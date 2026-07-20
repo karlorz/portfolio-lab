@@ -1358,6 +1358,19 @@ class DashboardGenerator:
                         "(paper book stays champion weights)."
                     ),
                 },
+                "factor_rotation": {
+                    "label": "Factor Rotation",
+                    "role": "advisory_non_routed",
+                    "routed": False,
+                    "routed_by": None,
+                    "live_authoritative": False,
+                    "allocation_field": "allocation",
+                    "canonical_controller": "signals.json.target_allocations",
+                    "description": (
+                        "Advisory factor sleeve weights (e.g. VLUE/VBR). "
+                        "Not order-routed; live routing uses target_allocations."
+                    ),
+                },
             },
         }
         root = Path(data_dir) if data_dir is not None else DATA_DIR
@@ -4400,7 +4413,19 @@ class DashboardGenerator:
                 )
                 ensemble["weighted_consensus"] = round(weighted_consensus, 4)
                 ensemble["agreement_ratio"] = round(agreement_weight / total_weight, 4)
+                # Raw mass after decay (may be < 1 when sources missing/stale)
                 ensemble["total_weight_after_decay"] = round(total_weight, 4)
+                ensemble["active_weight_mass"] = round(total_weight, 4)
+                # Renorm before entropy / n_eff so diversification is not understated
+                w_pos = np.array(
+                    [w for _, w in valid_sources if w > 0],
+                    dtype=float,
+                )
+                if len(w_pos) > 0 and float(np.sum(w_pos)) > 0:
+                    w_norm = w_pos / float(np.sum(w_pos))
+                    weight_entropy = float(-np.sum(w_norm * np.log(w_norm)))
+                    ensemble["weight_entropy"] = round(weight_entropy, 4)
+                    ensemble["n_eff"] = round(float(np.exp(weight_entropy)), 2)
 
             ensemble["configured_source_status"] = self._build_configured_source_status(
                 ensemble.get("regime", "normal"),

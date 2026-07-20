@@ -1240,3 +1240,34 @@ class TestCLIMain:
                         mock_sys.argv = ['convexity_harvest.py', '--backtest', '2020-01-01']
                         ch.main()
 
+
+
+def test_get_current_signal_uses_utc_calendar_date(monkeypatch):
+    """Host-local midnight must not advance date ahead of UTC SSOT."""
+    from datetime import datetime, timezone
+    from src.strategy.convexity_harvest import ConvexityHarvestStrategy
+
+    # Freeze "now" to 2026-07-20 01:00+08 (still 2026-07-19 UTC)
+    class _FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is timezone.utc or (tz is not None and getattr(tz, "tzname", lambda: None)(None) == "UTC"):
+                return cls(2026, 7, 19, 17, 0, 0, tzinfo=timezone.utc)
+            # naive local Asia/Shanghai-like
+            return cls(2026, 7, 20, 1, 0, 0)
+
+    import src.strategy.convexity_harvest as mod
+    monkeypatch.setattr(mod, "datetime", _FixedDateTime)
+    mock_mgr = MagicMock()
+    mock_mgr.get_contango_signal.side_effect = lambda d: {
+        "vix_level": 16.0,
+        "contango_spot_1m": 10.0,
+        "annualized_roll_yield": 5.0,
+        "is_contango": True,
+    } if d == "2026-07-19" else None
+    mock_mgr.get_data_range.return_value = ("2026-01-01", "2026-07-19")
+    strategy = ConvexityHarvestStrategy(vix_data_manager=mock_mgr)
+    # Patch generate path: if today uses UTC, date is 2026-07-19
+    sig = strategy.get_current_signal()
+    # Should resolve via UTC day or last cache — not silently No VIX for local tomorrow
+    assert sig.get("vix_level", 0) != 0 or sig.get("status") != "unavailable"

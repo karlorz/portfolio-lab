@@ -351,19 +351,44 @@ class AnalyticsCalculator:
         dd_series = self.calculate_drawdown_series(performance_data)
         max_dd = self.calculate_max_drawdown(dd_series)
         
-        result = {
-            "portfolio": {
-                "start_date": start_date,
-                "end_date": end_date,
-                "start_value": start_value,
-                "end_value": end_value,
-                "total_return": round(portfolio_return * 100, 2),
-                "cagr": None,  # Would need to calculate based on actual days
-                "volatility": round(portfolio_vol, 2),
-                "max_drawdown": max_dd.get("max_drawdown", 0),
-                "sharpe": None,  # Full period Sharpe
-            }
+        # Full-period Sharpe from NAV day-over-day returns (same series as vol)
+        sharpe = None
+        sharpe_reason = None
+        cagr = None
+        if len(returns) >= 5 and np.std(returns) > 1e-12:
+            sharpe = float(np.mean(returns) / np.std(returns) * np.sqrt(252))
+        elif len(returns) < 5:
+            sharpe_reason = "insufficient_return_observations"
+        elif returns:
+            sharpe_reason = "zero_return_variance"
+        else:
+            sharpe_reason = "no_returns"
+
+        # Simple CAGR from calendar span when dates parse
+        try:
+            from datetime import date as _date
+            d0 = _date.fromisoformat(str(start_date)[:10])
+            d1 = _date.fromisoformat(str(end_date)[:10])
+            years = max((d1 - d0).days / 365.25, 1 / 365.25)
+            if start_value > 0 and end_value > 0:
+                cagr = float((end_value / start_value) ** (1 / years) - 1) * 100
+        except (TypeError, ValueError, ZeroDivisionError):
+            cagr = None
+
+        portfolio_block = {
+            "start_date": start_date,
+            "end_date": end_date,
+            "start_value": start_value,
+            "end_value": end_value,
+            "total_return": round(portfolio_return * 100, 2),
+            "cagr": round(cagr, 2) if cagr is not None else None,
+            "volatility": round(portfolio_vol, 2),
+            "max_drawdown": max_dd.get("max_drawdown", 0),
+            "sharpe": round(sharpe, 2) if sharpe is not None else None,
         }
+        if sharpe_reason:
+            portfolio_block["sharpe_reason"] = sharpe_reason
+        result = {"portfolio": portfolio_block}
         
         return result
     

@@ -566,3 +566,42 @@ class TestEdgeCases:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+def test_benchmark_comparison_portfolio_sharpe_not_null_with_returns():
+    """Full-period portfolio.sharpe must be computed when NAV series has variance."""
+    calc = AnalyticsCalculator()
+    # Varying returns (not constant) so std > 0
+    rng = np.random.RandomState(0)
+    data = []
+    value = 100000.0
+    d = datetime(2024, 1, 2)
+    for i in range(80):
+        while d.weekday() >= 5:
+            d += timedelta(days=1)
+        data.append({
+            "timestamp": d.strftime("%Y-%m-%dT15:30:00"),
+            "total_value": round(value, 2),
+        })
+        value *= 1.0 + 0.0008 + float(rng.normal(0, 0.005))
+        d += timedelta(days=1)
+    result = calc.calculate_benchmark_comparison(performance_data=data)
+    port = result["portfolio"]
+    assert port["sharpe"] is not None
+    assert isinstance(port["sharpe"], (int, float))
+    assert port["volatility"] > 0
+
+
+
+def test_benchmark_comparison_sharpe_reason_when_flat():
+    calc = AnalyticsCalculator()
+    data = _make_perf_data(n_days=30, daily_return=0.0)
+    result = calc.calculate_benchmark_comparison(performance_data=data)
+    port = result["portfolio"]
+    # zero variance → null sharpe with reason
+    assert port.get("sharpe") is None
+    assert port.get("sharpe_reason") in {
+        "zero_return_variance",
+        "insufficient_return_observations",
+        "no_returns",
+    }

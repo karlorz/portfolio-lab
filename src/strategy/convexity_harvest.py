@@ -10,7 +10,7 @@ import json
 import logging
 import sys
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -358,7 +358,7 @@ class ConvexityHarvestStrategy:
     
     def get_current_signal(self) -> Dict:
         """Get current convexity harvest signal for today's date"""
-        today = datetime.now().strftime('%Y-%m-%d')
+        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
         position = self.generate_signal(today)
         payload = position.to_dict()
         # Honesty fields for dashboard consumers

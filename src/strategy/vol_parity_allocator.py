@@ -9,7 +9,7 @@ Allocates by volatility contribution rather than capital weight.
 import json
 import sys
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Optional, Tuple
 
 from src.data.vix_futures import VIXDataManager
@@ -282,7 +282,7 @@ class VolatilityParityAllocator:
     
     def get_current_allocation(self) -> Dict:
         """Get current allocation for today"""
-        today = datetime.now().strftime('%Y-%m-%d')
+        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
         allocation = self.generate_allocation(today)
         return {
             'allocation': allocation.to_dict(),

@@ -97,3 +97,55 @@ class TestNEffComputation:
         fields = [f.name for f in EnsembleVote.__dataclass_fields__.values()]
         assert "n_eff" in fields
         assert "weight_entropy" in fields
+
+
+def test_n_eff_renormalizes_incomplete_mass():
+    """Equal active weights with mass < 1 still yield n_eff ≈ k after renorm."""
+    # Simulate 6 equal sources with total mass 0.386 (incomplete collection)
+    raw = [0.386 / 6] * 6
+    # Without renorm (bug): entropy uses unnormalized → understated n_eff
+    w = np.array(raw)
+    buggy = float(np.exp(-np.sum(w * np.log(w))))
+    # With renorm (fix)
+    w_norm = w / w.sum()
+    fixed = float(np.exp(-np.sum(w_norm * np.log(w_norm))))
+    assert fixed == pytest.approx(6.0, abs=0.05)
+    assert buggy < 4.0  # documents the pre-fix understatement
+    assert _compute_n_eff(list(w_norm)) == pytest.approx(6.0, abs=0.05)
+
+
+def test_build_vote_n_eff_renorms_active_mass(tmp_path):
+    """EnsembleVoter._build_vote reports n_eff on renormalized active weights."""
+    from src.strategy.ensemble_voter import (
+        EnsembleVoter,
+        Regime,
+        SignalReading,
+        SignalSource,
+    )
+    from types import SimpleNamespace
+
+    voter = EnsembleVoter(data_path=tmp_path)
+    # three equal-mass readings summing to 0.3
+    members = list(SignalSource)[:3]
+    readings = [
+        SignalReading(
+            source=src,
+            timestamp="2026-07-20T00:00:00",
+            value=0.1,
+            confidence=0.8,
+            weight=0.1,
+            regime_fit="normal",
+        )
+        for src in members
+    ]
+    consensus = SimpleNamespace(
+        weighted_consensus=0.1,
+        agreement=0.9,
+        equity_bias=0.0,
+        duration_bias=0.0,
+        gold_bias=0.0,
+        action="neutral",
+        action_confidence=0.5,
+    )
+    vote = voter._build_vote(readings, consensus, Regime.NORMAL, 0.7)
+    assert vote.n_eff == pytest.approx(3.0, abs=0.05)

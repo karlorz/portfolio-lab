@@ -2379,15 +2379,20 @@ class EnsembleVoter:
         for r in weighted_signals[:3]:
             reasons.append(f"  {r.source.value}: {r.value:+.3f} (w={r.weight:.2f}, conf={r.confidence:.1%})")
 
-        # Compute effective signal count (N_eff) and Shannon entropy
-        weights_arr = np.array([r.weight for r in weighted_signals])
-        weights_arr = weights_arr[weights_arr > 0]
-        if len(weights_arr) > 0:
-            weight_entropy = float(-np.sum(weights_arr * np.log(weights_arr)))
+        # Compute effective signal count (N_eff) and Shannon entropy on
+        # *renormalized* positive weights so incomplete collection does not
+        # understate diversification (sleeping-experts: active set sums to 1).
+        weights_arr = np.array([r.weight for r in weighted_signals], dtype=float)
+        weights_arr = weights_arr[np.isfinite(weights_arr) & (weights_arr > 0)]
+        active_weight_mass = float(np.sum(weights_arr)) if len(weights_arr) else 0.0
+        if len(weights_arr) > 0 and active_weight_mass > 0:
+            w_norm = weights_arr / active_weight_mass
+            weight_entropy = float(-np.sum(w_norm * np.log(w_norm)))
             n_eff = float(np.exp(weight_entropy))
         else:
             weight_entropy = 0.0
             n_eff = 0.0
+            active_weight_mass = 0.0
 
         return EnsembleVote(
             timestamp=str(datetime.now()),

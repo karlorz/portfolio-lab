@@ -954,7 +954,7 @@ class TestEnsemblePostDecayMetrics:
     def test_allocation_surface_roles_include_standalone_advisory_artifacts(self, tmp_path):
         roles = DashboardGenerator._build_allocation_surface_roles(data_dir=tmp_path)
 
-        for surface in ("adaptive_sizing", "black_litterman", "calendar_seasonality"):
+        for surface in ("adaptive_sizing", "black_litterman", "calendar_seasonality", "factor_rotation"):
             role = roles["surfaces"][surface]
             assert role["role"] == "advisory_non_routed"
             assert role["routed"] is False
