@@ -6352,3 +6352,53 @@ class TestZeroDTEClosingAuctionHonesty:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+class TestTwoStageRegimeUnavailableHonesty:
+    """Optional regime sections must not silently disappear when generators return None."""
+
+    def test_two_stage_none_publishes_unavailable_section(self, tmp_path, monkeypatch):
+        from datetime import datetime, timezone
+        import types
+        gen, _ = _make_generator(tmp_path)
+        fresh = datetime.now(timezone.utc).isoformat()
+        monkeypatch.setattr(
+            "src.dashboard.generator.validate_signal",
+            lambda _name, signal: signal,
+        )
+        monkeypatch.setattr(gen, "_generate_two_stage_regime", lambda: None)
+        monkeypatch.setattr(gen, "_generate_bocd_regime", lambda: None)
+        monkeypatch.setattr(gen, "_run_spc_monitor", lambda output: {"status": "ok"})
+        monkeypatch.setattr(gen, "_record_ic_data", lambda output: None)
+        # Empty regime history → transition also unavailable
+        fake_cursor = types.SimpleNamespace(
+            execute=lambda *a, **k: None,
+            fetchall=lambda: [],
+        )
+        output = {
+            "ensemble_voting": {
+                "generated_at": fresh,
+                "regime": "normal",
+                "source_breakdown": [],
+            },
+            "alternative_data": {"timestamp": fresh},
+            "garch_cvar": {"timestamp": fresh},
+            "smart_rebalance": {"generated_at": fresh},
+            "rebalance_health": {"generated_at": fresh},
+        }
+        try:
+            result = gen._apply_signal_postprocessors(
+                output,
+                {"cursor": fake_cursor, "current_regime": "normal"},
+            )
+        finally:
+            gen.conn.close()
+
+        assert "two_stage_regime" in result
+        ts = result["two_stage_regime"]
+        assert ts.get("status") == "unavailable" or ts.get("runtime_status") == "unavailable"
+        assert ts.get("regime") in ("UNKNOWN", "unavailable", None) or ts.get("confidence", 0) == 0.0
+
+        assert "regime_transition" in result
+        rt = result["regime_transition"]
+        assert rt.get("status") == "unavailable" or rt.get("runtime_status") == "unavailable"

@@ -2091,12 +2091,27 @@ class DashboardGenerator:
                 output["two_stage_regime"] = validate_signal(
                     "two_stage_regime", two_stage_signal,
                 )
+            else:
+                # Honesty: do not omit section when generator returns None
+                # (missing FRED-MD / import / insufficient data).
+                output["two_stage_regime"] = {
+                    "regime": "UNKNOWN",
+                    "confidence": 0.0,
+                    "status": "unavailable",
+                    "runtime_status": "unavailable",
+                    "reason": "generator_returned_none",
+                    "method": "oliveira_2025_two_stage_kmeans",
+                    "timestamp": datetime.now().isoformat(),
+                }
         except MONITOR_EXCEPTIONS as e:
             _log_signal_error("two_stage_regime", e)
             output["two_stage_regime"] = {
                 "regime": "UNKNOWN",
                 "confidence": 0.0,
+                "status": "unavailable",
+                "runtime_status": "unavailable",
                 "error": str(e),
+                "timestamp": datetime.now().isoformat(),
             }
 
         # Bayesian Online Changepoint Detection (BOCD) regime signal
@@ -2119,7 +2134,10 @@ class DashboardGenerator:
             from src.regime.regime_transition_forecaster import RegimeTransitionForecaster
             forecaster = RegimeTransitionForecaster()
             # Extract regime labels from two_stage_regime signal or VIX classification
-            current = output.get("two_stage_regime", {}).get("regime", current_regime)
+            two_stage_block = output.get("two_stage_regime") or {}
+            current = two_stage_block.get("regime") if isinstance(two_stage_block, dict) else None
+            if not current or current in ("UNKNOWN", "unavailable"):
+                current = current_regime
             # Fit on recent regime history from regime_log
             cursor.execute("SELECT regime FROM regime_log ORDER BY detected_at DESC LIMIT 100")
             history = [row[0] for row in cursor.fetchall()]
@@ -2132,10 +2150,27 @@ class DashboardGenerator:
                     "forecast_probs": {k: round(v, 4) for k, v in forecast.probabilities.items()},
                     "most_likely": forecast.most_likely,
                     "persistence_params": {k: round(v, 1) for k, v in forecast.persistence_params.items()},
+                    "status": "ok",
+                    "timestamp": datetime.now().isoformat(),
+                }
+            else:
+                output["regime_transition"] = {
+                    "current_regime": current,
+                    "horizon_days": 5,
+                    "status": "unavailable",
+                    "runtime_status": "unavailable",
+                    "reason": "insufficient_regime_history",
+                    "history_len": len(history),
                     "timestamp": datetime.now().isoformat(),
                 }
         except MONITOR_EXCEPTIONS as e:
             _log_signal_error("regime_transition", e)
+            output["regime_transition"] = {
+                "status": "unavailable",
+                "runtime_status": "unavailable",
+                "error": str(e),
+                "timestamp": datetime.now().isoformat(),
+            }
 
         # Signal staleness must be computed after optional regime sections are appended.
         output["staleness"] = self._check_signal_staleness(output)
