@@ -307,6 +307,12 @@ def _generate_alpaca_feed_entitlement() -> dict[str, Any]:
 
 def main():
     data = generate()
+    try:
+        from src.dashboard.generator import _stamp_generator_git_sha
+
+        data = _stamp_generator_git_sha(data)
+    except Exception:  # noqa: BLE001 — never block rebalance export
+        pass
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     save_results_json(data, output_path=str(OUTPUT_PATH))
 

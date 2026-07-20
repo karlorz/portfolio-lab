@@ -601,6 +601,10 @@ class SmartRebalancingController:
             'ytd_cost_pct': round(self.cost_tracker.ytd_total_pct * 100, 3),
             'remaining_budget_pct': round(self.cost_tracker.remaining_budget_pct * 100, 3),
             'remaining_budget_ratio': round(self.cost_tracker.remaining_budget_pct, 6),
+            # Unit honesty: pct is percent-of-portfolio (0.5 means 0.5%),
+            # ratio is portfolio fraction (0.005 means 0.5%).
+            'remaining_budget_pct_unit': 'percent_of_portfolio',
+            'remaining_budget_ratio_unit': 'portfolio_fraction',
             'is_over_budget': self.cost_tracker.is_over_budget(),
             'is_warning': self.cost_tracker.is_warning(),
             'last_rebalance': self.last_rebalance.isoformat() if self.last_rebalance else None,

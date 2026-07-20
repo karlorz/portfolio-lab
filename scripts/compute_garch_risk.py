@@ -322,6 +322,12 @@ def main():
                 "max_drawdown_limit=policy; measured_max_drawdown=NAV series",
             ),
         }
+        try:
+            from src.dashboard.generator import _stamp_generator_git_sha
+
+            public_payload = _stamp_generator_git_sha(public_payload)
+        except Exception:  # noqa: BLE001 — never block dual-write
+            pass
         public_path = public_root / "garch_cvar.json"
         # Atomic write: temp + rename (same FS) so readers never see partial JSON
         tmp_path = public_path.with_suffix(".json.tmp")

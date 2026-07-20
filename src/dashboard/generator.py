@@ -1890,6 +1890,11 @@ class DashboardGenerator:
                         gate_status,
                     ),
                     'remaining_budget_ratio': remaining_budget_ratio,
+                    # Unit honesty: pct is percent-of-portfolio (0.5 = 0.5%),
+                    # ratio is portfolio fraction (0.005 = 0.5%).
+                    'remaining_budget_pct_unit': 'percent_of_portfolio',
+                    'remaining_budget_ratio_unit': 'portfolio_fraction',
+                    'annual_cost_limit_pct': 0.5,
                     'status': gate_status,
                 }
             else:
@@ -1912,6 +1917,9 @@ class DashboardGenerator:
                         gate_status,
                     ),
                     'remaining_budget_ratio': remaining_budget_ratio,
+                    'remaining_budget_pct_unit': 'percent_of_portfolio',
+                    'remaining_budget_ratio_unit': 'portfolio_fraction',
+                    'annual_cost_limit_pct': 0.5,
                     'status': gate_status,
                 }
             # Kill authority blocks actionable execute (order_router SSOT)
@@ -3678,6 +3686,7 @@ class DashboardGenerator:
         except Exception as exc:  # noqa: BLE001 — never block public health write
             logger.warning("monitor health SSOT reconcile failed: %s", exc)
 
+        health_data = _stamp_generator_git_sha(health_data)
         out_path = PUBLIC_DIR / "health.json"
         save_results_json(health_data, output_path=str(out_path))
         
