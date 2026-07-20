@@ -159,6 +159,44 @@ def _apply_partial_patch_git_sha_honesty(
     )
 
 
+def _enrich_duration_allocation_provenance(
+    payload: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Ensure duration_allocation never publishes bare weights without role/unit.
+
+    Live partial patches and legacy consumers have left only ``{tlt,ief,shy,bil}``
+    which looks like a live sleeve without advisory disclosure.
+    """
+    if not isinstance(payload, dict) or not payload:
+        return payload
+    out = dict(payload)
+    # Collect weight symbols if nested under weights or flat
+    weights = out.get("weights")
+    if not isinstance(weights, dict):
+        weights = {
+            k: out[k]
+            for k in ("tlt", "ief", "shy", "bil")
+            if isinstance(out.get(k), (int, float))
+        }
+        if weights:
+            out["weights"] = weights
+    if weights:
+        try:
+            out["sum"] = round(sum(float(v) for v in weights.values()), 4)
+        except (TypeError, ValueError):
+            pass
+    out.setdefault("unit", "portfolio_weight_fraction")
+    out.setdefault("live_authoritative", False)
+    out.setdefault("role", "advisory_sleeve")
+    out.setdefault(
+        "description",
+        "Bond duration sleeve from 2s10s regime table; "
+        "not target_allocations / order-routing authority",
+    )
+    out.setdefault("source", "yield_curve_regime_table")
+    return out
+
+
 def refresh_public_alternative_data_projection(
     *,
     data_dir: Path | None = None,
@@ -1690,11 +1728,22 @@ class DashboardGenerator:
             convexity_engine = ConvexityHarvestStrategy()
             convexity_signal = convexity_engine.get_current_signal()
             
-            # Get volatility parity allocation  
+            # Get volatility parity allocation (full to_dict provenance —
+            # weight_unit / role / live_authoritative — not bare pct fields only)
             vol_allocator = VolatilityParityAllocator(vix_strategy=convexity_engine)
             vol_parity_data = vol_allocator.get_current_allocation()
             if vol_parity_data:
-                vol_parity_signal = vol_parity_data.get('allocation')
+                alloc = vol_parity_data.get("allocation")
+                if isinstance(alloc, dict):
+                    vol_parity_signal = dict(alloc)
+                    # Ensure advisory provenance even if older to_dict path
+                    vol_parity_signal.setdefault(
+                        "weight_unit", "percent_of_portfolio_0_100"
+                    )
+                    vol_parity_signal.setdefault("live_authoritative", False)
+                    vol_parity_signal.setdefault("role", "advisory_research_sleeve")
+                else:
+                    vol_parity_signal = alloc
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("convexity_harvest", e)
 
@@ -2043,7 +2092,9 @@ class DashboardGenerator:
             "marl_status": validate_signal("marl_status", self._generate_marl_status()),
             "factor_rotation": factor_rotation_signal,
             "yield_curve": validate_signal("yield_curve", yield_curve_data.get("yield_curve")),
-            "duration_allocation": yield_curve_data.get("duration_allocation"),
+            "duration_allocation": _enrich_duration_allocation_provenance(
+                yield_curve_data.get("duration_allocation")
+            ),
             "convexity_harvest": convexity_signal,
             "volatility_parity": vol_parity_signal,
             "llm_sentiment": sentiment_signal,
@@ -3030,21 +3081,15 @@ class DashboardGenerator:
                 "inverted": {"tlt": 0.15, "ief": 0.25, "shy": 0.35, "bil": 0.25}
             }
             weights = regime_allocations.get(regime, regime_allocations["normal"])
-            result["duration_allocation"] = {
-                "weights": weights,
-                # Flat keys retained for backward-compat consumers
-                **weights,
-                "unit": "portfolio_weight_fraction",
-                "sum": round(sum(weights.values()), 4),
-                "duration_regime": regime,
-                "source": "yield_curve_regime_table",
-                "live_authoritative": False,
-                "role": "advisory_sleeve",
-                "description": (
-                    "Bond duration sleeve from 2s10s regime table; "
-                    "not target_allocations / order-routing authority"
-                ),
-            }
+            result["duration_allocation"] = _enrich_duration_allocation_provenance(
+                {
+                    "weights": weights,
+                    # Flat keys retained for backward-compat consumers
+                    **weights,
+                    "duration_regime": regime,
+                    "source": "yield_curve_regime_table",
+                }
+            )
 
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.warning("Failed to load yield curve data: %s", e)

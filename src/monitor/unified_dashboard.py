@@ -887,17 +887,64 @@ def generate_status_text() -> str:
 # ─────────────────────────────────────────────
 
 
+def _unified_payload_section_score(dashboard: Dict[str, Any]) -> int:
+    """Count operator-critical sections that report available=True.
+
+    Used to refuse hollow dual-writes (all sections unavailable) that would
+    clobber a richer public SSOT when tasker DATA_DIR is empty/mis-pointed.
+    """
+    score = 0
+    for key in ("health", "portfolio", "risk", "regime", "cron", "attribution"):
+        sec = dashboard.get(key)
+        if isinstance(sec, dict) and sec.get("available") is True:
+            score += 1
+    # risk_history uses available too
+    rh = dashboard.get("risk_history")
+    if isinstance(rh, dict) and rh.get("available") is True:
+        score += 1
+    return score
+
+
 def _save_unified_dashboard(dashboard: Dict[str, Any]) -> list:
-    """Write private DATA_DIR and dual-write PUBLIC_DATA_DIR (operator WWW SSOT)."""
+    """Write private DATA_DIR and dual-write PUBLIC_DATA_DIR (operator WWW SSOT).
+
+    Public dual-write is skipped when the payload is hollow (no critical
+    sections available) so a misconfigured DATA_DIR cannot replace a richer
+    public file with all-unavailable stubs.
+    """
     written: list = []
     private_path = Path(DATA_DIR) / "unified_dashboard.json"
     save_results_json(dashboard, output_path=str(private_path))
     written.append(private_path)
     logger.info("Saved unified dashboard to %s", private_path)
+
+    score = _unified_payload_section_score(dashboard)
+    if score < 1:
+        logger.warning(
+            "Skipping public unified dual-write: hollow payload "
+            "(section_score=%s; refuse clobber of operator SSOT)",
+            score,
+        )
+        return written
+
     try:
         public_root = Path(PUBLIC_DATA_DIR)
         public_root.mkdir(parents=True, exist_ok=True)
         public_path = public_root / "unified_dashboard.json"
+        # Do not clobber a richer public file with a thinner one
+        if public_path.exists():
+            try:
+                prior = json.loads(public_path.read_text(encoding="utf-8"))
+                prior_score = _unified_payload_section_score(prior)
+                if prior_score > score:
+                    logger.warning(
+                        "Skipping public unified dual-write: prior score=%s > new=%s",
+                        prior_score,
+                        score,
+                    )
+                    return written
+            except (OSError, json.JSONDecodeError, TypeError):
+                pass
         # Atomic write so readers never see partial JSON
         tmp_path = public_path.with_suffix(".json.tmp")
         tmp_path.write_text(
@@ -906,7 +953,11 @@ def _save_unified_dashboard(dashboard: Dict[str, Any]) -> list:
         )
         tmp_path.replace(public_path)
         written.append(public_path)
-        logger.info("Public dual-write unified dashboard to %s", public_path)
+        logger.info(
+            "Public dual-write unified dashboard to %s (section_score=%s)",
+            public_path,
+            score,
+        )
     except OSError as exc:
         logger.warning("Public unified_dashboard dual-write failed: %s", exc)
     return written
