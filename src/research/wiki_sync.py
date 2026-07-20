@@ -703,5 +703,10 @@ Market data snapshots saved to `raw/market/` with SHA256 provenance.
         logger.info("Wiki Sync Complete (%d wiki, %d app)", len(wiki_pages), len(app_data))
 
 if __name__ == "__main__":
+    # Cron/Makefile tee captures stdout; enable StreamHandler so tasker logs
+    # and data/wiki_sync.log receive structured INFO lines on each run.
+    from src.utils.log_config import configure_logging
+
+    configure_logging()
     sync = WikiSync()
     sync.run()

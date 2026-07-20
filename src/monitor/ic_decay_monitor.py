@@ -333,6 +333,21 @@ class ICMonitor:
 
 
 
+def _signal_prediction_date_expr(columns: set[str]) -> str:
+    """SQL expression for prediction calendar date across schema variants.
+
+    Production SignalHealthTracker uses ``timestamp`` (ISO datetime). Older /
+    test fixtures may use ``prediction_date`` only. Prefer date(timestamp) when
+    present so distinct pending dates and oldest unresolved are honest.
+    """
+    if "prediction_date" in columns:
+        return "prediction_date"
+    if "timestamp" in columns:
+        # date() handles ISO 'YYYY-MM-DD…' prefixes; substr fallback for odd values
+        return "COALESCE(date(timestamp), substr(timestamp, 1, 10))"
+    return "NULL"
+
+
 def _signal_prediction_backlog(db_path: Optional[Path] = None) -> Dict[str, Any]:
     """Row-level pending backlog from SignalHealthTracker table (not staged IC window).
 
@@ -355,6 +370,20 @@ def _signal_prediction_backlog(db_path: Optional[Path] = None) -> Dict[str, Any]
     try:
         with sqlite_connect(path) as conn:
             cur = conn.cursor()
+            # Fail soft if table missing
+            tables = {
+                r[0]
+                for r in cur.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            if "signal_predictions" not in tables:
+                return empty
+            col_rows = cur.execute("PRAGMA table_info(signal_predictions)").fetchall()
+            columns = {str(r[1]) for r in col_rows}
+            if "actual_direction" not in columns:
+                return empty
+
             total = int(cur.execute("SELECT COUNT(*) FROM signal_predictions").fetchone()[0])
             resolved = int(
                 cur.execute(
@@ -362,9 +391,10 @@ def _signal_prediction_backlog(db_path: Optional[Path] = None) -> Dict[str, Any]
                 ).fetchone()[0]
             )
             pending_rows = max(0, total - resolved)
+            date_expr = _signal_prediction_date_expr(columns)
             row = cur.execute(
-                """
-                SELECT COUNT(DISTINCT prediction_date), MIN(prediction_date)
+                f"""
+                SELECT COUNT(DISTINCT {date_expr}), MIN({date_expr})
                 FROM signal_predictions
                 WHERE actual_direction IS NULL
                 """
@@ -383,7 +413,7 @@ def _signal_prediction_backlog(db_path: Optional[Path] = None) -> Dict[str, Any]
             ),
         }
     except Exception as exc:  # noqa: BLE001 — optional enrichment
-        logger.debug("signal prediction backlog unavailable: %s", exc)
+        logger.warning("signal prediction backlog unavailable: %s", exc)
         return empty
 
 

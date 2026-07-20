@@ -427,6 +427,39 @@ def _get_adaptive_weights_section() -> Dict[str, Any]:
     }
 
 
+def _cron_job_is_ok(status: Any) -> bool:
+    """True for healthy terminal statuses across tasker/Makefile vocabularies.
+
+    Tasker stamps ``success``; hermes/Makefile sometimes use ``ok``. Treat both
+    (and common synonyms) as healthy so unified does not report 0/16 ok with
+    16 errors when every job actually succeeded.
+    """
+    s = str(status or "").strip().lower()
+    return s in {
+        "ok",
+        "success",
+        "succeeded",
+        "completed",
+        "pass",
+        "passed",
+        "healthy",
+    }
+
+
+def _cron_job_is_pending(status: Any) -> bool:
+    s = str(status or "").strip().lower()
+    return s in {"pending", "running", "scheduled", "unknown", ""}
+
+
+def _cron_job_is_disabled(status: Any, *, job: dict | None = None) -> bool:
+    s = str(status or "").strip().lower()
+    if s in {"disabled", "paused", "manual_only", "skipped"}:
+        return True
+    if job and (job.get("manual_only") is True or job.get("enabled") is False):
+        return True
+    return False
+
+
 def _get_cron_section() -> Dict[str, Any]:
     """Cron job status summary."""
     status = _read_json("cron_status.json")
@@ -434,16 +467,40 @@ def _get_cron_section() -> Dict[str, Any]:
         return {"available": False, "jobs": []}
 
     jobs = status.get("jobs", [])
-    ok_count = sum(1 for j in jobs if j.get("status") == "ok")
-    pending_count = sum(1 for j in jobs if j.get("status") == "pending")
-    error_count = sum(1 for j in jobs if j.get("status") not in ("ok", "pending"))
+    ok_count = sum(1 for j in jobs if _cron_job_is_ok(j.get("status")))
+    pending_count = sum(
+        1
+        for j in jobs
+        if not _cron_job_is_ok(j.get("status"))
+        and not _cron_job_is_disabled(j.get("status"), job=j)
+        and _cron_job_is_pending(j.get("status"))
+    )
+    disabled_count = sum(
+        1 for j in jobs if _cron_job_is_disabled(j.get("status"), job=j)
+    )
+    error_count = sum(
+        1
+        for j in jobs
+        if not _cron_job_is_ok(j.get("status"))
+        and not _cron_job_is_pending(j.get("status"))
+        and not _cron_job_is_disabled(j.get("status"), job=j)
+    )
 
     job_list = []
     for j in jobs:
+        raw = j.get("status")
+        display = raw
+        if _cron_job_is_ok(raw):
+            display = "ok" if str(raw).lower() != "ok" else raw
+            # keep tasker "success" visible but count as ok; show normalized
+            display = "ok"
+        elif _cron_job_is_disabled(raw, job=j):
+            display = "disabled"
         job_list.append(
             {
                 "name": j.get("name"),
-                "status": j.get("status"),
+                "status": display,
+                "raw_status": raw,
                 "last_run": j.get("last_run"),
                 "duration_seconds": j.get("duration_seconds"),
                 "backend": j.get("backend"),
@@ -455,6 +512,7 @@ def _get_cron_section() -> Dict[str, Any]:
         "total": len(jobs),
         "ok": ok_count,
         "pending": pending_count,
+        "disabled": disabled_count,
         "errors": error_count,
         "jobs": job_list,
     }
@@ -705,11 +763,23 @@ def print_summary(dashboard: Dict[str, Any]) -> None:
     cron = dashboard.get("cron", {})
     if cron.get("available"):
         badge = "✅" if cron.get("errors", 0) == 0 else "⚠️"
-        logger.info(f"  {badge} CRON JOBS: {cron.get('ok')}/{cron.get('total')} ok, {cron.get('errors')} errors")
+        disabled = cron.get("disabled", 0)
+        disabled_bit = f", {disabled} disabled" if disabled else ""
+        logger.info(
+            f"  {badge} CRON JOBS: {cron.get('ok')}/{cron.get('total')} ok, "
+            f"{cron.get('errors')} errors{disabled_bit}"
+        )
         for job in cron.get("jobs", []):
             dur = job.get("duration_seconds", 0)
             status = job.get("status", "?")
-            badge = "✅" if status == "ok" else "⏳" if status == "pending" else "❌"
+            if status == "ok":
+                badge = "✅"
+            elif status == "pending":
+                badge = "⏳"
+            elif status == "disabled":
+                badge = "⏸"
+            else:
+                badge = "❌"
             logger.info(f"       {badge} {job.get('name', '?'):<30} {status:<8} {_fmt(dur, 's')}")
     else:
         logger.info("  ❌ CRON: not available")

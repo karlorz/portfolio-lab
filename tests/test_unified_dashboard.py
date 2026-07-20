@@ -929,8 +929,9 @@ class TestCronSectionEdgeCases:
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
             section = _get_cron_section()
             assert section["ok"] == 1
-            assert section["pending"] == 1
-            assert section["errors"] == 2
+            # pending + unknown (unknown is non-terminal / not yet a hard error)
+            assert section["pending"] == 2
+            assert section["errors"] == 1
             assert section["total"] == 4
 
     def test_jobs_missing_optional_fields(self, tmp_path):
@@ -940,8 +941,30 @@ class TestCronSectionEdgeCases:
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
             section = _get_cron_section()
             assert section["ok"] == 1
-            assert section["errors"] == 1  # "a" has no status → not ok/pending
+            # Missing status treated as pending/unknown, not a hard error
+            assert section["pending"] == 1
+            assert section["errors"] == 0
             assert section["jobs"][0]["duration_seconds"] is None
+
+    def test_tasker_success_counts_as_ok(self, tmp_path):
+        """Tasker stamps status=success; must not inflate error counts."""
+        jobs = {
+            "jobs": [
+                {"name": "portfolio-lab-data", "status": "success"},
+                {"name": "portfolio-lab-health", "status": "success"},
+                {"name": "portfolio-lab-build", "status": "disabled", "manual_only": True},
+            ]
+        }
+        f = tmp_path / "cron_status.json"
+        f.write_text(json.dumps(jobs))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_cron_section()
+            assert section["ok"] == 2
+            assert section["errors"] == 0
+            assert section.get("disabled", 0) == 1
+            assert all(
+                j["status"] in ("ok", "disabled") for j in section["jobs"]
+            )
 
 
 # ─────────────────────────────────────────────

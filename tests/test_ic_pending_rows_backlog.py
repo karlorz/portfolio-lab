@@ -47,3 +47,38 @@ def test_compute_ic_decay_report_includes_pending_rows(tmp_path, monkeypatch):
     assert "staged" in (report.get("pending_semantics") or "").lower() or "pending_rows" in (
         report.get("pending_semantics") or ""
     )
+
+
+def test_backlog_uses_timestamp_column_like_production(tmp_path):
+    """Production signal_predictions has timestamp, not prediction_date."""
+    from src.monitor.ic_decay_monitor import _signal_prediction_backlog
+
+    db = tmp_path / "market.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """
+        CREATE TABLE signal_predictions (
+            id INTEGER PRIMARY KEY,
+            timestamp TEXT NOT NULL,
+            source TEXT,
+            actual_direction INTEGER
+        )
+        """
+    )
+    conn.executemany(
+        "INSERT INTO signal_predictions (timestamp, source, actual_direction) VALUES (?,?,?)",
+        [
+            ("2026-05-24T10:00:00", "a", None),
+            ("2026-06-01T10:00:00", "a", None),
+            ("2026-07-01T10:00:00", "a", 1),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    backlog = _signal_prediction_backlog(db)
+    assert backlog["pending_rows"] == 2
+    assert backlog["pending_dates"] == 2
+    assert backlog["oldest_unresolved_date"] == "2026-05-24"
+    assert backlog["total_predictions"] == 3
+    assert backlog["resolved_predictions"] == 1

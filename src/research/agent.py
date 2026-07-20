@@ -389,5 +389,10 @@ Work item: {work_file}
         return summary
 
 if __name__ == "__main__":
+    # Cron/Makefile tee captures stdout; without configure_logging, logger
+    # output is silent and tasker logs stay ~50B echo headers only.
+    from src.utils.log_config import configure_logging
+
+    configure_logging()
     agent = ResearchAgent()
     agent.run()
