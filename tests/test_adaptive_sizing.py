@@ -164,7 +164,13 @@ class TestAdaptiveSizerInit:
         assert sizer.last_allocation == BASE_ALLOCATION
 
     def test_load_ensemble_signal_uses_env_override(self, temp_data_dir, monkeypatch, tmp_path):
-        """ENSEMBLE_WEIGHTS_FILE should override the default data_dir path."""
+        """ENSEMBLE_WEIGHTS_FILE used when no signals.json vote is available."""
+        # Isolate from live PUBLIC_DATA_DIR / WWW signals.json
+        empty_public = tmp_path / "empty_public"
+        empty_public.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv("PUBLIC_DATA_DIR", str(empty_public))
+        monkeypatch.setenv("PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA", "1")
+
         weights_path = tmp_path / "custom_ensemble_weights.json"
         weights_path.write_text(json.dumps({
             "weighted_consensus": 0.42,
@@ -1253,26 +1259,38 @@ class TestLoadCircuitBreaker:
 class TestLoadEnsembleSignal:
     """Ensemble signal loading tests."""
 
-    def test_missing_file_returns_defaults(self, tmp_path):
+    def test_missing_file_returns_defaults(self, tmp_path, monkeypatch):
         data_dir = tmp_path / "data"
         data_dir.mkdir(parents=True, exist_ok=True)
+        empty_public = tmp_path / "empty_public"
+        empty_public.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv("PUBLIC_DATA_DIR", str(empty_public))
+        monkeypatch.setenv("PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA", "1")
         sizer = AdaptiveSizer(data_dir=data_dir)
         signal, agreement = sizer._load_ensemble_signal()
         assert signal == 0.0
         assert agreement == 0.5
 
-    def test_corrupted_file_returns_defaults(self, tmp_path):
+    def test_corrupted_file_returns_defaults(self, tmp_path, monkeypatch):
         data_dir = tmp_path / "data"
         data_dir.mkdir(parents=True, exist_ok=True)
+        empty_public = tmp_path / "empty_public"
+        empty_public.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv("PUBLIC_DATA_DIR", str(empty_public))
+        monkeypatch.setenv("PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA", "1")
         (data_dir / "ensemble_weights.json").write_text("BROKEN")
         sizer = AdaptiveSizer(data_dir=data_dir)
         signal, agreement = sizer._load_ensemble_signal()
         assert signal == 0.0
         assert agreement == 0.5
 
-    def test_valid_file_with_composite_signal(self, tmp_path):
+    def test_valid_file_with_composite_signal(self, tmp_path, monkeypatch):
         data_dir = tmp_path / "data"
         data_dir.mkdir(parents=True, exist_ok=True)
+        empty_public = tmp_path / "empty_public"
+        empty_public.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv("PUBLIC_DATA_DIR", str(empty_public))
+        monkeypatch.setenv("PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA", "1")
         state = {"composite_signal": 0.3, "agreement_ratio": 0.7}
         (data_dir / "ensemble_weights.json").write_text(json.dumps(state))
         sizer = AdaptiveSizer(data_dir=data_dir)
@@ -1280,15 +1298,158 @@ class TestLoadEnsembleSignal:
         assert signal == 0.3
         assert agreement == 0.7
 
-    def test_valid_file_with_weighted_consensus(self, tmp_path):
+    def test_valid_file_with_weighted_consensus(self, tmp_path, monkeypatch):
         data_dir = tmp_path / "data"
         data_dir.mkdir(parents=True, exist_ok=True)
+        empty_public = tmp_path / "empty_public"
+        empty_public.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv("PUBLIC_DATA_DIR", str(empty_public))
+        monkeypatch.setenv("PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA", "1")
         state = {"weighted_consensus": -0.4, "agreement_ratio": 0.6}
         (data_dir / "ensemble_weights.json").write_text(json.dumps(state))
         sizer = AdaptiveSizer(data_dir=data_dir)
         signal, agreement = sizer._load_ensemble_signal()
         assert signal == -0.4
         assert agreement == 0.6
+
+    def test_signals_json_ensemble_voting_is_primary_ssot(self, tmp_path):
+        """Live ensemble_voting must win over regime weight tables."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        # Regime weight table (real shape) — must NOT be read as vote consensus
+        (data_dir / "ensemble_weights.json").write_text(json.dumps({
+            "normal": {"alternative_data": 0.21, "momentum": 0.3},
+            "crisis": {"alternative_data": 0.1},
+        }))
+        (data_dir / "signals.json").write_text(json.dumps({
+            "ensemble_voting": {
+                "weighted_consensus": 0.0483,
+                "agreement_ratio": 0.9364,
+                "regime": "normal",
+                "regime_confidence": 0.755,
+            }
+        }))
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        signal, agreement = sizer._load_ensemble_signal()
+        assert abs(signal - 0.0483) < 1e-9
+        assert abs(agreement - 0.9364) < 1e-9
+
+    def test_signals_json_prefers_public_path_over_stale_weights(self, tmp_path, monkeypatch):
+        """PUBLIC SIGNALS_JSON path should be consulted when data_dir has only weights."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        public = tmp_path / "public" / "data"
+        public.mkdir(parents=True, exist_ok=True)
+        (data_dir / "ensemble_weights.json").write_text(json.dumps({
+            "normal": {"momentum": 0.5},
+        }))
+        (public / "signals.json").write_text(json.dumps({
+            "ensemble_voting": {
+                "weighted_consensus": -0.12,
+                "agreement_ratio": 0.81,
+            }
+        }))
+        monkeypatch.setenv("PUBLIC_DATA_DIR", str(public))
+        # Clear any module-level path cache by re-reading via env in loader
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        signal, agreement = sizer._load_ensemble_signal()
+        assert abs(signal - (-0.12)) < 1e-9
+        assert abs(agreement - 0.81) < 1e-9
+
+    def test_weight_table_without_vote_keys_returns_defaults(self, tmp_path, monkeypatch):
+        """Per-regime weight tables must not invent composite_signal=0 from missing keys only."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        empty_public = tmp_path / "empty_public"
+        empty_public.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv("PUBLIC_DATA_DIR", str(empty_public))
+        monkeypatch.setenv("PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA", "1")
+        (data_dir / "ensemble_weights.json").write_text(json.dumps({
+            "normal": {"momentum": 0.4, "mean_reversion": 0.2},
+            "crisis": {"momentum": 0.1},
+        }))
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        signal, agreement = sizer._load_ensemble_signal()
+        # No vote keys → defaults (not a false "0.0 consensus from weights")
+        assert signal == 0.0
+        assert agreement == 0.5
+
+
+
+class TestLoadRegimeStateSSOT:
+    """Regime confidence should follow live SSOT, not stale classifier fixtures."""
+
+    def test_stale_classifier_defers_to_signals_regime_confidence(self, tmp_path, monkeypatch):
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        empty_public = tmp_path / "empty_public"
+        empty_public.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv("PUBLIC_DATA_DIR", str(empty_public))
+        monkeypatch.setenv("PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA", "1")
+        # May-stale classifier with failed low confidence
+        (data_dir / "regime_classifier_state.json").write_text(json.dumps({
+            "current_regime": "normal",
+            "last_updated": "2026-05-21T00:00:00",
+            "last_reading": {
+                "regime": "normal",
+                "confidence": 0.3,
+                "regime_reason": "Insufficient data",
+            },
+        }))
+        (data_dir / "signals.json").write_text(json.dumps({
+            "ensemble_voting": {
+                "regime": "normal",
+                "regime_confidence": 0.755,
+                "weighted_consensus": 0.05,
+                "agreement_ratio": 0.9,
+            },
+            "regime": {"name": "normal", "confidence": 0.755},
+        }))
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        regime, conf = sizer._load_regime_state()
+        assert regime == "normal"
+        assert abs(conf - 0.755) < 1e-9
+
+    def test_fresh_regime_state_json_preferred(self, tmp_path, monkeypatch):
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        empty_public = tmp_path / "empty_public"
+        empty_public.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv("PUBLIC_DATA_DIR", str(empty_public))
+        monkeypatch.setenv("PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA", "1")
+        now = datetime.now().isoformat()
+        (data_dir / "regime_state.json").write_text(json.dumps({
+            "regime": "high_vol",
+            "confidence": 0.88,
+            "updated_at": now,
+            "generated_at": now,
+        }))
+        (data_dir / "regime_classifier_state.json").write_text(json.dumps({
+            "current_regime": "normal",
+            "last_updated": "2026-05-21T00:00:00",
+            "last_reading": {"regime": "normal", "confidence": 0.3},
+        }))
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        regime, conf = sizer._load_regime_state()
+        assert regime == "high_vol"
+        assert abs(conf - 0.88) < 1e-9
+
+    def test_fresh_classifier_still_used_when_no_better_source(self, tmp_path, monkeypatch):
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        empty_public = tmp_path / "empty_public"
+        empty_public.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv("PUBLIC_DATA_DIR", str(empty_public))
+        monkeypatch.setenv("PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA", "1")
+        (data_dir / "regime_classifier_state.json").write_text(json.dumps({
+            "current_regime": "crisis",
+            "last_updated": datetime.now().isoformat(),
+            "last_reading": {"regime": "crisis", "confidence": 0.91},
+        }))
+        sizer = AdaptiveSizer(data_dir=data_dir)
+        regime, conf = sizer._load_regime_state()
+        assert regime == "crisis"
+        assert abs(conf - 0.91) < 1e-9
 
 
 class TestGetSeries:

@@ -33,7 +33,7 @@ from typing import Dict, Optional, Tuple
 
 import pandas as pd
 
-from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON, sqlite_connect
+from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON, PUBLIC_DATA_DIR, sqlite_connect
 from src.data.price_cache import get_prices, get_prices_df
 from src.backtest.metrics import save_results_json
 
@@ -195,8 +195,91 @@ class AdaptiveSizer:
             logger.error("Failed to load circuit breaker state: %s", e)
         return "ok"
 
+    def _signals_json_candidates(self) -> list:
+        """Ordered candidate paths for live signals.json.
+
+        Prefer the sizer's ``data_dir`` (tests + explicit workspace), then
+        runtime ``PUBLIC_DATA_DIR`` env, then freshly resolved public SSOT,
+        then repo ``DATA_DIR``. Module-level ``PUBLIC_DATA_DIR`` alone is not
+        enough — it is bound at import and can pin a live WWW tree across tests.
+        """
+        candidates = [self.data_dir / "signals.json"]
+        env_public = os.environ.get("PUBLIC_DATA_DIR")
+        if env_public and str(env_public).strip():
+            candidates.append(Path(str(env_public).strip()).expanduser() / "signals.json")
+        try:
+            from src.paths import resolve_runtime_public_data_dir
+
+            candidates.append(resolve_runtime_public_data_dir() / "signals.json")
+        except Exception:
+            candidates.append(PUBLIC_DATA_DIR / "signals.json")
+        candidates.append(DATA_DIR / "signals.json")
+        # Dedup while preserving order
+        seen = set()
+        ordered = []
+        for p in candidates:
+            try:
+                key = str(p.resolve()) if p.exists() else str(p)
+            except OSError:
+                key = str(p)
+            if key not in seen:
+                seen.add(key)
+                ordered.append(p)
+        return ordered
+
+    @staticmethod
+    def _vote_from_mapping(state: dict) -> Optional[Tuple[float, float]]:
+        """Extract (signal, agreement) from a mapping that looks like a live vote.
+
+        Returns None when the mapping is a regime weight table (nested regimes)
+        or lacks vote keys entirely — so callers can fall through.
+        """
+        if not isinstance(state, dict):
+            return None
+        # Live vote may be nested under ensemble_voting
+        vote = state.get("ensemble_voting") if isinstance(state.get("ensemble_voting"), dict) else state
+        if not isinstance(vote, dict):
+            return None
+        # Per-regime weight tables look like {"normal": {...}, "crisis": {...}}
+        # without composite/weighted_consensus/agreement at top level.
+        has_vote_key = any(
+            k in vote for k in ("composite_signal", "weighted_consensus", "agreement_ratio")
+        )
+        if not has_vote_key:
+            return None
+        try:
+            if "composite_signal" in vote:
+                signal = float(vote["composite_signal"])
+            elif "weighted_consensus" in vote:
+                signal = float(vote["weighted_consensus"])
+            else:
+                signal = 0.0
+            agreement = float(vote.get("agreement_ratio", 0.5))
+            return signal, agreement
+        except (TypeError, ValueError):
+            return None
+
     def _load_ensemble_signal(self) -> Tuple[float, float]:
-        """Load latest ensemble signal value and agreement."""
+        """Load latest ensemble signal value and agreement.
+
+        Primary SSOT: signals.json#ensemble_voting (public/data or data_dir).
+        Fallback: ENSEMBLE_WEIGHTS_FILE / ensemble_weights.json only when that
+        file actually carries vote fields (composite_signal / weighted_consensus).
+        Pure regime weight tables are ignored so they never pin signal=0.0.
+        """
+        # 1) Live signals.json ensemble_voting
+        for sig_path in self._signals_json_candidates():
+            try:
+                if not sig_path.exists():
+                    continue
+                payload = json.loads(sig_path.read_text())
+                parsed = self._vote_from_mapping(payload)
+                if parsed is not None:
+                    return parsed
+            except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+                logger.debug("ensemble signal signals.json read failed (%s): %s", sig_path, e)
+
+        # 2) Explicit weights/vote file override (must contain vote keys)
         ev_path = Path(os.environ.get(
             "ENSEMBLE_WEIGHTS_FILE",
             str(self.data_dir / "ensemble_weights.json"),
@@ -204,9 +287,13 @@ class AdaptiveSizer:
         try:
             if ev_path.exists():
                 state = json.loads(ev_path.read_text())
-                signal = float(state.get("composite_signal", state.get("weighted_consensus", 0.0)))
-                agreement = float(state.get("agreement_ratio", 0.5))
-                return signal, agreement
+                parsed = self._vote_from_mapping(state)
+                if parsed is not None:
+                    return parsed
+                logger.debug(
+                    "ensemble weights at %s lack vote keys; ignoring for adaptive sizing",
+                    ev_path,
+                )
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.error("Failed to load ensemble signal from %s: %s", ev_path, e)
         return 0.0, 0.5
