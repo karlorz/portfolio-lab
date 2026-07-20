@@ -11,6 +11,7 @@ from scripts.capture_daily_pnl import (
     load_portfolio,
     compute_pnl_snapshot,
     save_snapshot,
+    backfill_daily_returns_from_nav,
     main,
 )
 
@@ -470,6 +471,34 @@ class TestSaveSnapshotEdgeCases:
         latest_path = tmp_path / "daily_pnl_latest.json"
         result = save_snapshot(snap, append_path, latest_path)
         assert result is True
+
+
+class TestBackfillDailyReturns:
+    def test_rewrites_zero_when_nav_moved(self, tmp_path):
+        path = tmp_path / "daily_pnl.jsonl"
+        path.write_text(
+            '{"date":"2026-07-07","total_value":95367.04,"daily_return":0.0}\n'
+            '{"date":"2026-07-08","total_value":96111.74,"daily_return":0.0}\n'
+            '{"date":"2026-07-09","total_value":95316.38,"daily_return":0.0}\n',
+            encoding="utf-8",
+        )
+        summary = backfill_daily_returns_from_nav(path, dry_run=False)
+        assert summary["rewritten"] == 2
+        rows = [json.loads(ln) for ln in path.read_text().splitlines() if ln.strip()]
+        assert rows[1]["daily_return"] == pytest.approx((96111.74 / 95367.04) - 1.0, abs=1e-6)
+        assert rows[1].get("daily_return_backfilled") is True
+
+    def test_dry_run_no_write(self, tmp_path):
+        path = tmp_path / "daily_pnl.jsonl"
+        path.write_text(
+            '{"date":"2026-07-07","total_value":100.0,"daily_return":0.0}\n'
+            '{"date":"2026-07-08","total_value":110.0,"daily_return":0.0}\n',
+            encoding="utf-8",
+        )
+        summary = backfill_daily_returns_from_nav(path, dry_run=True)
+        assert summary["rewritten"] == 1
+        row = json.loads(path.read_text().splitlines()[1])
+        assert row["daily_return"] == 0.0
 
 
 class TestMain:

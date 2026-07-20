@@ -125,11 +125,37 @@ class TestCheckDataFreshness:
         assert freshness["cron"]["status"] == "ok"
         assert freshness["cron"]["backends"]["tasker"]["status"] == "ok"
         assert freshness["cron"]["backends"]["tasker"]["failed_jobs"] == 0
-        # Raw row still visible for operators.
+        # Raw row still visible for operators before in-process stamp.
         health_row = next(
             j for j in freshness["cron"]["jobs"] if j["name"] == "portfolio-lab-health"
         )
         assert health_row["status"] == "error"
+
+    def test_stamp_self_job_overwrites_prior_error(self, tmp_path, monkeypatch):
+        """Successful health run must not publish prior self-error in report jobs."""
+        from src.monitor.health_check import _stamp_health_self_job_running_success
+
+        freshness = {
+            "cron": {
+                "status": "ok",
+                "failed_jobs": 0,
+                "jobs": [
+                    {
+                        "name": "portfolio-lab-health",
+                        "status": "error",
+                        "last_run": "2026-07-20T14:00:00+00:00",
+                    },
+                    {"name": "portfolio-lab-data", "status": "success"},
+                ],
+            }
+        }
+        _stamp_health_self_job_running_success(freshness)
+        health_row = next(
+            j for j in freshness["cron"]["jobs"] if j["name"] == "portfolio-lab-health"
+        )
+        assert health_row["status"] == "ok"
+        assert health_row.get("self_observation") == "in_process_success_stamp"
+        assert health_row.get("prior_status_before_stamp") == "error"
 
     def test_non_self_job_error_still_degrades_cron(self, tmp_path, monkeypatch):
         """Sibling job errors continue to degrade the cron rollup."""

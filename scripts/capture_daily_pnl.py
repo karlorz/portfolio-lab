@@ -233,6 +233,61 @@ def save_snapshot(snapshot: Dict[str, Any], append_path: Path, latest_path: Path
     return True
 
 
+def backfill_daily_returns_from_nav(
+    append_path: Path,
+    *,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    """Recompute historical daily_return from consecutive total_value marks.
+
+    Fixes rows where stored daily_return was 0 while NAV moved (pre-NAV-DoD
+    capture). Idempotent: only rewrites when |stored - true| > 1e-6.
+    """
+    if not append_path.exists():
+        return {"rewritten": 0, "rows": 0, "dry_run": dry_run}
+
+    rows: list[dict] = []
+    with open(append_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(entry, dict):
+                rows.append(entry)
+
+    rewritten = 0
+    for i in range(1, len(rows)):
+        prev = rows[i - 1]
+        cur = rows[i]
+        try:
+            pv = float(prev.get("total_value"))
+            tv = float(cur.get("total_value"))
+        except (TypeError, ValueError):
+            continue
+        if pv <= 0:
+            continue
+        true_ret = (tv / pv) - 1.0
+        try:
+            stored = float(cur.get("daily_return") or 0.0)
+        except (TypeError, ValueError):
+            stored = 0.0
+        if abs(true_ret - stored) > 1e-6:
+            cur["daily_return"] = round(true_ret, 6)
+            cur["daily_return_backfilled"] = True
+            rewritten += 1
+
+    if not dry_run and rewritten:
+        with open(append_path, "w") as f:
+            for entry in rows:
+                f.write(json.dumps(entry, default=str) + "\n")
+
+    return {"rewritten": rewritten, "rows": len(rows), "dry_run": dry_run}
+
+
 def append_performance_jsonl(snapshot: Dict[str, Any], performance_path: Optional[Path] = None) -> bool:
     """Append deduped performance.jsonl row for bandit/stats consumers.
 
@@ -283,10 +338,28 @@ def main():
     parser = argparse.ArgumentParser(description="Capture daily P&L snapshot")
     parser.add_argument("--mode", default="paper", choices=["paper", "live"],
                         help="Portfolio mode to capture")
+    parser.add_argument(
+        "--backfill-returns",
+        action="store_true",
+        help="Recompute historical daily_return from consecutive total_value marks",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="With --backfill-returns: report rewrite count without writing",
+    )
     args = parser.parse_args()
 
     from src.utils.log_config import configure_logging
     configure_logging()
+
+    append_path = DATA_DIR / "daily_pnl.jsonl"
+    latest_path = DATA_DIR / "daily_pnl_latest.json"
+
+    if args.backfill_returns:
+        summary = backfill_daily_returns_from_nav(append_path, dry_run=args.dry_run)
+        logger.info("backfill_daily_returns: %s", summary)
+        return
 
     logger.info("Daily P&L Capture — %s", datetime.now().isoformat())
 
@@ -294,9 +367,6 @@ def main():
     if not portfolio:
         logger.error("No portfolio_%s.json found", args.mode)
         sys.exit(1)
-
-    append_path = DATA_DIR / "daily_pnl.jsonl"
-    latest_path = DATA_DIR / "daily_pnl_latest.json"
 
     snapshot = compute_pnl_snapshot(portfolio, append_path=append_path)
 

@@ -1006,9 +1006,52 @@ def _compute_system_status(checks: dict, circuit: dict) -> str:
     return "unknown"
 
 
+def _stamp_health_self_job_running_success(freshness: dict[str, Any]) -> None:
+    """Overwrite portfolio-lab-health row so a successful run does not publish prior error.
+
+    Tasker writes cron_status *after* the job body. During ``run_health_check`` the
+    self job still shows the previous terminal status. When that was ``error``, the
+    successful run's own report freezes a false error row into health_ops/public
+    until a later writer fixes it. Stamp in-process success for honesty; rollup
+    already excludes self-errors from failed_jobs.
+    """
+    if not isinstance(freshness, dict):
+        return
+    cron = freshness.get("cron")
+    if not isinstance(cron, dict):
+        return
+    jobs = cron.get("jobs")
+    if not isinstance(jobs, list):
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    stamped = False
+    for job in jobs:
+        if not isinstance(job, dict):
+            continue
+        if not is_health_self_job(job):
+            continue
+        prev = job.get("status")
+        job["status"] = "ok"
+        job["last_run"] = now
+        job["self_observation"] = "in_process_success_stamp"
+        if prev not in (None, "ok", "success"):
+            job["prior_status_before_stamp"] = prev
+        stamped = True
+    if stamped:
+        # Keep embedded failed_jobs consistent with rollup (already excludes self)
+        try:
+            from src.monitor.hermes_cron import rollup_failed_cron_jobs
+
+            cron["failed_jobs"] = len(rollup_failed_cron_jobs(jobs))
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def run_health_check() -> dict:
     """Run all health checks and return a structured report."""
     freshness = _check_data_freshness()
+    # Self-job race: do not publish prior terminal error while this process succeeds.
+    _stamp_health_self_job_running_success(freshness)
     circuit = _check_circuit_breaker()
     kill_switch = _check_kill_switch()
     open_incidents = _check_open_incidents()
