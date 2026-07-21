@@ -2859,6 +2859,22 @@ class DashboardGenerator:
         out_path = PUBLIC_DIR / "signals.json"
         save_results_json(output, output_path=str(out_path), validator=validate_all_signals)
 
+        # Batch CO: dual-write private DATA_DIR for SSOT / mirror lag honesty.
+        # Live authority remains PUBLIC_DIR; private is the producer-side twin
+        # so soft-mirror and ops health never see source_present=false forever.
+        try:
+            private_path = Path(DATA_DIR) / "signals.json"
+            if private_path.resolve() != out_path.resolve():
+                private_path.parent.mkdir(parents=True, exist_ok=True)
+                save_results_json(
+                    output,
+                    output_path=str(private_path),
+                    validator=validate_all_signals,
+                )
+                logger.info("Dual-wrote private signals.json → %s", private_path)
+        except (OSError, TypeError, ValueError) as exc:
+            logger.warning("Private signals.json dual-write skipped: %s", exc)
+
         return out_path
 
     def _load_broker_data(self) -> Dict:
