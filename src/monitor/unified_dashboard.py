@@ -260,7 +260,12 @@ def _get_health_section() -> Dict[str, Any]:
 
 
 def _get_portfolio_section() -> Dict[str, Any]:
-    """Current portfolio state from portfolio_paper.json."""
+    """Current portfolio state from portfolio_paper.json.
+
+    Batch CF: surface day-over-day return from ``daily_pnl_latest.json`` (capture
+    SSOT) with fallback to the last paper history row — so the unified panel no
+    longer omits DoD while MTM/history and capture disagree.
+    """
     paper = _read_json("portfolio_paper.json")
     if not paper:
         return {"available": False}
@@ -284,7 +289,34 @@ def _get_portfolio_section() -> Dict[str, Any]:
             }
         )
 
-    return {
+    daily_return: Optional[float] = None
+    daily_return_source: Optional[str] = None
+    daily_return_date: Optional[str] = None
+    pnl = _read_json("daily_pnl_latest.json")
+    if isinstance(pnl, dict) and pnl.get("daily_return") is not None:
+        try:
+            daily_return = float(pnl["daily_return"])
+            daily_return_source = "daily_pnl_latest"
+            daily_return_date = str(pnl.get("date") or "")[:10] or None
+        except (TypeError, ValueError):
+            daily_return = None
+    if daily_return is None:
+        history = paper.get("history") or []
+        if isinstance(history, list):
+            for row in reversed(history):
+                if not isinstance(row, dict) or row.get("daily_return") is None:
+                    continue
+                try:
+                    daily_return = float(row["daily_return"])
+                    daily_return_source = "portfolio_paper.history"
+                    daily_return_date = str(
+                        row.get("session_date") or row.get("date") or row.get("timestamp") or ""
+                    )[:10] or None
+                    break
+                except (TypeError, ValueError):
+                    continue
+
+    out: Dict[str, Any] = {
         "available": True,
         "total_value": round(total_value, 2),
         "cash": round(paper.get("cash", 0), 2),
@@ -294,6 +326,12 @@ def _get_portfolio_section() -> Dict[str, Any]:
         "mode": paper.get("mode", "paper"),
         "history_count": len(paper.get("history", [])),
     }
+    if daily_return is not None:
+        out["daily_return"] = round(daily_return, 6)
+        out["daily_return_source"] = daily_return_source
+        if daily_return_date:
+            out["daily_return_date"] = daily_return_date
+    return out
 
 
 def _normalize_drawdown_to_percent(

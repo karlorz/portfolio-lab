@@ -1509,3 +1509,44 @@ class TestHealthSectionPublicSignalHealth:
         assert any("0/9" in a for a in section["alerts"])
         # GARCH still disclosed as component
         assert "garch_cvar" in section["components"]
+
+
+class TestPortfolioSectionDailyReturn:
+    """Batch CF: unified portfolio surfaces DoD from daily_pnl_latest SSOT."""
+
+    def test_daily_return_from_pnl_latest(self, tmp_path, sample_portfolio):
+        from src.monitor import unified_dashboard as ud
+
+        (tmp_path / "portfolio_paper.json").write_text(json.dumps(sample_portfolio))
+        (tmp_path / "daily_pnl_latest.json").write_text(
+            json.dumps(
+                {
+                    "date": "2026-07-22",
+                    "daily_return": 0.001298,
+                    "total_value": 94746.06,
+                }
+            )
+        )
+        with patch.object(ud, "DATA_DIR", tmp_path):
+            section = ud._get_portfolio_section()
+        assert section["daily_return"] == 0.001298
+        assert section["daily_return_source"] == "daily_pnl_latest"
+        assert section["daily_return_date"] == "2026-07-22"
+
+    def test_daily_return_fallback_history(self, tmp_path, sample_portfolio):
+        from src.monitor import unified_dashboard as ud
+
+        paper = dict(sample_portfolio)
+        paper["history"] = [
+            {
+                "timestamp": "2026-07-22T02:20:00",
+                "session_date": "2026-07-22",
+                "total_value": 94746.0,
+                "daily_return": -0.00045,
+            }
+        ]
+        (tmp_path / "portfolio_paper.json").write_text(json.dumps(paper))
+        with patch.object(ud, "DATA_DIR", tmp_path):
+            section = ud._get_portfolio_section()
+        assert section["daily_return"] == -0.00045
+        assert section["daily_return_source"] == "portfolio_paper.history"
