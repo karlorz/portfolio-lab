@@ -733,6 +733,8 @@ class SignalHealthTracker:
         ic_bonus_threshold: float = 0.05,
         ic_penalty_threshold: float = 0.02,
         ic_weight_factor: float = 0.15,
+        *,
+        hard_zero_unhealthy: bool = True,
     ) -> Dict[str, float]:
         """
         Calculate health-adjusted weights for ensemble voting.
@@ -740,11 +742,16 @@ class SignalHealthTracker:
         Formula:
           adjusted_weight = base_weight * health_multiplier * ic_multiplier
 
-        health_multiplier = max(min_multiplier, health_score)
+        health_multiplier:
+          - status == unhealthy → 0.0 (hard quality gate; Batch BH)
+          - else max(min_multiplier, health_score) soft floor for degraded/healthy
         ic_multiplier:
           - |IC| > ic_bonus_threshold: 1.0 + ic_weight_factor * |IC|
           - |IC| < ic_penalty_threshold: 1.0 - ic_weight_factor * (1 - |IC|/ic_penalty_threshold)
           - otherwise: 1.0 (neutral)
+
+        When every arm is hard-zeroed, returns all zeros (do not reinflate toxic
+        mass). Callers should freeze adaptive blend / fall back to champion.
 
         Args:
             base_weights: Dict mapping source to base weight (should sum to 1.0)
@@ -752,22 +759,29 @@ class SignalHealthTracker:
             ic_bonus_threshold: IC above this gets a weight boost (default 0.05)
             ic_penalty_threshold: IC below this gets a weight penalty (default 0.02)
             ic_weight_factor: Magnitude of IC adjustment (default 0.15)
+            hard_zero_unhealthy: When True, status=unhealthy forces multiplier 0
 
         Returns:
-            Dict of adjusted weights (normalized to sum to 1.0)
+            Dict of adjusted weights (normalized to sum to 1.0, or all 0 if gated)
         """
         scores = self.calculate_all_health_scores()
 
         adjusted = {}
+        slept: list[str] = []
         for source, base_weight in base_weights.items():
             score = scores.get(source)
             if score:
-                # Health multiplier
-                health_mult = max(min_weight_multiplier, score.health_score)
+                status = str(getattr(score, "status", "") or "").lower()
+                # Hard quality gate: unhealthy arms get zero mass (not soft floor).
+                if hard_zero_unhealthy and status == SignalHealthStatus.UNHEALTHY.value:
+                    health_mult = 0.0
+                    slept.append(source)
+                else:
+                    health_mult = max(min_weight_multiplier, score.health_score)
 
                 # IC multiplier
                 ic_mult = 1.0
-                if score.ic is not None:
+                if score.ic is not None and health_mult > 0:
                     abs_ic = abs(score.ic)
                     if abs_ic > ic_bonus_threshold:
                         ic_mult = 1.0 + ic_weight_factor * abs_ic
@@ -779,10 +793,19 @@ class SignalHealthTracker:
                 # No health data - use neutral health (0.5)
                 adjusted[source] = base_weight * 0.5
 
-        # Normalize to sum to 1.0
+        if slept:
+            logger.info(
+                "Health gate slept %d unhealthy arm(s): %s",
+                len(slept),
+                ", ".join(slept),
+            )
+
+        # Normalize to sum to 1.0 — never reinflate when all hard-gated
         total = sum(adjusted.values())
         if total > 0:
             adjusted = {k: v / total for k, v in adjusted.items()}
+        else:
+            adjusted = {k: 0.0 for k in base_weights}
 
         return adjusted
 

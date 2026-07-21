@@ -446,6 +446,22 @@ def refresh_signals_health_kill_fields(
     if report.get("timestamp") is not None:
         health["generated_at"] = report.get("timestamp")
 
+    # Max-severity honesty after kill patch (Batch BH): never leave compact
+    # status=healthy when kill enabled, open incidents, failed cron, or
+    # scheduler degraded.
+    try:
+        from src.dashboard.cron_scheduler_section import _elevate_compact_health_status
+        from src.dashboard.kill_authority import elevate_system_status_for_kill
+
+        elevated = elevate_system_status_for_kill(
+            health.get("status"), disk_kill, disk_open
+        )
+        if elevated:
+            health["status"] = elevated
+        health = _elevate_compact_health_status(health)
+    except Exception:  # noqa: BLE001 — never fail kill refresh on elevate
+        pass
+
     payload["health"] = health
     # Partial rewrite must advance top-level generated_at (mtime honesty)
     from datetime import datetime, timezone

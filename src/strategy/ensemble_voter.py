@@ -1802,9 +1802,18 @@ class EnsembleVoter:
         return weights
 
     def _apply_health_weights(self, weights: Dict) -> Dict:
-        """Apply health-adjusted weighting (v3.12) — reduce weight for poor health scores."""
+        """Apply health-adjusted weighting (v3.12) — soft floor + hard-zero unhealthy.
+
+        Batch BH residual honesty:
+        - status == unhealthy → multiplier 0 (quality sleep / hard exclude)
+        - otherwise soft floor max(0.2, health_score) for graceful degrade
+        - if all arms hard-gated: freeze adaptive blend (all-zero mass, do not
+          reinflate toxic arms via renorm)
+        """
+        self._health_gate_freeze = False
+        self._health_gate_slept: list[str] = []
         try:
-            from src.signals.health_tracker import SignalHealthTracker
+            from src.signals.health_tracker import SignalHealthTracker, SignalHealthStatus
             health_tracker = SignalHealthTracker()
             health_scores = health_tracker.calculate_all_health_scores()
 
@@ -1812,20 +1821,48 @@ class EnsembleVoter:
                 return weights
 
             adjusted_weights = {}
+            slept: list[str] = []
             for source_enum, base_weight in weights.items():
                 source_str = source_enum.value
                 if source_str in health_scores:
                     health = health_scores[source_str]
-                    multiplier = max(0.2, min(1.0, health.health_score))
+                    status = str(getattr(health, "status", "") or "").lower()
+                    if status == SignalHealthStatus.UNHEALTHY.value:
+                        multiplier = 0.0
+                        slept.append(source_str)
+                        logger.info(
+                            "Health-gated %s: weight %.2f%% → 0%% (status=unhealthy, score=%.2f)",
+                            source_str,
+                            base_weight * 100,
+                            float(getattr(health, "health_score", 0.0) or 0.0),
+                        )
+                    else:
+                        multiplier = max(0.2, min(1.0, float(health.health_score)))
+                        if health.health_score < 0.5:
+                            logger.info(
+                                "Health-adjusted %s: weight %.2f%% → %.2f%% (health=%.2f)",
+                                source_str,
+                                base_weight * 100,
+                                base_weight * multiplier * 100,
+                                health.health_score,
+                            )
                     adjusted_weights[source_enum] = base_weight * multiplier
-                    if health.health_score < 0.5:
-                        logger.info("Health-adjusted %s: weight %.2f%% → %.2f%% (health=%.2f)", source_str, base_weight * 100, adjusted_weights[source_enum] * 100, health.health_score)
                 else:
                     adjusted_weights[source_enum] = base_weight
 
+            self._health_gate_slept = slept
             total = sum(adjusted_weights.values())
             if total > 0:
                 weights = {k: v / total for k, v in adjusted_weights.items()}
+            else:
+                # All arms unhealthy / zero — freeze; do not reinflate via renorm
+                self._health_gate_freeze = True
+                weights = {k: 0.0 for k in weights}
+                logger.warning(
+                    "Health gate freeze: all ensemble arms hard-zeroed (%s); "
+                    "adaptive blend contributes zero mass",
+                    ", ".join(slept) if slept else "no sources",
+                )
         except (KeyError, ValueError, TypeError, AttributeError, OSError) as e:
             logger.warning("Could not apply health-adjusted weights: %s", e)
         return weights

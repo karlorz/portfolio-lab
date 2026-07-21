@@ -423,33 +423,67 @@ class TestWeightAdjustment:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "test.db"
             tracker = SignalHealthTracker(db_path)
-            
-            base_date = datetime(2026, 5, 14)
-            
-            # Very unhealthy signal
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO signal_health_scores
-                (timestamp, source, health_score, accuracy_30d, accuracy_60d, accuracy_90d, decay_rate, predictions_count, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                base_date.isoformat(),
-                "very_unhealthy",
-                0.1,  # Very low health
-                0.1, 0.1, 0.1,
-                0.0,
-                100,
-                "unhealthy"
-            ))
-            conn.commit()
-            conn.close()
-            
-            base_weights = {"very_unhealthy": 1.0}
+            from src.signals.health_tracker import HealthScore
+
+            # Degraded low score still uses soft floor (mock scores — calc uses predictions)
+            mock_scores = {
+                "soft_floor_degraded": HealthScore(
+                    source="soft_floor_degraded",
+                    timestamp="2026-05-14",
+                    health_score=0.1,
+                    accuracy_30d=0.1,
+                    accuracy_60d=0.1,
+                    accuracy_90d=0.1,
+                    decay_rate=0.0,
+                    predictions_count=100,
+                    status="degraded",
+                )
+            }
+            tracker.calculate_all_health_scores = lambda end_date=None: mock_scores
+            base_weights = {"soft_floor_degraded": 1.0}
             adjusted = tracker.get_adjusted_weights(base_weights, min_weight_multiplier=0.2)
-            
-            # Should use floor of 0.2 even though health is 0.1
-            assert adjusted["very_unhealthy"] >= 0.999  # Normalized to ~1.0
+            # Soft floor 0.2 on degraded → renorms to ~1.0 when sole arm
+            assert adjusted["soft_floor_degraded"] >= 0.999
+
+    def test_unhealthy_hard_zero_not_soft_floor(self):
+        """Batch BH: status=unhealthy must zero mass, not max(0.2, score)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "test.db"
+            tracker = SignalHealthTracker(db_path)
+            from src.signals.health_tracker import HealthScore
+
+            mock_scores = {
+                "multi_speed_momentum": HealthScore(
+                    source="multi_speed_momentum",
+                    timestamp="2026-05-14",
+                    health_score=0.85,
+                    accuracy_30d=0.85,
+                    accuracy_60d=0.85,
+                    accuracy_90d=0.85,
+                    decay_rate=0.0,
+                    predictions_count=100,
+                    status="healthy",
+                ),
+                "cross_asset_rv": HealthScore(
+                    source="cross_asset_rv",
+                    timestamp="2026-05-14",
+                    health_score=0.35,
+                    accuracy_30d=0.35,
+                    accuracy_60d=0.35,
+                    accuracy_90d=0.35,
+                    decay_rate=0.0,
+                    predictions_count=100,
+                    status="unhealthy",
+                ),
+            }
+            tracker.calculate_all_health_scores = lambda end_date=None: mock_scores
+            base_weights = {
+                "multi_speed_momentum": 0.5,
+                "cross_asset_rv": 0.5,
+            }
+            adjusted = tracker.get_adjusted_weights(base_weights)
+            assert adjusted.get("cross_asset_rv", 0.0) == 0.0
+            assert adjusted.get("multi_speed_momentum", 0.0) >= 0.999
 
 
 class TestHealthReport:

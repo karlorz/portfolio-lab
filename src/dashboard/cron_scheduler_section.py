@@ -190,12 +190,36 @@ def refresh_public_health_cron_section(
                     signals["health"] = health
                 failed = len(rollup_failed_cron_jobs(payload.get("cron_jobs") or []))
                 health["failed_cron_jobs"] = failed
-                health["cron_job_count"] = len(payload.get("cron_jobs") or [])
+                new_count = len(payload.get("cron_jobs") or [])
+                # Refuse inventory collapse (suite pollution / partial loader):
+                # prior ≥10 → new ≤3 without a full generate is not a real shrink.
+                prev_count = health.get("cron_job_count")
+                if (
+                    isinstance(prev_count, int)
+                    and prev_count >= 10
+                    and new_count <= 3
+                ):
+                    logger.warning(
+                        "signals.health cron_job_count refuse drop %s→%s "
+                        "(need full generate or honest full inventory)",
+                        prev_count,
+                        new_count,
+                    )
+                    health["cron_job_count_drop_refused"] = {
+                        "previous": prev_count,
+                        "attempted": new_count,
+                    }
+                else:
+                    health["cron_job_count"] = new_count
+                    health.pop("cron_job_count_drop_refused", None)
                 sched = payload.get("scheduler_status") or {}
                 if isinstance(sched, dict) and sched.get("status"):
                     health["scheduler_status"] = sched.get("status")
                 if payload.get("system_status"):
                     health["status"] = payload.get("system_status")
+                # Max-severity honesty: never leave compact healthy when
+                # scheduler degraded / failed jobs / kill sticky (Batch BH).
+                health = _elevate_compact_health_status(health)
                 health["cron_section_refreshed_at"] = payload["cron_section_refreshed_at"]
                 signals_path.write_text(json.dumps(signals, indent=2) + "\n", encoding="utf-8")
                 logger.info("Refreshed signals.health cron compact fields at %s", signals_path)
@@ -203,3 +227,55 @@ def refresh_public_health_cron_section(
         logger.warning("signals.health cron compact refresh failed: %s", exc)
 
     return True
+
+
+def _elevate_compact_health_status(health: dict[str, Any]) -> dict[str, Any]:
+    """Never report compact status=healthy when critical subsystems are worse.
+
+    Max-severity rollup (SRE dashboard pattern): kill, scheduler degraded,
+    or failed_cron_jobs must demote healthy/ok → warning/degraded.
+    """
+    if not isinstance(health, dict):
+        return health
+    status = str(health.get("status") or "unknown").lower()
+    severity = {
+        "healthy": 0,
+        "ok": 0,
+        "good": 0,
+        "warning": 1,
+        "warn": 1,
+        "degraded": 2,
+        "unhealthy": 3,
+        "critical": 4,
+        "error": 4,
+    }
+    rank = severity.get(status, 0)
+    target = status if status in severity else "unknown"
+
+    failed = int(health.get("failed_cron_jobs") or 0)
+    sched = str(health.get("scheduler_status") or "").lower()
+    kill_enabled = bool(health.get("kill_switch_enabled")) or (
+        isinstance(health.get("kill_switch"), dict)
+        and bool(health["kill_switch"].get("enabled"))
+    )
+    open_count = int(health.get("open_incidents_count") or 0)
+    if isinstance(health.get("open_incidents"), dict):
+        open_count = max(open_count, int(health["open_incidents"].get("open_count") or 0))
+
+    if failed > 0 and rank < 1:
+        target, rank = "warning", 1
+    if sched in {"degraded", "warning", "warn"} and rank < 2:
+        target, rank = "degraded", 2
+    if sched in {"error", "critical", "unavailable"} and rank < 3:
+        target, rank = "unhealthy", 3
+    if (kill_enabled or open_count > 0) and rank < 1:
+        target, rank = "warning", 1
+
+    if target != status and severity.get(status, 0) < rank:
+        health["status"] = target
+        health["status_elevated_from"] = status
+        health["status_elevate_reason"] = (
+            f"max_severity(failed_cron={failed}, scheduler={sched or 'n/a'}, "
+            f"kill={kill_enabled}, open_incidents={open_count})"
+        )
+    return health
