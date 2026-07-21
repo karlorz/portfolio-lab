@@ -652,6 +652,13 @@ daily-pnl: mark-to-market
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-daily-pnl $$STATUS $$DUR; \
 	exit $$EXIT
 
+# One-shot / ops: rewrite paper history daily_return from NAV chain (Batch CG).
+# Does not stamp cron_status (not a scheduled tasker job).
+.PHONY: backfill-paper-returns
+backfill-paper-returns:
+	@echo "=== Backfill paper history returns: $$(date) ==="
+	@cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/capture_daily_pnl.py --backfill-paper-history $(if $(DRY_RUN),--dry-run,)
+
 # ── Performance Attribution ────────────────────────────────────────────
 
 .PHONY: attribution
@@ -822,6 +829,7 @@ fetch-trends:
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 3 ]; then STATUS="rate_limited"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \

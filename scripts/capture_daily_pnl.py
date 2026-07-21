@@ -314,6 +314,82 @@ def backfill_daily_returns_from_nav(
     return {"rewritten": rewritten, "rows": len(rows), "dry_run": dry_run}
 
 
+def backfill_paper_history_returns_from_nav(
+    portfolio_path: Path,
+    *,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    """Recompute portfolio_paper history daily_return from consecutive NAV marks.
+
+    Batch CG / c344–c365: pre-session-baseline MTM wrote 0.0 while total_value
+    moved. Mirrors ``backfill_daily_returns_from_nav`` for the paper history
+    array. Idempotent; marks rewritten rows with ``daily_return_backfilled``.
+    """
+    if not portfolio_path.exists():
+        return {"rewritten": 0, "rows": 0, "dry_run": dry_run, "path": str(portfolio_path)}
+
+    try:
+        portfolio = json.loads(portfolio_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        logger.warning("backfill_paper_history: failed to read %s: %s", portfolio_path, exc)
+        return {
+            "rewritten": 0,
+            "rows": 0,
+            "dry_run": dry_run,
+            "error": str(exc),
+            "path": str(portfolio_path),
+        }
+
+    if not isinstance(portfolio, dict):
+        return {"rewritten": 0, "rows": 0, "dry_run": dry_run, "error": "not_object"}
+
+    history = portfolio.get("history")
+    if not isinstance(history, list) or len(history) < 2:
+        return {
+            "rewritten": 0,
+            "rows": len(history) if isinstance(history, list) else 0,
+            "dry_run": dry_run,
+            "path": str(portfolio_path),
+        }
+
+    rewritten = 0
+    for i in range(1, len(history)):
+        prev = history[i - 1]
+        cur = history[i]
+        if not isinstance(prev, dict) or not isinstance(cur, dict):
+            continue
+        try:
+            pv = float(prev.get("total_value"))
+            tv = float(cur.get("total_value"))
+        except (TypeError, ValueError):
+            continue
+        if pv <= 0:
+            continue
+        true_ret = (tv / pv) - 1.0
+        try:
+            stored = float(cur.get("daily_return") or 0.0)
+        except (TypeError, ValueError):
+            stored = 0.0
+        if abs(true_ret - stored) > 1e-6:
+            cur["daily_return"] = round(true_ret, 6)
+            cur["daily_return_backfilled"] = True
+            rewritten += 1
+
+    if not dry_run and rewritten:
+        portfolio["history"] = history
+        portfolio_path.write_text(
+            json.dumps(portfolio, indent=2, default=str) + "\n",
+            encoding="utf-8",
+        )
+
+    return {
+        "rewritten": rewritten,
+        "rows": len(history),
+        "dry_run": dry_run,
+        "path": str(portfolio_path),
+    }
+
+
 def append_performance_jsonl(snapshot: Dict[str, Any], performance_path: Optional[Path] = None) -> bool:
     """Append deduped performance.jsonl row for bandit/stats consumers.
 
@@ -367,12 +443,17 @@ def main():
     parser.add_argument(
         "--backfill-returns",
         action="store_true",
-        help="Recompute historical daily_return from consecutive total_value marks",
+        help="Recompute historical daily_return from consecutive total_value marks (jsonl)",
+    )
+    parser.add_argument(
+        "--backfill-paper-history",
+        action="store_true",
+        help="Recompute portfolio_paper.json history daily_return from consecutive NAV marks",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="With --backfill-returns: report rewrite count without writing",
+        help="With backfill flags: report rewrite count without writing",
     )
     args = parser.parse_args()
 
@@ -382,9 +463,16 @@ def main():
     append_path = DATA_DIR / "daily_pnl.jsonl"
     latest_path = DATA_DIR / "daily_pnl_latest.json"
 
-    if args.backfill_returns:
-        summary = backfill_daily_returns_from_nav(append_path, dry_run=args.dry_run)
-        logger.info("backfill_daily_returns: %s", summary)
+    if args.backfill_returns or args.backfill_paper_history:
+        if args.backfill_returns:
+            summary = backfill_daily_returns_from_nav(append_path, dry_run=args.dry_run)
+            logger.info("backfill_daily_returns: %s", summary)
+        if args.backfill_paper_history:
+            paper_path = DATA_DIR / f"portfolio_{args.mode}.json"
+            summary = backfill_paper_history_returns_from_nav(
+                paper_path, dry_run=args.dry_run
+            )
+            logger.info("backfill_paper_history_returns: %s", summary)
         return
 
     logger.info("Daily P&L Capture — %s", datetime.now().isoformat())

@@ -577,3 +577,60 @@ class TestUsCashSessionDate:
         # us_cash_session_date uses datetime.now(tz=_ET) — patch module datetime
         assert cap.us_cash_session_date() == "2026-07-21"
 
+
+
+class TestBackfillPaperHistoryReturns:
+    """Batch CG: portfolio_paper history NAV chain rewrite."""
+
+    def test_rewrites_zero_while_nav_moved(self, tmp_path):
+        from scripts.capture_daily_pnl import backfill_paper_history_returns_from_nav
+
+        path = tmp_path / "portfolio_paper.json"
+        portfolio = {
+            "mode": "paper",
+            "cash": 0,
+            "positions": {},
+            "history": [
+                {"timestamp": "2026-07-20T23:40:00", "total_value": 100000.0, "daily_return": 0.0},
+                {"timestamp": "2026-07-21T23:40:00", "total_value": 101000.0, "daily_return": 0.0},
+                {"timestamp": "2026-07-22T03:10:00", "total_value": 101500.0, "daily_return": 0.0},
+            ],
+        }
+        path.write_text(json.dumps(portfolio))
+        summary = backfill_paper_history_returns_from_nav(path, dry_run=False)
+        assert summary["rewritten"] == 2
+        out = json.loads(path.read_text())
+        assert out["history"][1]["daily_return"] == pytest.approx(0.01, abs=1e-6)
+        assert out["history"][1]["daily_return_backfilled"] is True
+        assert out["history"][2]["daily_return"] == pytest.approx(101500 / 101000 - 1, abs=1e-6)
+
+    def test_dry_run_does_not_write(self, tmp_path):
+        from scripts.capture_daily_pnl import backfill_paper_history_returns_from_nav
+
+        path = tmp_path / "portfolio_paper.json"
+        portfolio = {
+            "history": [
+                {"total_value": 100.0, "daily_return": 0.0},
+                {"total_value": 110.0, "daily_return": 0.0},
+            ]
+        }
+        path.write_text(json.dumps(portfolio))
+        summary = backfill_paper_history_returns_from_nav(path, dry_run=True)
+        assert summary["rewritten"] == 1
+        out = json.loads(path.read_text())
+        assert out["history"][1]["daily_return"] == 0.0
+
+    def test_idempotent_second_pass(self, tmp_path):
+        from scripts.capture_daily_pnl import backfill_paper_history_returns_from_nav
+
+        path = tmp_path / "portfolio_paper.json"
+        portfolio = {
+            "history": [
+                {"total_value": 100.0, "daily_return": 0.0},
+                {"total_value": 110.0, "daily_return": 0.0},
+            ]
+        }
+        path.write_text(json.dumps(portfolio))
+        backfill_paper_history_returns_from_nav(path)
+        summary2 = backfill_paper_history_returns_from_nav(path)
+        assert summary2["rewritten"] == 0
