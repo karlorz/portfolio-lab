@@ -3495,11 +3495,11 @@ class DashboardGenerator:
         )
         alerts.extend(build_health_slo_alerts(health_payload))
         
-        output = {
+        output = _stamp_generator_git_sha({
             "alerts": sorted(alerts, key=lambda x: x.get("timestamp", "") or "", reverse=True),
             "count": len(alerts),
             "generated_at": datetime.now(timezone.utc).isoformat()
-        }
+        })
         
         out_path = PUBLIC_DIR / "alerts.json"
         save_results_json(output, output_path=str(out_path))
@@ -3543,11 +3543,11 @@ class DashboardGenerator:
                         if not (isinstance(a, dict) and a.get("type") == "kill_switch")
                     ]
                     rebuilt.insert(0, kill_alert)
-                    output = {
+                    output = _stamp_generator_git_sha({
                         "alerts": rebuilt,
                         "count": len(rebuilt),
                         "generated_at": datetime.now(timezone.utc).isoformat(),
-                    }
+                    })
                     out_path.write_text(
                         json.dumps(output, indent=2, sort_keys=False) + "\n",
                         encoding="utf-8",
@@ -3581,7 +3581,7 @@ class DashboardGenerator:
             payload = self._empty_incident_summary()
 
         payload.setdefault("schema_version", "incident-lifecycle/v1")
-        payload.setdefault("generated_at", datetime.now().isoformat())
+        payload.setdefault("generated_at", datetime.now(timezone.utc).isoformat())
         payload.setdefault("open_count", 0)
         payload.setdefault("incidents", [])
         payload.setdefault("metrics", {
@@ -3590,6 +3590,7 @@ class DashboardGenerator:
             "resolved_count": 0,
             "mean_mttr_seconds": None,
         })
+        payload = _stamp_generator_git_sha(payload)
 
         out_path = PUBLIC_DIR / "incidents.json"
         save_results_json(payload, output_path=str(out_path))

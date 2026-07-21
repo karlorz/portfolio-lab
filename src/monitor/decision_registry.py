@@ -630,7 +630,7 @@ def build_decision_registry_snapshot(
     except Exception:  # noqa: BLE001
         experiment_total = len(experiments)
 
-    return {
+    snapshot = {
         "schema_version": DECISION_REGISTRY_SCHEMA_VERSION,
         "generated_at": generated_at or _now_iso(),
         "projection_freshness": _build_projection_freshness(reg, decisions),
@@ -661,6 +661,14 @@ def build_decision_registry_snapshot(
             "counts_scope": "ledger_total",
         },
     }
+    sha = _git_sha_short()
+    if sha:
+        snapshot["generator_git_sha"] = sha
+        snapshot["generator_git_sha_status"] = "full"
+    else:
+        snapshot["generator_git_sha"] = None
+        snapshot["generator_git_sha_status"] = "unavailable"
+    return snapshot
 
 
 def publish_decision_registry_json(

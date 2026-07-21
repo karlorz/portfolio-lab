@@ -214,6 +214,12 @@ class IncidentManager:
             "incidents": [incident.to_dict() for incident in incidents],
             "metrics": self.metrics(),
         }
+        try:
+            from src.dashboard.generator import _stamp_generator_git_sha
+
+            summary = _stamp_generator_git_sha(summary)
+        except Exception:  # noqa: BLE001 — never block incident SSOT write
+            pass
         body = json.dumps(summary, indent=2)
         self.summary_path.parent.mkdir(parents=True, exist_ok=True)
         self.summary_path.write_text(body, encoding="utf-8")
