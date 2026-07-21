@@ -46,6 +46,13 @@ PROVENANCE_CONTRACT_FILES = (
 # Status values that claim a successful full stamp without null sha
 _PROVENANCE_FULL_STATUSES = frozenset({"full", "full_generate"})
 
+# Artifacts that emit provenance_completeness dual-write blocks (Batch AS/AT)
+DUAL_WRITE_PROVENANCE_FILES = (
+    "incidents.json",
+    "health_ops.json",
+    "unified_dashboard.json",
+)
+
 
 @dataclass(frozen=True)
 class ConsistencyResult:
@@ -601,6 +608,31 @@ def _check_generator_git_sha_provenance(
             f"public/data/{filename} missing generator_git_sha "
             "(regenerate producer or stamp unavailable status)"
         )
+
+
+
+def _check_dual_write_provenance_completeness(
+    public_data: Path,
+    errors: list[str],
+    warnings: list[str],
+) -> None:
+    """Warn when dual-write was attempted but dual_write_ok is false (H11)."""
+    for filename in DUAL_WRITE_PROVENANCE_FILES:
+        path = public_data / filename
+        if not path.exists():
+            continue
+        local: list[str] = []
+        payload = _load_json(path, local)
+        if payload is None:
+            continue
+        pc = payload.get("provenance_completeness")
+        if not isinstance(pc, dict):
+            continue
+        if pc.get("dual_write_attempted") and pc.get("dual_write_ok") is False:
+            warnings.append(
+                f"public/data/{filename} dual_write_attempted but dual_write_ok=false "
+                f"(note={pc.get('note')!r}; check private vs public split-brain)"
+            )
 
 
 def check_public_data_consistency(

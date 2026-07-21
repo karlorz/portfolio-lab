@@ -919,14 +919,57 @@ def _save_unified_dashboard(dashboard: Dict[str, Any]) -> list:
     Public dual-write is skipped when the payload is hollow (no critical
     sections available) so a misconfigured DATA_DIR cannot replace a richer
     public file with all-unavailable stubs.
+
+    Attaches ``provenance_completeness`` (Batch AT / H10) for split-brain lag
+    forensics when private and public trees diverge.
     """
     written: list = []
     private_path = Path(DATA_DIR) / "unified_dashboard.json"
+    public_path = Path(PUBLIC_DATA_DIR) / "unified_dashboard.json"
+
+    score = _unified_payload_section_score(dashboard)
+    dual_attempted = score >= 1
+    dual_ok: bool | None = None
+    skip_reason: str | None = None
+    paths_identical = False
+    try:
+        paths_identical = private_path.resolve() == public_path.resolve()
+    except OSError:
+        paths_identical = False
+
+    if score < 1:
+        skip_reason = f"hollow_payload_section_score={score}"
+        dual_attempted = False
+        dual_ok = False
+    elif paths_identical:
+        dual_attempted = False
+        dual_ok = True
+        skip_reason = "paths_identical"
+
+    # Stamp intent before private write so private always carries completeness
+    try:
+        from src.dashboard.generator import _attach_dual_write_provenance
+
+        dashboard = _attach_dual_write_provenance(
+            dashboard,
+            private_path=private_path,
+            public_path=public_path,
+            dual_write_attempted=dual_attempted and not paths_identical,
+            dual_write_ok=dual_ok,
+            paths_identical=paths_identical,
+            note=skip_reason,
+        )
+        # section score for operators
+        pc = dashboard.get("provenance_completeness")
+        if isinstance(pc, dict):
+            pc["section_score"] = score
+    except Exception:  # noqa: BLE001 — never block save on provenance
+        pass
+
     save_results_json(dashboard, output_path=str(private_path))
     written.append(private_path)
     logger.info("Saved unified dashboard to %s", private_path)
 
-    score = _unified_payload_section_score(dashboard)
     if score < 1:
         logger.warning(
             "Skipping public unified dual-write: hollow payload "
@@ -935,10 +978,12 @@ def _save_unified_dashboard(dashboard: Dict[str, Any]) -> list:
         )
         return written
 
+    if paths_identical:
+        return written
+
     try:
         public_root = Path(PUBLIC_DATA_DIR)
         public_root.mkdir(parents=True, exist_ok=True)
-        public_path = public_root / "unified_dashboard.json"
         # Do not clobber a richer public file with a thinner one
         if public_path.exists():
             try:
@@ -950,9 +995,45 @@ def _save_unified_dashboard(dashboard: Dict[str, Any]) -> list:
                         prior_score,
                         score,
                     )
+                    try:
+                        from src.dashboard.generator import _attach_dual_write_provenance
+
+                        dashboard = _attach_dual_write_provenance(
+                            dashboard,
+                            private_path=private_path,
+                            public_path=public_path,
+                            dual_write_attempted=True,
+                            dual_write_ok=False,
+                            paths_identical=False,
+                            note=f"skipped_thinner_payload prior={prior_score} new={score}",
+                        )
+                        pc = dashboard.get("provenance_completeness")
+                        if isinstance(pc, dict):
+                            pc["section_score"] = score
+                        save_results_json(dashboard, output_path=str(private_path))
+                    except Exception:  # noqa: BLE001
+                        pass
                     return written
             except (OSError, json.JSONDecodeError, TypeError):
                 pass
+        # Mark success on payload before public write
+        try:
+            from src.dashboard.generator import _attach_dual_write_provenance
+
+            dashboard = _attach_dual_write_provenance(
+                dashboard,
+                private_path=private_path,
+                public_path=public_path,
+                dual_write_attempted=True,
+                dual_write_ok=True,
+                paths_identical=False,
+            )
+            pc = dashboard.get("provenance_completeness")
+            if isinstance(pc, dict):
+                pc["section_score"] = score
+            save_results_json(dashboard, output_path=str(private_path))
+        except Exception:  # noqa: BLE001
+            pass
         # Atomic write so readers never see partial JSON
         tmp_path = public_path.with_suffix(".json.tmp")
         tmp_path.write_text(
@@ -968,6 +1049,24 @@ def _save_unified_dashboard(dashboard: Dict[str, Any]) -> list:
         )
     except OSError as exc:
         logger.warning("Public unified_dashboard dual-write failed: %s", exc)
+        try:
+            from src.dashboard.generator import _attach_dual_write_provenance
+
+            dashboard = _attach_dual_write_provenance(
+                dashboard,
+                private_path=private_path,
+                public_path=public_path,
+                dual_write_attempted=True,
+                dual_write_ok=False,
+                paths_identical=False,
+                note=str(exc),
+            )
+            pc = dashboard.get("provenance_completeness")
+            if isinstance(pc, dict):
+                pc["section_score"] = score
+            save_results_json(dashboard, output_path=str(private_path))
+        except Exception:  # noqa: BLE001
+            pass
     return written
 
 
