@@ -594,7 +594,11 @@ class AlternativeDataSignalGenerator:
         ts = str(signal.timestamp).replace("Z", "+00:00")
         signal_time = datetime.fromisoformat(ts)
         if signal_time.tzinfo is None:
-            signal_time = signal_time.replace(tzinfo=timezone.utc)
+            # Naive timestamps are host wall-clock (test/common convention).
+            # Attach local timezone before converting to UTC so CST/UTC hosts
+            # do not mis-age by treating local time as UTC.
+            local_tz = datetime.now().astimezone().tzinfo or timezone.utc
+            signal_time = signal_time.replace(tzinfo=local_tz).astimezone(timezone.utc)
         else:
             signal_time = signal_time.astimezone(timezone.utc)
         age_hours = (datetime.now(timezone.utc) - signal_time).total_seconds() / 3600

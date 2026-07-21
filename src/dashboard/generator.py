@@ -443,8 +443,9 @@ def _attach_dual_write_provenance(
     public is older than private — typical split-brain lag). Advisory only.
 
     Batch dual-write: if path resolves differ but **canonical content hashes**
-    match (trailing-newline-normalized), treat as ``paths_identical`` for lag
-    purposes and clear sticky lag_stale.
+    match (trailing-newline-normalized), clear sticky lag_stale and set lag
+    seconds to 0. ``paths_identical`` remains path-resolve identity (caller
+    flag or resolve equality); content match is ``content_hash_identical``.
     """
     out = dict(payload)
     sha = out.get("generator_git_sha")
@@ -458,7 +459,13 @@ def _attach_dual_write_provenance(
     content_hash_identical: bool | None = None
     private_content_hash: str | None = None
     public_content_hash: str | None = None
-    resolved_identical = paths_identical
+    # Path identity: caller flag, else compare resolves when both exist
+    if paths_identical is None and priv is not None and pub is not None:
+        try:
+            paths_identical = priv.resolve() == pub.resolve()
+        except OSError:
+            paths_identical = False
+    path_identical = bool(paths_identical)
     try:
         if priv is not None and priv.is_file():
             private_mtime = float(priv.stat().st_mtime)
@@ -468,24 +475,20 @@ def _attach_dual_write_provenance(
             public_content_hash = _canonical_file_content_hash(pub)
         if private_content_hash is not None and public_content_hash is not None:
             content_hash_identical = private_content_hash == public_content_hash
-            if content_hash_identical:
-                # Content-equal dual trees are not split-brain even if path
-                # strings/resolves differ or final newline policy differs.
-                resolved_identical = True
+        # Lag is irrelevant when paths are the same OR content hashes match
+        lag_cleared = path_identical or bool(content_hash_identical)
         if (
             private_mtime is not None
             and public_mtime is not None
-            and not resolved_identical
+            and not lag_cleared
         ):
             # public - private: negative => public behind private (lag)
             lag_seconds = round(public_mtime - private_mtime, 3)
             # Stale if public is older than private by more than threshold
             if lag_seconds < -abs(float(lag_threshold_seconds)):
                 lag_stale = True
-        elif resolved_identical:
-            lag_seconds = 0.0 if (
-                private_mtime is not None and public_mtime is not None
-            ) else lag_seconds
+        elif lag_cleared and private_mtime is not None and public_mtime is not None:
+            lag_seconds = 0.0
             lag_stale = False
     except OSError:
         pass
@@ -496,7 +499,7 @@ def _attach_dual_write_provenance(
         "dual_write_ok": dual_write_ok,
         "private_path": str(priv) if priv is not None else None,
         "public_path": str(pub) if pub is not None else None,
-        "paths_identical": resolved_identical,
+        "paths_identical": path_identical,
         "content_hash_identical": content_hash_identical,
         "private_content_hash": private_content_hash,
         "public_content_hash": public_content_hash,

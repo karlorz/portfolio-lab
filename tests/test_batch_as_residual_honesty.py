@@ -149,6 +149,8 @@ def test_attach_dual_write_content_hash_clears_lag_when_payloads_match(tmp_path)
     )
     block = out["provenance_completeness"]
     assert block["content_hash_identical"] is True
-    assert block["paths_identical"] is True  # elevated by content hash
+    # Path identity stays false when resolves differ; content hash clears lag
+    assert block["paths_identical"] is False
     assert block["dual_write_lag_stale"] is False
+    assert block["dual_write_lag_seconds"] in (None, 0.0)
     assert block["private_content_hash"] == block["public_content_hash"]
