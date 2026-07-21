@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, Optional, Sequence
 
-from src.paths import PROJECT_ROOT
+from src.paths import DATA_DIR, PROJECT_ROOT, PUBLIC_DATA_DIR
 
 CRON_FIELD_PREVIEW_CHARS = int(os.environ.get("CRON_FIELD_PREVIEW_CHARS", "4096"))
 
@@ -15,6 +16,25 @@ CRON_FIELD_PREVIEW_CHARS = int(os.environ.get("CRON_FIELD_PREVIEW_CHARS", "4096"
 # cron_update + tasker mirrors). Counting that row as a "failed job" makes the
 # next health/dashboard SLO run self-degrade forever. Exclude from rollups only.
 HEALTH_SELF_JOB_NAME = "portfolio-lab-health"
+
+# Batch BT: sticky last_status=error after successful recovery (manual CLI,
+# nested-step partial success, or out-of-band producer). SRE practice: roll
+# current health from output freshness, not a single sticky failure flag.
+# Grace covers producer writes before the job stamps finished_at.
+RECOVERY_MTIME_GRACE_SECONDS = float(
+    os.environ.get("PORTFOLIO_LAB_CRON_RECOVERY_GRACE_SECONDS", "180")
+)
+# Max age of proving artifact (hours) so ancient same-run files cannot clear
+# a fresh error forever.
+RECOVERY_MAX_ARTIFACT_AGE_HOURS = float(
+    os.environ.get("PORTFOLIO_LAB_CRON_RECOVERY_MAX_AGE_HOURS", "6")
+)
+
+# job name → relative artifact basenames under data / public data dirs
+JOB_RECOVERY_ARTIFACTS: dict[str, tuple[str, ...]] = {
+    "portfolio-lab-dashboard": ("health.json", "signals.json", "dashboard.json"),
+    "portfolio-lab-data": ("prices.json", "prices_compact.json"),
+}
 
 
 def is_health_self_job(job: Any) -> bool:
@@ -24,8 +44,163 @@ def is_health_self_job(job: Any) -> bool:
     return str(job.get("name") or "") == HEALTH_SELF_JOB_NAME
 
 
-def rollup_failed_cron_jobs(jobs: list[Any]) -> list[dict[str, Any]]:
-    """Failed jobs that should affect health/SLO exit (excludes health self-job)."""
+def _parse_iso_to_utc_epoch(value: Any) -> Optional[float]:
+    """Parse ISO timestamps (with/without Z, naive→UTC) to epoch seconds."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
+def recovery_data_dirs(
+    extra_dirs: Optional[Sequence[Path]] = None,
+    *,
+    include_defaults: bool = True,
+) -> list[Path]:
+    """Search private DATA_DIR then PUBLIC_DATA_DIR for recovery artifacts.
+
+    When ``extra_dirs`` is provided (hermetic tests), defaults are skipped
+    (``include_defaults=False``) to prevent live WWW/DATA leakage.
+    """
+    dirs: list[Path] = []
+    if extra_dirs is not None:
+        for d in extra_dirs:
+            p = Path(d)
+            if p not in dirs:
+                dirs.append(p)
+        if not include_defaults:
+            return dirs
+    if include_defaults:
+        for candidate in (DATA_DIR, PUBLIC_DATA_DIR):
+            try:
+                p = Path(candidate)
+            except TypeError:
+                continue
+            if p not in dirs:
+                dirs.append(p)
+    return dirs
+
+
+def cron_job_artifact_recovery_evidence(
+    job: Mapping[str, Any],
+    *,
+    data_dirs: Optional[Sequence[Path]] = None,
+    now: Optional[float] = None,
+    grace_seconds: Optional[float] = None,
+    max_age_hours: Optional[float] = None,
+) -> Optional[dict[str, Any]]:
+    """Return recovery evidence when sticky error is contradicted by fresh output.
+
+    Batch BT: a job with ``status=error`` is treated as recovered for *health
+    rollups* when a known producer artifact is:
+
+    1. not older than ``last_run`` by more than ``grace_seconds`` (same-run
+       write before fail, or later successful regenerate), and
+    2. still fresh vs *now* (``max_age_hours``) so stale archives cannot clear
+       a real outage.
+
+    Returns None when the job is not error, has no mapping, or evidence fails.
+    Never invents success for unknown jobs.
+    """
+    if not isinstance(job, Mapping):
+        return None
+    status = normalize_cron_status(job.get("status", job.get("last_status")))
+    if status != "error":
+        return None
+    name = str(job.get("name") or "")
+    artifacts = JOB_RECOVERY_ARTIFACTS.get(name)
+    if not artifacts:
+        return None
+
+    last_run_ts = _parse_iso_to_utc_epoch(
+        job.get("last_run") or job.get("last_run_at") or job.get("last_finished_at")
+    )
+    if last_run_ts is None:
+        return None
+
+    grace = (
+        float(grace_seconds)
+        if grace_seconds is not None
+        else float(RECOVERY_MTIME_GRACE_SECONDS)
+    )
+    max_age_h = (
+        float(max_age_hours)
+        if max_age_hours is not None
+        else float(RECOVERY_MAX_ARTIFACT_AGE_HOURS)
+    )
+    now_ts = float(now) if now is not None else datetime.now(timezone.utc).timestamp()
+    max_age_s = max(max_age_h, 0.0) * 3600.0
+    threshold = last_run_ts - max(grace, 0.0)
+
+    # Explicit data_dirs → hermetic-only roots (no live WWW/DATA leak)
+    if data_dirs is not None:
+        roots = recovery_data_dirs(data_dirs, include_defaults=False)
+    else:
+        roots = recovery_data_dirs(include_defaults=True)
+    for root in roots:
+        for rel in artifacts:
+            path = root / rel
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            if mtime < threshold:
+                continue
+            age_s = now_ts - mtime
+            if age_s > max_age_s:
+                continue
+            return {
+                "job": name,
+                "artifact": rel,
+                "artifact_path": str(path),
+                "artifact_mtime": datetime.fromtimestamp(
+                    mtime, tz=timezone.utc
+                ).isoformat(),
+                "last_run": job.get("last_run") or job.get("last_run_at"),
+                "grace_seconds": grace,
+                "max_age_hours": max_age_h,
+                "live_authoritative": False,
+                "reason": "producer_artifact_fresh_after_sticky_error",
+            }
+    return None
+
+
+def is_sticky_cron_error_recovered(
+    job: Any,
+    *,
+    data_dirs: Optional[Sequence[Path]] = None,
+    now: Optional[float] = None,
+) -> bool:
+    """True when sticky status=error should not count as a current failure."""
+    return cron_job_artifact_recovery_evidence(
+        job if isinstance(job, Mapping) else {},
+        data_dirs=data_dirs,
+        now=now,
+    ) is not None
+
+
+def rollup_failed_cron_jobs(
+    jobs: list[Any],
+    *,
+    data_dirs: Optional[Sequence[Path]] = None,
+    now: Optional[float] = None,
+) -> list[dict[str, Any]]:
+    """Failed jobs that should affect health/SLO exit.
+
+    Excludes:
+    - the portfolio-lab-health self-job (sticky self-degrade loop)
+    - sticky errors with fresher producer artifacts (Batch BT recovery)
+    """
     failed: list[dict[str, Any]] = []
     for job in jobs:
         if not isinstance(job, dict):
@@ -33,6 +208,8 @@ def rollup_failed_cron_jobs(jobs: list[Any]) -> list[dict[str, Any]]:
         if job.get("status") != "error":
             continue
         if is_health_self_job(job):
+            continue
+        if is_sticky_cron_error_recovered(job, data_dirs=data_dirs, now=now):
             continue
         failed.append(job)
     return failed
@@ -118,6 +295,8 @@ def summarize_backend(
     jobs: list[dict[str, Any]],
     status: str | None = None,
     reason: str | None = None,
+    data_dirs: Optional[Sequence[Path]] = None,
+    now: Optional[float] = None,
 ) -> dict[str, Any]:
     """Build backend-level scheduler health metadata.
 
@@ -126,12 +305,20 @@ def summarize_backend(
     / signals.health ``failed_cron_jobs``. Counting the health job's own exit
     as a scheduler failure creates a sticky degraded loop after a single
     non-ok health run.
+
+    Batch BT: also excludes sticky errors recovered by fresher producer
+    artifacts (same logic as ``rollup_failed_cron_jobs``).
     """
-    failed_jobs = sum(
-        1
+    rollup_failed = rollup_failed_cron_jobs(jobs, data_dirs=data_dirs, now=now)
+    failed_jobs = len(rollup_failed)
+    recovered = [
+        job
         for job in jobs
-        if job.get("status") == "error" and not is_health_self_job(job)
-    )
+        if isinstance(job, dict)
+        and job.get("status") == "error"
+        and not is_health_self_job(job)
+        and is_sticky_cron_error_recovered(job, data_dirs=data_dirs, now=now)
+    ]
     active_unknown_jobs = sum(
         1
         for job in jobs
@@ -148,6 +335,11 @@ def summarize_backend(
         "total_jobs": len(jobs),
         "failed_jobs": failed_jobs,
     }
+    if recovered:
+        summary["recovered_sticky_errors"] = len(recovered)
+        summary["recovered_sticky_job_names"] = [
+            str(j.get("name") or "") for j in recovered
+        ]
     if active_unknown_jobs:
         summary["unknown_active_jobs"] = active_unknown_jobs
     if reason:
