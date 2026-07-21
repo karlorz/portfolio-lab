@@ -24,6 +24,8 @@ def test_attach_dual_write_provenance_block_shape():
     assert block["dual_write_attempted"] is True
     assert block["dual_write_ok"] is True
     assert block["paths_identical"] is False
+    assert "dual_write_lag_seconds" in block
+    assert block["dual_write_lag_unit"] == "seconds_public_mtime_minus_private"
     assert "advisory" in block["disclosure"].lower() or "split-brain" in block["disclosure"].lower()
 
 

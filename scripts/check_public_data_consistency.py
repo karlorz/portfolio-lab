@@ -633,6 +633,13 @@ def _check_dual_write_provenance_completeness(
                 f"public/data/{filename} dual_write_attempted but dual_write_ok=false "
                 f"(note={pc.get('note')!r}; check private vs public split-brain)"
             )
+        if pc.get("dual_write_lag_stale") is True:
+            lag = pc.get("dual_write_lag_seconds")
+            thr = pc.get("dual_write_lag_threshold_seconds")
+            warnings.append(
+                f"public/data/{filename} dual_write_lag_stale "
+                f"(lag_seconds={lag!r} threshold={thr!r}; public mtime behind private)"
+            )
 
 
 def check_public_data_consistency(

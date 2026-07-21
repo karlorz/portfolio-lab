@@ -396,23 +396,61 @@ def _attach_dual_write_provenance(
     dual_write_ok: bool | None = None,
     paths_identical: bool | None = None,
     note: str | None = None,
+    lag_threshold_seconds: float = 120.0,
 ) -> Dict[str, Any]:
     """Attach dual-write completeness block for operator lag / split-brain forensics.
 
     Does not alter live authority. Complements generator_git_sha stamps (Batch AR).
+
+    When both private and public paths exist and differ, sets
+    ``dual_write_lag_seconds`` = public_mtime - private_mtime (negative means
+    public is older than private — typical split-brain lag). Advisory only.
     """
     out = dict(payload)
     sha = out.get("generator_git_sha")
+    priv = Path(private_path) if private_path is not None else None
+    pub = Path(public_path) if public_path is not None else None
+
+    lag_seconds: float | None = None
+    private_mtime: float | None = None
+    public_mtime: float | None = None
+    lag_stale = False
+    try:
+        if priv is not None and priv.is_file():
+            private_mtime = float(priv.stat().st_mtime)
+        if pub is not None and pub.is_file():
+            public_mtime = float(pub.stat().st_mtime)
+        if (
+            private_mtime is not None
+            and public_mtime is not None
+            and not paths_identical
+        ):
+            # public - private: negative => public behind private (lag)
+            lag_seconds = round(public_mtime - private_mtime, 3)
+            # Stale if public is older than private by more than threshold
+            if lag_seconds < -abs(float(lag_threshold_seconds)):
+                lag_stale = True
+    except OSError:
+        pass
+
     block: Dict[str, Any] = {
         "generator_git_sha_present": bool(sha),
         "dual_write_attempted": bool(dual_write_attempted),
         "dual_write_ok": dual_write_ok,
-        "private_path": str(private_path) if private_path is not None else None,
-        "public_path": str(public_path) if public_path is not None else None,
+        "private_path": str(priv) if priv is not None else None,
+        "public_path": str(pub) if pub is not None else None,
         "paths_identical": paths_identical,
+        "dual_write_lag_seconds": lag_seconds,
+        "dual_write_lag_unit": "seconds_public_mtime_minus_private",
+        "dual_write_lag_stale": lag_stale,
+        "dual_write_lag_threshold_seconds": float(lag_threshold_seconds),
+        "private_mtime": private_mtime,
+        "public_mtime": public_mtime,
         "disclosure": (
             "Dual-write provenance is advisory for split-brain detection; "
-            "private DATA_DIR remains the producer SSOT when paths differ."
+            "private DATA_DIR remains the producer SSOT when paths differ. "
+            "Lag uses filesystem mtimes (public - private); negative means "
+            "public is older than private."
         ),
     }
     if note:
