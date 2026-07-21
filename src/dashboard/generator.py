@@ -387,6 +387,40 @@ def _stamp_generator_git_sha(
     return out
 
 
+def _attach_dual_write_provenance(
+    payload: Dict[str, Any],
+    *,
+    private_path: str | Path | None = None,
+    public_path: str | Path | None = None,
+    dual_write_attempted: bool = False,
+    dual_write_ok: bool | None = None,
+    paths_identical: bool | None = None,
+    note: str | None = None,
+) -> Dict[str, Any]:
+    """Attach dual-write completeness block for operator lag / split-brain forensics.
+
+    Does not alter live authority. Complements generator_git_sha stamps (Batch AR).
+    """
+    out = dict(payload)
+    sha = out.get("generator_git_sha")
+    block: Dict[str, Any] = {
+        "generator_git_sha_present": bool(sha),
+        "dual_write_attempted": bool(dual_write_attempted),
+        "dual_write_ok": dual_write_ok,
+        "private_path": str(private_path) if private_path is not None else None,
+        "public_path": str(public_path) if public_path is not None else None,
+        "paths_identical": paths_identical,
+        "disclosure": (
+            "Dual-write provenance is advisory for split-brain detection; "
+            "private DATA_DIR remains the producer SSOT when paths differ."
+        ),
+    }
+    if note:
+        block["note"] = note
+    out["provenance_completeness"] = block
+    return out
+
+
 def _finalize_signal_metadata(output: Dict, *, finalized_at: str | None = None) -> Dict:
     """Stamp final artifact metadata after all signal sections are assembled."""
     timestamp = finalized_at or datetime.now(timezone.utc).isoformat()

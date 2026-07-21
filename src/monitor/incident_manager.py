@@ -220,19 +220,79 @@ class IncidentManager:
             summary = _stamp_generator_git_sha(summary)
         except Exception:  # noqa: BLE001 — never block incident SSOT write
             pass
+
+        public_summary = Path(PUBLIC_DATA_DIR) / "incidents.json"
+        dual_attempted = False
+        dual_ok: bool | None = None
+        paths_identical = False
+        try:
+            paths_identical = public_summary.resolve() == self.summary_path.resolve()
+        except OSError:
+            paths_identical = False
+
+        # Stamp completeness *before* private write so both trees share metadata
+        try:
+            from src.dashboard.generator import _attach_dual_write_provenance
+
+            # dual_write_ok filled after public attempt; first pass records intent
+            summary = _attach_dual_write_provenance(
+                summary,
+                private_path=self.summary_path,
+                public_path=public_summary,
+                dual_write_attempted=not paths_identical,
+                dual_write_ok=None if not paths_identical else True,
+                paths_identical=paths_identical,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
         body = json.dumps(summary, indent=2)
         self.summary_path.parent.mkdir(parents=True, exist_ok=True)
         self.summary_path.write_text(body, encoding="utf-8")
         # Atomic dual-write to live WWW SSOT when configured
         try:
-            public_summary = Path(PUBLIC_DATA_DIR) / "incidents.json"
-            if public_summary.resolve() != self.summary_path.resolve():
+            if not paths_identical:
+                dual_attempted = True
                 public_summary.parent.mkdir(parents=True, exist_ok=True)
                 tmp = public_summary.with_suffix(".json.tmp")
+                # Refresh dual_write_ok=True into body for public tree
+                try:
+                    from src.dashboard.generator import _attach_dual_write_provenance
+
+                    summary = _attach_dual_write_provenance(
+                        summary,
+                        private_path=self.summary_path,
+                        public_path=public_summary,
+                        dual_write_attempted=True,
+                        dual_write_ok=True,
+                        paths_identical=False,
+                    )
+                    body = json.dumps(summary, indent=2)
+                    # Keep private tree in sync with final completeness block
+                    self.summary_path.write_text(body, encoding="utf-8")
+                except Exception:  # noqa: BLE001
+                    pass
                 tmp.write_text(body, encoding="utf-8")
                 tmp.replace(public_summary)
+                dual_ok = True
         except OSError as exc:
+            dual_ok = False
             logger.warning("Public incidents dual-write failed: %s", exc)
+            try:
+                from src.dashboard.generator import _attach_dual_write_provenance
+
+                summary = _attach_dual_write_provenance(
+                    summary,
+                    private_path=self.summary_path,
+                    public_path=public_summary,
+                    dual_write_attempted=True,
+                    dual_write_ok=False,
+                    paths_identical=False,
+                    note=str(exc),
+                )
+                self.summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+            except Exception:  # noqa: BLE001
+                pass
         return summary
 
     def _open_or_update(

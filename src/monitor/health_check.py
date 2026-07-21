@@ -478,8 +478,38 @@ def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
       kill clear is visible within one health cron (not only full dashboard).
     """
     ops_path = health_ops_path()
+    public_health = Path(PUBLIC_DATA_DIR) / "health.json"
+    try:
+        from src.dashboard.generator import _attach_dual_write_provenance
+
+        report = _attach_dual_write_provenance(
+            report,
+            private_path=HEALTH_PATH,
+            public_path=ops_path,
+            dual_write_attempted=True,
+            dual_write_ok=None,  # set after write
+            paths_identical=False,
+            note="health_ops is public dual surface; private SSOT is data/health.json",
+        )
+    except Exception:  # noqa: BLE001
+        pass
     try:
         ops_path.parent.mkdir(parents=True, exist_ok=True)
+        # Mark dual_write_ok after successful ops write
+        try:
+            from src.dashboard.generator import _attach_dual_write_provenance
+
+            report = _attach_dual_write_provenance(
+                report,
+                private_path=HEALTH_PATH,
+                public_path=ops_path,
+                dual_write_attempted=True,
+                dual_write_ok=True,
+                paths_identical=False,
+                note="health_ops is public dual surface; private SSOT is data/health.json",
+            )
+        except Exception:  # noqa: BLE001
+            pass
         ops_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
         logger.info("Ops health written to %s", ops_path)
     except OSError as exc:
