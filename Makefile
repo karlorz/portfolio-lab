@@ -42,7 +42,11 @@ PERF_UPDATE_BASELINE ?= 0
 help:
 	@echo "Portfolio-Lab Makefile"
 	@echo ""
-	@echo "  make test         Run test suite (safe: ML disabled, 6GB memory cap, 3600s)"
+	@echo "  make test         Full safe suite (ML off, 6GB VSZ, 3600s, PUBLIC isolated)"
+	@echo "  make test-unit    Safe suite excluding generator + *integration* (S18 segment)"
+	@echo "  make test-generator  Only tests/test_generator.py (heavy dashboard path)"
+	@echo "  make test-integration  Path-selected *integration* / e2e modules (S18)"
+	@echo "  make test-fast    Ensemble/signal subset only (not full unit; <2m target)"
 	@echo "  make test-ml-extract  Run extracted ML-kernel tests (safe: ML disabled)"
 	@echo "  make test-ml      Run full test suite including ML (requires torch/sklearn)"
 	@echo "  make test-isolation  Run top-20 failing files individually (bypasses pollution)"
@@ -165,14 +169,30 @@ test:
 	fi; \
 	exit $$EXIT
 
-.PHONY: test test-ml test-fast test-ml-extract
+.PHONY: test test-ml test-fast test-unit test-generator test-integration test-ml-extract
+
+# S18 path segments (generator is ~6.6k lines; *integration* modules host-touch).
+# test-unit = full safe suite minus those files. Full gate remains `make test`.
+TEST_GENERATOR_FILE := tests/test_generator.py
+TEST_INTEGRATION_FILES := \
+	tests/test_collect_signals_integration.py \
+	tests/test_e2e_overlay_pipeline.py \
+	tests/test_integration.py \
+	tests/test_rebalancing_integration.py \
+	tests/test_rebalancing_integration_cli.py \
+	tests/test_regime_bandit_integration.py \
+	tests/test_signal_backtest_integration.py \
+	tests/test_signal_tsmom_integration.py \
+	tests/test_tsmom_integration.py \
+	tests/test_vix_vol_targeting_integration.py
 
 test-fast:
 	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
 	echo "=== Test Suite (fast mode): $$(date) ==="; \
 	echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"; \
-	echo "  Focus: Core signal and ensemble tests only"; \
+	echo "  Focus: Core signal and ensemble tests only (NOT full unit suite)"; \
 	echo "  Target: <2 minutes execution time"; \
+	echo "  For broader non-generator suite use: make test-unit"; \
 	START=$$(date +%s); \
 	PORTFOLIO_LAB_ENABLE_ML=0 uv run pytest tests/test_adaptive_sizing.py tests/test_adaptive_consensus.py tests/test_adaptive_ensemble_weights.py tests/test_regime_conditional_weights.py tests/test_ensemble_voter.py tests/test_regime_gate.py tests/test_ensemble_diversity_floor.py tests/test_ensemble_correlation.py tests/test_ensemble_n_eff.py tests/test_regime_bandit_integration.py -q --tb=short -p no:cacheprovider; \
 	EXIT=$$?; \
@@ -187,6 +207,84 @@ test-fast:
 	elif [ $$EXIT -ne 0 ]; then \
 		echo "Some tests failed (exit $$EXIT). Review output above."; \
 	fi; \
+	exit $$EXIT
+
+# Unit segment: safe suite excluding generator + path-selected integration modules
+test-unit:
+	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
+	echo "=== Test Suite (unit segment / S18): $$(date) ==="; \
+	echo "  ML: disabled; Memory: 6GB virtual; PUBLIC: isolated"; \
+	echo "  Excludes: test_generator.py + *integration* path list"; \
+	echo "  Timeout: 2400s (full suite uses 3600s)"; \
+	START=$$(date +%s); \
+	bash -c 'ulimit -v 6291456 2>/dev/null || true; \
+		PUBLIC_TMP=$$(mktemp -d /tmp/plab-pytest-public.XXXXXX); \
+		mkdir -p "$$PUBLIC_TMP/data"; \
+		export PUBLIC_DATA_DIR="$$PUBLIC_TMP/data"; \
+		export PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA=1; \
+		export PORTFOLIO_LAB_ENABLE_ML=0; \
+		IGNORE_ARGS="--ignore=$(TEST_GENERATOR_FILE)"; \
+		for f in $(TEST_INTEGRATION_FILES); do \
+			IGNORE_ARGS="$$IGNORE_ARGS --ignore=$$f"; \
+		done; \
+		timeout 2400 uv run pytest tests/ -q --tb=short -p no:cacheprovider $$IGNORE_ARGS; \
+		EXIT=$$?; rm -rf "$$PUBLIC_TMP"; exit $$EXIT'; \
+	EXIT=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	echo ""; \
+	echo "=== Test Suite (unit): exit $$EXIT, duration $${DUR}s ==="; \
+	if [ $$EXIT -eq 124 ]; then \
+		echo "TIMEOUT (124): Unit segment exceeded 2400s."; \
+	elif [ $$EXIT -eq 137 ]; then \
+		echo "SIGKILL (137): memory limit exceeded (6GB virtual)."; \
+	elif [ $$EXIT -ne 0 ]; then \
+		echo "Some unit-segment tests failed (exit $$EXIT)."; \
+	fi; \
+	exit $$EXIT
+
+# Generator-only segment (dashboard / public dual-write heavy)
+test-generator:
+	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
+	echo "=== Test Suite (generator segment / S18): $$(date) ==="; \
+	echo "  File: $(TEST_GENERATOR_FILE)"; \
+	echo "  Timeout: 1200s"; \
+	START=$$(date +%s); \
+	bash -c 'ulimit -v 6291456 2>/dev/null || true; \
+		PUBLIC_TMP=$$(mktemp -d /tmp/plab-pytest-public.XXXXXX); \
+		mkdir -p "$$PUBLIC_TMP/data"; \
+		export PUBLIC_DATA_DIR="$$PUBLIC_TMP/data"; \
+		export PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA=1; \
+		export PORTFOLIO_LAB_ENABLE_ML=0; \
+		timeout 1200 uv run pytest $(TEST_GENERATOR_FILE) -q --tb=short -p no:cacheprovider; \
+		EXIT=$$?; rm -rf "$$PUBLIC_TMP"; exit $$EXIT'; \
+	EXIT=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	echo ""; \
+	echo "=== Test Suite (generator): exit $$EXIT, duration $${DUR}s ==="; \
+	exit $$EXIT
+
+# Integration path segment (host-touching / multi-module flows)
+test-integration:
+	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
+	echo "=== Test Suite (integration segment / S18): $$(date) ==="; \
+	echo "  Files: path-selected *integration* + e2e modules"; \
+	echo "  Timeout: 1200s"; \
+	START=$$(date +%s); \
+	bash -c 'ulimit -v 6291456 2>/dev/null || true; \
+		PUBLIC_TMP=$$(mktemp -d /tmp/plab-pytest-public.XXXXXX); \
+		mkdir -p "$$PUBLIC_TMP/data"; \
+		export PUBLIC_DATA_DIR="$$PUBLIC_TMP/data"; \
+		export PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA=1; \
+		export PORTFOLIO_LAB_ENABLE_ML=0; \
+		timeout 1200 uv run pytest $(TEST_INTEGRATION_FILES) -q --tb=short -p no:cacheprovider; \
+		EXIT=$$?; rm -rf "$$PUBLIC_TMP"; exit $$EXIT'; \
+	EXIT=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	echo ""; \
+	echo "=== Test Suite (integration): exit $$EXIT, duration $${DUR}s ==="; \
 	exit $$EXIT
 
 test-ml-extract:

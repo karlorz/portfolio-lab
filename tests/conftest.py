@@ -585,6 +585,14 @@ def pytest_configure(config):
         "allow_live_public_data: allow test to use live PUBLIC_DATA_DIR "
         "(disables dual-write isolation; dangerous on lab hosts)",
     )
+    config.addinivalue_line(
+        "markers",
+        "unit: fast hermetic unit tests (optional; path-based make test-unit is S18 primary)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "integration: multi-module / host-touching flows (see Makefile TEST_INTEGRATION_FILES)",
+    )
 
 
 def pytest_collection_modifyitems(config, items):

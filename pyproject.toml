@@ -65,6 +65,8 @@ addopts = "--import-mode=importlib"
 markers = [
     "heavy: tests requiring heavy ML libraries (torch, xgboost) — require PORTFOLIO_LAB_ENABLE_ML=1",
     "ml_extract: safe-mode tests for extracted pure ML-adjacent kernels — require PORTFOLIO_LAB_ENABLE_ML=0 and --include-ml-extract",
+    "unit: fast hermetic unit tests (optional tag; path-based make test-unit is primary S18 gate)",
+    "integration: multi-module / host-touching flows (path list in Makefile TEST_INTEGRATION_FILES)",
     "db: tests that require SQLite database access",
     "network: tests that make real HTTP requests",
     "slow: tests that take >2 seconds to complete",
