@@ -2260,15 +2260,31 @@ class EnsembleVoter:
                     except (TypeError, ValueError):
                         ic_val = None
 
-                    hard_zero = status == SignalHealthStatus.UNHEALTHY.value
-                    sleep_reason = "unhealthy" if hard_zero else None
-                    # Batch CN: degraded + negative IC is toxic drag — hard sleep
-                    if (
-                        not hard_zero
-                        and status == SignalHealthStatus.DEGRADED.value
+                    # Batch CY hybrid (evolves BH/CN):
+                    # - hard sleep toxic arms: IC < 0 (any non-healthy status), or
+                    #   unhealthy with unknown IC (fail-closed without IC evidence)
+                    # - soft floor max(0.2, hs) when quality is poor but IC ≥ 0
+                    #   (borderline "unhealthy" with non-neg IC is not toxic drag)
+                    hard_zero = False
+                    sleep_reason = None
+                    if ic_val is not None and ic_val < 0.0:
+                        hard_zero = True
+                        sleep_reason = (
+                            f"negative_ic({ic_val:.3f})"
+                            if status != SignalHealthStatus.DEGRADED.value
+                            else f"degraded_negative_ic({ic_val:.3f})"
+                        )
+                    elif status == SignalHealthStatus.UNHEALTHY.value:
+                        if ic_val is None:
+                            hard_zero = True
+                            sleep_reason = "unhealthy_ic_unknown"
+                        # else: unhealthy + IC>=0 → soft floor below
+                    elif (
+                        status == SignalHealthStatus.DEGRADED.value
                         and ic_val is not None
                         and ic_val < 0.0
                     ):
+                        # unreachable (neg IC handled above) — keep for clarity
                         hard_zero = True
                         sleep_reason = f"degraded_negative_ic({ic_val:.3f})"
 
@@ -2287,12 +2303,14 @@ class EnsembleVoter:
                         )
                     else:
                         multiplier = max(0.2, min(1.0, hs))
-                        if hs < 0.5:
+                        if hs < 0.5 or status == SignalHealthStatus.UNHEALTHY.value:
                             logger.info(
-                                "Health-adjusted %s: weight %.2f%% → %.2f%% (health=%.2f, ic=%s)",
+                                "Health-adjusted %s: weight %.2f%% → %.2f%% "
+                                "(status=%s, health=%.2f, ic=%s)",
                                 source_str,
                                 base_weight * 100,
                                 base_weight * multiplier * 100,
+                                status,
                                 hs,
                                 ic_val,
                             )

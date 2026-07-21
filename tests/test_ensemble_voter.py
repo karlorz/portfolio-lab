@@ -2796,7 +2796,34 @@ class TestApplyHealthWeightsEdgeCases:
         assert abs(sum(result.values()) - 1.0) < 0.01
 
     def test_unhealthy_status_hard_zeros(self, tmp_path):
-        """Batch BH/CN: status=unhealthy → weight 0 after renorm (not soft 0.2 floor)."""
+        """Batch CY: unhealthy + IC unknown → hard zero; unhealthy + IC>=0 soft floor."""
+        voter = _make_voter(tmp_path)
+        weights = {
+            SignalSource.MULTI_SPEED_MOM: 0.5,
+            SignalSource.VIX_TERM_STRUCTURE: 0.5,
+        }
+        with patch('src.signals.health_tracker.SignalHealthTracker') as MockTracker:
+            mock_instance = MagicMock()
+            good = MagicMock()
+            good.health_score = 0.8
+            good.status = "healthy"
+            good.ic = 0.1
+            bad = MagicMock()
+            bad.health_score = 0.43
+            bad.status = "unhealthy"
+            bad.ic = None  # unknown IC → fail-closed hard zero
+            mock_instance.calculate_all_health_scores.return_value = {
+                'multi_speed_momentum': good,
+                'vix_term_structure': bad,
+            }
+            MockTracker.return_value = mock_instance
+            result = voter._apply_health_weights(weights)
+        assert result[SignalSource.VIX_TERM_STRUCTURE] == 0.0
+        assert result[SignalSource.MULTI_SPEED_MOM] == pytest.approx(1.0)
+        assert "vix_term_structure" in voter._health_gate_slept
+
+    def test_unhealthy_positive_ic_soft_floor(self, tmp_path):
+        """Batch CY: unhealthy with non-negative IC uses soft floor (not hard sleep)."""
         voter = _make_voter(tmp_path)
         weights = {
             SignalSource.MULTI_SPEED_MOM: 0.5,
@@ -2818,9 +2845,9 @@ class TestApplyHealthWeightsEdgeCases:
             }
             MockTracker.return_value = mock_instance
             result = voter._apply_health_weights(weights)
-        assert result[SignalSource.VIX_TERM_STRUCTURE] == 0.0
-        assert result[SignalSource.MULTI_SPEED_MOM] == pytest.approx(1.0)
-        assert "vix_term_structure" in voter._health_gate_slept
+        assert result[SignalSource.VIX_TERM_STRUCTURE] > 0.0
+        assert result[SignalSource.VIX_TERM_STRUCTURE] < result[SignalSource.MULTI_SPEED_MOM]
+        assert "vix_term_structure" not in voter._health_gate_slept
 
     def test_degraded_negative_ic_hard_zeros(self, tmp_path):
         """Batch CN: degraded + IC < 0 sleeps arm (fail-closed hybrid policy)."""

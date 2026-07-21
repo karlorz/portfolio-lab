@@ -11,19 +11,27 @@ import pytest
 
 
 def test_apply_health_weights_hard_zeros_unhealthy():
+    """Batch CY: unhealthy + IC unknown hard-zeros; unhealthy + IC>=0 soft-floors."""
     from src.strategy.ensemble_voter import EnsembleVoter
     from src.signals.signal_source import SignalSource
 
     voter = EnsembleVoter.__new__(EnsembleVoter)
 
-    healthy = SimpleNamespace(health_score=0.9, status="healthy")
-    unhealthy = SimpleNamespace(health_score=0.43, status="unhealthy")
-    degraded = SimpleNamespace(health_score=0.55, status="degraded")
+    healthy = SimpleNamespace(health_score=0.9, status="healthy", ic=0.1)
+    # unknown IC → hard sleep (fail-closed)
+    unhealthy_unknown = SimpleNamespace(
+        health_score=0.43, status="unhealthy", ic=None
+    )
+    # non-neg IC → soft floor (Batch CY)
+    unhealthy_pos_ic = SimpleNamespace(
+        health_score=0.43, status="unhealthy", ic=0.05
+    )
+    degraded = SimpleNamespace(health_score=0.55, status="degraded", ic=0.0)
 
     scores = {
         SignalSource.MULTI_SPEED_MOM.value: healthy,
-        SignalSource.VIX_TERM_STRUCTURE.value: unhealthy,
-        SignalSource.UNIFIED_OVERLAY.value: unhealthy,
+        SignalSource.VIX_TERM_STRUCTURE.value: unhealthy_unknown,
+        SignalSource.UNIFIED_OVERLAY.value: unhealthy_pos_ic,
         SignalSource.ALTERNATIVE_DATA.value: degraded,
     }
 
@@ -44,12 +52,13 @@ def test_apply_health_weights_hard_zeros_unhealthy():
         out = voter._apply_health_weights(base)
 
     assert out[SignalSource.VIX_TERM_STRUCTURE] == 0.0
-    assert out[SignalSource.UNIFIED_OVERLAY] == 0.0
+    assert out[SignalSource.UNIFIED_OVERLAY] > 0.0  # soft floor, not hard zero
     assert out[SignalSource.MULTI_SPEED_MOM] > 0
     assert out[SignalSource.ALTERNATIVE_DATA] > 0
     assert abs(sum(out.values()) - 1.0) < 1e-9
     assert getattr(voter, "_health_gate_freeze", False) is False
     assert "vix_term_structure" in getattr(voter, "_health_gate_slept", [])
+    assert "unified_overlay" not in getattr(voter, "_health_gate_slept", [])
 
 
 def test_apply_health_weights_freeze_when_all_unhealthy():
@@ -59,10 +68,10 @@ def test_apply_health_weights_freeze_when_all_unhealthy():
     voter = EnsembleVoter.__new__(EnsembleVoter)
     scores = {
         SignalSource.VIX_TERM_STRUCTURE.value: SimpleNamespace(
-            health_score=0.4, status="unhealthy"
+            health_score=0.4, status="unhealthy", ic=None
         ),
         SignalSource.UNIFIED_OVERLAY.value: SimpleNamespace(
-            health_score=0.3, status="unhealthy"
+            health_score=0.3, status="unhealthy", ic=None
         ),
     }
     mock_tracker = MagicMock()

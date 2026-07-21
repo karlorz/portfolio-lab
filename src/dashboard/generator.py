@@ -1449,14 +1449,21 @@ class DashboardGenerator:
         source_breakdown = []
         for src in source_votes:
             value = float(src.value)
-            source_breakdown.append({
+            is_active = bool(getattr(src, "is_active", True))
+            entry = {
                 "source": src.source.value if hasattr(src.source, 'value') else str(src.source),
                 "value": round(value, 4),
                 "direction": "bullish" if value > 0 else ("bearish" if value < 0 else "neutral"),
                 "strength": round(abs(value), 3),
                 "confidence": round(src.confidence, 3),
                 "weight": round(src.weight, 3),
-            })
+                # Batch CY: surface snapshot activity for inactive_signal disclosure
+                "is_active": is_active,
+            }
+            expl = getattr(src, "explanation", None) or ""
+            if expl and not is_active:
+                entry["inactive_explanation"] = str(expl)[:200]
+            source_breakdown.append(entry)
         return source_breakdown
 
     @staticmethod
@@ -1506,6 +1513,7 @@ class DashboardGenerator:
             "zero_baseline",  # Batch CU: intentional weight-0 roster arms
             "health_sleep",  # Batch CW: CN unhealthy / degraded+neg-IC sleep
             "regime_gate",  # Batch CX: intentional OFF for current regime
+            "inactive_signal",  # Batch CY: snapshot is_active=False
             "unavailable",
         }
         if configured_source_status:
@@ -1645,6 +1653,15 @@ class DashboardGenerator:
                     # Batch CX: intentional regime OFF (e.g. unified_overlay in NORMAL)
                     status = "regime_gate"
                     reason = f"Regime-gated off: {regime_reason}"
+                elif row is not None and row.get("is_active") is False:
+                    # Batch CY: snapshot inactive (neutral/low conf) ≠ pipeline zero
+                    status = "inactive_signal"
+                    expl = str(row.get("inactive_explanation") or row.get("explanation") or "")
+                    reason = (
+                        f"Signal inactive (not actionable): {expl}"
+                        if expl
+                        else "Signal inactive (not actionable this cycle)."
+                    )
                 else:
                     status = "zero_weight"
                     reason = "Collected but assigned zero effective weight."
