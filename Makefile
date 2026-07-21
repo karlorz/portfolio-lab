@@ -141,10 +141,16 @@ test:
 	echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"; \
 	echo "  Memory cap: 6GB virtual (ulimit -v 6291456; raised after suite MemoryError cascade under 3GB)"; \
 	echo "  Heavy tests: excluded via collect_ignore"; \
+	echo "  PUBLIC_DATA_DIR: isolated mktemp (H16 — no live WWW dual-write)"; \
 	echo "  Timeout: 3600s (raised after get_bl_views isolation; full safe suite ~45m on lab hosts)"; \
 	START=$$(date +%s); \
 	bash -c 'ulimit -v 6291456; \
-		timeout 3600 uv run pytest tests/ -q --tb=short -p no:cacheprovider'; \
+		PUBLIC_TMP=$$(mktemp -d /tmp/plab-pytest-public.XXXXXX); \
+		mkdir -p "$$PUBLIC_TMP/data"; \
+		export PUBLIC_DATA_DIR="$$PUBLIC_TMP/data"; \
+		export PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA=1; \
+		timeout 3600 uv run pytest tests/ -q --tb=short -p no:cacheprovider; \
+		EXIT=$$?; rm -rf "$$PUBLIC_TMP"; exit $$EXIT'; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \

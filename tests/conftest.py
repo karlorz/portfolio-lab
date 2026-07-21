@@ -12,6 +12,7 @@ Layered defense (each layer independently prevents host CPU exhaust):
   2. builtins.__import__ hook — blocks ML imports at interpreter level
   3. Post-collection leak check — warns if real ML libs evaded all guards
   4. ulimit -v (Makefile) — OS kernel enforces 6GB virtual memory cap
+  5. PUBLIC_DATA_DIR isolation — dual-writes never hit live WWW / repo public
 
 Default (safe, ML-disabled lane; exact count from pytest output):
   make test
@@ -25,12 +26,56 @@ Include extracted pure ML-adjacent kernel tests without heavy ML imports:
 
 All tests including ML:
   PORTFOLIO_LAB_ENABLE_ML=1 pytest tests/
+
+Allow live operator PUBLIC dual-writes (dangerous on lab hosts):
+  PORTFOLIO_LAB_ALLOW_LIVE_PUBLIC=1 pytest …
+  or mark individual tests with @pytest.mark.allow_live_public_data
 """
 
 import os
 import sys
 import builtins
+import tempfile
+from pathlib import Path
 import pytest
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Layer 5 (early): PUBLIC_DATA_DIR isolation BEFORE any src.* import
+# ═══════════════════════════════════════════════════════════════════════════
+# Dual-write producers bind PUBLIC_DATA_DIR at import time. On lab hosts
+# resolve_runtime_public_data_dir prefers /var/www/portfolio-lab/data when
+# present — full pytest then wipes operator SSOT (investigate c307–c308).
+# Pin env to a process-private temp dir unless the operator opts into live.
+#
+# Makefile / run-tests-safe also export PUBLIC_DATA_DIR; this bootstrap
+# covers bare `pytest` / `uv run pytest` invocations.
+
+_ISOLATED_PUBLIC_DATA_DIR: Path | None = None
+
+
+def _bootstrap_public_data_dir_isolation() -> Path | None:
+    """Ensure PUBLIC_DATA_DIR points at a hermetic temp tree for the session."""
+    global _ISOLATED_PUBLIC_DATA_DIR
+    if os.environ.get("PORTFOLIO_LAB_ALLOW_LIVE_PUBLIC", "0") == "1":
+        return None
+    existing = os.environ.get("PUBLIC_DATA_DIR", "").strip()
+    if existing:
+        # Caller (Makefile) already isolated — remember path for rebind fixtures
+        _ISOLATED_PUBLIC_DATA_DIR = Path(existing).expanduser()
+        _ISOLATED_PUBLIC_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        return _ISOLATED_PUBLIC_DATA_DIR
+    base = Path(tempfile.mkdtemp(prefix="plab-pytest-public-"))
+    public = base / "data"
+    public.mkdir(parents=True, exist_ok=True)
+    os.environ["PUBLIC_DATA_DIR"] = str(public)
+    # Prevent resolve_* fallbacks from preferring live WWW if env is cleared
+    os.environ.setdefault("PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA", "1")
+    _ISOLATED_PUBLIC_DATA_DIR = public
+    return public
+
+
+_bootstrap_public_data_dir_isolation()
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Layer 0: collect_ignore — prevent pytest from OPENING heavy test files
@@ -265,6 +310,78 @@ def _isolate_evaluator_data_dir(request, tmp_path, monkeypatch):
     yield
 
 
+# Dual-write modules that import PUBLIC_DATA_DIR at module level — rebind each
+# test so late imports and already-loaded producers never write live WWW/repo.
+_PUBLIC_DUAL_WRITE_MODULES = (
+    "src.paths",
+    "src.dashboard.generator",
+    "src.dashboard.overlay_dashboard",
+    "src.dashboard.public_data_index",
+    "src.dashboard.cron_scheduler_section",
+    "src.monitor.health_check",
+    "src.monitor.incident_manager",
+    "src.monitor.rebalance_health",
+    "src.monitor.unified_dashboard",
+    "src.monitor.performance_attribution",
+    "src.monitor.decision_registry",
+    "src.monitor.daily_brief",
+    "src.strategy.adaptive_sizing",
+    "src.tasker.store",
+    "src.research.labs_validation_report",
+    "src.research.experiment_scorecard",
+    "src.research.experiment_registry",
+    "src.research.artifact_retention",
+    "src.signals.cross_asset_regime_arb",
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_public_data_dir_modules(request, monkeypatch):
+    """Rebind PUBLIC_DATA_DIR on dual-write modules to the hermetic session dir.
+
+    Complements early env bootstrap (Layer 5). Opt out:
+      @pytest.mark.allow_live_public_data
+      PORTFOLIO_LAB_ALLOW_LIVE_PUBLIC=1
+    """
+    if request.node.get_closest_marker("allow_live_public_data"):
+        yield
+        return
+    if os.environ.get("PORTFOLIO_LAB_ALLOW_LIVE_PUBLIC", "0") == "1":
+        yield
+        return
+    target = _ISOLATED_PUBLIC_DATA_DIR
+    if target is None:
+        env_p = os.environ.get("PUBLIC_DATA_DIR", "").strip()
+        if not env_p:
+            yield
+            return
+        target = Path(env_p)
+    target.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("PUBLIC_DATA_DIR", str(target))
+    # Rebind module-level aliases already imported
+    for mod_name in _PUBLIC_DUAL_WRITE_MODULES:
+        mod = sys.modules.get(mod_name)
+        if mod is None:
+            continue
+        if hasattr(mod, "PUBLIC_DATA_DIR"):
+            monkeypatch.setattr(mod, "PUBLIC_DATA_DIR", target, raising=False)
+        # paths.py also exposes derived JSON paths
+        if mod_name == "src.paths":
+            monkeypatch.setattr(mod, "PRICES_JSON", target / "prices.json", raising=False)
+            monkeypatch.setattr(mod, "SIGNALS_JSON", target / "signals.json", raising=False)
+            monkeypatch.setattr(
+                mod, "HISTORICAL_JSON", target / "historical.json", raising=False
+            )
+            monkeypatch.setattr(mod, "YIELDS_JSON", target / "yields.json", raising=False)
+            monkeypatch.setattr(
+                mod,
+                "PUBLIC_TASKER_STATUS_JSON",
+                target / "tasker_status.json",
+                raising=False,
+            )
+    yield
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Mid-suite memory hygiene (S17) — insurance after 3GB→6GB MemoryError cascade
 # ═══════════════════════════════════════════════════════════════════════════
@@ -337,6 +454,11 @@ def pytest_configure(config):
         "markers",
         "allow_live_data: allow test to use live repo data/ paths "
         "(disables evaluator DATA_DIR isolation)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "allow_live_public_data: allow test to use live PUBLIC_DATA_DIR "
+        "(disables dual-write isolation; dangerous on lab hosts)",
     )
 
 
