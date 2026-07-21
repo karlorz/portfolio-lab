@@ -65,6 +65,8 @@ help:
 	@echo "  make labs-validate  Validate existing Labs artifacts offline"
 	@echo "  make labs-smoke     Run Labs artifact generation smoke tests"
 	@echo "  make data-quality   Audit public/data/prices.json offline"
+	@echo "  make mirror-repo-public-data  Mirror live PUBLIC_DATA_DIR → repo public/data (H22b)"
+	@echo "  make mirror-repo-public-data-lag  Exit 1 if repo public/data lags live"
 	@echo "  make sync         Broker position reconciliation"
 	@echo "  make all          Run all tasks sequentially"
 	@echo "  make cron-reset   Reset cron status file to defaults"
@@ -371,6 +373,18 @@ data-quality:
 	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
 	echo "=== Public Data Quality Audit: $$(date) ==="; \
 	$(PYTHON_RUNTIME) scripts/check_public_data_quality.py --app-dir $(PROJECT_DIR) --allow-repo-public-data $(DATA_QUALITY_ARGS)
+
+# Batch BW / H22b: mirror operator PUBLIC_DATA_DIR → repo public/data (stale SHA fix)
+.PHONY: mirror-repo-public-data
+mirror-repo-public-data:
+	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
+	echo "=== Mirror live public data → repo public/data: $$(date) ==="; \
+	$(PYTHON_RUNTIME) scripts/mirror_repo_public_data.py $(MIRROR_REPO_PUBLIC_ARGS)
+
+.PHONY: mirror-repo-public-data-lag
+mirror-repo-public-data-lag:
+	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
+	$(PYTHON_RUNTIME) scripts/mirror_repo_public_data.py --lag-only $(MIRROR_REPO_PUBLIC_ARGS)
 
 # ── Dashboard ────────────────────────────────────────────────────────
 
