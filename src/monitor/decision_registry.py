@@ -675,17 +675,35 @@ def publish_decision_registry_json(
     public_dir: str | Path = PUBLIC_DATA_DIR,
     *,
     registry: DecisionRegistry | None = None,
+    private_dir: str | Path | None = None,
 ) -> Path:
+    """Write decision_registry.json to public (and private DATA_DIR when distinct).
+
+    Batch CK: private ``DATA_DIR/decision_registry.json`` was missing while
+    public WWW carried a copy, so ``make mirror-repo-public-data-lag`` reported
+    source_present=false / bytes lag forever. Dual-write both trees.
+    """
     snapshot = build_decision_registry_snapshot(registry=registry)
+    body = json.dumps(snapshot, indent=2, sort_keys=True)
     out = Path(public_dir) / DECISION_REGISTRY_JSON
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w") as f:
-        json.dump(snapshot, f, indent=2, sort_keys=True)
+        f.write(body)
     logger.info(
         "Decision registry JSON written: %s (%d decisions)",
         out,
         snapshot["counts"]["decisions"],
     )
+    # Private SSOT for mirror lag / repo-local consumers
+    priv_root = Path(private_dir) if private_dir is not None else Path(DATA_DIR)
+    private_out = priv_root / DECISION_REGISTRY_JSON
+    try:
+        if private_out.resolve() != out.resolve():
+            private_out.parent.mkdir(parents=True, exist_ok=True)
+            private_out.write_text(body, encoding="utf-8")
+            logger.info("Decision registry JSON dual-wrote private: %s", private_out)
+    except OSError as exc:
+        logger.warning("Decision registry private dual-write failed: %s", exc)
     return out
 
 

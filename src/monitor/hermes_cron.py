@@ -269,7 +269,143 @@ def _add_bounded_text_field(normalized: dict[str, Any], field: str, value: Any) 
         normalized[f"{field}_original_length"] = original_length
 
 
-def normalize_cron_job(job: dict[str, Any], *, backend: str, source: str, index: int = 0) -> dict[str, Any]:
+def estimate_schedule_period_seconds(schedule: Any) -> Optional[float]:
+    """Best-effort period (seconds) from a 5-field cron expr without croniter.
+
+    Batch CK / deep-research: schedule-aware last_success age needs a period
+    so weekly jobs do not share hourly thresholds. Returns None when unknown.
+    """
+    text = str(schedule or "").strip()
+    if not text:
+        return None
+    parts = text.split()
+    if len(parts) != 5:
+        return None
+    minute, hour, dom, _month, dow = parts
+
+    def _star(v: str) -> bool:
+        return v in {"*", "?"}
+
+    # Weekly: day-of-week constrained (e.g. ``20 4 * * 0``)
+    if not _star(dow) and _star(dom):
+        return float(7 * 86400)
+    # Daily: specific hour(s), any day-of-month/week
+    if not _star(hour) and _star(dom) and _star(dow):
+        return float(86400)
+    # Intra-hour / hourly
+    if _star(hour):
+        if minute.isdigit():
+            return 3600.0
+        if minute.startswith("*/") and minute[2:].isdigit():
+            return float(int(minute[2:]) * 60)
+        if "," in minute:
+            mins = sorted(int(x) for x in minute.split(",") if x.isdigit())
+            if len(mins) >= 2:
+                gaps = [mins[i + 1] - mins[i] for i in range(len(mins) - 1)]
+                gaps.append(60 - mins[-1] + mins[0])
+                return float(min(g for g in gaps if g > 0) * 60)
+        return 3600.0
+    # Fallback: treat as daily when hour fixed
+    if not _star(hour):
+        return float(86400)
+    return None
+
+
+def schedule_aware_last_success_heartbeat(
+    job: Mapping[str, Any],
+    *,
+    now: Optional[float] = None,
+    grace_fraction: float = 0.1,
+    min_grace_seconds: float = 3600.0,
+) -> dict[str, Any]:
+    """Dead-man's-switch style last_success age vs schedule period (Batch CK).
+
+    States (SRE schedule-aware SLI):
+    - ``inactive`` — disabled / manual_only / paused
+    - ``pending_never_run`` — no last_run yet; **not** overdue (new weekly jobs)
+    - ``ok`` — last success within period + grace
+    - ``overdue`` — last success older than period + grace (or error aged out)
+    - ``error`` — last terminal error still inside period window
+    - ``unknown`` — insufficient schedule/evidence
+
+    ``last_success_age_seconds`` is null for pending_never_run (does not burn
+    error budget); otherwise ``now - last_run`` when last_run is known.
+    """
+    now_ts = float(now) if now is not None else datetime.now(timezone.utc).timestamp()
+    enabled = bool(job.get("enabled", True))
+    manual_only = bool(job.get("manual_only", False))
+    state = str(job.get("state") or "").lower()
+    status = normalize_cron_status(job.get("status", job.get("last_status")))
+    schedule = job.get("schedule") or job.get("schedule_display") or ""
+    period = estimate_schedule_period_seconds(schedule)
+    last_run_ts = _parse_iso_to_utc_epoch(
+        job.get("last_run") or job.get("last_run_at") or job.get("last_finished_at")
+    )
+
+    grace = min_grace_seconds
+    if period is not None:
+        grace = max(float(period) * float(grace_fraction), float(min_grace_seconds))
+
+    out: dict[str, Any] = {
+        "schedule_period_seconds": period,
+        "grace_seconds": round(grace, 1),
+        "last_success_age_seconds": None,
+        "heartbeat_state": "unknown",
+        "overdue": False,
+        "disclosure": (
+            "schedule-aware last_success age (Batch CK): pending_never_run does "
+            "not burn budget; overdue when age > period + grace"
+        ),
+    }
+
+    if manual_only or not enabled or state in {"manual_only", "paused", "disabled"}:
+        out["heartbeat_state"] = "inactive"
+        return out
+
+    if last_run_ts is None:
+        # Never fired — weekly/sparse jobs stay pending without false overdue
+        if status in {"pending", "unknown"} or status == "ok":
+            out["heartbeat_state"] = "pending_never_run"
+            out["overdue"] = False
+            return out
+        out["heartbeat_state"] = "never_run"
+        return out
+
+    age = max(0.0, now_ts - float(last_run_ts))
+    out["last_success_age_seconds"] = round(age, 1)
+    threshold = (float(period) + grace) if period is not None else None
+
+    if status == "error":
+        out["heartbeat_state"] = "error"
+        if threshold is not None and age > threshold:
+            out["overdue"] = True
+            out["heartbeat_state"] = "overdue"
+        return out
+
+    if status in {"ok", "pending"}:
+        if threshold is not None and age > threshold:
+            out["heartbeat_state"] = "overdue"
+            out["overdue"] = True
+        else:
+            out["heartbeat_state"] = "ok"
+        return out
+
+    if threshold is not None and age > threshold:
+        out["heartbeat_state"] = "overdue"
+        out["overdue"] = True
+    else:
+        out["heartbeat_state"] = status or "unknown"
+    return out
+
+
+def normalize_cron_job(
+    job: dict[str, Any],
+    *,
+    backend: str,
+    source: str,
+    index: int = 0,
+    now: Optional[float] = None,
+) -> dict[str, Any]:
     """Normalize a local or Hermes cron row for dashboard health consumers."""
     name = str(job.get("name") or job.get("id") or f"job-{index}")
     normalized = {
@@ -294,6 +430,16 @@ def normalize_cron_job(job: dict[str, Any], *, backend: str, source: str, index:
     _add_bounded_text_field(normalized, "stderr", job.get("stderr"))
     if "duration_seconds" in job:
         normalized["duration_seconds"] = job["duration_seconds"]
+    # Batch CK: schedule-aware last_success heartbeat SLI (primitive for dead-man)
+    try:
+        hb = schedule_aware_last_success_heartbeat(normalized, now=now)
+        normalized["schedule_period_seconds"] = hb.get("schedule_period_seconds")
+        normalized["last_success_age_seconds"] = hb.get("last_success_age_seconds")
+        normalized["heartbeat_state"] = hb.get("heartbeat_state")
+        normalized["heartbeat_overdue"] = bool(hb.get("overdue"))
+        normalized["heartbeat_grace_seconds"] = hb.get("grace_seconds")
+    except Exception:  # noqa: BLE001 — never break job normalize on SLI
+        pass
     return normalized
 
 
@@ -365,7 +511,37 @@ def summarize_backend(
         summary["unknown_active_jobs"] = active_unknown_jobs
     if active_pending_never_run:
         summary["pending_never_run_jobs"] = active_pending_never_run
-    if reason:
+    # Batch CK: roll up schedule-aware heartbeats (do not degrade on pending_never_run)
+    overdue_jobs = [
+        job
+        for job in jobs
+        if isinstance(job, dict)
+        and job.get("enabled", True)
+        and not job.get("manual_only", False)
+        and job.get("state") not in {"manual_only", "paused"}
+        and (
+            job.get("heartbeat_overdue") is True
+            or job.get("heartbeat_state") == "overdue"
+        )
+    ]
+    if overdue_jobs:
+        summary["heartbeat_overdue_jobs"] = len(overdue_jobs)
+        summary["heartbeat_overdue_job_names"] = [
+            str(j.get("name") or "") for j in overdue_jobs
+        ]
+        # Soft signal only: unknown/error still own hard degrade; overdue is advisory
+        # unless there are zero failed/unknown — then surface warning-tier degrade.
+        if not failed_jobs and not active_unknown_jobs and summary["status"] == "ok":
+            summary["status"] = "degraded"
+            summary["reason"] = summary.get("reason") or "heartbeat_overdue"
+    ages = [
+        float(j["last_success_age_seconds"])
+        for j in jobs
+        if isinstance(j, dict) and j.get("last_success_age_seconds") is not None
+    ]
+    if ages:
+        summary["max_last_success_age_seconds"] = round(max(ages), 1)
+    if reason and not summary.get("reason"):
         summary["reason"] = reason
     return summary
 
