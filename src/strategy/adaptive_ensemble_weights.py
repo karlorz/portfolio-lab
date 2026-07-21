@@ -49,6 +49,9 @@ DEFAULT_CONFIG = {
     "min_weight": 0.01,
     "max_weight": 0.40,
     "min_weight_active_sources": 0.005,
+    # When True, arms with baseline weight == 0 are hard-excluded from the
+    # min_weight floor (zero baseline must remain zero after renorm).
+    "respect_zero_baseline": True,
     "decay_half_life": 30,
     "stale_attribution_days": 7,
     "min_readings_per_source": 20,
@@ -121,6 +124,8 @@ class AdaptiveEnsembleWeights:
         self.history: List[WeightAdjustment] = []
         self.current_regime: str = "normal"
         self._last_save_refused: Optional[str] = None
+        # Arms with baseline==0 that were hard-excluded from min_weight floor
+        self.zero_baseline_exclusions: List[str] = []
 
     # ── Public API ──
 
@@ -173,12 +178,34 @@ class AdaptiveEnsembleWeights:
                 ", ".join(sorted(skipped_ghosts)[:12]),
             )
 
-        # Apply min weight floor
-        for source_name in raw_adjusted:
-            raw_adjusted[source_name] = max(
-                self.config["min_weight"],
-                raw_adjusted[source_name]
+        # Zero-baseline arms are hard excludes when respect_zero_baseline is on
+        # (default). Floor only applies to arms with positive baseline weight.
+        respect_zero = bool(self.config.get("respect_zero_baseline", True))
+        zero_baseline = {
+            name
+            for name, base_w in baseline.items()
+            if respect_zero and float(base_w or 0.0) <= 0.0
+        }
+        self.zero_baseline_exclusions = sorted(zero_baseline)
+        if zero_baseline:
+            logger.info(
+                "Adaptive weights hard-excluding %d zero-baseline arm(s): %s",
+                len(zero_baseline),
+                ", ".join(self.zero_baseline_exclusions[:12]),
             )
+
+        def _floorable(name: str) -> bool:
+            return name not in zero_baseline
+
+        # Apply min weight floor (skip zero-baseline hard excludes)
+        for source_name in raw_adjusted:
+            if _floorable(source_name):
+                raw_adjusted[source_name] = max(
+                    self.config["min_weight"],
+                    raw_adjusted[source_name],
+                )
+            else:
+                raw_adjusted[source_name] = 0.0
 
         # Normalize to sum = 1.0
         total = sum(raw_adjusted.values())
@@ -206,6 +233,9 @@ class AdaptiveEnsembleWeights:
         while any_below_min and iteration < max_iterations:
             any_below_min = False
             for source_name in normalized:
+                if not _floorable(source_name):
+                    normalized[source_name] = 0.0
+                    continue
                 if normalized[source_name] < self.config["min_weight"] - 1e-8:
                     normalized[source_name] = self.config["min_weight"]
                     any_below_min = True
@@ -220,6 +250,9 @@ class AdaptiveEnsembleWeights:
 
         # Final hard clamp for any remaining sub-min weights
         for source_name in normalized:
+            if not _floorable(source_name):
+                normalized[source_name] = 0.0
+                continue
             if normalized[source_name] < self.config["min_weight"]:
                 normalized[source_name] = self.config["min_weight"]
 
@@ -230,6 +263,24 @@ class AdaptiveEnsembleWeights:
                 normalized = {k: v / total_clamped for k, v in normalized.items()}
                 # Round again
                 normalized = {k: round(v, 6) for k, v in normalized.items()}
+                # Keep hard excludes exactly zero after renorm rounding
+                for source_name in zero_baseline:
+                    if source_name in normalized:
+                        normalized[source_name] = 0.0
+                total_clamped2 = sum(normalized.values())
+                if total_clamped2 > 0 and abs(total_clamped2 - 1.0) > 1e-6:
+                    # Renorm only floorable mass
+                    active_sum = sum(
+                        v for k, v in normalized.items() if _floorable(k)
+                    )
+                    if active_sum > 0:
+                        for k in list(normalized.keys()):
+                            if _floorable(k):
+                                normalized[k] = round(
+                                    normalized[k] / active_sum, 6
+                                )
+                            else:
+                                normalized[k] = 0.0
 
         self.adjusted_weights = normalized
         self.multipliers = multipliers
@@ -361,6 +412,7 @@ class AdaptiveEnsembleWeights:
                 "history": [asdict(h) for h in self.history[-50:]],  # Keep last 50
                 "baseline_weights": self.base_weights,
                 "config": self.config,
+                "zero_baseline_exclusions": list(self.zero_baseline_exclusions),
             }
             # Atomic write when possible
             self.state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -383,6 +435,10 @@ class AdaptiveEnsembleWeights:
             self.current_regime = state.get("regime", "normal")
             self.history = [WeightAdjustment(**h) for h in state.get("history", [])]
             self.base_weights = state.get("baseline_weights", self.base_weights)
+            excl = state.get("zero_baseline_exclusions", [])
+            self.zero_baseline_exclusions = (
+                list(excl) if isinstance(excl, list) else []
+            )
             logger.debug("Loaded adaptive weights state from %s", self.state_file)
             return True
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
@@ -416,6 +472,11 @@ class AdaptiveEnsembleWeights:
             "multipliers": self.multipliers,
             "top_changes": top_changes[:10],
             "history_count": len(self.history),
+            # Hard-excluded arms (baseline weight == 0) under respect_zero_baseline
+            "zero_baseline_exclusions": list(self.zero_baseline_exclusions),
+            "respect_zero_baseline": bool(
+                self.config.get("respect_zero_baseline", True)
+            ),
         }
 
 

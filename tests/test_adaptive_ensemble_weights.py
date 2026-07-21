@@ -290,9 +290,16 @@ class TestWeightUpdate:
             f"CTA ({cta_weight:.4f}) should > MSM ({msm_weight:.4f})"
 
     def test_min_weight_enforced(self, adaptive_weights, sample_attribution_good):
-        """No source should fall below min_weight."""
+        """Positive-baseline sources should not fall below min_weight.
+
+        Zero-baseline arms are hard-excluded (see test_zero_baseline_arm_stays_zero).
+        """
         adapted = adaptive_weights.update_weights(sample_attribution_good, "normal")
         for source, weight in adapted.items():
+            base = float(adaptive_weights.base_weights.get(source, 0) or 0)
+            if base <= 0:
+                assert weight == 0.0, f"zero-baseline {source} resurrected to {weight}"
+                continue
             assert weight >= adaptive_weights.config["min_weight"], \
                 f"{source} weight {weight:.4f} < min {adaptive_weights.config['min_weight']}"
 
@@ -360,7 +367,13 @@ class TestIntegration:
 
         # Check all expected properties
         assert abs(sum(adapted.values()) - 1.0) < 0.01
-        assert all(w >= 0.01 for w in adapted.values())
+        # Positive-baseline arms respect min floor; zero-baseline hard-exclude stays 0
+        for src, w in adapted.items():
+            base = float(sample_base_weights.get(src, 0) or 0)
+            if base <= 0:
+                assert w == 0.0, f"zero-baseline {src} resurrected to {w}"
+            else:
+                assert w >= 0.01, f"{src} weight {w} < min floor"
         assert all(w <= 0.40 for w in adapted.values())
 
         # Check that top performer got highest weight
@@ -1327,6 +1340,104 @@ class TestSaveStateParentDir:
             weights.adjusted_weights = {"src": 1.0}
             weights._save_state()
             assert deep_path.exists()
+
+
+# ── Zero-baseline hard exclude (Batch AQ) ──────────────────────────────────
+
+
+class TestZeroBaselineSkipsMinWeightFloor:
+    """Zero baseline weight must mean hard exclude — no min_weight resurrection."""
+
+    def test_zero_baseline_arm_stays_zero(self, tmp_state_dir):
+        """baseline multi_speed_momentum=0 yields adjusted msm=0 after update."""
+        base = {
+            "tsfm_momentum": 0.50,
+            "cta_trend": 0.50,
+            "multi_speed_momentum": 0.0,
+        }
+        attr = {
+            "timestamp": "now",
+            "sources": {
+                "tsfm_momentum": {
+                    "total_readings": 40,
+                    "sharpe_contribution": 0.8,
+                },
+                "cta_trend": {
+                    "total_readings": 40,
+                    "sharpe_contribution": 0.6,
+                },
+                # Strong attribution must not resurrect a zero-baseline arm
+                "multi_speed_momentum": {
+                    "total_readings": 40,
+                    "sharpe_contribution": 1.5,
+                },
+            },
+        }
+        weights = AdaptiveEnsembleWeights(
+            base_weights=base,
+            state_file=Path(tmp_state_dir) / "adaptive_zero.json",
+        )
+        adapted = weights.update_weights(attr, "normal")
+        assert adapted.get("multi_speed_momentum", None) == 0.0, (
+            f"zero-baseline msm resurrected to {adapted.get('multi_speed_momentum')}"
+        )
+        # Active mass still renormalizes
+        assert abs(sum(adapted.values()) - 1.0) < 0.01
+        assert adapted["tsfm_momentum"] > 0
+        assert adapted["cta_trend"] > 0
+        # Disclosure on instance + state payload
+        assert "multi_speed_momentum" in weights.zero_baseline_exclusions
+        state = weights.get_state_dict()
+        assert "multi_speed_momentum" in state["zero_baseline_exclusions"]
+        assert state["respect_zero_baseline"] is True
+
+    def test_respect_zero_baseline_config_default_true(self):
+        """respect_zero_baseline is True by default."""
+        assert DEFAULT_CONFIG.get("respect_zero_baseline") is True
+        w = AdaptiveEnsembleWeights(base_weights={"a": 1.0})
+        assert w.config.get("respect_zero_baseline") is True
+
+    def test_respect_zero_baseline_false_restores_floor(self, tmp_state_dir):
+        """Opt-out: respect_zero_baseline=false re-applies min_weight to zero base."""
+        base = {
+            "tsfm_momentum": 0.50,
+            "cta_trend": 0.50,
+            "multi_speed_momentum": 0.0,
+        }
+        attr = {
+            "timestamp": "now",
+            "sources": {
+                "tsfm_momentum": {
+                    "total_readings": 40,
+                    "sharpe_contribution": 0.8,
+                },
+                "cta_trend": {
+                    "total_readings": 40,
+                    "sharpe_contribution": 0.6,
+                },
+                "multi_speed_momentum": {
+                    "total_readings": 40,
+                    "sharpe_contribution": 1.5,
+                },
+            },
+        }
+        weights = AdaptiveEnsembleWeights(
+            base_weights=base,
+            config={"respect_zero_baseline": False, "min_weight": 0.01},
+            state_file=Path(tmp_state_dir) / "adaptive_legacy.json",
+        )
+        adapted = weights.update_weights(attr, "normal")
+        assert adapted["multi_speed_momentum"] >= weights.config["min_weight"] - 1e-9
+        assert weights.zero_baseline_exclusions == []
+
+    def test_sample_base_circuit_breaker_stays_zero(
+        self, adaptive_weights, sample_attribution_good
+    ):
+        """circuit_breaker baseline 0.0 in sample fixtures stays zero after update."""
+        adapted = adaptive_weights.update_weights(sample_attribution_good, "normal")
+        if "circuit_breaker" in adaptive_weights.base_weights:
+            assert adapted.get("circuit_breaker", 0.0) == 0.0
+            assert "circuit_breaker" in adaptive_weights.zero_baseline_exclusions
 
 
 if __name__ == "__main__":
