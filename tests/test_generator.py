@@ -3991,8 +3991,11 @@ class TestGenerateGraduationJSON:
         assert data["min_trading_days"] == GraduationChecklist.DEFAULT_CRITERIA["min_trading_days"]["value"]
         assert data["trading_days"] == criteria["min_trading_days"]["value"]
         assert data["trading_days"] == 49
-        assert criteria["min_sharpe"]["value"] == 0.0
+        # Honesty: keep raw implausible Sharpe (>3.0) — never coerce to 0.0.
+        # Gate still fails (Batch AE / graduation_checklist._sharpe_plausibility).
+        assert criteria["min_sharpe"]["value"] == 3.38
         assert criteria["min_sharpe"]["passed"] is False
+        assert "implausible" in (criteria["min_sharpe"]["description"] or "").lower()
         # Frontend dual-shape aliases (GraduationDataSchema / panel)
         assert data["readiness_pct"] == expected_score
         assert data["eligible"] is expected_ready

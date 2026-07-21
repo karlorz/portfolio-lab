@@ -45,7 +45,7 @@ from src.paths import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ICMonitor", "compute_ic_decay_report"]
+__all__ = ["ICMonitor", "compute_ic_decay_report", "advisory_factor_half_life_table", "ADVISORY_FACTOR_HALF_LIFE_DAYS"]
 
 # Configurable via environment variables
 IC_WINDOW_SIZE = int(os.environ.get("IC_MONITOR_WINDOW", "60"))
@@ -55,6 +55,59 @@ IC_TREND_WINDOW = int(os.environ.get("IC_TREND_WINDOW", "20"))
 # Spearman IC with n≈5–10 is extremely noisy; do not escalate kill on thin history.
 IC_MIN_OBS_FOR_STATUS = int(os.environ.get("IC_MIN_OBS_FOR_STATUS", "20"))
 IC_STATE_PATH = DATA_DIR / "ic_monitor_state.json"
+
+# Advisory factor / sleeve half-lives (trading days) from multi-market IC decay
+# literature (Flint/Vermaak-style summaries via Alpha Architect / Quantpedia).
+# NOT live-authoritative — operators only; rebalance cadence is still governed by
+# signals.json.target_allocations + smart-rebalance cost budget.
+ADVISORY_FACTOR_HALF_LIFE_DAYS: Dict[str, Dict[str, Any]] = {
+    "investment": {
+        "half_life_days": 21,
+        "suggested_rebalance_days": 21,
+        "note": "fastest equity-factor decay; ~1 month optimal",
+    },
+    "momentum": {
+        "half_life_days": 63,
+        "suggested_rebalance_days": 63,
+        "note": "~3 months typical equity momentum half-life band",
+    },
+    "value": {
+        "half_life_days": 84,
+        "suggested_rebalance_days": 84,
+        "note": "longest persistence; ~3–4 months rebalance",
+    },
+    "quality": {
+        "half_life_days": 105,
+        "suggested_rebalance_days": 105,
+        "note": "~4–5 months optimal in global studies",
+    },
+    "low_volatility": {
+        "half_life_days": 126,
+        "suggested_rebalance_days": 126,
+        "note": "~5–6 months; slow decay sleeve",
+    },
+    "strategic_spy_gld_tlt": {
+        "half_life_days": None,
+        "suggested_rebalance_days": 252,
+        "note": "champion book risk control; annual or ±5% band, cost-aware",
+    },
+}
+
+
+def advisory_factor_half_life_table() -> Dict[str, Any]:
+    """Public advisory payload for IC half-life → rebalance cadence mapping."""
+    return {
+        "role": "advisory",
+        "live_authoritative": False,
+        "unit": "trading_days",
+        "source": "literature_defaults_not_fitted_to_lab_ic",
+        "sleeves": dict(ADVISORY_FACTOR_HALF_LIFE_DAYS),
+        "disclosure": (
+            "Half-lives are literature defaults for operator cadence design; "
+            "they do not override signals.json.target_allocations or order_router."
+        ),
+    }
+
 
 
 def _spearman_rank_correlation(x: List[float], y: List[float]) -> float:
@@ -461,4 +514,5 @@ def compute_ic_decay_report() -> Dict[str, Any]:
         ),
         "staged_date": monitor.get_staged_date(),
         "label_horizon": "SPY close-to-close forward return from staged market-data date to latest available SPY row",
+        "advisory_factor_half_life": advisory_factor_half_life_table(),
     }
