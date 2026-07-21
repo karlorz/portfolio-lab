@@ -62,6 +62,8 @@ _PUBLIC_DATA_CONTRACT: dict[str, tuple[str, str]] = {
     "labs_replays.json": ("labs", LABS_REPLAY_SCHEMA_VERSION),
     "labs_validation.json": ("labs", LABS_VALIDATION_SCHEMA_VERSION),
     "decision_registry.json": ("monitoring", DECISION_REGISTRY_SCHEMA_VERSION),
+    # Nested dual-write (H19): basename used when path is attribution/*
+    "attribution/latest.json": ("attribution", "attribution-report/v1"),
 }
 
 _OPTIONAL_PUBLIC_DATA_FILES = (
@@ -76,6 +78,8 @@ _OPTIONAL_PUBLIC_DATA_FILES = (
     "labs_validation.json",
     "decision_registry.json",
     "incidents.json",
+    # Nested dual-write catalog (H19) — also discovered via _discover_attribution_public_paths
+    "attribution/latest.json",
 )
 
 _LABS_OBJECT_PAGINATION_ROW_KEYS = {
@@ -174,9 +178,16 @@ def _cached_sha256_file(
     return digest
 
 
-def _contract_for_filename(filename: str) -> tuple[str, str]:
+def _contract_for_filename(filename: str, relative_path: str | None = None) -> tuple[str, str]:
+    # Prefer nested relative path contracts (e.g. attribution/latest.json)
+    if relative_path and relative_path in _PUBLIC_DATA_CONTRACT:
+        return _PUBLIC_DATA_CONTRACT[relative_path]
     if filename in _PUBLIC_DATA_CONTRACT:
         return _PUBLIC_DATA_CONTRACT[filename]
+    if relative_path and relative_path.startswith("attribution/"):
+        return "attribution", "attribution-report/v1"
+    if filename.startswith("attribution_") and filename.endswith(".json"):
+        return "attribution", "attribution-report/v1"
     if "experiment_diff" in filename or "experiment-diff" in filename:
         return "labs", EXPERIMENT_DIFF_SCHEMA_VERSION
     if "labs" in filename or "scorecard" in filename or "replay" in filename:
@@ -327,6 +338,34 @@ def _discover_governed_public_paths(public_dir: Path) -> list[Path]:
         "duration-sweep-results.json",
     )
     return sorted(path for filename in filenames if (path := public_dir / filename).exists())
+
+
+def _discover_attribution_public_paths(public_dir: Path) -> list[Path]:
+    """Discover dual-written attribution reports under public/data/attribution/.
+
+    Live gap (H19): attribution dual-write publishes latest.json + dated files but
+    WWW index.json can lag until the next full dashboard generate. Discovery keeps
+    the catalog honest without requiring the generator path list.
+    """
+    attr_dir = public_dir / "attribution"
+    if not attr_dir.is_dir():
+        return []
+    paths: list[Path] = []
+    latest = attr_dir / "latest.json"
+    if latest.is_file():
+        paths.append(latest)
+    # Dated reports (attribution_YYYY-MM-DD.json) — cap to newest 30 for catalog size
+    dated = sorted(
+        (
+            p
+            for p in attr_dir.glob("attribution_*.json")
+            if p.is_file() and not _is_labs_page_shard_path(p)
+        ),
+        key=lambda p: p.name,
+        reverse=True,
+    )
+    paths.extend(dated[:30])
+    return paths
 
 
 def _load_source_manifest(public_dir: Path) -> dict[str, Any] | None:
@@ -690,12 +729,21 @@ def _public_data_entry(
     source_manifest: Mapping[str, Any] | None = None,
     source_manifest_quality_artifacts: set[str] | None = None,
 ) -> dict[str, Any]:
-    category, schema_version = _contract_for_filename(filename)
+    relative_hint = None
+    if path is not None:
+        try:
+            relative_hint = path.relative_to(public_dir).as_posix()
+        except ValueError:
+            relative_hint = filename if "/" in filename else None
+    elif "/" in filename:
+        relative_hint = filename
+    category, schema_version = _contract_for_filename(filename, relative_hint)
     if path is None or not path.exists():
         _remove_labs_page_shards(public_dir, filename)
+        missing_path = relative_hint or filename
         return {
-            "filename": filename,
-            "path": filename,
+            "filename": Path(filename).name,
+            "path": missing_path,
             "category": category,
             "schema_version": schema_version,
             "status": "missing",
@@ -709,6 +757,10 @@ def _public_data_entry(
 
     schema_version, validation_status, validation_errors = _validate_public_data_entry(path, filename, schema_version)
     relative_path = _relative_public_path(path, public_dir, filename)
+    # Re-resolve category with actual nested path (basename alone may be ambiguous)
+    category, schema_version_nested = _contract_for_filename(path.name, relative_path)
+    if schema_version_nested != "unknown":
+        schema_version = schema_version_nested
     size_budget = measure_public_data_size_budget(path)
     pagination = _write_labs_pagination_shards(path, filename, public_dir, size_budget, validation_status)
     source_manifest_row = _source_manifest_row_for(filename, source_manifest)
@@ -788,38 +840,41 @@ def build_public_data_index(
     hash_cache_updates = dict(hash_cache) if hash_cache is not None else None
     source_manifest = _load_source_manifest(public_dir)
     source_manifest_quality_artifacts = _source_manifest_quality_artifacts(source_manifest)
+    # Keys are catalog filenames (basename). Nested dual-writes use basename that
+    # is unique under public/data (attribution_*.json, explainability_latest.json).
     path_map: dict[str, Path] = {}
     ordered_filenames: list[str] = []
+
+    def _register(path: Path) -> None:
+        filename = path.name
+        path_map.setdefault(filename, path)
+        if filename not in ordered_filenames:
+            ordered_filenames.append(filename)
 
     for path in paths:
         if path is None:
             continue
-        path = Path(path)
-        filename = path.name
-        path_map[filename] = path
-        if filename not in ordered_filenames:
-            ordered_filenames.append(filename)
+        _register(Path(path))
 
     for path in _discover_labs_public_paths(public_dir):
-        path_map.setdefault(path.name, path)
-        if path.name not in ordered_filenames:
-            ordered_filenames.append(path.name)
+        _register(path)
 
     for path in _discover_market_data_public_paths(public_dir):
-        path_map.setdefault(path.name, path)
-        if path.name not in ordered_filenames:
-            ordered_filenames.append(path.name)
+        _register(path)
 
     for path in _discover_governed_public_paths(public_dir):
-        path_map.setdefault(path.name, path)
-        if path.name not in ordered_filenames:
-            ordered_filenames.append(path.name)
+        _register(path)
+
+    for path in _discover_attribution_public_paths(public_dir):
+        _register(path)
 
     for filename in _OPTIONAL_PUBLIC_DATA_FILES:
+        # Nested optional keys use posix relative paths
         path = public_dir / filename
-        if filename not in path_map and path.exists():
-            path_map[filename] = path
-        if filename not in ordered_filenames:
+        if path.exists():
+            _register(path)
+        elif filename not in ordered_filenames and "/" not in filename:
+            # Flat optional missing entries still appear as missing in catalog
             ordered_filenames.append(filename)
 
     entries = [

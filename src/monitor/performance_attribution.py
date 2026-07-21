@@ -714,6 +714,33 @@ class PerformanceAttribution:
                 save_results_json(payload, output_path=str(latest))
                 save_results_json(payload, output_path=str(dated))
                 logger.info("Published attribution to public: %s", latest)
+                # H19: keep public index catalog current without waiting for full dashboard
+                try:
+                    from src.dashboard.public_data_index import build_public_data_index
+                    from src.paths import PUBLIC_DATA_DIR as _pub
+
+                    index_path = Path(_pub) / "index.json"
+                    existing_paths: list[Path] = []
+                    if index_path.is_file():
+                        try:
+                            prior = json.loads(index_path.read_text(encoding="utf-8"))
+                            for entry in prior.get("entries") or []:
+                                if not isinstance(entry, dict):
+                                    continue
+                                rel = entry.get("path") or entry.get("filename")
+                                if isinstance(rel, str) and rel:
+                                    candidate = Path(_pub) / rel
+                                    if candidate.is_file():
+                                        existing_paths.append(candidate)
+                        except (OSError, json.JSONDecodeError, TypeError):
+                            pass
+                    # Always include dual-write surfaces
+                    existing_paths.extend([latest, dated])
+                    index = build_public_data_index(existing_paths, public_dir=Path(_pub))
+                    save_results_json(index, output_path=str(index_path))
+                    logger.info("Refreshed public index after attribution dual-write")
+                except Exception as idx_exc:  # noqa: BLE001 — never block attribution
+                    logger.warning("Public index refresh after attribution failed: %s", idx_exc)
             except (OSError, TypeError, ValueError) as exc:
                 logger.warning("Public attribution dual-write failed: %s", exc)
                 try:
