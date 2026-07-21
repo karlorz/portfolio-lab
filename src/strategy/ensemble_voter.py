@@ -276,6 +276,9 @@ def _load_regime_weights() -> Dict[Regime, Dict[SignalSource, float]]:
 
     regime_weights: Dict[Regime, Dict[SignalSource, float]] = {}
     for regime_name, sources in raw.items():
+        # Batch CS: skip _meta / underscore metadata keys without warning noise
+        if str(regime_name).startswith("_"):
+            continue
         try:
             regime = Regime(regime_name)
         except ValueError:

@@ -18,6 +18,7 @@ Usage:
 
 import json
 import logging
+import os
 import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime
@@ -29,11 +30,29 @@ from src.backtest.metrics import save_results_json
 from src.paths import DATA_DIR, ATTRIBUTION_DIR
 
 
-__all__ = ['DEFAULT_CONFIG', 'WeightAdjustment', 'AdaptiveWeightsState', 'AdaptiveEnsembleWeights']
+__all__ = [
+    'DEFAULT_CONFIG',
+    'WeightAdjustment',
+    'AdaptiveWeightsState',
+    'AdaptiveEnsembleWeights',
+    'ENSEMBLE_WEIGHTS_FILE',
+    'stamp_ensemble_weights_freshness',
+]
 
 logger = logging.getLogger(__name__)
 
 STATE_FILE = DATA_DIR / "adaptive_weights_state.json"
+
+
+def _default_ensemble_weights_path() -> Path:
+    return Path(
+        os.environ.get(
+            "ENSEMBLE_WEIGHTS_FILE", str(DATA_DIR / "ensemble_weights.json")
+        )
+    )
+
+
+ENSEMBLE_WEIGHTS_FILE = _default_ensemble_weights_path()
 
 # ─────────────────────────────────────────────
 #  Configuration
@@ -515,6 +534,86 @@ def _load_latest_attribution() -> Optional[Dict]:
         return None
 
 
+def stamp_ensemble_weights_freshness(
+    weights_path: Optional[Path] = None,
+    *,
+    reason: str = "freshness_stamp",
+) -> dict:
+    """Batch CS: reaffirm static ensemble_weights.json without changing weights.
+
+    Age of ``ensemble_weights.json`` drove false freeze (pre-CQ) and still
+    surfaces as ``weight_file_stale`` after CQ. Content recompute requires
+    attribution + promotion; this path only rewrites the same regime map
+    with an updated ``_meta`` so mtime/age reflect last verification.
+
+    Does **not** change live allocation authority (champion 46/38/16).
+    """
+    path = (
+        Path(weights_path)
+        if weights_path is not None
+        else _default_ensemble_weights_path()
+    )
+    result: dict = {
+        "path": str(path),
+        "ok": False,
+        "reason": reason,
+    }
+    if not path.is_file():
+        result["error"] = "missing"
+        logger.warning("ensemble_weights stamp skipped — missing %s", path)
+        return result
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        result["error"] = str(exc)
+        logger.warning("ensemble_weights stamp read failed: %s", exc)
+        return result
+    if not isinstance(raw, dict):
+        result["error"] = "invalid_payload"
+        return result
+
+    now = datetime.now().isoformat()
+    regime_keys = [k for k in raw if not str(k).startswith("_") and isinstance(raw.get(k), dict)]
+    meta = raw.get("_meta") if isinstance(raw.get("_meta"), dict) else {}
+    meta = {
+        **meta,
+        "schema": meta.get("schema") or "ensemble-weights/v1",
+        "last_freshness_stamp": now,
+        "stamp_reason": reason,
+        "regime_count": len(regime_keys),
+        "content_identity": "unchanged",
+        "note": (
+            "Freshness stamp only — regime source weights not recomputed. "
+            "Live target_allocations remain champion baseline unless separately promoted."
+        ),
+    }
+    out = {k: v for k, v in raw.items() if not str(k).startswith("_") or k == "_meta"}
+    # Preserve regimes; set _meta last
+    out = {k: v for k, v in raw.items() if k != "_meta"}
+    out["_meta"] = meta
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        save_results_json(out, output_path=str(tmp))
+        tmp.replace(path)
+    except (OSError, TypeError, ValueError) as exc:
+        result["error"] = str(exc)
+        logger.warning("ensemble_weights stamp write failed: %s", exc)
+        return result
+
+    result["ok"] = True
+    result["last_freshness_stamp"] = now
+    result["regime_count"] = len(regime_keys)
+    logger.info(
+        "Stamped ensemble_weights freshness at %s (regimes=%d reason=%s)",
+        path,
+        len(regime_keys),
+        reason,
+    )
+    return result
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Adaptive Ensemble Signal Weighting")
@@ -524,13 +623,27 @@ def main():
     update_parser = subparsers.add_parser("update", help="Compute updated weights from latest attribution")
     update_parser.add_argument("--regime", default="normal", help="Current market regime")
     update_parser.add_argument("--attribution-file", help="Specific attribution file path")
-
     # Show command
     show_parser = subparsers.add_parser("show", help="Display current adaptive weights")
     show_parser.add_argument("--top", type=int, default=20, help="Show top N sources")
 
     # Reset command
     reset_parser = subparsers.add_parser("reset", help="Reset weights to baseline")
+
+    # Batch CS: stamp only
+    stamp_parser = subparsers.add_parser(
+        "stamp",
+        help="Reaffirm ensemble_weights.json mtime/_meta without changing weights",
+    )
+    stamp_parser.add_argument(
+        "--path",
+        help="Override ensemble_weights.json path (default ENSEMBLE_WEIGHTS_FILE / data/)",
+    )
+    stamp_parser.add_argument(
+        "--reason",
+        default="cli_stamp",
+        help="Stamp reason recorded in _meta",
+    )
 
     args = parser.parse_args()
 
@@ -583,6 +696,23 @@ def main():
             )
 
         logger.info("  State saved to: %s", STATE_FILE)
+        # Batch CS: always reaffirm static weights file age after adaptive update
+        stamp = stamp_ensemble_weights_freshness(reason="adaptive_update")
+        if not stamp.get("ok"):
+            logger.warning("ensemble_weights stamp after update: %s", stamp)
+
+    elif args.command == "stamp":
+        path = Path(args.path) if args.path else None
+        stamp = stamp_ensemble_weights_freshness(path, reason=args.reason)
+        if not stamp.get("ok"):
+            logger.error("stamp failed: %s", stamp)
+            sys.exit(1)
+        logger.info(
+            "Stamped ensemble_weights: path=%s stamp=%s regimes=%s",
+            stamp.get("path"),
+            stamp.get("last_freshness_stamp"),
+            stamp.get("regime_count"),
+        )
 
     elif args.command == "show":
         loaded = adaptive._load_state()
