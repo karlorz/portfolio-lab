@@ -405,6 +405,24 @@ def _stamp_generator_git_sha(
     return out
 
 
+def _canonical_file_content_hash(path: Path) -> str | None:
+    """SHA-256 of file bytes after stripping a single trailing newline.
+
+    Dual-write trees often differ only by final-newline policy; content hash
+    treats those as identical so sticky lag is not reported when payloads match.
+    """
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None
+    # Normalize trailing newlines only (do not alter interior whitespace)
+    while raw.endswith(b"\n"):
+        raw = raw[:-1]
+    import hashlib
+
+    return hashlib.sha256(raw).hexdigest()
+
+
 def _attach_dual_write_provenance(
     payload: Dict[str, Any],
     *,
@@ -423,6 +441,10 @@ def _attach_dual_write_provenance(
     When both private and public paths exist and differ, sets
     ``dual_write_lag_seconds`` = public_mtime - private_mtime (negative means
     public is older than private — typical split-brain lag). Advisory only.
+
+    Batch dual-write: if path resolves differ but **canonical content hashes**
+    match (trailing-newline-normalized), treat as ``paths_identical`` for lag
+    purposes and clear sticky lag_stale.
     """
     out = dict(payload)
     sha = out.get("generator_git_sha")
@@ -433,21 +455,38 @@ def _attach_dual_write_provenance(
     private_mtime: float | None = None
     public_mtime: float | None = None
     lag_stale = False
+    content_hash_identical: bool | None = None
+    private_content_hash: str | None = None
+    public_content_hash: str | None = None
+    resolved_identical = paths_identical
     try:
         if priv is not None and priv.is_file():
             private_mtime = float(priv.stat().st_mtime)
+            private_content_hash = _canonical_file_content_hash(priv)
         if pub is not None and pub.is_file():
             public_mtime = float(pub.stat().st_mtime)
+            public_content_hash = _canonical_file_content_hash(pub)
+        if private_content_hash is not None and public_content_hash is not None:
+            content_hash_identical = private_content_hash == public_content_hash
+            if content_hash_identical:
+                # Content-equal dual trees are not split-brain even if path
+                # strings/resolves differ or final newline policy differs.
+                resolved_identical = True
         if (
             private_mtime is not None
             and public_mtime is not None
-            and not paths_identical
+            and not resolved_identical
         ):
             # public - private: negative => public behind private (lag)
             lag_seconds = round(public_mtime - private_mtime, 3)
             # Stale if public is older than private by more than threshold
             if lag_seconds < -abs(float(lag_threshold_seconds)):
                 lag_stale = True
+        elif resolved_identical:
+            lag_seconds = 0.0 if (
+                private_mtime is not None and public_mtime is not None
+            ) else lag_seconds
+            lag_stale = False
     except OSError:
         pass
 
@@ -457,7 +496,10 @@ def _attach_dual_write_provenance(
         "dual_write_ok": dual_write_ok,
         "private_path": str(priv) if priv is not None else None,
         "public_path": str(pub) if pub is not None else None,
-        "paths_identical": paths_identical,
+        "paths_identical": resolved_identical,
+        "content_hash_identical": content_hash_identical,
+        "private_content_hash": private_content_hash,
+        "public_content_hash": public_content_hash,
         "dual_write_lag_seconds": lag_seconds,
         "dual_write_lag_unit": "seconds_public_mtime_minus_private",
         "dual_write_lag_stale": lag_stale,
@@ -468,7 +510,8 @@ def _attach_dual_write_provenance(
             "Dual-write provenance is advisory for split-brain detection; "
             "private DATA_DIR remains the producer SSOT when paths differ. "
             "Lag uses filesystem mtimes (public - private); negative means "
-            "public is older than private."
+            "public is older than private. Content-hash equality "
+            "(trailing-newline-normalized) clears sticky lag when payloads match."
         ),
     }
     if note:

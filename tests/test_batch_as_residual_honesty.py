@@ -119,3 +119,34 @@ def test_batch_as_source_contracts():
 
     health = Path("src/monitor/health_check.py").read_text(encoding="utf-8")
     assert "_attach_dual_write_provenance" in health
+
+
+def test_attach_dual_write_content_hash_clears_lag_when_payloads_match(tmp_path):
+    """Trailing-newline-only pair → content-hash identical, lag not sticky."""
+    from src.dashboard.generator import _attach_dual_write_provenance
+
+    priv = tmp_path / "private.json"
+    pub = tmp_path / "public.json"
+    body = b'{"status": "ok", "value": 1}'
+    priv.write_bytes(body + b"\n")
+    pub.write_bytes(body)  # no trailing newline — path-different trees, same content
+    # Stagger mtimes so naive lag would look stale
+    import os, time
+    now = time.time()
+    os.utime(priv, (now, now))
+    os.utime(pub, (now - 600, now - 600))  # public 10 min older
+
+    out = _attach_dual_write_provenance(
+        {"generator_git_sha": "abc"},
+        private_path=priv,
+        public_path=pub,
+        dual_write_attempted=True,
+        dual_write_ok=True,
+        paths_identical=False,  # resolve differs
+        lag_threshold_seconds=120.0,
+    )
+    block = out["provenance_completeness"]
+    assert block["content_hash_identical"] is True
+    assert block["paths_identical"] is True  # elevated by content hash
+    assert block["dual_write_lag_stale"] is False
+    assert block["private_content_hash"] == block["public_content_hash"]
