@@ -12,8 +12,19 @@ RUN_SUCCESS = "success"
 RUN_ERROR = "error"
 RUN_TIMEOUT = "timeout"
 RUN_CANCELLED = "cancelled"
+# Intentional no-op (e.g. eval EXIT_BLOCKED=2 under kill authority) — not a failure.
+RUN_BLOCKED = "blocked"
 
-TERMINAL_RUN_STATUSES = {RUN_SUCCESS, RUN_ERROR, RUN_TIMEOUT, RUN_CANCELLED}
+TERMINAL_RUN_STATUSES = {
+    RUN_SUCCESS,
+    RUN_ERROR,
+    RUN_TIMEOUT,
+    RUN_CANCELLED,
+    RUN_BLOCKED,
+}
+
+# Process exit codes that map to intentional block (not RUN_ERROR).
+EXIT_CODE_BLOCKED = 2
 
 
 @dataclass(frozen=True)

@@ -391,6 +391,7 @@ eval:
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 2 ]; then STATUS="blocked"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
 	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \

@@ -11,7 +11,14 @@ from pathlib import Path
 from typing import Any
 
 from src.paths import PROJECT_ROOT
-from src.tasker.models import RUN_CANCELLED, RUN_ERROR, RUN_SUCCESS, RUN_TIMEOUT
+from src.tasker.models import (
+    EXIT_CODE_BLOCKED,
+    RUN_BLOCKED,
+    RUN_CANCELLED,
+    RUN_ERROR,
+    RUN_SUCCESS,
+    RUN_TIMEOUT,
+)
 from src.tasker.registry import TaskRegistry
 from src.tasker.store import TaskerStore
 
@@ -127,6 +134,9 @@ class TaskRunner:
                 status = RUN_CANCELLED
             elif process.returncode == 0:
                 status = RUN_SUCCESS
+            elif process.returncode == EXIT_CODE_BLOCKED:
+                # Evaluator/control-loop intentional skip under kill — not a hard error
+                status = RUN_BLOCKED
             else:
                 status = RUN_ERROR
             self.store.finish_run(run_id, status=status, exit_code=process.returncode, duration_seconds=duration)

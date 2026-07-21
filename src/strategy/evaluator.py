@@ -813,7 +813,10 @@ def _authority_kill_blocks_paper_actions(data_dir: Path | None = None) -> tuple[
     return is_kill_execution_blocked(payload), payload
 
 
-# Exit codes for make eval / tasker STATUS mapping (nonzero → error, not ok).
+# Exit codes for make eval / tasker STATUS mapping.
+# 0 = ok; 2 = intentional block (kill authority) → cron/tasker status "blocked"
+# (not "error" — avoids sticky scheduler degraded / failed_cron noise).
+# Other nonzero → error.
 EXIT_OK = 0
 EXIT_BLOCKED = 2  # control loop intentionally skipped (kill / authority)
 
@@ -823,8 +826,8 @@ def main() -> int:
 
     Returns:
         0 on normal paper cycle completion.
-        2 when the control loop is blocked by risk-limit kill or authority kill
-        so cron STATUS is not reported as unqualified success.
+        2 when the control loop is blocked by risk-limit kill or authority kill.
+        Makefile maps 2 → STATUS=blocked; tasker maps returncode 2 → RUN_BLOCKED.
     """
     logger.info("Strategy Evaluator Starting")
 

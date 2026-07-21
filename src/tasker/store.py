@@ -10,7 +10,13 @@ from pathlib import Path
 from typing import Any
 
 from src.paths import DATA_DIR, PUBLIC_DATA_DIR, TASKER_DB, sqlite_connect
-from src.tasker.models import RUN_CANCELLED, RUN_ERROR, RUN_SUCCESS, RUN_TIMEOUT
+from src.tasker.models import (
+    RUN_BLOCKED,
+    RUN_CANCELLED,
+    RUN_ERROR,
+    RUN_SUCCESS,
+    RUN_TIMEOUT,
+)
 from src.tasker.registry import TaskRegistry
 
 
@@ -311,7 +317,8 @@ class TaskerStore:
         if status in {RUN_ERROR, RUN_TIMEOUT}:
             failure_count += 1
             consecutive += 1
-        elif status == RUN_SUCCESS:
+        elif status in {RUN_SUCCESS, RUN_BLOCKED}:
+            # Blocked is intentional no-op (exit 2) — reset consecutive failures
             consecutive = 0
         elif status == RUN_CANCELLED:
             pass

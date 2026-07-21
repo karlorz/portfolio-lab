@@ -8,6 +8,7 @@ and regime classifications for use by the VIX term structure signal generator.
 
 import sqlite3
 import json
+import sys
 import pandas as pd
 from pathlib import Path
 import logging
@@ -15,13 +16,19 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Allow `uv run python scripts/update_vix_term_structure.py` from repo root
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+
 def update_vix_term_structure():
     """Update vix_term_structure.json with VIX/VIX3M data."""
     
     # Paths
-    data_dir = Path('data')
-    market_db = data_dir / 'market.db'
-    vix_ts_path = data_dir / 'vix_term_structure.json'
+    data_dir = _PROJECT_ROOT / "data"
+    market_db = data_dir / "market.db"
+    vix_ts_path = data_dir / "vix_term_structure.json"
     
     # Load current data
     if vix_ts_path.exists():
@@ -36,72 +43,91 @@ def update_vix_term_structure():
     conn = sqlite3.connect(market_db)
     
     try:
-        # Load VIX data
-        vix_df = pd.read_sql_query(
-            "SELECT date, close as vix FROM prices WHERE symbol = '^VIX' ORDER BY date",
-            conn
-        )
-        
-        # Load VIX3M data
+        # Load VIX3M (always present in this lab); ^VIX may be absent.
         vix3m_df = pd.read_sql_query(
             "SELECT date, close as vix3m FROM prices WHERE symbol = '^VIX3M' ORDER BY date",
-            conn
+            conn,
         )
-        
-        # Merge on date
-        merged = pd.merge(vix_df, vix3m_df, on='date', how='inner')
+        vix_df = pd.read_sql_query(
+            "SELECT date, close as vix FROM prices WHERE symbol = '^VIX' ORDER BY date",
+            conn,
+        )
+
+        if vix_df.empty and not vix3m_df.empty:
+            # VIX3M-only proxy: use VIX3M as both spot and front; mild contango
+            # placeholder for second/third (same as VIXDataManager hydrate path).
+            logger.warning(
+                "^VIX missing in market.db — building term structure from ^VIX3M only "
+                "(%d rows); contango_spot_1m will be 0 when spot==front",
+                len(vix3m_df),
+            )
+            merged = vix3m_df.copy()
+            merged["vix"] = merged["vix3m"]
+        elif vix3m_df.empty:
+            logger.error("No ^VIX3M rows in market.db")
+            return False
+        else:
+            merged = pd.merge(vix_df, vix3m_df, on="date", how="inner")
+
         logger.info(f"Merged VIX/VIX3M data: {len(merged)} rows")
         logger.info(f"Date range: {merged['date'].min()} to {merged['date'].max()}")
-        
-        # Calculate VIX/VIX3M ratio
-        merged['vix_vix3m_ratio'] = merged['vix'] / merged['vix3m']
-        
-        # Update entries
+
+        # Calculate VIX/VIX3M ratio (1.0 when VIX3M-only proxy)
+        merged["vix_vix3m_ratio"] = merged["vix"] / merged["vix3m"]
+
+        # Update entries via VIXTermStructure.from_dict so contango fields always present
+        from src.data.vix_futures import VIXTermStructure
+
         updated_count = 0
         for _, row in merged.iterrows():
-            date = row['date']
-            vix = row['vix']
-            vix3m = row['vix3m']
-            ratio = row['vix_vix3m_ratio']
-            
-            # Determine regime based on ratio
+            date = row["date"]
+            vix = float(row["vix"])
+            vix3m = float(row["vix3m"])
+            ratio = float(row["vix_vix3m_ratio"])
+
             if ratio < 0.8:
                 regime = "extreme_backwardation"
-                is_contango = False
             elif ratio < 0.95:
                 regime = "backwardation"
-                is_contango = False
             elif ratio < 1.0:
                 regime = "flat"
-                is_contango = True
             elif ratio < 1.15:
                 regime = "contango"
-                is_contango = True
             else:
                 regime = "extreme_contango"
-                is_contango = True
-            
-            # Create entry
-            entry = {
+
+            raw = {
                 "date": date,
                 "vix_spot": vix,
-                "front_month": vix3m,  # VIX3M is front month (3-month)
-                "third_month": None,  # VIX6M not available
-                "vix_vix3m_ratio": ratio,
-                "regime": regime,
-                "is_contango": is_contango,
-                "contango_spot_1m": (vix3m - vix) / vix * 100,  # Percentage
-                "contango_1m_2m": 0.0,  # Not available without VIX6M
-                "days_to_expiry_front": None
+                "front_month": vix3m,
+                "third_month": vix3m,  # no VIX6M — proxy
+                "days_to_expiry_front": 0,
             }
-            
+            try:
+                ts = VIXTermStructure.from_dict(raw)
+                entry = ts.to_dict()
+            except (TypeError, ValueError, KeyError):
+                entry = {
+                    "date": date,
+                    "vix_spot": vix,
+                    "front_month": vix3m,
+                    "second_month": vix3m,
+                    "third_month": vix3m,
+                    "contango_1m_2m": 0.0,
+                    "contango_spot_1m": (vix3m / vix - 1.0) * 100.0 if vix else 0.0,
+                    "is_contango": bool(vix3m >= vix) if vix else True,
+                    "days_to_expiry_front": 0,
+                }
+            entry["vix_vix3m_ratio"] = ratio
+            entry["regime"] = regime
+            entry["source"] = "market.db"
+            entry["as_of"] = date
             current_data[date] = entry
             updated_count += 1
-        
+
         logger.info(f"Updated {updated_count} entries")
-        
-        # Save updated data
-        with open(vix_ts_path, 'w') as f:
+
+        with open(vix_ts_path, "w") as f:
             json.dump(current_data, f, indent=2)
         
         logger.info(f"Saved vix_term_structure.json with {len(current_data)} total entries")

@@ -550,7 +550,9 @@ class VIXTermStructureSignalGenerator:
         except (OSError, RuntimeError):
             return
 
-        row = {
+        # Persist with derived contango fields so VIXDataManager / from_dict
+        # never sees sparse market.db proxy rows (Batch BE sticky-kill class).
+        raw_row = {
             "date": as_of,
             "vix_spot": levels.get("vix_spot"),
             "front_month": levels.get("front_month"),
@@ -559,6 +561,21 @@ class VIXTermStructureSignalGenerator:
             "as_of": as_of,
             "refreshed_at": datetime.now().isoformat(),
         }
+        try:
+            from src.data.vix_futures import VIXTermStructure as _VTS
+
+            # Hydrate required dataclass fields (second_month, contango_*, is_contango)
+            if raw_row.get("vix_spot") is not None and raw_row.get("front_month") is not None:
+                ts = _VTS.from_dict(raw_row)
+                row = ts.to_dict()
+                row["source"] = raw_row.get("source", "market.db")
+                row["as_of"] = as_of
+                row["refreshed_at"] = raw_row["refreshed_at"]
+            else:
+                row = raw_row
+        except (TypeError, ValueError, KeyError) as e:
+            logger.debug("VIX row hydrate skipped: %s", e)
+            row = raw_row
         try:
             historical_data[as_of] = row
             self.VIX_DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
