@@ -396,6 +396,12 @@ def _stamp_generator_git_sha(
         # or when prior was already cleared by a partial_patch path.
         out["generator_git_sha"] = sha
         out["generator_git_sha_status"] = status
+        # Batch CB: full_generate with empty last_full gets self-trail so lag
+        # forensics always has a non-null full stamp after a complete generate.
+        if status == "full_generate":
+            existing_last = out.get("last_full_generator_git_sha")
+            if existing_last in (None, ""):
+                out["last_full_generator_git_sha"] = sha
     return out
 
 

@@ -869,3 +869,66 @@ class TestGraduationCircuitBreakerProducer:
             data_dir=tmp_path,
         )
         assert p["consecutive_ok"] == 1
+
+
+    def test_signal_health_zero_of_n_blocks_streak_increment(self, tmp_path):
+        """Batch CB: SH 0/N must not climb consecutive_ok even when ops status ok."""
+        from src.monitor.health_check import update_graduation_circuit_breaker_state
+
+        # seed streak
+        seed = update_graduation_circuit_breaker_state(
+            system_status="healthy",
+            broker_circuit={"state": "closed", "fail_count": 0},
+            data_dir=tmp_path,
+        )
+        assert seed["consecutive_ok"] == 1
+
+        sh = {
+            "status": "degraded",
+            "summary": {
+                "healthy": 0,
+                "degraded": 8,
+                "unhealthy": 1,
+                "total_tracked": 9,
+            },
+        }
+        blocked = update_graduation_circuit_breaker_state(
+            system_status="ok",  # ops monitor schema often ok without SH
+            broker_circuit={"state": "closed", "fail_count": 0},
+            data_dir=tmp_path,
+            signal_health=sh,
+        )
+        # Hold streak (do not climb); status yellow for quality outage
+        assert blocked["consecutive_ok"] == 1
+        assert blocked.get("signal_health_blocked") is True
+        assert blocked["status"] == "yellow"
+
+        # Clear SH path can resume climb
+        resume = update_graduation_circuit_breaker_state(
+            system_status="healthy",
+            broker_circuit={"state": "closed", "fail_count": 0},
+            data_dir=tmp_path,
+            signal_health={
+                "status": "healthy",
+                "summary": {
+                    "healthy": 5,
+                    "degraded": 2,
+                    "unhealthy": 0,
+                    "total_tracked": 7,
+                },
+            },
+        )
+        assert resume["consecutive_ok"] == 2
+        assert resume.get("signal_health_blocked") is not True
+
+
+    def test_absent_signal_health_preserves_legacy_ops_only_climb(self, tmp_path):
+        """When SH not passed, keep pre-CB ops+broker behavior (backward compat)."""
+        from src.monitor.health_check import update_graduation_circuit_breaker_state
+
+        p = update_graduation_circuit_breaker_state(
+            system_status="healthy",
+            broker_circuit={"state": "closed", "fail_count": 0},
+            data_dir=tmp_path,
+        )
+        assert p["consecutive_ok"] == 1

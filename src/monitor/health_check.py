@@ -913,6 +913,7 @@ def update_graduation_circuit_breaker_state(
     system_status: str,
     broker_circuit: dict | None = None,
     data_dir: Path | None = None,
+    signal_health: dict | None = None,
 ) -> dict[str, Any]:
     """Persist ``DATA_DIR/.circuit_breaker.json`` consecutive_ok for graduation.
 
@@ -921,7 +922,11 @@ def update_graduation_circuit_breaker_state(
     this file the gate stays failed forever even when health looks healthy.
 
     - Healthy + broker closed → consecutive_ok += 1 (capped at 30)
-    - Otherwise → consecutive_ok reset to 0, status reflects ops/broker
+    - Batch CB: when ``signal_health`` is provided and contribution is
+      degraded/critical (e.g. SH healthy==0 of N tracked), **hold** the streak
+      (do not climb) so CB cannot greenwash a 0/N signal fleet while ops-only
+      status is ok. Reset-to-zero still applies for broker open / ops red.
+    - Otherwise (ops/broker fail) → consecutive_ok reset to 0
     """
     root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
     path = root / ".circuit_breaker.json"
@@ -936,6 +941,22 @@ def update_graduation_circuit_breaker_state(
     if broker_state in {"open", "half-open", "half_open"}:
         broker_ok = False
 
+    # Batch CB: optional SH quality gate (max-severity readiness)
+    sh_blocked = False
+    sh_contrib: str | None = None
+    if signal_health is not None:
+        try:
+            from src.dashboard.health_report import signal_health_status_contribution
+
+            sh_contrib = signal_health_status_contribution(
+                signal_health if isinstance(signal_health, dict) else None
+            )
+            if sh_contrib in {"degraded", "critical", "warning"}:
+                # 0/N healthy or majority unhealthy → freeze climb
+                sh_blocked = True
+        except Exception:  # noqa: BLE001 — never fail CB on SH import
+            sh_contrib = None
+
     prev: dict[str, Any] = {}
     if path.exists():
         try:
@@ -946,10 +967,15 @@ def update_graduation_circuit_breaker_state(
             logger.warning("Failed to read graduation CB state %s: %s", path, exc)
 
     prev_ok = int(prev.get("consecutive_ok") or 0)
-    if ops_ok and broker_ok:
+    if ops_ok and broker_ok and not sh_blocked:
         consecutive_ok = min(prev_ok + 1, 30)
         status = "green"
         trips = 0
+    elif ops_ok and broker_ok and sh_blocked:
+        # Hold streak under signal-quality outage; do not invent recovery.
+        consecutive_ok = prev_ok
+        status = "yellow"
+        trips = int(prev.get("trips") or 0)
     else:
         consecutive_ok = 0
         status = "red" if not broker_ok and broker_state in {"open", "half-open", "half_open"} else "yellow"
@@ -968,6 +994,10 @@ def update_graduation_circuit_breaker_state(
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "producer": "src.monitor.health_check.update_graduation_circuit_breaker_state",
     }
+    if sh_blocked:
+        payload["signal_health_blocked"] = True
+        if sh_contrib:
+            payload["signal_health_contribution"] = sh_contrib
     try:
         root.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(path.suffix + ".tmp")
@@ -1235,11 +1265,28 @@ def run_health_check() -> dict:
     system_status = _compute_system_status(rollup_checks, circuit)
 
     # Persist graduation consecutive_ok producer (SSOT for circuit_breaker_confidence)
+    # Batch CB: fold live dashboard signal_health when present so ops-only ok
+    # cannot climb CB while SH fleet is 0/N healthy.
     try:
+        sh_for_cb: dict | None = None
+        for candidate in (
+            Path(PUBLIC_DATA_DIR) / "health.json",
+            Path(DATA_DIR) / "health.json",
+        ):
+            if not candidate.is_file():
+                continue
+            try:
+                blob = json.loads(candidate.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                continue
+            if isinstance(blob, dict) and isinstance(blob.get("signal_health"), dict):
+                sh_for_cb = blob["signal_health"]
+                break
         grad_cb = update_graduation_circuit_breaker_state(
             system_status=system_status,
             broker_circuit=circuit,
             data_dir=DATA_DIR,
+            signal_health=sh_for_cb,
         )
     except Exception as exc:  # noqa: BLE001 — never fail health job on CB producer
         logger.warning("Graduation CB consecutive_ok producer failed: %s", exc)

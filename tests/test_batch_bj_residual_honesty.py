@@ -121,3 +121,17 @@ def test_adaptive_skips_ghost_sources_and_renorms_baseline(tmp_path):
     assert "macro_momentum" not in adapted
     assert abs(sum(adapted.values()) - 1.0) < 0.01
     assert set(adapted) <= set(base)
+
+
+def test_stamp_full_generate_sets_last_full_self_trail_when_missing():
+    """Batch CB: full_generate with empty last_full gets self-trail for lag forensics."""
+    from src.dashboard import generator as gen
+
+    with patch.object(gen, "_generator_git_sha_short", return_value="newtifulsha01"):
+        out = gen._stamp_generator_git_sha(
+            {"foo": 1, "generator_git_sha": None},
+            status="full_generate",
+        )
+    assert out["generator_git_sha"] == "newtifulsha01"
+    assert out["generator_git_sha_status"] == "full_generate"
+    assert out["last_full_generator_git_sha"] == "newtifulsha01"
