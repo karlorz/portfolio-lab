@@ -385,7 +385,7 @@ class SmartRebalancingController:
                 max_drift=max_drift,
                 drift_details=drift_details,
                 vpin=market.vpin,
-                estimated_cost_bps=0,
+                estimated_cost_bps=0.0,
                 reason=f"drift_below_threshold ({max_drift:.1%} < {drift_threshold:.1%})",
             )
 
@@ -431,7 +431,7 @@ class SmartRebalancingController:
                 max_drift=max_drift,
                 drift_details=drift_details,
                 vpin=vpin,
-                estimated_cost_bps=0,
+                estimated_cost_bps=0.0,
                 reason=f"high_toxicity_defer (VPIN={vpin:.2f} > {vpin_threshold}, defer #{self.consecutive_deferrals})",
             )
         else:
@@ -448,7 +448,7 @@ class SmartRebalancingController:
                 max_drift=max_drift,
                 drift_details=drift_details,
                 vpin=vpin,
-                estimated_cost_bps=0,
+                estimated_cost_bps=0.0,
                 reason=f"wait_for_optimal_window (next: {self.config['timing']['optimal_start']}:00 ET)",
             )
 
@@ -461,7 +461,7 @@ class SmartRebalancingController:
                     max_drift=max_drift,
                     drift_details=drift_details,
                     vpin=vpin,
-                    estimated_cost_bps=0,
+                    estimated_cost_bps=0.0,
                     reason=f"cost_budget_exceeded (YTD: {self.cost_tracker.ytd_total_bps:.1f} bps)",
                 )
 
