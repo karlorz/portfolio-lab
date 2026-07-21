@@ -289,6 +289,131 @@ def _guard_live_performance_jsonl():
         )
 
 
+# H18: live operator PUBLIC SSOT pollution guard (investigate c307–c308)
+# Deny-listed fixture SHAs that must never appear in live WWW after a suite.
+_FIXTURE_SHA_DENYLIST = (
+    "abad1dea00",
+    "deadbeef12",
+    "deadbeefcafe",
+    "unifysha1234",
+    "rebalsha12345",
+    "overlaysha123",
+    "samepathsha12",
+    "incsha123456",
+)
+_LIVE_PUBLIC_WATCHLIST = (
+    "overlay_dashboard.json",
+    "health_ops.json",
+    "health.json",
+    "adaptive_sizing.json",
+    "signals.json",
+    "rebalance_health.json",
+    "unified_dashboard.json",
+    "incidents.json",
+    "garch_cvar.json",
+)
+
+
+def _resolve_live_public_root() -> Path | None:
+    """Return live WWW public tree if it exists and is distinct from isolation dir."""
+    live = Path(
+        os.environ.get(
+            "PORTFOLIO_LAB_LIVE_PUBLIC_DATA_DIR",
+            "/var/www/portfolio-lab/data",
+        )
+    ).expanduser()
+    try:
+        if not live.is_dir():
+            return None
+    except OSError:
+        return None
+    isolated = os.environ.get("PUBLIC_DATA_DIR", "").strip()
+    if isolated:
+        try:
+            if Path(isolated).resolve() == live.resolve():
+                return None  # intentionally testing live tree
+        except OSError:
+            pass
+    return live
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _guard_live_public_ssot_pollution():
+    """Fail session if live WWW operator JSON gains fixture SHAs after pytest.
+
+    Complements H16 isolation. Size-only guards false-fail under concurrent
+    cron regen; fixture-SHA denylist catches dual-write pollution from tests
+    (investigate: abad1dea00 overlay leak). Opt out:
+      PORTFOLIO_LAB_ALLOW_LIVE_PUBLIC=1
+      PORTFOLIO_LAB_ALLOW_LIVE_WWW_MUTATION=1
+    Strict size inventory (optional, noisy with cron):
+      PORTFOLIO_LAB_STRICT_LIVE_PUBLIC_GUARD=1
+    """
+    if os.environ.get("PORTFOLIO_LAB_ALLOW_LIVE_PUBLIC", "0") == "1":
+        yield
+        return
+    if os.environ.get("PORTFOLIO_LAB_ALLOW_LIVE_WWW_MUTATION", "0") == "1":
+        yield
+        return
+    live = _resolve_live_public_root()
+    if live is None:
+        yield
+        return
+
+    strict = os.environ.get("PORTFOLIO_LAB_STRICT_LIVE_PUBLIC_GUARD", "0") == "1"
+    before_sizes: dict[str, int | None] = {}
+    if strict:
+        for name in _LIVE_PUBLIC_WATCHLIST:
+            p = live / name
+            try:
+                before_sizes[name] = p.stat().st_size if p.is_file() else None
+            except OSError:
+                before_sizes[name] = None
+
+    yield
+
+    # Fixture SHA denylist — always when isolation is active
+    polluted: list[str] = []
+    for name in _LIVE_PUBLIC_WATCHLIST:
+        p = live / name
+        try:
+            if not p.is_file() or p.stat().st_size > 2_000_000:
+                continue
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for token in _FIXTURE_SHA_DENYLIST:
+            if token in text:
+                polluted.append(f"{name} contains fixture token {token!r}")
+                break
+    if polluted:
+        pytest.fail(
+            "Live operator PUBLIC SSOT polluted during pytest (H18):\n  - "
+            + "\n  - ".join(polluted)
+            + f"\nLive root: {live}\n"
+            "Ensure PUBLIC_DATA_DIR isolation (H16) and dual-write monkeypatches. "
+            "Set PORTFOLIO_LAB_ALLOW_LIVE_WWW_MUTATION=1 to bypass."
+        )
+
+    if strict:
+        size_changes: list[str] = []
+        for name, before in before_sizes.items():
+            p = live / name
+            try:
+                after = p.stat().st_size if p.is_file() else None
+            except OSError:
+                after = None
+            if before != after:
+                size_changes.append(f"{name}: {before} → {after}")
+        if size_changes:
+            pytest.fail(
+                "Live PUBLIC watchlist size changed during pytest "
+                f"(PORTFOLIO_LAB_STRICT_LIVE_PUBLIC_GUARD=1):\n  - "
+                + "\n  - ".join(size_changes)
+                + f"\nLive root: {live}"
+            )
+
+
 @pytest.fixture(autouse=True)
 def _isolate_evaluator_data_dir(request, tmp_path, monkeypatch):
     """Point evaluator DATA_DIR at tmp so PERFORMANCE_LOG/ORDERS_LOG stay hermetic.

@@ -70,6 +70,7 @@ markers = [
     "slow: tests that take >2 seconds to complete",
     "allow_live_signal_health: opt out of generator autouse isolation for SignalHealthTracker / ensemble vote",
     "allow_live_data: opt out of evaluator DATA_DIR isolation (conftest)",
+    "allow_live_public_data: opt out of PUBLIC_DATA_DIR dual-write isolation (conftest H16; dangerous on lab hosts)",
 ]
 testpaths = ["tests"]
 pythonpath = ["."]

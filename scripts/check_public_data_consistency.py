@@ -46,7 +46,7 @@ PROVENANCE_CONTRACT_FILES = (
 # Status values that claim a successful full stamp without null sha
 _PROVENANCE_FULL_STATUSES = frozenset({"full", "full_generate"})
 
-# Artifacts that emit provenance_completeness dual-write blocks (Batch AS/AT/AV/AW)
+# Artifacts that emit provenance_completeness dual-write blocks (Batch AS/AT/AV/AW/AY)
 DUAL_WRITE_PROVENANCE_FILES = (
     "incidents.json",
     "health_ops.json",
@@ -54,6 +54,7 @@ DUAL_WRITE_PROVENANCE_FILES = (
     "rebalance_health.json",
     "garch_cvar.json",
     "overlay_dashboard.json",
+    "attribution/latest.json",
 )
 
 

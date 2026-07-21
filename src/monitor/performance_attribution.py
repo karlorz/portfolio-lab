@@ -658,19 +658,79 @@ class PerformanceAttribution:
         filename = f"attribution_{report.timestamp[:10]}.json"
         path = self.attribution_dir / filename
         payload = report.to_dict()
+        # Operator lag detection: stamp code tip when available
+        try:
+            from src.dashboard.generator import _stamp_generator_git_sha
+
+            payload = _stamp_generator_git_sha(payload)
+        except Exception:  # noqa: BLE001 — never block attribution save on stamp
+            pass
+
+        public_dir = Path(PUBLIC_DATA_DIR) / "attribution"
+        latest = public_dir / "latest.json"
+        dated = public_dir / filename
+        paths_identical = False
+        try:
+            paths_identical = path.resolve() == latest.resolve()
+        except OSError:
+            paths_identical = False
+
+        try:
+            from src.dashboard.generator import _attach_dual_write_provenance
+
+            payload = _attach_dual_write_provenance(
+                payload,
+                private_path=path,
+                public_path=latest,
+                dual_write_attempted=not paths_identical,
+                dual_write_ok=None if not paths_identical else True,
+                paths_identical=paths_identical,
+                note="public dual-write under PUBLIC_DATA_DIR/attribution/",
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
         save_results_json(payload, output_path=str(path))
         logger.info("Saved attribution report: %s", path)
         # Public latest for dual-tree SSOT / index consumers
-        try:
-            public_dir = Path(PUBLIC_DATA_DIR) / "attribution"
-            public_dir.mkdir(parents=True, exist_ok=True)
-            latest = public_dir / "latest.json"
-            dated = public_dir / filename
-            save_results_json(payload, output_path=str(latest))
-            save_results_json(payload, output_path=str(dated))
-            logger.info("Published attribution to public: %s", latest)
-        except (OSError, TypeError, ValueError) as exc:
-            logger.warning("Public attribution dual-write failed: %s", exc)
+        if not paths_identical:
+            try:
+                public_dir.mkdir(parents=True, exist_ok=True)
+                try:
+                    from src.dashboard.generator import _attach_dual_write_provenance
+
+                    payload = _attach_dual_write_provenance(
+                        payload,
+                        private_path=path,
+                        public_path=latest,
+                        dual_write_attempted=True,
+                        dual_write_ok=True,
+                        paths_identical=False,
+                        note="public dual-write under PUBLIC_DATA_DIR/attribution/",
+                    )
+                    save_results_json(payload, output_path=str(path))
+                except Exception:  # noqa: BLE001
+                    pass
+                save_results_json(payload, output_path=str(latest))
+                save_results_json(payload, output_path=str(dated))
+                logger.info("Published attribution to public: %s", latest)
+            except (OSError, TypeError, ValueError) as exc:
+                logger.warning("Public attribution dual-write failed: %s", exc)
+                try:
+                    from src.dashboard.generator import _attach_dual_write_provenance
+
+                    payload = _attach_dual_write_provenance(
+                        payload,
+                        private_path=path,
+                        public_path=latest,
+                        dual_write_attempted=True,
+                        dual_write_ok=False,
+                        paths_identical=False,
+                        note=str(exc),
+                    )
+                    save_results_json(payload, output_path=str(path))
+                except Exception:  # noqa: BLE001
+                    pass
         return path
 
     def load_latest_report(self) -> Optional[AttributionReport]:
