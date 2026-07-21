@@ -290,11 +290,56 @@ def _elevate_compact_health_status(health: dict[str, Any]) -> dict[str, Any]:
     if (kill_enabled or open_count > 0) and rank < 1:
         target, rank = "warning", 1
 
+    # Batch AO: fold signal_health_status / SH counts into max-severity rollup.
+    # Compact must not stay healthy when nested SH is degraded/unhealthy.
+    sh_status = str(health.get("signal_health_status") or "").lower()
+    sh_healthy = health.get("signal_health_healthy")
+    sh_total = health.get("signal_health_total_tracked")
+    try:
+        sh_healthy_n = int(sh_healthy) if sh_healthy is not None else None
+    except (TypeError, ValueError):
+        sh_healthy_n = None
+    try:
+        sh_total_n = int(sh_total) if sh_total is not None else None
+    except (TypeError, ValueError):
+        sh_total_n = None
+    sh_zero_healthy = (
+        sh_healthy_n is not None
+        and sh_total_n is not None
+        and sh_healthy_n == 0
+        and sh_total_n > 0
+    )
+    sh_reasons: list[str] = []
+    if sh_status in {"degraded", "warning", "warn"} or (
+        sh_zero_healthy and sh_status not in {"unhealthy", "critical", "error"}
+    ):
+        if rank < 2:
+            target, rank = "degraded", 2
+            sh_reasons.append(f"signal_health_status={sh_status or 'zero_healthy'}")
+    if sh_status in {"unhealthy", "critical", "error"}:
+        if rank < 3:
+            target, rank = "unhealthy", 3
+            sh_reasons.append(f"signal_health_status={sh_status}")
+    if sh_zero_healthy and not sh_reasons:
+        # Count-only demotion when status field absent/unknown
+        if rank < 2:
+            target, rank = "degraded", 2
+            sh_reasons.append(
+                f"signal_health_healthy=0/{sh_total_n}"
+            )
+
     if target != status and severity.get(status, 0) < rank:
         health["status"] = target
         health["status_elevated_from"] = status
-        health["status_elevate_reason"] = (
-            f"max_severity(failed_cron={failed}, scheduler={sched or 'n/a'}, "
-            f"kill={kill_enabled}, open_incidents={open_count})"
-        )
+        reason_parts = [
+            f"failed_cron={failed}",
+            f"scheduler={sched or 'n/a'}",
+            f"kill={kill_enabled}",
+            f"open_incidents={open_count}",
+        ]
+        if sh_status:
+            reason_parts.append(f"signal_health_status={sh_status}")
+        if sh_zero_healthy:
+            reason_parts.append(f"signal_health_healthy=0/{sh_total_n}")
+        health["status_elevate_reason"] = f"max_severity({', '.join(reason_parts)})"
     return health

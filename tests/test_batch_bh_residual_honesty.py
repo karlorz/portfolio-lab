@@ -103,6 +103,59 @@ def test_elevate_compact_health_status_max_severity():
     assert h2["status"] != "healthy"
 
 
+def test_elevate_compact_folds_signal_health_status_degraded():
+    """Batch AO: healthy + signal_health_status=degraded → demote to degraded."""
+    from src.dashboard.cron_scheduler_section import _elevate_compact_health_status
+
+    h = _elevate_compact_health_status(
+        {
+            "status": "healthy",
+            "signal_health_status": "degraded",
+            "signal_health_healthy": 0,
+            "signal_health_total_tracked": 9,
+            "scheduler_status": "ok",
+            "failed_cron_jobs": 0,
+        }
+    )
+    assert h["status"] == "degraded"
+    assert h.get("status_elevated_from") == "healthy"
+    reason = str(h.get("status_elevate_reason") or "")
+    assert "signal_health_status=degraded" in reason
+
+
+def test_elevate_compact_folds_signal_health_zero_healthy_counts():
+    """healthy_count==0 with total>0 demotes even if SH status field empty."""
+    from src.dashboard.cron_scheduler_section import _elevate_compact_health_status
+
+    h = _elevate_compact_health_status(
+        {
+            "status": "healthy",
+            "signal_health_healthy": 0,
+            "signal_health_total_tracked": 8,
+            "scheduler_status": "ok",
+            "failed_cron_jobs": 0,
+        }
+    )
+    assert h["status"] == "degraded"
+    assert "signal_health_healthy=0/8" in str(h.get("status_elevate_reason") or "")
+
+
+def test_elevate_compact_never_promotes_worse_status():
+    """Max-severity only — unhealthy stays unhealthy when SH is merely degraded."""
+    from src.dashboard.cron_scheduler_section import _elevate_compact_health_status
+
+    h = _elevate_compact_health_status(
+        {
+            "status": "unhealthy",
+            "signal_health_status": "degraded",
+            "scheduler_status": "ok",
+            "failed_cron_jobs": 0,
+        }
+    )
+    assert h["status"] == "unhealthy"
+    assert "status_elevated_from" not in h
+
+
 def test_cron_refresh_refuses_compact_job_count_collapse(tmp_path, monkeypatch):
     from src.dashboard.cron_scheduler_section import refresh_public_health_cron_section
     import src.paths as paths
