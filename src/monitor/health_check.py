@@ -676,6 +676,21 @@ def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
                     )
             except Exception:  # noqa: BLE001
                 pass
+            # Batch CH: ops monitor stamps full_generate with current tip on every
+            # health job. Promote that tip into last_full so lag forensics do not
+            # freeze on an older dashboard last_full after partial_patch clears
+            # live generator_git_sha (c367: last_full stuck at fa7263a while ops
+            # full_generate advanced).
+            try:
+                ops_st = str(report.get("generator_git_sha_status") or "")
+                ops_sha = report.get("generator_git_sha")
+                ops_last = report.get("last_full_generator_git_sha")
+                if ops_st == "full_generate" and ops_sha not in (None, ""):
+                    payload["last_full_generator_git_sha"] = str(ops_sha)
+                elif ops_last not in (None, ""):
+                    payload.setdefault("last_full_generator_git_sha", str(ops_last))
+            except Exception:  # noqa: BLE001
+                pass
             # H20: stamp dual-write provenance on health.json so M11 badge does not
             # depend solely on health_ops.json (merge path is partial dual-write).
             try:
