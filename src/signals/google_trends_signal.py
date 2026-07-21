@@ -78,7 +78,22 @@ class GoogleTrendsSignal:
             if not isinstance(raw, dict) or not raw:
                 self._data = None
                 return
-            self._data = raw
+            # Batch CT: drop _meta / underscore keys; only term→{date→volume}
+            cleaned: Dict[str, Dict[str, int]] = {}
+            for term, series in raw.items():
+                if str(term).startswith("_"):
+                    continue
+                if not isinstance(series, dict):
+                    continue
+                series_clean: Dict[str, int] = {}
+                for d, v in series.items():
+                    try:
+                        series_clean[str(d)] = int(v)
+                    except (TypeError, ValueError):
+                        continue
+                if series_clean:
+                    cleaned[str(term)] = series_clean
+            self._data = cleaned or None
             self._last_load = datetime.now()
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to load Google Trends data: %s", e)

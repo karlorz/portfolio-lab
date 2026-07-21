@@ -255,12 +255,43 @@ def main():
     # Ensure output directory exists
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Batch CT: sidecar meta for ops freshness (signal loader ignores non-dict series)
+    latest_dates: list[str] = []
+    for term_data in data.values():
+        if isinstance(term_data, dict) and term_data:
+            latest_dates.append(max(term_data.keys()))
+    latest = max(latest_dates) if latest_dates else None
+    meta = {
+        "schema": "google-trends-cache/v1",
+        "fetched_at": datetime.now().isoformat(),
+        "days_requested": int(args.days),
+        "terms": list(data.keys()),
+        "term_count": len(data),
+        "latest_observation": latest,
+        "cache_merged": not args.no_cache_merge,
+        "rate_limited_partial": bool(rate_limited),
+        "note": (
+            "Term series are SSOT for GoogleTrendsSignal; _meta is ops provenance. "
+            "Signal loader skips non dict[str,int] values."
+        ),
+    }
+    payload = dict(data)
+    payload["_meta"] = meta
+
     # Write JSON
-    output_path.write_text(json.dumps(data, indent=2, sort_keys=True))
-    logger.info("Saved %d terms to %s", len(data), output_path)
+    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    logger.info(
+        "Saved %d terms to %s (latest=%s rate_limited=%s)",
+        len(data),
+        output_path,
+        latest,
+        rate_limited,
+    )
 
     # Summary
     for term, term_data in data.items():
+        if not isinstance(term_data, dict):
+            continue
         values = list(term_data.values())
         avg = sum(values) / len(values) if values else 0
         recent = values[-7:] if len(values) >= 7 else values

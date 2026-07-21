@@ -2780,6 +2780,21 @@ class DashboardGenerator:
         try:
             from src.monitor.health_check import run_health_check
             health_report = _load_canonical_health_report() or run_health_check()
+            # Batch CT: canonical WWW health.json may embed pre-CQ/CR/CS
+            # signal_health quality_disclosure (sticky freeze@46d age). Rebuild
+            # SH section live so compact freeze/stale matches current thresholds
+            # and ensemble_weights mtime — do not trust lagging published SH.
+            if isinstance(health_report, dict):
+                try:
+                    health_report = dict(health_report)
+                    health_report["signal_health"] = build_signal_health_section(
+                        resolve_labels=False
+                    )
+                except Exception as sh_exc:  # noqa: BLE001
+                    logger.warning(
+                        "live signal_health rebuild for compact skipped: %s",
+                        sh_exc,
+                    )
             output["health"] = _compact_health_summary(health_report)
         except Exception as e:
             output["health"] = _compact_health_summary({"status": "error", "error": str(e)})
