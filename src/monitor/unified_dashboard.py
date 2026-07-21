@@ -1280,6 +1280,30 @@ def _save_unified_dashboard(dashboard: Dict[str, Any]) -> list:
         )
         tmp_path.replace(public_path)
         written.append(public_path)
+        # Batch CJ: recompute lag/hash after both trees exist (clears sticky
+        # dual_write_lag_stale frozen from pre-write public mtime).
+        try:
+            from src.dashboard.generator import finalize_dual_write_provenance_after_sync
+
+            dashboard = finalize_dual_write_provenance_after_sync(
+                dashboard,
+                private_path=private_path,
+                public_path=public_path,
+                dual_write_ok=True,
+                note=(
+                    f"post_sync unified dual-write (Batch CJ); section_score={score}"
+                ),
+            )
+            pc = dashboard.get("provenance_completeness")
+            if isinstance(pc, dict):
+                pc["section_score"] = score
+                # Persist score into both trees (finalize already wrote body once)
+                from src.backtest.metrics import save_results_json as _save_ud
+
+                _save_ud(dashboard, output_path=str(private_path))
+                _save_ud(dashboard, output_path=str(public_path))
+        except Exception:  # noqa: BLE001 — never block save on post-sync stamp
+            pass
         logger.info(
             "Public dual-write unified dashboard to %s (section_score=%s)",
             public_path,

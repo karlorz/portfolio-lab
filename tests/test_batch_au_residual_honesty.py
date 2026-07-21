@@ -13,8 +13,9 @@ def test_dual_write_lag_seconds_public_behind_private(tmp_path):
 
     private = tmp_path / "private.json"
     public = tmp_path / "public.json"
-    private.write_text("{}")
-    public.write_text("{}")
+    # Different content so content-hash identity does not clear lag
+    private.write_text('{"v":1}')
+    public.write_text('{"v":0,"stale":true}')
     # Make public older than private by ~5s
     now = time.time()
     os.utime(public, (now - 10, now - 10))
@@ -33,6 +34,7 @@ def test_dual_write_lag_seconds_public_behind_private(tmp_path):
     assert pc["dual_write_lag_seconds"] is not None
     assert pc["dual_write_lag_seconds"] < -5.0
     assert pc["dual_write_lag_stale"] is True
+    assert pc["content_hash_identical"] is False
     assert pc["private_mtime"] is not None
     assert pc["public_mtime"] is not None
     assert pc["public_mtime"] < pc["private_mtime"]
@@ -77,8 +79,11 @@ def test_dual_write_lag_null_when_paths_identical(tmp_path):
         paths_identical=True,
     )
     pc = out["provenance_completeness"]
-    assert pc["dual_write_lag_seconds"] is None
+    # Same path / content-hash identical → lag not stale; lag seconds may be
+    # 0.0 (resolved identical) rather than null.
     assert pc["dual_write_lag_stale"] is False
+    assert pc["paths_identical"] is True
+    assert pc["dual_write_lag_seconds"] in (None, 0.0)
 
 
 def test_canary_warns_on_dual_write_lag_stale(tmp_path):

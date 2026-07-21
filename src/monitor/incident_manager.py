@@ -378,6 +378,24 @@ class IncidentManager:
                 tmp.write_text(body, encoding="utf-8")
                 tmp.replace(public_summary)
                 dual_ok = True
+                # Batch CJ: post-sync lag/hash so sticky dual_write_lag_stale clears
+                try:
+                    from src.dashboard.generator import (
+                        finalize_dual_write_provenance_after_sync,
+                    )
+
+                    summary = finalize_dual_write_provenance_after_sync(
+                        summary,
+                        private_path=self.summary_path,
+                        public_path=public_summary,
+                        dual_write_ok=True,
+                        note=(
+                            "post_sync incidents dual-write (Batch CJ); public is "
+                            "copy of private summary_path SSOT (Batch BI)"
+                        ),
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
                 # Content-addressed catalog must update digests after partial write
                 try:
                     from src.dashboard.public_data_index import (

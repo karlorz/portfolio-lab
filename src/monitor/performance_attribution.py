@@ -714,6 +714,23 @@ class PerformanceAttribution:
                 save_results_json(payload, output_path=str(latest))
                 save_results_json(payload, output_path=str(dated))
                 logger.info("Published attribution to public: %s", latest)
+                # Batch CJ: post-sync lag/hash on private + public latest
+                try:
+                    from src.dashboard.generator import (
+                        finalize_dual_write_provenance_after_sync,
+                    )
+
+                    payload = finalize_dual_write_provenance_after_sync(
+                        payload,
+                        private_path=path,
+                        public_path=latest,
+                        dual_write_ok=True,
+                        note="post_sync attribution dual-write (Batch CJ)",
+                    )
+                    # dated public copy should match finalized private body
+                    save_results_json(payload, output_path=str(dated))
+                except Exception:  # noqa: BLE001
+                    pass
                 # H19/BI: keep public index catalog current without full dashboard
                 try:
                     from src.dashboard.public_data_index import (

@@ -46,7 +46,10 @@ def test_unified_save_dual_write_stamps_provenance(tmp_path, monkeypatch):
         pc = body["provenance_completeness"]
         assert pc["dual_write_attempted"] is True
         assert pc["dual_write_ok"] is True
-        assert pc["paths_identical"] is False
+        # After dual-write, content-hash identity may set paths_identical True
+        # for lag purposes (Batch content-hash / CJ post-sync). Path strings still differ.
+        assert pc["private_path"] != pc["public_path"]
+        assert pc.get("dual_write_lag_stale") is False
         assert pc["section_score"] >= 1
 
 

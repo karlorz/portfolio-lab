@@ -40,7 +40,9 @@ def test_rebalance_health_main_dual_write_provenance(tmp_path, monkeypatch):
         pc = body["provenance_completeness"]
         assert pc["dual_write_attempted"] is True
         assert pc["dual_write_ok"] is True
-        assert pc["paths_identical"] is False
+        # Content-hash post-sync may set paths_identical for lag; strings still differ
+        assert pc["private_path"] != pc["public_path"]
+        assert pc.get("dual_write_lag_stale") is False
 
 
 def test_garch_public_payload_source_has_dual_write_provenance():

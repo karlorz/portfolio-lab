@@ -51,7 +51,9 @@ def test_incident_write_summary_includes_provenance_completeness(tmp_path, monke
     assert pc["generator_git_sha_present"] is True
     assert pc["dual_write_attempted"] is True
     assert pc["dual_write_ok"] is True
-    assert pc["paths_identical"] is False
+    # Path strings differ; content-hash post-sync may mark paths_identical for lag
+    assert "public" in str(pc.get("public_path") or "")
+    assert pc.get("dual_write_lag_stale") is False
     # Public dual-write materialised
     public_body = json.loads((public / "incidents.json").read_text(encoding="utf-8"))
     assert public_body["provenance_completeness"]["dual_write_ok"] is True

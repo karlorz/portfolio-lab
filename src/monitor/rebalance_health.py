@@ -357,6 +357,19 @@ def main():
             except Exception:  # noqa: BLE001
                 pass
             save_results_json(data, output_path=str(public_path))
+            # Batch CJ: honest lag/hash after both trees exist
+            try:
+                from src.dashboard.generator import finalize_dual_write_provenance_after_sync
+
+                data = finalize_dual_write_provenance_after_sync(
+                    data,
+                    private_path=private_path,
+                    public_path=public_path,
+                    dual_write_ok=True,
+                    note="post_sync rebalance_health dual-write (Batch CJ)",
+                )
+            except Exception:  # noqa: BLE001
+                pass
         except OSError as exc:
             logger.warning("Public rebalance_health dual-write failed: %s", exc)
             try:

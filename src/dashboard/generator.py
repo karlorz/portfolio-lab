@@ -520,6 +520,93 @@ def _attach_dual_write_provenance(
     return out
 
 
+def finalize_dual_write_provenance_after_sync(
+    payload: Dict[str, Any],
+    *,
+    private_path: str | Path,
+    public_path: str | Path,
+    dual_write_ok: bool = True,
+    note: str | None = None,
+    lag_threshold_seconds: float = 120.0,
+    write_json: bool = True,
+) -> Dict[str, Any]:
+    """Recompute dual-write lag/hash **after** both trees exist on disk (Batch CJ).
+
+    Producers often stamp provenance *before* the public write, freezing the
+    previous public mtime into ``dual_write_lag_stale=true`` forever even when
+    the subsequent dual-write succeeds and content hashes match. Call this
+    after both files are written (or after public replace) so lag/hash reflect
+    post-sync reality. Optionally rewrites private + public with the honest
+    block so operator canaries clear.
+
+    Deep-research: content-hash / sync_verified events beat sticky pre-write
+    lag gauges.
+    """
+    priv = Path(private_path)
+    pub = Path(public_path)
+    paths_identical = False
+    try:
+        paths_identical = priv.resolve() == pub.resolve()
+    except OSError:
+        paths_identical = False
+
+    stamped = _attach_dual_write_provenance(
+        payload,
+        private_path=priv,
+        public_path=pub,
+        dual_write_attempted=not paths_identical,
+        dual_write_ok=dual_write_ok if not paths_identical else True,
+        paths_identical=paths_identical,
+        note=note
+        or (
+            "post_sync dual-write provenance (Batch CJ): lag/hash after both "
+            "trees exist"
+        ),
+        lag_threshold_seconds=lag_threshold_seconds,
+    )
+    if not write_json:
+        return stamped
+
+    body = json.dumps(stamped, indent=2, default=str) + "\n"
+    try:
+        priv.parent.mkdir(parents=True, exist_ok=True)
+        tmp_p = priv.with_suffix(priv.suffix + ".postsync.tmp")
+        tmp_p.write_text(body, encoding="utf-8")
+        tmp_p.replace(priv)
+        if not paths_identical:
+            pub.parent.mkdir(parents=True, exist_ok=True)
+            tmp_u = pub.with_suffix(pub.suffix + ".postsync.tmp")
+            tmp_u.write_text(body, encoding="utf-8")
+            tmp_u.replace(pub)
+        # Second pass: mtimes now both post-sync; refresh lag/hash once more
+        stamped = _attach_dual_write_provenance(
+            stamped,
+            private_path=priv,
+            public_path=pub,
+            dual_write_attempted=not paths_identical,
+            dual_write_ok=True if dual_write_ok or paths_identical else dual_write_ok,
+            paths_identical=paths_identical,
+            note=note
+            or (
+                "post_sync dual-write provenance (Batch CJ): lag/hash after both "
+                "trees exist"
+            ),
+            lag_threshold_seconds=lag_threshold_seconds,
+        )
+        body2 = json.dumps(stamped, indent=2, default=str) + "\n"
+        tmp_p = priv.with_suffix(priv.suffix + ".postsync.tmp")
+        tmp_p.write_text(body2, encoding="utf-8")
+        tmp_p.replace(priv)
+        if not paths_identical:
+            tmp_u = pub.with_suffix(pub.suffix + ".postsync.tmp")
+            tmp_u.write_text(body2, encoding="utf-8")
+            tmp_u.replace(pub)
+    except OSError:
+        # Best-effort; return last stamped payload even if rewrite fails
+        pass
+    return stamped
+
+
 def _finalize_signal_metadata(output: Dict, *, finalized_at: str | None = None) -> Dict:
     """Stamp final artifact metadata after all signal sections are assembled."""
     timestamp = finalized_at or datetime.now(timezone.utc).isoformat()
