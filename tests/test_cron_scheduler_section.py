@@ -225,3 +225,75 @@ def test_refresh_public_health_also_updates_signals_health_compact(tmp_path: Pat
     assert health["failed_cron_jobs"] == 0
     assert health["status"] == "healthy"
     assert health.get("cron_section_refreshed_at")
+
+
+def test_refresh_cron_section_folds_signal_health_zero_of_n(tmp_path: Path) -> None:
+    """Partial cron refresh must not greenwash system_status when SH is 0/N (c340/c359)."""
+    data_dir = tmp_path / "data"
+    public_dir = tmp_path / "public"
+    data_dir.mkdir()
+    public_dir.mkdir()
+    (data_dir / "cron_status.json").write_text(
+        json.dumps(
+            {
+                "backend": "tasker",
+                "jobs": [
+                    {
+                        "name": "portfolio-lab-data",
+                        "status": "success",
+                        "last_run": "2026-07-21T18:06:00+00:00",
+                        "enabled": True,
+                        "state": "scheduled",
+                    },
+                    {
+                        "name": "portfolio-lab-health",
+                        "status": "success",
+                        "last_run": "2026-07-21T18:00:00+00:00",
+                        "enabled": True,
+                        "state": "scheduled",
+                    },
+                ],
+            }
+        )
+    )
+    health_path = public_dir / "health.json"
+    health_path.write_text(
+        json.dumps(
+            {
+                "system_status": "degraded",
+                "signal_health": {
+                    "status": "degraded",
+                    "overall_health": "degraded",
+                    "summary": {
+                        "healthy": 0,
+                        "degraded": 6,
+                        "unhealthy": 3,
+                        "total_tracked": 9,
+                    },
+                },
+                "cron_jobs": [],
+                "scheduler_status": {"status": "ok", "backends": {}},
+                "data_freshness": {},
+                "data_pipeline_slo": {"status": "ok"},
+            }
+        )
+    )
+
+    wrote = refresh_public_health_cron_section(
+        public_health_path=health_path,
+        cron_status_file=data_dir / "cron_status.json",
+    )
+    assert wrote is True
+    health = json.loads(health_path.read_text())
+    assert health["system_status"] == "degraded"
+    # SH section must survive the partial rewrite
+    assert health["signal_health"]["summary"]["healthy"] == 0
+
+
+def test_refresh_cron_section_source_passes_signal_health_kwarg() -> None:
+    """Guard: cron partial path must pass signal_health into derive_system_status."""
+    src = Path("src/dashboard/cron_scheduler_section.py").read_text(encoding="utf-8")
+    assert "signal_health=" in src
+    assert 'payload.get("signal_health")' in src
+    # Must not call derive without the SH kwarg nearby (Batch BZ)
+    assert "signal_health=sh" in src

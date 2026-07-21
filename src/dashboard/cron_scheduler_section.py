@@ -156,6 +156,10 @@ def refresh_public_health_cron_section(
             isinstance(b, dict) and b.get("status") == "error"
             for b in (payload.get("scheduler_status") or {}).get("backends", {}).values()
         )
+        # Batch BZ / c340: recompute from cron/SLO dims (current=healthy base) but
+        # always fold signal_health so SH 0/N cannot be greenwashed by a partial
+        # cron-only rewrite. SH fold is max-severity with other dims (Batch BN).
+        sh = payload.get("signal_health")
         payload["system_status"] = derive_system_status(
             current="healthy",
             backend_error=backend_error,
@@ -163,6 +167,7 @@ def refresh_public_health_cron_section(
             slo_status=slo_status,
             failed_jobs=failed_jobs,
             stale_count=stale_count,
+            signal_health=sh if isinstance(sh, dict) else None,
         )
     except Exception:  # noqa: BLE001 — leave prior system_status
         pass
