@@ -47,6 +47,7 @@ help:
 	@echo "  make test-generator  Only tests/test_generator.py (heavy dashboard path)"
 	@echo "  make test-integration  Path-selected *integration* / e2e modules (S18)"
 	@echo "  make test-fast    Ensemble/signal subset only (not full unit; <2m target)"
+	@echo "  S18b suite cron: OPTIONAL (commented in crontab; not in CRON_TARGETS/tasker)"
 	@echo "  make test-ml-extract  Run extracted ML-kernel tests (safe: ML disabled)"
 	@echo "  make test-ml      Run full test suite including ML (requires torch/sklearn)"
 	@echo "  make test-isolation  Run top-20 failing files individually (bypasses pollution)"

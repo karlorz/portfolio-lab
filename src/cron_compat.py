@@ -44,6 +44,16 @@ CRON_TARGETS = [
     "portfolio-lab-prune-logs",
 ]
 
+# S18b: optional suite segments — NOT production cron jobs (not in CRON_TARGETS /
+# tasker / cron_status). Documented Makefile targets + commented crontab fallback
+# only. Enable carefully: full suite ~28m under 6GB; unit segment is lighter.
+# Mapping: job-id → Makefile target
+OPTIONAL_SUITE_TARGETS = {
+    "portfolio-lab-test-unit": "test-unit",       # generator+integration ignored
+    "portfolio-lab-test-generator": "test-generator",
+    "portfolio-lab-test-full": "test",            # full safe gate (3600s)
+}
+
 # Expected max duration per job (seconds). Exceeding 2x this triggers alerts.
 CRON_EXPECTED_DURATIONS = {
     "portfolio-lab-data": 300,      # 5 min — bun fetch-data

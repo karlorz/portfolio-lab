@@ -175,7 +175,9 @@ export function normalizeBondMomentumData(
         signals,
         timestamp: typeof raw.timestamp === 'string' ? raw.timestamp : undefined,
         ensemble: isRecord(raw.ensemble)
-          ? (raw.ensemble as BondMomentumEnsemble)
+          // Cast via unknown: UnknownRecord is not structurally assignable to
+          // BondMomentumEnsemble under strict TS (2025 unknown-first pattern).
+          ? (raw.ensemble as unknown as BondMomentumEnsemble)
           : undefined,
       },
     };

@@ -61,3 +61,14 @@
 
 # Log pruning — daily at 03:03 (DISABLED: owned by tasker portfolio-lab-prune-logs)
 # 3 3 * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab prune-logs >> /root/projects/portfolio-lab/data/prune_logs.log 2>&1
+
+# ── S18b optional suite segments (NOT tasker/CRON_TARGETS; emergency/local only) ──
+# Full safe suite is the merge gate (`make test`, ~28m, 6GB VSZ). Unit segment
+# excludes generator + *integration* paths for faster wall-clock feedback.
+# Do NOT enable on production tasker without capacity review (CPU + dual-write risk).
+# Weekly unit segment — Sundays 04:17 (DISABLED)
+# 17 4 * * 0 CRON_BACKEND=crontab make -C /root/projects/portfolio-lab test-unit >> /root/projects/portfolio-lab/data/test_unit.log 2>&1
+# Monthly full safe suite — 1st of month 03:17 (DISABLED)
+# 17 3 1 * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab test >> /root/projects/portfolio-lab/data/test_full.log 2>&1
+# Generator-only smoke — optional (DISABLED)
+# 17 5 * * 0 CRON_BACKEND=crontab make -C /root/projects/portfolio-lab test-generator >> /root/projects/portfolio-lab/data/test_generator.log 2>&1
