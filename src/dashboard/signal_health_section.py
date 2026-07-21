@@ -96,6 +96,28 @@ def attach_signal_quality_disclosure(
             "Do not promote ensemble weights; investigate IC/accuracy on "
             "degraded sleeves; optional hard-zero unhealthy arms (ADR pending)."
         )
+    # Batch CP: disclose when fleet is under collapsed_recency thresholds
+    collapsed_n = int(summary.get("window_collapse_90_60_count") or 0)
+    if collapsed_n > 0 or zero_healthy:
+        try:
+            from src.signals.health_tracker import (
+                HEALTH_THRESHOLD_HEALTHY_COLLAPSED,
+                HEALTH_THRESHOLD_HEALTHY_FULL,
+                status_thresholds_for_scheme,
+            )
+
+            quality["threshold_policy"] = {
+                "full_scheme_healthy_min": HEALTH_THRESHOLD_HEALTHY_FULL,
+                "collapsed_scheme_healthy_min": HEALTH_THRESHOLD_HEALTHY_COLLAPSED,
+                "window_collapse_90_60_count": collapsed_n,
+                "note": (
+                    "Under collapsed_recency_40_60, healthy uses "
+                    f"{HEALTH_THRESHOLD_HEALTHY_COLLAPSED} not "
+                    f"{HEALTH_THRESHOLD_HEALTHY_FULL} (Batch CP / c328)."
+                ),
+            }
+        except Exception:  # noqa: BLE001
+            pass
         # List worst sleeves for runbook
         scores = out.get("scores")
         worst: list[dict[str, Any]] = []

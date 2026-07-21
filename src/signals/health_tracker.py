@@ -48,10 +48,55 @@ STATE_PATH = DATA_DIR / ".signal_health_state.json"
 from src.signals.signal_source import SignalSource  # canonical, consolidated May 2026
 
 class SignalHealthStatus(Enum):
-    """Health status classification."""
-    HEALTHY = "healthy"  # health >= 0.7
-    DEGRADED = "degraded"  # 0.5 <= health < 0.7
-    UNHEALTHY = "unhealthy"  # health < 0.5
+    """Health status classification.
+
+    Absolute cutoffs depend on ``weight_scheme`` (see
+    ``status_thresholds_for_scheme``). Full multi-window history uses the
+    classic 0.7 / 0.5 bands; collapsed 90/60 recency schemes use lower
+    healthy bounds so 0/N is not structural when max score ~0.58.
+    """
+
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    UNHEALTHY = "unhealthy"
+
+
+# Full independent 90/60/30 windows (Batch classic)
+HEALTH_THRESHOLD_HEALTHY_FULL = 0.70
+HEALTH_THRESHOLD_DEGRADED_FULL = 0.50
+# Collapsed recency (Batch CP / c328): 90d≡60d so score is 0.4*a60+0.6*a30.
+# Empirically fleet tops ~0.58; 0.7 is unreachable → permanent 0/N healthy.
+HEALTH_THRESHOLD_HEALTHY_COLLAPSED = 0.55
+HEALTH_THRESHOLD_DEGRADED_COLLAPSED = 0.48
+
+
+def status_thresholds_for_scheme(weight_scheme: str | None) -> tuple[float, float]:
+    """Return (healthy_min, degraded_min) for a health weight scheme.
+
+    Batch CP: scheme-aware thresholds so window collapse does not force
+    structural zero-healthy while ops is green (capture c328).
+    """
+    scheme = str(weight_scheme or "full_50_30_20")
+    if scheme.startswith("collapsed") or "collapsed_recency" in scheme:
+        return (
+            HEALTH_THRESHOLD_HEALTHY_COLLAPSED,
+            HEALTH_THRESHOLD_DEGRADED_COLLAPSED,
+        )
+    return (HEALTH_THRESHOLD_HEALTHY_FULL, HEALTH_THRESHOLD_DEGRADED_FULL)
+
+
+def classify_health_status(
+    health_score: float,
+    *,
+    weight_scheme: str | None = None,
+) -> str:
+    """Map a numeric health score to healthy/degraded/unhealthy."""
+    healthy_min, degraded_min = status_thresholds_for_scheme(weight_scheme)
+    if health_score >= healthy_min:
+        return SignalHealthStatus.HEALTHY.value
+    if health_score >= degraded_min:
+        return SignalHealthStatus.DEGRADED.value
+    return SignalHealthStatus.UNHEALTHY.value
 
 @dataclass
 class SignalPrediction:
@@ -523,13 +568,9 @@ class SignalHealthTracker:
         # positive → recent better than mid; negative → recent worse (decay)
         decay_rate = (accuracies['30d'] - accuracies['60d']) / 30 if counts['60d'] > 0 else 0
         
-        # Determine status
-        if health >= 0.7:
-            status = SignalHealthStatus.HEALTHY.value
-        elif health >= 0.5:
-            status = SignalHealthStatus.DEGRADED.value
-        else:
-            status = SignalHealthStatus.UNHEALTHY.value
+        # Batch CP: scheme-aware status cutoffs (collapsed cannot hit 0.7)
+        scheme = str(weights["weight_scheme"])
+        status = classify_health_status(health, weight_scheme=scheme)
         
         return HealthScore(
             source=source,
@@ -544,7 +585,7 @@ class SignalHealthTracker:
             ic=self.compute_ic(source, end_date=end_date),
             ic_half_life_days=self.compute_ic_half_life(source, end_date=end_date),
             window_collapse_90_60=bool(weights["window_collapse_90_60"]),
-            weight_scheme=str(weights["weight_scheme"]),
+            weight_scheme=scheme,
             weight_60d=float(weights["weight_60d"]),
             weight_30d=float(weights["weight_30d"]),
             weight_90d=float(weights["weight_90d"]),
@@ -943,7 +984,7 @@ class SignalHealthTracker:
             rows = cursor.fetchall()
 
         if len(rows) < 3:
-            logger.info("Insufficient data for IC: source=%s, rows=%d", source, len(rows))
+            logger.debug("Insufficient data for IC: source=%s, rows=%d", source, len(rows))
             return None
 
         signals = [r[0] for r in rows]
@@ -986,7 +1027,7 @@ class SignalHealthTracker:
             offset += step_days
 
         if len(ics) < min_periods:
-            logger.info(
+            logger.debug(
                 "Insufficient IC windows for half-life: source=%s, windows=%d",
                 source,
                 len(ics),
