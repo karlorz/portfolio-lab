@@ -154,6 +154,8 @@ test:
 	bash -c 'ulimit -v 6291456; \
 		PUBLIC_TMP=$$(mktemp -d /tmp/plab-pytest-public.XXXXXX); \
 		mkdir -p "$$PUBLIC_TMP/data"; \
+		if [ -f public/data/prices.json ]; then cp -a public/data/prices.json "$$PUBLIC_TMP/data/"; \
+		elif [ -f data/prices.json ]; then cp -a data/prices.json "$$PUBLIC_TMP/data/"; fi; \
 		export PUBLIC_DATA_DIR="$$PUBLIC_TMP/data"; \
 		export PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA=1; \
 		timeout 3600 uv run pytest tests/ -q --tb=short -p no:cacheprovider; \

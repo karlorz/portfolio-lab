@@ -53,6 +53,34 @@ import pytest
 _ISOLATED_PUBLIC_DATA_DIR: Path | None = None
 
 
+def _seed_isolated_public_fixtures(public: Path) -> None:
+    """Copy minimal price/public fixtures into hermetic PUBLIC_DATA_DIR.
+
+    Many integration/backtest tests resolve ``PRICES_JSON`` via PUBLIC_DATA_DIR
+    (H16 isolation). An empty mktemp tree yields ~100 FileNotFoundError fails
+    for prices.json even when market.db is available. Seed from repo fixtures
+    when present; never touch live WWW.
+    """
+    import shutil
+
+    repo_root = Path(__file__).resolve().parent.parent
+    candidates = [
+        repo_root / "public" / "data" / "prices.json",
+        repo_root / "data" / "prices.json",
+        repo_root / "tests" / "fixtures" / "prices.json",
+    ]
+    dest = public / "prices.json"
+    if dest.exists():
+        return
+    for src in candidates:
+        if src.is_file() and src.stat().st_size > 0:
+            try:
+                shutil.copy2(src, dest)
+            except OSError:
+                continue
+            break
+
+
 def _bootstrap_public_data_dir_isolation() -> Path | None:
     """Ensure PUBLIC_DATA_DIR points at a hermetic temp tree for the session."""
     global _ISOLATED_PUBLIC_DATA_DIR
@@ -63,6 +91,7 @@ def _bootstrap_public_data_dir_isolation() -> Path | None:
         # Caller (Makefile) already isolated — remember path for rebind fixtures
         _ISOLATED_PUBLIC_DATA_DIR = Path(existing).expanduser()
         _ISOLATED_PUBLIC_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        _seed_isolated_public_fixtures(_ISOLATED_PUBLIC_DATA_DIR)
         return _ISOLATED_PUBLIC_DATA_DIR
     base = Path(tempfile.mkdtemp(prefix="plab-pytest-public-"))
     public = base / "data"
@@ -70,6 +99,7 @@ def _bootstrap_public_data_dir_isolation() -> Path | None:
     os.environ["PUBLIC_DATA_DIR"] = str(public)
     # Prevent resolve_* fallbacks from preferring live WWW if env is cleared
     os.environ.setdefault("PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA", "1")
+    _seed_isolated_public_fixtures(public)
     _ISOLATED_PUBLIC_DATA_DIR = public
     return public
 
