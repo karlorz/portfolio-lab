@@ -267,7 +267,13 @@ class TestEnsembleBanditDailyRewardPersistence:
     def test_apply_daily_bandit_rewards_increments_and_persists(self, tmp_path):
         voter = EnsembleVoter(data_path=tmp_path)
         assert voter.bandit_observations == 0
-        summary = voter.apply_daily_bandit_rewards(0.001, regime_name="NORMAL", persist=True)
+        # Batch BO: multi-arm identical portfolio reward is skipped; use single arm
+        summary = voter.apply_daily_bandit_rewards(
+            0.001,
+            regime_name="NORMAL",
+            sources=["multi_speed_momentum"],
+            persist=True,
+        )
         assert summary["skipped"] is False
         assert summary["updates"] >= 1
         assert summary["observations"] == voter.bandit_observations
@@ -333,22 +339,44 @@ class TestBanditWarmupDaySemantics:
     def test_apply_daily_counts_one_warmup_day(self, tmp_path):
         voter = EnsembleVoter(data_path=tmp_path)
         assert getattr(voter, "bandit_days", 0) == 0
-        summary = voter.apply_daily_bandit_rewards(0.001, regime_name="NORMAL", persist=True)
-        # One calendar step regardless of source count
+        # Single-arm path (multi-arm identical broadcast is skipped — Batch BO)
+        summary = voter.apply_daily_bandit_rewards(
+            0.001,
+            regime_name="NORMAL",
+            sources=["multi_speed_momentum"],
+            persist=True,
+        )
+        # One calendar step
         assert summary.get("days", summary.get("bandit_days")) == 1 or voter.bandit_days == 1
         assert voter.bandit_days == 1
-        # Arm history may still receive N source updates
-        assert summary["updates"] >= 2
+        assert summary["updates"] == 1
         assert voter.bandit_observations == summary["updates"]
+
+    def test_multi_arm_identical_reward_skipped(self, tmp_path):
+        """Batch BO: portfolio PnL broadcast to all arms does not poison history."""
+        voter = EnsembleVoter(data_path=tmp_path)
+        summary = voter.apply_daily_bandit_rewards(
+            0.002, regime_name="NORMAL", persist=True
+        )
+        assert summary["skipped"] is True
+        assert summary["reason"] == "identical_portfolio_reward_all_arms"
+        assert summary["updates"] == 0
+        assert voter.bandit_observations == 0
+        assert voter.bandit_days == 0
 
     def test_blend_uses_days_not_arm_observations(self, tmp_path):
         from src.strategy.ensemble_voter import BANDIT_WARMUP_DAYS, BANDIT_MAX_BLEND
         voter = EnsembleVoter(data_path=tmp_path)
-        # Simulate 9 arm updates via one daily apply (production path)
-        voter.apply_daily_bandit_rewards(0.002, regime_name="NORMAL", persist=False)
+        # One calendar day via single-arm reward (not 9× identical broadcast)
+        voter.apply_daily_bandit_rewards(
+            0.002,
+            regime_name="NORMAL",
+            sources=["multi_speed_momentum"],
+            persist=False,
+        )
         status = voter.get_adaptive_learning_status("NORMAL")
         bandit = status["bandit"]
-        # Day progress: 1/252 of max blend, NOT 9/252
+        # Day progress: 1/252 of max blend
         expected = min(BANDIT_MAX_BLEND, 1 / BANDIT_WARMUP_DAYS * BANDIT_MAX_BLEND)
         # status publishes current_blend rounded to 4 decimals
         assert abs(bandit["current_blend"] - round(expected, 4)) < 1e-9
@@ -360,8 +388,18 @@ class TestBanditWarmupDaySemantics:
 
     def test_bandit_days_persist_across_reload(self, tmp_path):
         voter = EnsembleVoter(data_path=tmp_path)
-        voter.apply_daily_bandit_rewards(0.001, regime_name="NORMAL", persist=True)
-        voter.apply_daily_bandit_rewards(0.001, regime_name="NORMAL", persist=True)
+        voter.apply_daily_bandit_rewards(
+            0.001,
+            regime_name="NORMAL",
+            sources=["multi_speed_momentum"],
+            persist=True,
+        )
+        voter.apply_daily_bandit_rewards(
+            0.001,
+            regime_name="NORMAL",
+            sources=["cross_asset_rv"],
+            persist=True,
+        )
         assert voter.bandit_days == 2
         voter2 = EnsembleVoter(data_path=tmp_path)
         assert voter2.bandit_days == 2
@@ -389,7 +427,10 @@ class TestBanditRewardNoiseFloor:
     def test_accept_above_noise_floor(self, tmp_path):
         voter = EnsembleVoter(data_path=tmp_path)
         summary = voter.apply_daily_bandit_rewards(
-            -0.000207, regime_name="NORMAL", persist=True
+            -0.000207,
+            regime_name="NORMAL",
+            sources=["multi_speed_momentum"],
+            persist=True,
         )
         assert summary["skipped"] is False
         assert summary["updates"] >= 1

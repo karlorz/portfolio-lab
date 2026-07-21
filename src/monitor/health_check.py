@@ -383,6 +383,25 @@ def apply_ops_monitor_to_dashboard_health(
             except ImportError:
                 pass
             health_data["system_status"] = elevated
+
+    # Batch BO / BN residual: after kill clear demotes sticky kill→healthy,
+    # re-fold signal_health so 0/N healthy cannot leave system_status green.
+    # Partial ops merges must not undo full-generate signal_health honesty.
+    if "system_status" in health_data:
+        try:
+            from src.dashboard.health_report import (
+                derive_system_status,
+                signal_health_status_contribution,
+            )
+
+            sh = health_data.get("signal_health")
+            if signal_health_status_contribution(sh if isinstance(sh, dict) else None):
+                health_data["system_status"] = derive_system_status(
+                    current=str(health_data.get("system_status") or "healthy"),
+                    signal_health=sh if isinstance(sh, dict) else None,
+                )
+        except Exception:  # noqa: BLE001 — never block ops merge on SH fold
+            pass
     return health_data
 
 

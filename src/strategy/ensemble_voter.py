@@ -1318,6 +1318,32 @@ class EnsembleVoter:
 
         if sources is None:
             sources = [s.value for s in SignalSource]
+        sources = [str(s) for s in sources]
+        # Batch BO: broadcasting the same portfolio return to every arm is
+        # statistically non-identifying (MAB cannot learn relative skill).
+        # Skip multi-arm identical reward appends; allow single-arm explicit list.
+        if len(sources) > 1:
+            logger.info(
+                "Skipping bandit multi-arm identical reward broadcast: "
+                "daily_return=%.6f across %d arms (non-identification guard; "
+                "use per-source attribution rewards when available)",
+                reward,
+                len(sources),
+            )
+            return {
+                "updates": 0,
+                "observations": int(self.bandit_observations),
+                "reward_days": int(getattr(self, "bandit_days", 0) or 0),
+                "days": int(getattr(self, "bandit_days", 0) or 0),
+                "bandit_days": int(getattr(self, "bandit_days", 0) or 0),
+                "regime": regime_name,
+                "daily_return": reward,
+                "noise_floor": floor,
+                "skipped": True,
+                "reason": "identical_portfolio_reward_all_arms",
+                "arms_considered": len(sources),
+            }
+
         updates = 0
         for src in sources:
             self.update_bandit(str(src), regime_name, reward)
