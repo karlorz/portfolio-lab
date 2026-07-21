@@ -141,17 +141,17 @@ test:
 	echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"; \
 	echo "  Memory cap: 3GB virtual (ulimit -v 3145728)"; \
 	echo "  Heavy tests: excluded via collect_ignore"; \
-	echo "  Timeout: 1200s (increased from 600s to prevent false failures)"; \
+	echo "  Timeout: 3600s (raised after get_bl_views isolation; full safe suite ~45m on lab hosts)"; \
 	START=$$(date +%s); \
 	bash -c 'ulimit -v 3145728; \
-		timeout 1200 uv run pytest tests/ -q --tb=short -p no:cacheprovider'; \
+		timeout 3600 uv run pytest tests/ -q --tb=short -p no:cacheprovider'; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
 	echo ""; \
 	echo "=== Test Suite: exit $$EXIT, duration $${DUR}s ==="; \
 	if [ $$EXIT -eq 124 ]; then \
-		echo "TIMEOUT (124): Test suite exceeded 1200s limit. Check for hanging tests."; \
+		echo "TIMEOUT (124): Test suite exceeded 3600s limit. Check for hanging tests."; \
 	elif [ $$EXIT -eq 137 ]; then \
 		echo "SIGKILL (137): memory limit exceeded. Check for ML import leaks."; \
 	elif [ $$EXIT -ne 0 ]; then \
