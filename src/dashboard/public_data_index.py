@@ -944,3 +944,83 @@ def build_public_data_index(
     except Exception:  # noqa: BLE001 — index still usable without git
         pass
     return index
+
+
+# Core partial-write surfaces that commonly lag index digests after ops merges
+# (health/signals/incidents). Batch BI residual honesty.
+_PARTIAL_INDEX_CORE_FILES: tuple[str, ...] = (
+    "health.json",
+    "health_ops.json",
+    "signals.json",
+    "incidents.json",
+    "alerts.json",
+)
+
+
+def refresh_public_data_index_after_partial_write(
+    *,
+    public_dir: Path | None = None,
+    extra_paths: Iterable[Path | None] | None = None,
+    reason: str = "partial_write",
+) -> dict[str, Any] | None:
+    """Rebuild public index.json after partial dual-writes (Batch BI).
+
+    Content-addressed catalogs must recompute digests when artifact bytes
+    change; leaving index sha/size stale after health/signals/incident patches
+    is an integrity lie for operators and SLO checks.
+
+    Best-effort: never raises; returns the index dict on success, else None.
+    """
+    root = Path(public_dir) if public_dir is not None else Path(PUBLIC_DATA_DIR)
+    index_path = root / "index.json"
+    paths: list[Path] = []
+
+    if index_path.is_file():
+        try:
+            prior = json.loads(index_path.read_text(encoding="utf-8"))
+            for entry in prior.get("entries") or []:
+                if not isinstance(entry, dict):
+                    continue
+                rel = entry.get("path") or entry.get("filename")
+                if isinstance(rel, str) and rel:
+                    candidate = root / rel
+                    if candidate.is_file():
+                        paths.append(candidate)
+        except (OSError, json.JSONDecodeError, TypeError, UnicodeDecodeError):
+            pass
+
+    for name in _PARTIAL_INDEX_CORE_FILES:
+        candidate = root / name
+        if candidate.is_file():
+            paths.append(candidate)
+
+    if extra_paths is not None:
+        for path in extra_paths:
+            if path is None:
+                continue
+            p = Path(path)
+            if p.is_file():
+                paths.append(p)
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for p in paths:
+        key = str(p.resolve()) if p.exists() else str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(p)
+
+    try:
+        index = build_public_data_index(unique, public_dir=root)
+        index["content_patch_source"] = f"index_refresh:{reason}"
+        index["content_patched_at"] = datetime.now(timezone.utc).isoformat()
+        # Atomic write
+        tmp = index_path.with_suffix(".json.tmp")
+        index_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
+        tmp.replace(index_path)
+        return index
+    except Exception:  # noqa: BLE001 — never block dual-write callers
+        return None

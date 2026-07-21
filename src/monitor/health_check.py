@@ -619,6 +619,24 @@ def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
     except Exception as exc:  # noqa: BLE001 — never fail health job on signals patch
         logger.warning("signals.health kill refresh failed: %s", exc)
 
+    # Batch BI: recompute public index digests after health/signals partial patches
+    try:
+        from src.dashboard.public_data_index import (
+            refresh_public_data_index_after_partial_write,
+        )
+
+        refresh_public_data_index_after_partial_write(
+            public_dir=Path(PUBLIC_DATA_DIR),
+            extra_paths=[
+                Path(PUBLIC_DATA_DIR) / "health.json",
+                Path(PUBLIC_DATA_DIR) / "health_ops.json",
+                Path(PUBLIC_DATA_DIR) / "signals.json",
+            ],
+            reason="ops_health_merge",
+        )
+    except Exception as exc:  # noqa: BLE001 — never fail health job on index
+        logger.warning("public index refresh after ops health failed: %s", exc)
+
 
 def _should_include_hermes_audit(local_backend: dict) -> bool:
     """Return true when Hermes should be surfaced alongside tasker health."""

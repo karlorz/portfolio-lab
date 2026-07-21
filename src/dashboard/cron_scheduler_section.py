@@ -226,6 +226,20 @@ def refresh_public_health_cron_section(
     except Exception as exc:  # noqa: BLE001 — never fail health refresh on signals patch
         logger.warning("signals.health cron compact refresh failed: %s", exc)
 
+    # Batch BI: health + signals partial patches must update index digests
+    try:
+        from src.dashboard.public_data_index import (
+            refresh_public_data_index_after_partial_write,
+        )
+
+        refresh_public_data_index_after_partial_write(
+            public_dir=health_path.parent,
+            extra_paths=[health_path, Path(PUBLIC_DATA_DIR) / "signals.json"],
+            reason="cron_section_refresh",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("public index refresh after cron section failed: %s", exc)
+
     return True
 
 

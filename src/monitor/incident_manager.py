@@ -202,6 +202,14 @@ class IncidentManager:
         distinct from the private summary path so operators never see open_count
         split-brain (private firing vs public zero) after PASS resolve without
         a full dashboard cycle.
+
+        Batch BI residual honesty:
+        - Private ``summary_path`` (DATA_DIR) is the open-set SSOT from this
+          process's event log.
+        - Public dual-write copies that private body atomically — never rebuilds
+          public open set from a different process view that would clobber
+          channels (e.g. evaluator_error replacing signal_staleness).
+        - After public write, refresh index digests so sha/size stay honest.
         """
         incidents = sorted(
             self.open_incidents(),
@@ -213,6 +221,7 @@ class IncidentManager:
             "open_count": len(incidents),
             "incidents": [incident.to_dict() for incident in incidents],
             "metrics": self.metrics(),
+            "open_set_ssot": "private_summary_path",
         }
         try:
             from src.dashboard.generator import _stamp_generator_git_sha
@@ -222,7 +231,6 @@ class IncidentManager:
             pass
 
         public_summary = Path(PUBLIC_DATA_DIR) / "incidents.json"
-        dual_attempted = False
         dual_ok: bool | None = None
         paths_identical = False
         try:
@@ -249,10 +257,11 @@ class IncidentManager:
         body = json.dumps(summary, indent=2)
         self.summary_path.parent.mkdir(parents=True, exist_ok=True)
         self.summary_path.write_text(body, encoding="utf-8")
-        # Atomic dual-write to live WWW SSOT when configured
+        # Atomic dual-write: public is a byte-copy of private SSOT (not a second
+        # open-set derivation). Prevents secondary writers with a partial
+        # process view from inventing a divergent public open set.
         try:
             if not paths_identical:
-                dual_attempted = True
                 public_summary.parent.mkdir(parents=True, exist_ok=True)
                 tmp = public_summary.with_suffix(".json.tmp")
                 # Refresh dual_write_ok=True into body for public tree
@@ -266,6 +275,10 @@ class IncidentManager:
                         dual_write_attempted=True,
                         dual_write_ok=True,
                         paths_identical=False,
+                        note=(
+                            "public incidents is dual-write copy of private "
+                            "summary_path SSOT (Batch BI)"
+                        ),
                     )
                     body = json.dumps(summary, indent=2)
                     # Keep private tree in sync with final completeness block
@@ -275,6 +288,19 @@ class IncidentManager:
                 tmp.write_text(body, encoding="utf-8")
                 tmp.replace(public_summary)
                 dual_ok = True
+                # Content-addressed catalog must update digests after partial write
+                try:
+                    from src.dashboard.public_data_index import (
+                        refresh_public_data_index_after_partial_write,
+                    )
+
+                    refresh_public_data_index_after_partial_write(
+                        public_dir=public_summary.parent,
+                        extra_paths=[public_summary],
+                        reason="incidents_dual_write",
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
         except OSError as exc:
             dual_ok = False
             logger.warning("Public incidents dual-write failed: %s", exc)

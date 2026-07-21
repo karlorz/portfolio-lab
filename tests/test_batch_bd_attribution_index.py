@@ -96,5 +96,9 @@ def test_attribution_save_refreshes_public_index(tmp_path, monkeypatch):
 
 def test_batch_bd_source_contracts():
     pa = Path("src/monitor/performance_attribution.py").read_text(encoding="utf-8")
-    assert "build_public_data_index" in pa
+    # Batch BI centralized index refresh; still must refresh after attribution dual-write
+    assert (
+        "build_public_data_index" in pa
+        or "refresh_public_data_index_after_partial_write" in pa
+    )
     assert "Refreshed public index after attribution" in pa or "index" in pa.lower()
