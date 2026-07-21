@@ -948,12 +948,19 @@ def build_public_data_index(
 
 # Core partial-write surfaces that commonly lag index digests after ops merges
 # (health/signals/incidents). Batch BI residual honesty.
+# Batch BY: market-data dual-writes (source_manifest / quality / compact) also
+# leave index older than source_manifest → data_pipeline_slo stale_index warning.
 _PARTIAL_INDEX_CORE_FILES: tuple[str, ...] = (
     "health.json",
     "health_ops.json",
     "signals.json",
     "incidents.json",
     "alerts.json",
+    "source_manifest.json",
+    "data_quality.json",
+    "prices.json",
+    "prices_compact.json",
+    "yields.json",
 )
 
 

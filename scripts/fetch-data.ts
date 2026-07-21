@@ -622,6 +622,28 @@ export async function main() {
   await writeJsonAtomic(manifestPath, manifest);
   console.log(`Saved market data source manifest → ${manifestPath}`);
 
+  // Batch BY: rebuild index.json immediately after source_manifest so
+  // data_pipeline_slo never sees stale_index if dashboard gen lags/fails.
+  console.log('\nRefreshing public data index (post source_manifest)...');
+  try {
+    execFileSync(PYTHON_RUNTIME, [
+      'scripts/refresh_public_data_index.py',
+      '--reason',
+      'source_manifest',
+    ], {
+      cwd: PROJECT_ROOT,
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        // Keep PUBLIC_DATA_DIR pointing at the same tree fetch-data wrote
+        PUBLIC_DATA_DIR: DATA_DIR,
+      },
+    });
+  } catch (indexError) {
+    // Soft: dashboard gen still rebuilds index; surface noise for operators.
+    console.error('Public index refresh after source_manifest failed:', indexError);
+  }
+
   // Fail-closed quality gate after artifacts are written (operators can inspect
   // data_quality.json / source_manifest) but before claiming job success.
   assertPriceQualityAllowsSuccess(priceQualityReport);
