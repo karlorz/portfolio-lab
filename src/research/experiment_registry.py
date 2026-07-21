@@ -353,6 +353,12 @@ def build_labs_registry(
         "sources": sources,
         "warnings": warnings,
     }
+    try:
+        from src.dashboard.generator import _stamp_generator_git_sha
+
+        registry = _stamp_generator_git_sha(registry)
+    except Exception:  # noqa: BLE001 — registry still valid without git
+        pass
     validation = validate_artifact(registry)
     if not validation.valid:
         raise ValueError(f"generated Labs registry failed validation: {validation.error_messages()}")

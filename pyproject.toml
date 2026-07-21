@@ -68,6 +68,8 @@ markers = [
     "db: tests that require SQLite database access",
     "network: tests that make real HTTP requests",
     "slow: tests that take >2 seconds to complete",
+    "allow_live_signal_health: opt out of generator autouse isolation for SignalHealthTracker / ensemble vote",
+    "allow_live_data: opt out of evaluator DATA_DIR isolation (conftest)",
 ]
 testpaths = ["tests"]
 pythonpath = ["."]

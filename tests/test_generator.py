@@ -57,6 +57,87 @@ def _make_generator(tmp_path):
     return gen, db_path
 
 
+@pytest.fixture(autouse=True)
+def _isolate_live_ensemble_and_ic_health(request, monkeypatch):
+    """Keep generator tests off live SignalHealthTracker.compute_ic / compute_vote.
+
+    gen.run() and generate_health_json() otherwise call get_health_report() which
+    runs hundreds of Spearman IC queries (~15–35s each on lab hosts). That was
+    stalling make-test around the TestRun / health-json region (~44%).
+
+    Opt out with @pytest.mark.allow_live_signal_health when a test intentionally
+    exercises the real tracker (or already patches get_health_report itself).
+    """
+    if request.node.get_closest_marker("allow_live_signal_health"):
+        yield
+        return
+
+    from src.strategy.ensemble_voter import EnsembleVote, Regime
+
+    def _fake_vote(self, *args, **kwargs):
+        return EnsembleVote(
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            regime=Regime.NORMAL,
+            regime_confidence=0.7,
+            num_sources=1,
+            weighted_consensus=0.1,
+            agreement_ratio=0.5,
+            equity_bias=0.1,
+            duration_bias=0.0,
+            gold_bias=0.0,
+            action="neutral",
+            confidence=0.5,
+            reasoning="test-isolation",
+            source_votes=[],
+        )
+
+    def _fake_bl_views(self, *args, **kwargs):
+        from src.strategy.black_litterman_mapper import map_biases_to_views
+
+        views = map_biases_to_views(
+            0.1, 0.0, 0.0, health_scores=None, tau=0.15, prior="equal"
+        )
+        return {
+            "views": views,
+            "tau": 0.15,
+            "prior": "equal",
+            "health_scores_used": {},
+            "equity_bias": 0.1,
+            "duration_bias": 0.0,
+            "gold_bias": 0.0,
+        }
+
+    def _fake_signal_health_section(**kwargs):
+        return {
+            "status": "ok",
+            "sources": {},
+            "summary": {"healthy": 0, "warning": 0, "critical": 0, "total": 0},
+            "label_resolve": {"resolved": 0, "pending": 0, "skipped": True},
+        }
+
+    monkeypatch.setattr(
+        "src.strategy.ensemble_voter.EnsembleVoter.compute_vote",
+        _fake_vote,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "src.strategy.ensemble_voter.EnsembleVoter.get_bl_views",
+        _fake_bl_views,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "src.dashboard.signal_health_section.build_signal_health_section",
+        _fake_signal_health_section,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "src.dashboard.generator.build_signal_health_section",
+        _fake_signal_health_section,
+        raising=False,
+    )
+    yield
+
+
 def _write_ok_source_manifest(public_dir: Path) -> None:
     """Write a compact live source manifest for healthy health-json fixtures."""
     (public_dir / "source_manifest.json").write_text(json.dumps({
@@ -5162,8 +5243,10 @@ class TestHealthJSONSignalHealth:
         assert "signal_health" in data
         gen.conn.close()
 
+    @pytest.mark.allow_live_signal_health
     def test_signal_health_error_fallback(self, tmp_path):
         """Signal health has error fallback when tracker unavailable."""
+        # Needs real build_signal_health_section path (opt out of isolation fixture).
         gen, _ = _make_generator(tmp_path)
         with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
             with patch("src.dashboard.generator.DATA_DIR", tmp_path):

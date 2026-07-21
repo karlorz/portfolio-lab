@@ -1,5 +1,22 @@
+import { execFileSync } from 'child_process';
+
 export const PRICE_DATA_QUALITY_SCHEMA_VERSION = 'price-data-quality/v1';
 export const PRICE_DATA_QUALITY_FILENAME = 'data_quality.json';
+
+/** Short HEAD for operator lag detection (code vs projected artifact). */
+export function generatorGitShaShort(projectRoot: string = process.cwd()): string | null {
+  try {
+    const out = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+      timeout: 5000,
+    }).trim();
+    return out ? out.slice(0, 12) : null;
+  } catch {
+    return null;
+  }
+}
+
 
 export type PriceDataQualityStatus = 'ok' | 'warn' | 'fail';
 export type PriceReturnAnomalySeverity = 'warning' | 'critical';
@@ -81,6 +98,9 @@ export interface PriceSymbolQualitySummary {
 export interface PriceDataQualityReport {
   schema_version: typeof PRICE_DATA_QUALITY_SCHEMA_VERSION;
   generated_at: string;
+  /** Short HEAD when producer could resolve git (operator lag detection). */
+  generator_git_sha?: string | null;
+  generator_git_sha_status?: string;
   overall_status: PriceDataQualityStatus;
   issue_counts: PriceIssueCounts;
   symbols: PriceSymbolQualitySummary[];
@@ -572,7 +592,7 @@ export function buildPriceDataQualityReport(
   applyReferenceCalendarChecks(audits, counts, asOfOptions);
   applyReturnAnomalyChecks(audits, counts, options);
 
-  return {
+  const report: PriceDataQualityReport = {
     schema_version: PRICE_DATA_QUALITY_SCHEMA_VERSION,
     generated_at: generatedAt,
     overall_status: hasBlockingIssueCounts(counts)
@@ -581,4 +601,10 @@ export function buildPriceDataQualityReport(
     issue_counts: counts,
     symbols: audits.map((audit) => audit.summary),
   };
+  const sha = generatorGitShaShort();
+  if (sha) {
+    report.generator_git_sha = sha;
+    report.generator_git_sha_status = 'full_generate';
+  }
+  return report;
 }

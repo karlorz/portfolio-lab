@@ -1134,6 +1134,13 @@ def run_health_check() -> dict:
             "updated_at": grad_cb.get("updated_at"),
         }
 
+    try:
+        from src.dashboard.generator import _stamp_generator_git_sha
+
+        report = _stamp_generator_git_sha(report)
+    except Exception:  # noqa: BLE001 — never block health SSOT write
+        pass
+
     # Always persist full checks (including kill_switch / open_incidents) so
     # on-disk data/health.json matches live run_health_check() output.
     HEALTH_PATH.parent.mkdir(parents=True, exist_ok=True)

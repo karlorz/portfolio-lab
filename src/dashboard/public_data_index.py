@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -780,7 +780,7 @@ def build_public_data_index(
 ) -> dict[str, Any]:
     """Build the public data manifest while preserving the legacy files list."""
     public_dir = Path(public_dir)
-    generated_at = generated_at or datetime.now().isoformat()
+    generated_at = generated_at or datetime.now(timezone.utc).isoformat()
     resolved_cache_path = (
         Path(hash_cache_path) if hash_cache_path is not None else public_dir / DEFAULT_HASH_CACHE_FILENAME
     )
@@ -846,4 +846,10 @@ def build_public_data_index(
     source_manifest_identity = _source_manifest_identity(source_manifest, entries)
     if source_manifest_identity is not None:
         index["source_manifest"] = source_manifest_identity
+    try:
+        from src.dashboard.generator import _stamp_generator_git_sha
+
+        index = _stamp_generator_git_sha(index)
+    except Exception:  # noqa: BLE001 — index still usable without git
+        pass
     return index
