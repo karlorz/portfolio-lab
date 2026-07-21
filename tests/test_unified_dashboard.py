@@ -641,7 +641,9 @@ class TestHealthSectionEdgeCases:
         }
         f = tmp_path / ".health_report.json"
         f.write_text(json.dumps(report))
-        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path), patch(
+                "src.monitor.unified_dashboard.PUBLIC_DATA_DIR", tmp_path / "nopub"
+            ):
             section = _get_health_section()
             assert section["available"] is True
             assert section["status"] == "healthy"
@@ -657,7 +659,9 @@ class TestHealthSectionEdgeCases:
         }
         f = tmp_path / ".health_report.json"
         f.write_text(json.dumps(report))
-        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path), patch(
+                "src.monitor.unified_dashboard.PUBLIC_DATA_DIR", tmp_path / "nopub"
+            ):
             section = _get_health_section()
             assert section["available"] is True
             assert section["status"] == "unhealthy"
@@ -671,7 +675,9 @@ class TestHealthSectionEdgeCases:
         }
         f = tmp_path / ".health_report.json"
         f.write_text(json.dumps(report))
-        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path), patch(
+                "src.monitor.unified_dashboard.PUBLIC_DATA_DIR", tmp_path / "nopub"
+            ):
             section = _get_health_section()
             assert section["available"] is True
             assert section["status"] == "unhealthy"
@@ -683,7 +689,9 @@ class TestHealthSectionEdgeCases:
         }
         f = tmp_path / ".health_report.json"
         f.write_text(json.dumps(report))
-        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path), patch(
+                "src.monitor.unified_dashboard.PUBLIC_DATA_DIR", tmp_path / "nopub"
+            ):
             section = _get_health_section()
             assert section["available"] is True
             assert section["status"] == "unhealthy"
@@ -693,7 +701,9 @@ class TestHealthSectionEdgeCases:
         report = {"cvar_ratio": 0.5}
         f = tmp_path / ".health_report.json"
         f.write_text(json.dumps(report))
-        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path), patch(
+                "src.monitor.unified_dashboard.PUBLIC_DATA_DIR", tmp_path / "nopub"
+            ):
             section = _get_health_section()
             assert section["available"] is True
             assert section["status"] == "healthy"
@@ -702,7 +712,9 @@ class TestHealthSectionEdgeCases:
         report = {"status": "healthy", "checks": {}, "alerts": []}
         f = tmp_path / ".health_report.json"
         f.write_text(json.dumps(report))
-        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path), patch(
+                "src.monitor.unified_dashboard.PUBLIC_DATA_DIR", tmp_path / "nopub"
+            ):
             section = _get_health_section()
             assert section["available"] is True
             assert section["status"] == "healthy"
@@ -713,7 +725,9 @@ class TestHealthSectionEdgeCases:
         report = {"status": "healthy", "checks": {"a": {"status": "ok", "ok": True}}}
         f = tmp_path / ".health_report.json"
         f.write_text(json.dumps(report))
-        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path), patch(
+                "src.monitor.unified_dashboard.PUBLIC_DATA_DIR", tmp_path / "nopub"
+            ):
             section = _get_health_section()
             assert section["available"] is True
             # Missing summary → defaults to 0
@@ -723,7 +737,9 @@ class TestHealthSectionEdgeCases:
         report = {"tail_severity": "normal", "cvar_ratio": 1.0, "var_95": -2.5, "cvar_95": -3.8}
         f = tmp_path / ".health_report.json"
         f.write_text(json.dumps(report))
-        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path), patch(
+                "src.monitor.unified_dashboard.PUBLIC_DATA_DIR", tmp_path / "nopub"
+            ):
             section = _get_health_section()
             comp = section["components"]["garch_cvar"]
             assert comp["var_95"] == -2.5
@@ -1443,3 +1459,53 @@ class TestReadJsonEdgeCases:
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
             result = _read_json("number.json")
             assert result == 42
+
+
+class TestHealthSectionPublicSignalHealth:
+    """Batch CD: prefer public health.json SH over entropy-only GARCH report."""
+
+    def test_public_sh_zero_of_n_surfaces_degraded(self, tmp_path):
+        from src.monitor import unified_dashboard as ud
+
+        pub = tmp_path / "public"
+        pub.mkdir()
+        (pub / "health.json").write_text(
+            json.dumps(
+                {
+                    "system_status": "degraded",
+                    "generated_at": "2026-07-21T18:15:00+00:00",
+                    "signal_health": {
+                        "status": "degraded",
+                        "summary": {
+                            "healthy": 0,
+                            "degraded": 8,
+                            "unhealthy": 1,
+                            "total_tracked": 9,
+                        },
+                    },
+                }
+            )
+        )
+        # GARCH-only private report would look "healthy" elevated tail only
+        (tmp_path / ".health_report.json").write_text(
+            json.dumps(
+                {
+                    "timestamp": "2026-07-21T16:57:00+00:00",
+                    "tail_severity": "elevated",
+                    "cvar_ratio": 1.59,
+                    "var_95": -1.13,
+                }
+            )
+        )
+        with patch.object(ud, "DATA_DIR", tmp_path), patch.object(
+            ud, "PUBLIC_DATA_DIR", pub
+        ):
+            section = ud._get_health_section()
+        assert section["available"] is True
+        assert section["status"] == "degraded"
+        assert section["components"]["signal_health"]["healthy"] == 0
+        assert section["components"]["signal_health"]["total_tracked"] == 9
+        assert section["checks_total"] == 9
+        assert any("0/9" in a for a in section["alerts"])
+        # GARCH still disclosed as component
+        assert "garch_cvar" in section["components"]

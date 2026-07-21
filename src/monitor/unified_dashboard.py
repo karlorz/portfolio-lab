@@ -69,61 +69,193 @@ def _read_json(path: str) -> Optional[Any]:
 
 
 def _get_health_section() -> Dict[str, Any]:
-    """System health from .health_report.json.
+    """System health for the unified panel.
 
-    Supports two formats:
-    - Legacy: {status, checks, summary, alerts} — structured health report
-    - GARCH flat: {var_95, cvar_95, tail_severity, ...} — GARCHCVaRMetrics asdict
+    Preference order (Batch CD):
+    1. Dashboard ``PUBLIC_DATA_DIR/health.json`` when it carries ``system_status``
+       and/or ``signal_health`` — so SH 0/N and degraded system_status surface
+       (entropy-only GARCH report was hiding the fleet).
+    2. Legacy ``.health_report.json`` structured checks.
+    3. GARCH flat metrics in ``.health_report.json`` / risk_metrics.
+
+    Components always include signal_health rollup when available.
     """
+    components: Dict[str, Any] = {}
+    alerts: list[Any] = []
+    status = "unknown"
+    timestamp = None
+    checks_passed = 0
+    checks_total = 0
+    sources_used: list[str] = []
+
+    # ── 1) Dashboard health SSOT (public tree) ─────────────────────────
+    pub_health: Optional[Dict[str, Any]] = None
+    pub_path = Path(PUBLIC_DATA_DIR) / "health.json"
+    if pub_path.is_file():
+        try:
+            blob = json.loads(pub_path.read_text(encoding="utf-8"))
+            if isinstance(blob, dict):
+                pub_health = blob
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            logger.warning("Failed to read public health.json: %s", exc)
+
+    if isinstance(pub_health, dict) and (
+        pub_health.get("system_status") is not None
+        or isinstance(pub_health.get("signal_health"), dict)
+    ):
+        sources_used.append("public_health")
+        status = str(
+            pub_health.get("system_status")
+            or pub_health.get("status")
+            or "unknown"
+        ).lower()
+        timestamp = (
+            pub_health.get("generated_at")
+            or pub_health.get("content_patched_at")
+            or pub_health.get("timestamp")
+        )
+        sh = pub_health.get("signal_health")
+        if isinstance(sh, dict):
+            summary = sh.get("summary") if isinstance(sh.get("summary"), dict) else {}
+            healthy = int(summary.get("healthy") or 0)
+            total = int(summary.get("total_tracked") or summary.get("total") or 0)
+            degraded = int(summary.get("degraded") or 0)
+            unhealthy = int(summary.get("unhealthy") or 0)
+            sh_status = str(sh.get("status") or sh.get("overall_health") or "unknown")
+            components["signal_health"] = {
+                "status": sh_status,
+                "ok": healthy > 0 and unhealthy == 0,
+                "healthy": healthy,
+                "degraded": degraded,
+                "unhealthy": unhealthy,
+                "total_tracked": total,
+            }
+            checks_passed = healthy
+            checks_total = total
+            if total > 0 and healthy == 0:
+                alerts.append(
+                    f"signal_health 0/{total} healthy "
+                    f"(degraded={degraded}, unhealthy={unhealthy})"
+                )
+        # Compact ops fields if present
+        if pub_health.get("ops_health_status"):
+            components["ops_health"] = {
+                "status": pub_health.get("ops_health_status"),
+                "ok": str(pub_health.get("ops_health_status")).lower()
+                in {"ok", "healthy", "green"},
+            }
+
+    # ── 2/3) .health_report.json (legacy checks or GARCH flat) ────────
     report = _read_json(".health_report.json")
-    if not report:
+    if report and ("checks" in report or "status" in report) and "var_95" not in report:
+        sources_used.append("health_report_legacy")
+        if status == "unknown":
+            status = str(report.get("status", "unknown"))
+            timestamp = timestamp or report.get("timestamp")
+            checks_passed = safe_get(report, "summary", "passed", default=0) or 0
+            checks_total = safe_get(report, "summary", "total_checks", default=0) or 0
+            alerts = list(report.get("alerts") or alerts)
+        checks = report.get("checks") or {}
+        for name, c in checks.items():
+            if not isinstance(c, dict):
+                continue
+            components[name] = {
+                "status": c.get("status"),
+                "ok": c.get("ok", False),
+            }
+    elif report and (
+        "var_95" in report
+        or "tail_severity" in report
+        or "cvar_ratio" in report
+    ):
+        sources_used.append("health_report_garch")
+        tail = report.get("tail_severity", "normal")
+        cvar_ratio = report.get("cvar_ratio", 1.0)
+        if tail in ("extreme", "severe") or (
+            isinstance(cvar_ratio, (int, float)) and cvar_ratio > 3.0
+        ):
+            garch_status = "unhealthy"
+        elif tail in ("elevated", "moderate") or (
+            isinstance(cvar_ratio, (int, float)) and cvar_ratio > 2.0
+        ):
+            garch_status = "degraded"
+        else:
+            garch_status = "healthy"
+        components["garch_cvar"] = {
+            "status": garch_status,
+            "ok": garch_status == "healthy",
+            "var_95": report.get("var_95") or report.get("var_95_daily"),
+            "cvar_95": report.get("cvar_95") or report.get("cvar_95_daily"),
+            "tail_severity": tail,
+            "garch_active": report.get("garch_active"),
+            "coverage_pass": safe_get(
+                report, "coverage_diagnostics", "coverage_pass", default=None
+            ),
+        }
+        if status == "unknown":
+            status = garch_status
+            timestamp = timestamp or report.get("timestamp")
+            checks_passed = 1 if garch_status == "healthy" else 0
+            checks_total = 1
+            if garch_status != "healthy":
+                try:
+                    cr = float(cvar_ratio)
+                    alerts.append(f"Tail severity: {tail}, CVaR ratio: {cr:.2f}")
+                except (TypeError, ValueError):
+                    alerts.append(f"Tail severity: {tail}, CVaR ratio: {cvar_ratio}")
+        elif garch_status != "healthy":
+            alerts.append(f"GARCH: {garch_status} (tail={tail})")
+
+    # Also fold risk_metrics coverage if garch component missing
+    if "garch_cvar" not in components:
+        metrics = _read_json("risk_metrics.json")
+        if isinstance(metrics, dict) and (
+            metrics.get("var_95_daily") is not None or metrics.get("tail_severity")
+        ):
+            sources_used.append("risk_metrics")
+            tail = metrics.get("tail_severity", "normal")
+            cov = metrics.get("coverage_diagnostics") or {}
+            garch_active = metrics.get("garch_active")
+            garch_status = "healthy"
+            if metrics.get("status") in {"degraded", "unhealthy"}:
+                garch_status = str(metrics.get("status"))
+            elif garch_active is False or cov.get("coverage_pass") is False:
+                garch_status = "degraded"
+            components["garch_cvar"] = {
+                "status": garch_status,
+                "ok": garch_status == "healthy",
+                "var_95": metrics.get("var_95_daily"),
+                "cvar_95": metrics.get("cvar_95_daily"),
+                "tail_severity": tail,
+                "garch_active": garch_active,
+                "coverage_pass": cov.get("coverage_pass"),
+            }
+            if status == "unknown":
+                status = garch_status
+                timestamp = timestamp or metrics.get("timestamp")
+                checks_passed = 1 if garch_status == "healthy" else 0
+                checks_total = 1
+
+    if not components and status == "unknown":
         return {"available": False, "status": "unknown"}
 
-    # Legacy format: has explicit status field and checks
-    if "checks" in report or "status" in report:
-        checks = report.get("checks", {})
-        return {
-            "available": True,
-            "timestamp": report.get("timestamp"),
-            "status": report.get("status", "unknown"),
-            "checks_passed": safe_get(report, "summary", "passed", default=0),
-            "checks_total": safe_get(report, "summary", "total_checks", default=0),
-            "alerts": report.get("alerts", []),
-            "components": {
-                name: {
-                    "status": c.get("status"),
-                    "ok": c.get("ok", False),
-                }
-                for name, c in checks.items()
-            },
-        }
-
-    # GARCH flat format: derive status from tail_severity and cvar_ratio
-    tail = report.get("tail_severity", "normal")
-    cvar_ratio = report.get("cvar_ratio", 1.0)
-    if tail in ("extreme", "severe") or cvar_ratio > 3.0:
-        status = "unhealthy"
-    else:
-        status = "healthy"
+    # Max-severity: SH 0/N or public degraded wins over garch-only healthy
+    if any(
+        isinstance(c, dict) and c.get("status") in {"degraded", "unhealthy", "critical"}
+        for c in components.values()
+    ):
+        if status in {"healthy", "ok", "unknown"}:
+            status = "degraded"
 
     return {
         "available": True,
-        "timestamp": report.get("timestamp"),
+        "timestamp": timestamp,
         "status": status,
-        "checks_passed": 1 if status == "healthy" else 0,
-        "checks_total": 1,
-        "alerts": [] if status == "healthy" else [
-            f"Tail severity: {tail}, CVaR ratio: {cvar_ratio:.2f}"
-        ],
-        "components": {
-            "garch_cvar": {
-                "status": status,
-                "ok": status == "healthy",
-                "var_95": report.get("var_95"),
-                "cvar_95": report.get("cvar_95"),
-                "tail_severity": tail,
-            },
-        },
+        "checks_passed": checks_passed,
+        "checks_total": checks_total,
+        "alerts": alerts,
+        "components": components,
+        "sources": sources_used,
     }
 
 

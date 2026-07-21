@@ -727,6 +727,28 @@ prune-logs:
 prune-logs-dry-run:
 	@cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/prune_logs.py --keep 20 --delete-dead-health-log --dry-run
 
+# ── Prod ideas (ops SSOT → machine channel delta; badge-only promote) ──
+# Hourly hybrid prod→dev capture. Never creates planned work items.
+# ML off; machine JSON under data/prod_idea_channels.json is the SSOT.
+
+.PHONY: prod-ideas
+prod-ideas:
+	@echo "=== Prod Ideas: $$(date) ==="; \
+	START=$$(date +%s); \
+	cd $(PROJECT_DIR) && \
+	  export PORTFOLIO_LAB_ENABLE_ML=0; \
+	  ulimit -v 3145728 && \
+	  timeout 60 $(PYTHON_RUNTIME) -m src.monitor.prod_ideas 2>&1; \
+	EXIT=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-prod-ideas $$STATUS $$DUR; \
+	exit $$EXIT
+
 # ── Cron Status Management ───────────────────────────────────────────
 
 .PHONY: cron-reset
@@ -749,6 +771,8 @@ cron-reset:
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-attribution pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-unified-dashboard pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-prune-logs pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-prod-ideas pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-fetch-trends pending 0 manual
 	@echo "Cron status reset: $(CRON_STATUS)"
 
 # ── Verification ─────────────────────────────────────────────────────
@@ -791,5 +815,15 @@ audit-routing-contract:
 
 .PHONY: fetch-trends
 fetch-trends:
-	@echo "=== Google Trends: $$(date) ==="
-	cd $(PROJECT_DIR) && uv run python scripts/fetch_google_trends.py --days 90 2>&1 | tee -a $(DATA_DIR)/cron.log
+	@echo "=== Google Trends: $$(date) ==="; \
+	START=$$(date +%s); \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 300 $(PYTHON_RUNTIME) scripts/fetch_google_trends.py --days 90 2>&1 | tee -a $(DATA_DIR)/cron.log; \
+	EXIT=$${PIPESTATUS[0]}; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-fetch-trends $$STATUS $$DUR; \
+	exit $$EXIT

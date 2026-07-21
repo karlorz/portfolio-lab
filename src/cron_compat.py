@@ -42,6 +42,8 @@ CRON_TARGETS = [
     "portfolio-lab-unified-dashboard",
     "portfolio-lab-health",
     "portfolio-lab-prune-logs",
+    "portfolio-lab-prod-ideas",
+    "portfolio-lab-fetch-trends",
 ]
 
 # S18b: optional suite segments — NOT production cron jobs (not in CRON_TARGETS /
@@ -71,6 +73,8 @@ CRON_EXPECTED_DURATIONS = {
     "portfolio-lab-unified-dashboard": 120,  # 2 min — JSON serialization
     "portfolio-lab-health": 30,  # 30 sec — rebalance health check
     "portfolio-lab-prune-logs": 60,  # 1 min — bound tasker_logs growth + dead-log removal
+    "portfolio-lab-prod-ideas": 60,  # 1 min — scan ops SSOT → channel delta (ML off)
+    "portfolio-lab-fetch-trends": 300,  # 5 min — pytrends weekly refresh
 }
 
 # Guard configuration (applied by scripts/cron_guard.sh)

@@ -903,6 +903,16 @@ class TestGraduationCircuitBreakerProducer:
         assert blocked.get("signal_health_blocked") is True
         assert blocked["status"] == "yellow"
 
+        # Hold also when ops is warning (lab FRED/cron) — SH gate freezes climb
+        warn_hold = update_graduation_circuit_breaker_state(
+            system_status="warning",
+            broker_circuit={"state": "closed", "fail_count": 0},
+            data_dir=tmp_path,
+            signal_health=sh,
+        )
+        assert warn_hold["consecutive_ok"] == 1
+        assert warn_hold.get("signal_health_blocked") is True
+
         # Clear SH path can resume climb
         resume = update_graduation_circuit_breaker_state(
             system_status="healthy",

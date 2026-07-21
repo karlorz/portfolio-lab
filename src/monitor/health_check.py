@@ -967,20 +967,30 @@ def update_graduation_circuit_breaker_state(
             logger.warning("Failed to read graduation CB state %s: %s", path, exc)
 
     prev_ok = int(prev.get("consecutive_ok") or 0)
-    if ops_ok and broker_ok and not sh_blocked:
-        consecutive_ok = min(prev_ok + 1, 30)
-        status = "green"
-        trips = 0
-    elif ops_ok and broker_ok and sh_blocked:
-        # Hold streak under signal-quality outage; do not invent recovery.
+    broker_open = broker_state in {"open", "half-open", "half_open"}
+    if broker_open or (not broker_ok and not ops_ok):
+        # Hard fail: open broker, or both ops and broker bad
+        consecutive_ok = 0
+        status = "red" if broker_open else "yellow"
+        trips = int(prev.get("trips") or 0)
+        if broker_open:
+            trips = trips + 1
+    elif sh_blocked:
+        # Batch CB: SH quality outage freezes climb even if ops is warning
+        # (lab FRED/cron dims must not wipe streak while SH 0/N is the gate).
         consecutive_ok = prev_ok
         status = "yellow"
         trips = int(prev.get("trips") or 0)
+    elif ops_ok and broker_ok:
+        consecutive_ok = min(prev_ok + 1, 30)
+        status = "green"
+        trips = 0
     else:
+        # Ops warning/degraded without SH block → reset streak
         consecutive_ok = 0
-        status = "red" if not broker_ok and broker_state in {"open", "half-open", "half_open"} else "yellow"
+        status = "red" if broker_open else "yellow"
         trips = int(prev.get("trips") or 0)
-        if not broker_ok and broker_state in {"open", "half-open", "half_open"}:
+        if broker_open:
             trips = trips + 1
 
     payload: dict[str, Any] = {
