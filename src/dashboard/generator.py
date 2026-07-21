@@ -1505,6 +1505,7 @@ class DashboardGenerator:
             "zero_weight",
             "zero_baseline",  # Batch CU: intentional weight-0 roster arms
             "health_sleep",  # Batch CW: CN unhealthy / degraded+neg-IC sleep
+            "regime_gate",  # Batch CX: intentional OFF for current regime
             "unavailable",
         }
         if configured_source_status:
@@ -1592,6 +1593,7 @@ class DashboardGenerator:
         regime: Any,
         source_breakdown: List[Dict[str, Any]],
         health_gate_slept: Dict[str, str] | None = None,
+        regime_gated: Dict[str, str] | None = None,
     ) -> List[Dict[str, Any]]:
         """Explain configured source state, including missing stale configured sources."""
         configured_weights = DashboardGenerator._get_configured_ensemble_source_weights(regime)
@@ -1601,6 +1603,11 @@ class DashboardGenerator:
         slept_map = {
             str(k): str(v)
             for k, v in (health_gate_slept or {}).items()
+            if k is not None
+        }
+        regime_map = {
+            str(k): str(v)
+            for k, v in (regime_gated or {}).items()
             if k is not None
         }
 
@@ -1619,6 +1626,7 @@ class DashboardGenerator:
             collected = row is not None
             effective_weight = 0.0
             sleep_reason = slept_map.get(source)
+            regime_reason = regime_map.get(source)
             if row is not None:
                 try:
                     row_weight = float(row.get("weight", 0.0))
@@ -1633,6 +1641,10 @@ class DashboardGenerator:
                     # Batch CW: CN health-gate sleep is not a generic zero_weight
                     status = "health_sleep"
                     reason = f"Health-gated sleep: {sleep_reason}"
+                elif regime_reason:
+                    # Batch CX: intentional regime OFF (e.g. unified_overlay in NORMAL)
+                    status = "regime_gate"
+                    reason = f"Regime-gated off: {regime_reason}"
                 else:
                     status = "zero_weight"
                     reason = "Collected but assigned zero effective weight."
@@ -1678,6 +1690,8 @@ class DashboardGenerator:
             }
             if sleep_reason:
                 entry["health_sleep_reason"] = sleep_reason
+            if regime_reason:
+                entry["regime_gate_reason"] = regime_reason
             statuses.append(entry)
 
         # Renormalize over contributors so sum(active_weight) ≈ 1 when any active
@@ -2143,10 +2157,14 @@ class DashboardGenerator:
                 sleep_map = getattr(ensemble_result, "health_gate_slept", None) or {}
                 if not isinstance(sleep_map, dict):
                     sleep_map = {}
+                regime_map = getattr(ensemble_result, "regime_gated", None) or {}
+                if not isinstance(regime_map, dict):
+                    regime_map = {}
                 configured_source_status = self._build_configured_source_status(
                     ensemble_result.regime,
                     source_breakdown,
                     health_gate_slept=sleep_map,
+                    regime_gated=regime_map,
                 )
                 source_counts = self._build_ensemble_source_count_metadata(
                     ensemble_result.regime,
@@ -2181,6 +2199,9 @@ class DashboardGenerator:
                         getattr(ensemble_result, "health_gate_freeze", False)
                     ),
                     "health_gate_slept_count": len(sleep_map),
+                    # Batch CX: regime-gate OFF disclosure
+                    "regime_gated": regime_map,
+                    "regime_gated_count": len(regime_map),
                 }
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("ensemble_voting", e)
@@ -5175,14 +5196,18 @@ class DashboardGenerator:
                     ensemble["weight_entropy"] = round(weight_entropy, 4)
                     ensemble["n_eff"] = round(float(np.exp(weight_entropy)), 2)
 
-            # Batch CW: preserve health_gate_slept through staleness rebuild
+            # Batch CW/CX: preserve gate maps through staleness rebuild
             sleep_map = ensemble.get("health_gate_slept") or {}
             if not isinstance(sleep_map, dict):
                 sleep_map = {}
+            regime_map = ensemble.get("regime_gated") or {}
+            if not isinstance(regime_map, dict):
+                regime_map = {}
             ensemble["configured_source_status"] = self._build_configured_source_status(
                 ensemble.get("regime", "normal"),
                 ensemble["source_breakdown"],
                 health_gate_slept=sleep_map,
+                regime_gated=regime_map,
             )
             ensemble.update(self._build_ensemble_source_count_metadata(
                 ensemble.get("regime", "normal"),

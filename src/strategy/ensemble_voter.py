@@ -179,6 +179,8 @@ class EnsembleVote:
     # Batch CW: health-gate sleep map (source → reason) for dashboard disclosure
     health_gate_slept: Optional[Dict[str, str]] = None
     health_gate_freeze: bool = False
+    # Batch CX: regime-gate map (source → reason) — intentional OFF regimes
+    regime_gated: Optional[Dict[str, str]] = None
 
 
 # Regime-dependent weights (6 active signals, renormalized per regime)
@@ -1989,6 +1991,8 @@ class EnsembleVoter:
         Uses confidence-weighted gating (v3.26) to defer gating when regime confidence is low,
         preventing premature switching on uncertain regime classification.
         """
+        # Batch CX: reset disclosure map each vote
+        self._regime_gated: Dict[str, str] = {}
         if hasattr(self, 'regime_gate') and self.regime_gate is not None:
             # Get active signals based on confidence and hysteresis
             active_signal_names = self.regime_gate.gate_with_confidence(
@@ -2007,7 +2011,18 @@ class EnsembleVoter:
                     explicit_gate_rules is None or source_name in explicit_gate_rules
                 )
                 is_active = source_name in active_signal_set or not has_explicit_gate
-                gated_weights[source] = weight if is_active else 0.0
+                if is_active:
+                    gated_weights[source] = weight
+                else:
+                    gated_weights[source] = 0.0
+                    if float(weight or 0.0) > 0.0 or has_explicit_gate:
+                        off_regimes = set()
+                        if isinstance(explicit_gate_rules, dict):
+                            off_regimes = set(explicit_gate_rules.get(source_name) or [])
+                        self._regime_gated[source_name] = (
+                            f"regime_gate_off({regime_name}"
+                            f"{'; off=' + ','.join(sorted(off_regimes)) if off_regimes else ''})"
+                        )
             
             total = sum(gated_weights.values())
             if total > 0:
@@ -2914,6 +2929,7 @@ class EnsembleVoter:
             active_weight_mass = 0.0
 
         sleep_reasons = dict(getattr(self, "_health_gate_sleep_reasons", None) or {})
+        regime_gated = dict(getattr(self, "_regime_gated", None) or {})
         return EnsembleVote(
             timestamp=str(datetime.now()),
             regime=regime,
@@ -2933,6 +2949,7 @@ class EnsembleVoter:
             adaptive_learning=self.get_adaptive_learning_status(regime.name),
             health_gate_slept=sleep_reasons or None,
             health_gate_freeze=bool(getattr(self, "_health_gate_freeze", False)),
+            regime_gated=regime_gated or None,
         )
 
     def _persist_vote(self, vote: EnsembleVote, weighted_consensus: float) -> None:
