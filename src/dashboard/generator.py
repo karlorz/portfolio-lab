@@ -704,10 +704,21 @@ def _compact_health_summary(report: Dict) -> Dict:
                 summary["signal_health_quality_badge"] = sh_summary.get("quality_badge")
             if sh_summary.get("zero_healthy_sources"):
                 summary["signal_health_zero_healthy"] = True
-            if sh_summary.get("ensemble_weight_freeze_active"):
-                summary["ensemble_weight_freeze_active"] = True
+            else:
+                # Batch CR: clear sticky zero-healthy when SH recovered
+                summary["signal_health_zero_healthy"] = False
+            # Batch CQ/CR: always project freeze True/False (never leave sticky True)
+            freeze_active = bool(sh_summary.get("ensemble_weight_freeze_active"))
+            summary["ensemble_weight_freeze_active"] = freeze_active
+            if sh_summary.get("ensemble_weights_age_days") is not None:
                 summary["ensemble_weights_age_days"] = sh_summary.get(
                     "ensemble_weights_age_days"
+                )
+            if sh_summary.get("ensemble_weights_file_stale"):
+                summary["ensemble_weights_file_stale"] = True
+            elif not freeze_active:
+                summary["ensemble_weights_file_stale"] = bool(
+                    sh_summary.get("ensemble_weights_file_stale")
                 )
         overall = signal_health.get("overall_health") or signal_health.get("status")
         if overall:
@@ -715,6 +726,21 @@ def _compact_health_summary(report: Dict) -> Dict:
         qd = signal_health.get("quality_disclosure")
         if isinstance(qd, dict) and qd.get("badge"):
             summary["signal_quality_badge"] = qd.get("badge")
+            # Prefer quality_disclosure freeze fields when summary omitted them
+            freeze_block = qd.get("ensemble_weight_freeze")
+            if isinstance(freeze_block, dict):
+                if "weight_freeze_active" in freeze_block:
+                    summary["ensemble_weight_freeze_active"] = bool(
+                        freeze_block.get("weight_freeze_active")
+                    )
+                if freeze_block.get("ensemble_weights_age_days") is not None:
+                    summary["ensemble_weights_age_days"] = freeze_block.get(
+                        "ensemble_weights_age_days"
+                    )
+                if freeze_block.get("weight_file_stale") is not None:
+                    summary["ensemble_weights_file_stale"] = bool(
+                        freeze_block.get("weight_file_stale")
+                    )
 
     return summary
 

@@ -461,6 +461,36 @@ def refresh_signals_health_kill_fields(
         if disk_open.get("status"):
             health["open_incidents_status"] = disk_open.get("status")
 
+    # Batch CR: re-project SH freeze/quality onto sticky signals.health so a
+    # pre-CQ full dashboard cannot leave ensemble_weight_freeze_active=true
+    # after zero-healthy recovery (kill refresh previously only patched kill).
+    try:
+        sh_report = report.get("signal_health") if isinstance(report, dict) else None
+        if isinstance(sh_report, dict):
+            sh_compact = _compact_health_summary({"signal_health": sh_report})
+            for key in (
+                "signal_health_healthy",
+                "signal_health_degraded",
+                "signal_health_unhealthy",
+                "signal_health_total_tracked",
+                "signal_health_quality_badge",
+                "signal_health_zero_healthy",
+                "signal_health_status",
+                "signal_quality_badge",
+                "ensemble_weight_freeze_active",
+                "ensemble_weights_age_days",
+                "ensemble_weights_file_stale",
+            ):
+                if key in sh_compact:
+                    health[key] = sh_compact[key]
+            # Explicit clear sticky True when freeze is now False
+            if sh_compact.get("ensemble_weight_freeze_active") is False:
+                health["ensemble_weight_freeze_active"] = False
+            if sh_compact.get("signal_health_zero_healthy") is False:
+                health["signal_health_zero_healthy"] = False
+    except Exception as exc:  # noqa: BLE001 — never fail kill refresh on SH
+        logger.warning("signals.health SH freeze re-project skipped: %s", exc)
+
     if report.get("status") is not None:
         health.setdefault("status", report.get("status"))
     if report.get("timestamp") is not None:
@@ -503,8 +533,24 @@ def refresh_signals_health_kill_fields(
         payload["generator_git_sha"] = None
         payload["generator_git_sha_status"] = "partial_patch"
     try:
-        signals_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        text = json.dumps(payload, indent=2)
+        signals_path.write_text(text, encoding="utf-8")
         logger.info("Refreshed signals.health kill fields at %s", signals_path)
+        # Batch CO/CR: dual-write private twin when present (soft-mirror lag fix)
+        try:
+            root_data = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+            private = root_data / "signals.json"
+            if private.resolve() != signals_path.resolve() and (
+                private.exists() or private.parent.is_dir()
+            ):
+                private.write_text(text, encoding="utf-8")
+                logger.info(
+                    "Refreshed private signals.health twin at %s", private
+                )
+        except OSError as private_exc:
+            logger.warning(
+                "private signals.health twin write skipped: %s", private_exc
+            )
     except OSError as exc:
         logger.warning("Failed to write signals health kill refresh: %s", exc)
 
