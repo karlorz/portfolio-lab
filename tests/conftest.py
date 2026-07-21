@@ -11,7 +11,7 @@ Layered defense (each layer independently prevents host CPU exhaust):
   1. Env var gate — PORTFOLIO_LAB_ENABLE_ML=0 set before any import
   2. builtins.__import__ hook — blocks ML imports at interpreter level
   3. Post-collection leak check — warns if real ML libs evaded all guards
-  4. ulimit -v (Makefile) — OS kernel enforces 3GB virtual memory cap
+  4. ulimit -v (Makefile) — OS kernel enforces 6GB virtual memory cap
 
 Default (safe, ML-disabled lane; exact count from pytest output):
   make test
@@ -192,7 +192,7 @@ def _fingerprint_file(path: Path):
     """Return (sha256, size, mtime_ns) or None if missing.
 
     Hash only the first + last 64 KiB so session teardown stays cheap under the
-    make-test 3GB virtual-memory cap (full-file hashing after a long suite can
+    make-test 6GB virtual-memory cap (full-file hashing after a long suite can
     MemoryError when capture/logging has already exhausted the budget).
     """
     if not path.exists():

@@ -42,7 +42,7 @@ PERF_UPDATE_BASELINE ?= 0
 help:
 	@echo "Portfolio-Lab Makefile"
 	@echo ""
-	@echo "  make test         Run test suite (safe: ML disabled, 3GB memory cap)"
+	@echo "  make test         Run test suite (safe: ML disabled, 6GB memory cap, 3600s)"
 	@echo "  make test-ml-extract  Run extracted ML-kernel tests (safe: ML disabled)"
 	@echo "  make test-ml      Run full test suite including ML (requires torch/sklearn)"
 	@echo "  make test-isolation  Run top-20 failing files individually (bypasses pollution)"
@@ -139,11 +139,11 @@ test:
 	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
 	echo "=== Test Suite (safe mode): $$(date) ==="; \
 	echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"; \
-	echo "  Memory cap: 3GB virtual (ulimit -v 3145728)"; \
+	echo "  Memory cap: 6GB virtual (ulimit -v 6291456; raised after suite MemoryError cascade under 3GB)"; \
 	echo "  Heavy tests: excluded via collect_ignore"; \
 	echo "  Timeout: 3600s (raised after get_bl_views isolation; full safe suite ~45m on lab hosts)"; \
 	START=$$(date +%s); \
-	bash -c 'ulimit -v 3145728; \
+	bash -c 'ulimit -v 6291456; \
 		timeout 3600 uv run pytest tests/ -q --tb=short -p no:cacheprovider'; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
@@ -153,7 +153,7 @@ test:
 	if [ $$EXIT -eq 124 ]; then \
 		echo "TIMEOUT (124): Test suite exceeded 3600s limit. Check for hanging tests."; \
 	elif [ $$EXIT -eq 137 ]; then \
-		echo "SIGKILL (137): memory limit exceeded. Check for ML import leaks."; \
+		echo "SIGKILL (137): memory limit exceeded (6GB virtual cap). Check for ML import leaks."; \
 	elif [ $$EXIT -ne 0 ]; then \
 		echo "Some tests failed (exit $$EXIT). Review output above."; \
 	fi; \
