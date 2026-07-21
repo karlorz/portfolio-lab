@@ -8,10 +8,53 @@ export interface CompactPriceEntry {
 
 export type CompactPriceData = Record<string, ReadonlyArray<CompactPriceEntry>>;
 
+/** Wrapped compact artifact (Batch BK): meta + symbols last-N map. */
+export interface CompactPriceArtifactV1 {
+  meta?: {
+    schema?: string;
+    as_of?: string;
+    n_bars?: number;
+    full_artifact?: string;
+    symbol_count?: number;
+    bar_count?: number;
+  };
+  symbols: CompactPriceData;
+}
+
 export const COMPACT_PRICE_DATA_ENDPOINT = '/data/prices_compact.json';
 export const LEGACY_PRICE_DATA_ENDPOINT = '/data/prices.json';
 
 type PriceDataFetcher = (url: string) => Promise<Response>;
+
+/**
+ * Normalize prices_compact.json payloads.
+ * Accepts legacy flat `{SPY:[{d,p}]}` and Batch BK `{meta, symbols}`.
+ */
+export function unwrapCompactPricePayload(payload: unknown): CompactPriceData | null {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  // Wrapped form: { meta, symbols: { SPY: [...] } }
+  if (
+    record.symbols !== undefined
+    && typeof record.symbols === 'object'
+    && record.symbols !== null
+    && !Array.isArray(record.symbols)
+  ) {
+    return record.symbols as CompactPriceData;
+  }
+  // Legacy flat map — first value is an array of bars
+  const values = Object.values(record);
+  if (values.length === 0) {
+    return record as CompactPriceData;
+  }
+  const first = values[0];
+  if (Array.isArray(first)) {
+    return record as CompactPriceData;
+  }
+  return null;
+}
 
 export function symbolsForPortfolios(portfolios: ReadonlyArray<PortfolioConfig>): string[] {
   const symbols = new Set<string>();
@@ -56,7 +99,8 @@ async function fetchPricePayload(
   if (!response.ok) {
     return null;
   }
-  return await response.json() as CompactPriceData;
+  const raw: unknown = await response.json();
+  return unwrapCompactPricePayload(raw);
 }
 
 export async function fetchCompactPriceData(

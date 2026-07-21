@@ -10,7 +10,8 @@ describe('dashboard delivery source contracts', () => {
     const source = read('scripts/fetch-data.ts');
 
     expect(source).toContain("'prices_compact.json'");
-    expect(source).toContain('writeJsonAtomic(pricesCompactPath, compact)');
+    expect(source).toContain('writeJsonAtomic(pricesCompactPath, pricesCompactPayload)');
+    expect(source).toContain('buildLastNBarsCompact');
   });
 
   it('syncs fetched prices into market.db before regenerating dashboard health', () => {

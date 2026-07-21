@@ -45,23 +45,30 @@ export async function fetchAllSymbols() {
   return allData;
 }
 
-// CLI: fetch and save to compact prices.json
+// CLI: fetch and save prices.json + last-N prices_compact.json (Batch BK)
 if (import.meta.main) {
+  const { buildLastNBarsCompact, resolvePricesCompactNBars } = await import(
+    '../../scripts/fetch-data.ts'
+  );
   const data = await fetchAllSymbols();
-  // Compact format: { SPY: [{d:"2024-01-02",p:123.45}, ...], ... }
-  const compact: Record<string, Array<{d: string, p: number}>> = {};
+  // Full history: { SPY: [{d:"2024-01-02",p:123.45}, ...], ... }
+  const full: Record<string, Array<{d: string, p: number}>> = {};
   for (const [sym, entries] of Object.entries(data)) {
-    compact[sym] = entries.map(e => ({ d: e.date, p: e.price }));
+    full[sym] = entries.map(e => ({ d: e.date, p: e.price }));
   }
   const outPath = new URL('../../public/data/prices.json', import.meta.url).pathname;
   const compactPath = new URL('../../public/data/prices_compact.json', import.meta.url).pathname;
-  const serialized = JSON.stringify(compact);
-  await Bun.write(outPath, serialized);
-  await Bun.write(compactPath, serialized);
-  console.log(`\nCompact data saved to ${outPath}`);
-  console.log(`Compact mirror saved to ${compactPath}`);
-  console.log(`Symbols: ${Object.keys(compact).join(', ')}`);
-  for (const [k, v] of Object.entries(compact)) {
+  const nBars = resolvePricesCompactNBars();
+  const compactPayload = buildLastNBarsCompact(full, nBars);
+  await Bun.write(outPath, JSON.stringify(full));
+  await Bun.write(compactPath, JSON.stringify(compactPayload));
+  console.log(`\nFull history saved to ${outPath}`);
+  console.log(
+    `Compact last-${nBars} bars saved to ${compactPath} `
+    + `(${compactPayload.meta.bar_count} points)`,
+  );
+  console.log(`Symbols: ${Object.keys(full).join(', ')}`);
+  for (const [k, v] of Object.entries(full)) {
     console.log(`  ${k}: ${v.length} days (${v[0]?.d} to ${v[v.length-1]?.d})`);
   }
 }

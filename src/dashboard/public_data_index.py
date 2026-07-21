@@ -48,7 +48,7 @@ _PUBLIC_DATA_CONTRACT: dict[str, tuple[str, str]] = {
     "explainability_latest.json": ("explainability", "explainability/v1"),
     "risk_decomposition.json": ("risk", "risk-decomposition/v1"),
     "overlay_dashboard.json": ("overlay", "overlay-dashboard/v1"),
-    "prices.json": ("market_data", "prices/compact-v1"),
+    "prices.json": ("market_data", "prices/full-v1"),
     "prices_compact.json": ("market_data", "prices/compact-v1"),
     "historical.json": ("market_data", "historical/v1"),
     "yields.json": ("market_data", "yields/v1"),

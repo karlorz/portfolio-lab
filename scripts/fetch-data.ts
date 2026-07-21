@@ -108,6 +108,75 @@ function latestObservationFromCompact(compact: Record<string, { d: string; p: nu
   return latest;
 }
 
+/** Default window for prices_compact.json (≈2 trading years). */
+export const PRICES_COMPACT_DEFAULT_N_BARS = 504;
+
+export type CompactPriceBar = { d: string; p: number };
+export type CompactPriceSeriesMap = Record<string, CompactPriceBar[]>;
+
+/**
+ * Build last-N-bars compact payload (Batch BK).
+ * Full history stays in prices.json; compact is a true window for CDN/dashboard.
+ */
+export function buildLastNBarsCompact(
+  full: CompactPriceSeriesMap,
+  nBars: number = PRICES_COMPACT_DEFAULT_N_BARS,
+  options?: { asOf?: string; fullArtifact?: string },
+): {
+  meta: {
+    schema: 'prices/compact-v1';
+    as_of: string;
+    n_bars: number;
+    full_artifact: string;
+    symbol_count: number;
+    bar_count: number;
+  };
+  symbols: CompactPriceSeriesMap;
+} {
+  const limit = Number.isFinite(nBars) && nBars > 0 ? Math.trunc(nBars) : PRICES_COMPACT_DEFAULT_N_BARS;
+  const symbols: CompactPriceSeriesMap = {};
+  let barCount = 0;
+  for (const [symbol, rows] of Object.entries(full)) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+      symbols[symbol] = [];
+      continue;
+    }
+    // Assume rows are chronological ascending (fetch path); take tail.
+    const sliced = rows.length > limit ? rows.slice(-limit) : rows.slice();
+    symbols[symbol] = sliced;
+    barCount += sliced.length;
+  }
+  const asOf = options?.asOf
+    ?? latestObservationFromCompact(symbols)
+    ?? new Date().toISOString().slice(0, 10);
+  return {
+    meta: {
+      schema: 'prices/compact-v1',
+      as_of: asOf,
+      n_bars: limit,
+      full_artifact: options?.fullArtifact ?? 'prices.json',
+      symbol_count: Object.keys(symbols).length,
+      bar_count: barCount,
+    },
+    symbols,
+  };
+}
+
+/** Env override: PRICES_COMPACT_N_BARS (positive int). */
+export function resolvePricesCompactNBars(
+  env: Record<string, string | undefined> = process.env as Record<string, string | undefined>,
+): number {
+  const raw = env.PRICES_COMPACT_N_BARS;
+  if (raw === undefined || raw.trim() === '') {
+    return PRICES_COMPACT_DEFAULT_N_BARS;
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    return PRICES_COMPACT_DEFAULT_N_BARS;
+  }
+  return Math.trunc(n);
+}
+
 function firstFailureReason(
   failureCounts: Awaited<ReturnType<typeof fetchAllDataWithSummary>>['summary']['failure_counts'],
 ): string | null {
@@ -135,13 +204,14 @@ function unavailablePriceQualitySourceSummary(): NonNullable<MarketDataSourceRow
 
 export function buildPriceSourceRows(
   priceSummary: Awaited<ReturnType<typeof fetchAllDataWithSummary>>['summary'],
-  compact: Record<string, { d: string; p: number }[]>,
+  fullPrices: CompactPriceSeriesMap,
   fetchedAt: string,
   qualityReport?: PriceDataQualityReport,
+  compactMeta?: { n_bars: number; bar_count: number },
 ): MarketDataSourceRow[] {
-  const rowCount = Object.values(compact).reduce((sum, rows) => sum + rows.length, 0);
-  const latestObservation = latestObservationFromCompact(compact);
-  const symbols = Object.keys(compact).sort();
+  const fullRowCount = Object.values(fullPrices).reduce((sum, rows) => sum + rows.length, 0);
+  const latestObservation = latestObservationFromCompact(fullPrices);
+  const symbols = Object.keys(fullPrices).sort();
   const failureReason = priceSummary.circuit_breaker.opened
     ? priceSummary.circuit_breaker.reason
     : firstFailureReason(priceSummary.failure_counts);
@@ -156,28 +226,60 @@ export function buildPriceSourceRows(
   } else if (qualityStatus === 'warn' && priceSummary.status === 'success') {
     qualityNotes.push('Price data quality overall_status=warn; manifest status degraded.');
   }
-  return ['prices.json', 'prices_compact.json'].map((artifact) => ({
-    artifact,
-    provider: priceSummary.provider,
-    feed: priceSummary.feed,
-    provider_chain: priceSummary.provider_chain,
-    primary_provider: priceSummary.primary_provider,
-    fallback_provider: priceSummary.fallback_provider,
-    source_mode: priceSummary.source_mode,
-    status: rowStatus,
-    fetched_at: fetchedAt,
-    latest_observation: latestObservation,
-    row_count: rowCount,
-    symbols,
-    failure_reason: failureReason ?? (qualityStatus === 'fail' ? 'price_data_quality_fail' : null),
-    ...(dataQuality === undefined ? {} : { data_quality: dataQuality }),
-    notes: [
-      ...(priceSummary.circuit_breaker.opened
-        ? [`Skipped symbols after provider circuit breaker opened: ${priceSummary.circuit_breaker.skipped_symbols.join(', ')}`]
-        : []),
-      ...qualityNotes,
-    ],
-  }));
+  const compactRowCount = compactMeta?.bar_count ?? fullRowCount;
+  const compactNotes = [
+    ...qualityNotes,
+    compactMeta
+      ? `prices_compact is last-${compactMeta.n_bars} bars/symbol (not a full-history mirror)`
+      : 'prices_compact last-N window',
+  ];
+  return [
+    {
+      artifact: 'prices.json',
+      provider: priceSummary.provider,
+      feed: priceSummary.feed,
+      provider_chain: priceSummary.provider_chain,
+      primary_provider: priceSummary.primary_provider,
+      fallback_provider: priceSummary.fallback_provider,
+      source_mode: priceSummary.source_mode,
+      status: rowStatus,
+      fetched_at: fetchedAt,
+      latest_observation: latestObservation,
+      row_count: fullRowCount,
+      symbols,
+      failure_reason: failureReason ?? (qualityStatus === 'fail' ? 'price_data_quality_fail' : null),
+      ...(dataQuality === undefined ? {} : { data_quality: dataQuality }),
+      notes: [
+        ...(priceSummary.circuit_breaker.opened
+          ? [`Skipped symbols after provider circuit breaker opened: ${priceSummary.circuit_breaker.skipped_symbols.join(', ')}`]
+          : []),
+        ...qualityNotes,
+        'full multi-year history for market.db / backtest archive',
+      ],
+    },
+    {
+      artifact: 'prices_compact.json',
+      provider: priceSummary.provider,
+      feed: priceSummary.feed,
+      provider_chain: priceSummary.provider_chain,
+      primary_provider: priceSummary.primary_provider,
+      fallback_provider: priceSummary.fallback_provider,
+      source_mode: priceSummary.source_mode,
+      status: rowStatus,
+      fetched_at: fetchedAt,
+      latest_observation: latestObservation,
+      row_count: compactRowCount,
+      symbols,
+      failure_reason: failureReason ?? (qualityStatus === 'fail' ? 'price_data_quality_fail' : null),
+      ...(dataQuality === undefined ? {} : { data_quality: dataQuality }),
+      notes: [
+        ...(priceSummary.circuit_breaker.opened
+          ? [`Skipped symbols after provider circuit breaker opened: ${priceSummary.circuit_breaker.skipped_symbols.join(', ')}`]
+          : []),
+        ...compactNotes,
+      ],
+    },
+  ];
 }
 
 function fredCacheKey(key: FredCacheKey): string {
@@ -451,23 +553,33 @@ export async function main() {
     throw new Error(`No price rows returned for configured symbols: ${missingSymbols.join(', ')}`);
   }
 
-  // Convert to compact format: { symbol: [{d, p}, ...] }
-  const compact: Record<string, { d: string; p: number }[]> = {};
+  // Full history: { symbol: [{d, p}, ...] } → prices.json (canonical for market.db)
+  const fullPrices: CompactPriceSeriesMap = {};
   let totalDays = 0;
   for (const [symbol, prices] of Object.entries(priceData)) {
-    compact[symbol] = prices.map(p => ({ d: p.date, p: p.adjClose }));
+    fullPrices[symbol] = prices.map(p => ({ d: p.date, p: p.adjClose }));
     totalDays += prices.length;
   }
+
+  // Batch BK: prices_compact is last-N bars only (not a second full archive)
+  const compactNBars = resolvePricesCompactNBars();
+  const pricesCompactPayload = buildLastNBarsCompact(fullPrices, compactNBars, {
+    fullArtifact: 'prices.json',
+  });
 
   const pricesPath = join(DATA_DIR, 'prices.json');
   const pricesCompactPath = join(DATA_DIR, 'prices_compact.json');
   const priceQualityPath = join(DATA_DIR, PRICE_DATA_QUALITY_FILENAME);
-  const priceQualityReport = buildPriceDataQualityReport(compact);
-  await writeJsonAtomic(pricesPath, compact);
-  await writeJsonAtomic(pricesCompactPath, compact);
+  // Quality audit runs on full history (operators care about full-book anomalies)
+  const priceQualityReport = buildPriceDataQualityReport(fullPrices);
+  await writeJsonAtomic(pricesPath, fullPrices);
+  await writeJsonAtomic(pricesCompactPath, pricesCompactPayload);
   await writeJsonAtomic(priceQualityPath, priceQualityReport);
-  console.log(`\nSaved ${Object.keys(compact).length} symbols (${totalDays} total data points) → ${pricesPath}`);
-  console.log(`Saved compact price mirror → ${pricesCompactPath}`);
+  console.log(`\nSaved ${Object.keys(fullPrices).length} symbols (${totalDays} total data points) → ${pricesPath}`);
+  console.log(
+    `Saved prices_compact last-${compactNBars} bars `
+    + `(${pricesCompactPayload.meta.bar_count} points) → ${pricesCompactPath}`,
+  );
   console.log(
     `Saved price data quality audit → ${priceQualityPath} (overall_status=${priceQualityReport.overall_status})`,
   );
@@ -490,7 +602,16 @@ export async function main() {
   const manifestPath = join(DATA_DIR, MARKET_DATA_SOURCE_MANIFEST_FILENAME);
   const manifestGeneratedAt = new Date().toISOString();
   const manifest = buildMarketDataSourceManifest([
-    ...buildPriceSourceRows(priceResult.summary, compact, manifestGeneratedAt, priceQualityReport),
+    ...buildPriceSourceRows(
+      priceResult.summary,
+      fullPrices,
+      manifestGeneratedAt,
+      priceQualityReport,
+      {
+        n_bars: pricesCompactPayload.meta.n_bars,
+        bar_count: pricesCompactPayload.meta.bar_count,
+      },
+    ),
     buildYieldSourceRow(
       yieldResult.summary,
       yieldData.length,
