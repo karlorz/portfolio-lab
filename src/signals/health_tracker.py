@@ -82,11 +82,17 @@ class HealthScore:
     accuracy_30d: float  # 30-day rolling accuracy
     accuracy_60d: float  # 60-day rolling accuracy
     accuracy_90d: float  # 90-day rolling accuracy
-    decay_rate: float  # Daily decay rate (negative = improving)
+    decay_rate: float  # (acc_30d - acc_60d) / 30; negative = recent worse than mid
     predictions_count: int
     status: str  # healthy/degraded/unhealthy
     ic: Optional[float] = None  # Information Coefficient (Spearman ρ)
     ic_half_life_days: Optional[float] = None  # IC half-life in days (inf = stable)
+    # Batch BU: multi-window honesty when 90d collapses onto 60d history
+    window_collapse_90_60: bool = False
+    weight_scheme: str = "full_50_30_20"  # or collapsed_recency_40_60
+    weight_60d: float = 0.3
+    weight_30d: float = 0.2
+    weight_90d: float = 0.5
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -401,6 +407,45 @@ class SignalHealthTracker:
         )
         return summary
     
+    @staticmethod
+    def resolve_health_window_weights(
+        counts: Dict[str, int],
+        accuracies: Dict[str, float],
+    ) -> Dict[str, Any]:
+        """Choose multi-window weights with collapse honesty (Batch BU).
+
+        Full scheme (independent 90d history): 50% 90d + 30% 60d + 20% 30d.
+
+        When the 90d window collapses onto 60d (same labeled row count, or
+        identical accuracy because there is no extra history), double-counting
+        90d+60d masks recent decay. MLOps multi-window practice: compare recent
+        vs long baselines without pretending a longer window exists; apply
+        recency bias (60% 30d + 40% 60d).
+
+        Returns weights + collapse flag + scheme name.
+        """
+        c90 = int(counts.get("90d") or 0)
+        c60 = int(counts.get("60d") or 0)
+        # Collapsed only when 90d has no extra labeled rows beyond 60d.
+        # Do not use accuracy equality alone — full history can share the same
+        # hit rate while still being a longer window (would false-collapse).
+        collapsed = c90 > 0 and c60 > 0 and c90 == c60
+        if collapsed:
+            return {
+                "window_collapse_90_60": True,
+                "weight_scheme": "collapsed_recency_40_60",
+                "weight_90d": 0.0,
+                "weight_60d": 0.4,
+                "weight_30d": 0.6,
+            }
+        return {
+            "window_collapse_90_60": False,
+            "weight_scheme": "full_50_30_20",
+            "weight_90d": 0.5,
+            "weight_60d": 0.3,
+            "weight_30d": 0.2,
+        }
+
     def calculate_health_score(
         self, 
         source: str,
@@ -409,11 +454,14 @@ class SignalHealthTracker:
         """
         Calculate health score for a signal source.
         
-        Health score formula:
+        Health score formula (full independent history):
         - 50% weight on 90-day accuracy
         - 30% weight on 60-day accuracy  
         - 20% weight on 30-day accuracy
-        - Decay penalty if health dropping >20% in 30 days
+
+        Batch BU: when 90d window collapses onto 60d (same labeled count or
+        identical accuracy), use recency-biased 40% 60d + 60% 30d so recent
+        decay is not masked by double-counting the same mid window as "long".
         """
         end_date = end_date or datetime.now().strftime("%Y-%m-%d")
         
@@ -464,13 +512,15 @@ class SignalHealthTracker:
             logger.warning("Insufficient data for %s: only %d predictions", source, ninety_day_count)
             return None
         
+        weights = self.resolve_health_window_weights(counts, accuracies)
         health = (
-            accuracies['90d'] * 0.5 +
-            accuracies['60d'] * 0.3 +
-            accuracies['30d'] * 0.2
+            accuracies['90d'] * float(weights["weight_90d"])
+            + accuracies['60d'] * float(weights["weight_60d"])
+            + accuracies['30d'] * float(weights["weight_30d"])
         )
         
         # Calculate decay rate (change per day over 30 days)
+        # positive → recent better than mid; negative → recent worse (decay)
         decay_rate = (accuracies['30d'] - accuracies['60d']) / 30 if counts['60d'] > 0 else 0
         
         # Determine status
@@ -493,6 +543,11 @@ class SignalHealthTracker:
             status=status,
             ic=self.compute_ic(source, end_date=end_date),
             ic_half_life_days=self.compute_ic_half_life(source, end_date=end_date),
+            window_collapse_90_60=bool(weights["window_collapse_90_60"]),
+            weight_scheme=str(weights["weight_scheme"]),
+            weight_60d=float(weights["weight_60d"]),
+            weight_30d=float(weights["weight_30d"]),
+            weight_90d=float(weights["weight_90d"]),
         )
     
     def calculate_all_health_scores(
@@ -1001,6 +1056,9 @@ class SignalHealthTracker:
             overall_health = "healthy" if healthy_count >= len(scores) * 0.6 else "degraded"
             status = overall_health
 
+        collapsed_n = sum(
+            1 for s in scores.values() if getattr(s, "window_collapse_90_60", False)
+        )
         return {
             "timestamp": datetime.now().isoformat(),
             "summary": {
@@ -1020,6 +1078,8 @@ class SignalHealthTracker:
                     "Not the same as signals.ic_decay.pending_predictions "
                     "(IC staged-date window)."
                 ),
+                # Batch BU: how many arms used collapsed multi-window weights
+                "window_collapse_90_60_count": collapsed_n,
             },
             "scores": {s: scores[s].to_dict() for s in scores},
             "ic_metrics": ic_data,
@@ -1027,6 +1087,12 @@ class SignalHealthTracker:
             "overall_health": overall_health,
             "status": status,
             "label_horizon": "SPY actual direction resolved by update_actual_directions for each prediction date",
+            "health_score_policy": {
+                "full_scheme": "50% 90d + 30% 60d + 20% 30d",
+                "collapsed_scheme": "40% 60d + 60% 30d (recency bias; no fake 90d)",
+                "collapse_rule": "c90==c60 (no extra labeled history in 60→90)",
+                "live_authoritative": False,
+            },
         }
 
 def backfill_predictions(

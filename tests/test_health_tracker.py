@@ -825,6 +825,9 @@ class TestHealthScoreExtended:
             'source', 'timestamp', 'health_score', 'accuracy_30d',
             'accuracy_60d', 'accuracy_90d', 'decay_rate', 'predictions_count',
             'status', 'ic', 'ic_half_life_days',
+            # Batch BU multi-window honesty fields
+            'window_collapse_90_60', 'weight_scheme',
+            'weight_60d', 'weight_30d', 'weight_90d',
         }
         assert set(d.keys()) == expected_keys
 
@@ -1193,6 +1196,8 @@ class TestHealthScoreToDictEdgeCases:
             'source', 'timestamp', 'health_score', 'accuracy_30d',
             'accuracy_60d', 'accuracy_90d', 'decay_rate', 'predictions_count',
             'status', 'ic', 'ic_half_life_days',
+            'window_collapse_90_60', 'weight_scheme',
+            'weight_60d', 'weight_30d', 'weight_90d',
         }
         assert set(d.keys()) == expected
         assert d['ic'] is None
@@ -2463,6 +2468,8 @@ class TestDataclassFieldValidation:
             'source', 'timestamp', 'health_score', 'accuracy_30d',
             'accuracy_60d', 'accuracy_90d', 'decay_rate',
             'predictions_count', 'status', 'ic', 'ic_half_life_days',
+            'window_collapse_90_60', 'weight_scheme',
+            'weight_60d', 'weight_30d', 'weight_90d',
         }
         assert fields['health_score'].type is float
         assert fields['predictions_count'].type is int
@@ -3817,12 +3824,12 @@ class TestGetAdjustedWeightsMinMultiplier:
             adjusted_custom = tracker.get_adjusted_weights(
                 {"src_a": 1.0}, min_weight_multiplier=0.5,
             )
-        # Default min_mult=0.2: health_mult = max(0.2, 0.1) = 0.2
-        # Custom min_mult=0.5: health_mult = max(0.5, 0.1) = 0.5
-        assert abs(adjusted_custom["src_a"] - 1.0) < 0.01
-        assert abs(adjusted_default["src_a"] - 1.0) < 0.01
-        # Both normalize to 1.0 with only one source, so compare health multipler
-        # Only visible when there are multiple sources
+        # Batch BH: status=unhealthy hard-zeros arm mass (soft floor does not apply).
+        # Single-source portfolio still renormalizes empty → 0 weight for that key
+        # or drops mass; either way unhealthy is not soft-floored to min_mult.
+        assert adjusted_default.get("src_a", 0.0) == pytest.approx(0.0, abs=0.01)
+        assert adjusted_custom.get("src_a", 0.0) == pytest.approx(0.0, abs=0.01)
+        # Soft floor still matters for degraded (not unhealthy) multi-source cases.
         scores_two = {
             "src_a": HealthScore(
                 source="src_a", timestamp="2026-05-24",
@@ -3842,11 +3849,35 @@ class TestGetAdjustedWeightsMinMultiplier:
             adj_custom = tracker.get_adjusted_weights(
                 {"src_a": 0.5, "src_b": 0.5}, min_weight_multiplier=0.5,
             )
-        # With default: src_a adj = 0.5*0.2=0.1, src_b = 0.5*0.9=0.45
-        #   normalized: src_a = 0.1/0.55 ≈ 0.182, src_b = 0.45/0.55 ≈ 0.818
-        # With custom (0.5): src_a = 0.5*0.5=0.25, src_b = 0.5*0.9=0.45
-        #   normalized: src_a = 0.25/0.70 ≈ 0.357, src_b = 0.45/0.70 ≈ 0.643
-        assert adj_custom["src_a"] > adj_default["src_a"]
+        # Batch BH: unhealthy src_a is hard-zeroed; soft min_mult does not revive it.
+        # All residual mass on healthy src_b after renormalization.
+        assert adj_default.get("src_a", 0.0) == pytest.approx(0.0, abs=0.01)
+        assert adj_custom.get("src_a", 0.0) == pytest.approx(0.0, abs=0.01)
+        assert adj_default.get("src_b", 0.0) == pytest.approx(1.0, abs=0.01)
+        assert adj_custom.get("src_b", 0.0) == pytest.approx(1.0, abs=0.01)
+
+        # Soft floor still differentiates *degraded* arms (status not unhealthy).
+        scores_degraded = {
+            "src_a": HealthScore(
+                source="src_a", timestamp="2026-05-24",
+                health_score=0.10, accuracy_30d=0.10, accuracy_60d=0.10,
+                accuracy_90d=0.10, decay_rate=0.0, predictions_count=100,
+                status="degraded", ic=None,
+            ),
+            "src_b": HealthScore(
+                source="src_b", timestamp="2026-05-24",
+                health_score=0.90, accuracy_30d=0.90, accuracy_60d=0.90,
+                accuracy_90d=0.90, decay_rate=0.0, predictions_count=100,
+                status="healthy", ic=None,
+            ),
+        }
+        with patch.object(tracker, 'calculate_all_health_scores', return_value=scores_degraded):
+            deg_default = tracker.get_adjusted_weights({"src_a": 0.5, "src_b": 0.5})
+            deg_custom = tracker.get_adjusted_weights(
+                {"src_a": 0.5, "src_b": 0.5}, min_weight_multiplier=0.5,
+            )
+        # Higher soft floor → more residual mass on the weak degraded arm
+        assert deg_custom["src_a"] > deg_default["src_a"]
 
 
 def test_signal_health_summary_tags_pending_scope(tmp_path):
