@@ -1254,6 +1254,181 @@ class EnsembleVoter:
             return False
 
     @staticmethod
+    def contribution_reward_decimal(
+        daily_return: float,
+        *,
+        value: float,
+        weight: float,
+    ) -> float:
+        """Map one signal reading + portfolio daily return → arm reward (decimal).
+
+        Batch BR: same credit formula as ``PerformanceAttribution._compute_source_attribution``
+        (directional: ``ret * |value|``; neutral ``|value|<=0.05``: ``ret * weight * 2``),
+        returned in decimal return units (not bps) for bandit updates.
+        """
+        ret = float(daily_return)
+        val = float(value)
+        w = float(weight)
+        if abs(val) > 0.05:
+            return ret * abs(val)
+        return ret * w * 2.0
+
+    @staticmethod
+    def compute_daily_contribution_rewards(
+        signals: List[Dict[str, Any]],
+        daily_return: float,
+        *,
+        min_spread: float = 1e-12,
+    ) -> Optional[Dict[str, float]]:
+        """Build identifying per-source rewards for one calendar day.
+
+        Uses the latest reading per source in ``signals``. Returns None when
+        fewer than two sources or zero reward spread (non-identification).
+        """
+        try:
+            ret = float(daily_return)
+        except (TypeError, ValueError):
+            return None
+        by_source: Dict[str, Dict[str, Any]] = {}
+        for sig in signals:
+            if not isinstance(sig, dict):
+                continue
+            name = sig.get("source")
+            if name is None:
+                continue
+            src = str(name)
+            # Last write wins (callers should pass chronological order)
+            by_source[src] = sig
+        if len(by_source) < 2:
+            return None
+        rewards: Dict[str, float] = {}
+        for src, sig in by_source.items():
+            try:
+                value = float(sig.get("value", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            try:
+                weight = float(sig.get("weight", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                weight = 0.0
+            rewards[src] = EnsembleVoter.contribution_reward_decimal(
+                ret, value=value, weight=weight
+            )
+        if len(rewards) < 2:
+            return None
+        vals = list(rewards.values())
+        if max(vals) - min(vals) < min_spread:
+            return None
+        return rewards
+
+    @staticmethod
+    def load_daily_contribution_source_rewards(
+        data_dir: Optional[Path] = None,
+        *,
+        lookback_days: int = 14,
+    ) -> Optional[Tuple[Dict[str, float], Dict[str, Any]]]:
+        """Load per-source rewards from *one* recent day of signal × PnL credit.
+
+        Batch BR (B1): prefers true daily contribution over windowed
+        ``avg_return_bps`` (Batch BQ). Joins ``source_readings`` (latest per
+        source/day) with paper daily returns; walks newest dates first until
+        an identifying multi-arm map is found.
+
+        Returns ``(rewards, meta)`` or None. Meta includes ``as_of_date``,
+        ``reward_mode``, ``live_authoritative: false``. Hermetic when
+        ``data_dir`` is an explicit tmp path (no live DATA_DIR leak).
+        """
+        root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+        lookback = max(int(lookback_days), 2)
+
+        # Lazy import avoids pulling attribution/numpy heavy paths at module load
+        try:
+            from src.monitor.performance_attribution import PerformanceAttribution
+        except ImportError:
+            logger.debug("PerformanceAttribution unavailable for daily contribution rewards")
+            return None
+
+        try:
+            pa = PerformanceAttribution(data_dir=root)
+            history = pa._get_signal_history(days=lookback)
+            daily_returns = pa._get_paper_trading_returns(days=lookback)
+        except (OSError, TypeError, ValueError, AttributeError, RuntimeError) as exc:
+            logger.debug("Daily contribution load failed: %s", exc)
+            return None
+
+        if not history or not daily_returns:
+            return None
+
+        # Group source readings by calendar date (latest timestamp per source/day)
+        by_day: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        for row in history:
+            if not isinstance(row, dict) or row.get("type") == "ensemble_vote":
+                continue
+            ts = row.get("timestamp")
+            src = row.get("source")
+            if not ts or not src:
+                continue
+            day = str(ts)[:10]
+            if len(day) < 10:
+                continue
+            bucket = by_day.setdefault(day, {})
+            # history is DESC by timestamp; first seen wins as latest
+            if str(src) not in bucket:
+                bucket[str(src)] = row
+
+        # Newest return dates first
+        for day in sorted(daily_returns.keys(), reverse=True):
+            ret_entry = daily_returns.get(day) or {}
+            try:
+                ret = float(ret_entry.get("daily_return"))
+            except (TypeError, ValueError):
+                continue
+            day_sources = by_day.get(day)
+            if not day_sources or len(day_sources) < 2:
+                continue
+            signals = list(day_sources.values())
+            rewards = EnsembleVoter.compute_daily_contribution_rewards(
+                signals, daily_return=ret
+            )
+            if rewards is None:
+                continue
+            meta: Dict[str, Any] = {
+                "reward_mode": "daily_contribution_source_rewards",
+                "as_of_date": day,
+                "arms": len(rewards),
+                "reward_spread": max(rewards.values()) - min(rewards.values()),
+                "live_authoritative": False,
+                "portfolio_daily_return": ret,
+            }
+            logger.debug(
+                "Loaded daily contribution rewards for %s (%d arms, spread=%.6f)",
+                day,
+                len(rewards),
+                meta["reward_spread"],
+            )
+            return rewards, meta
+        return None
+
+    @staticmethod
+    def load_preferred_source_rewards(
+        data_dir: Optional[Path] = None,
+    ) -> Tuple[Optional[Dict[str, float]], str]:
+        """Prefer daily contribution rewards; fall back to windowed attribution.
+
+        Batch BR: ``(rewards, reward_mode)``. Mode is one of
+        ``daily_contribution_source_rewards``, ``attribution_source_rewards``,
+        or ``none``.
+        """
+        daily = EnsembleVoter.load_daily_contribution_source_rewards(data_dir)
+        if daily is not None:
+            rewards, meta = daily
+            return rewards, str(meta.get("reward_mode") or "daily_contribution_source_rewards")
+        windowed = EnsembleVoter.load_attribution_source_rewards(data_dir)
+        if windowed is not None:
+            return windowed, "attribution_source_rewards"
+        return None, "none"
+
+    @staticmethod
     def load_attribution_source_rewards(
         data_dir: Optional[Path] = None,
         *,
@@ -1265,6 +1440,9 @@ class EnsembleVoter:
         multi-arm bandit updates can differentiate signals. Windowed attribution
         is a *proxy* for true daily credit assignment (linear/contextual bandit
         ideal); still identifying vs identical portfolio PnL broadcast.
+
+        Batch BR prefers :meth:`load_daily_contribution_source_rewards` via
+        :meth:`load_preferred_source_rewards` when a single-day join is available.
 
         Preference order (when ``data_dir`` is None → default DATA_DIR):
           1. ``{data_dir}/attribution/latest.json``
@@ -1350,6 +1528,7 @@ class EnsembleVoter:
         persist: bool = True,
         noise_floor: Optional[float] = None,
         source_rewards: Optional[Dict[str, float]] = None,
+        reward_mode: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Apply one day of portfolio return as reward to ensemble bandit sources.
 
@@ -1366,6 +1545,8 @@ class EnsembleVoter:
         (non-identification). Batch BQ: when ``source_rewards`` maps arms to
         *differentiated* per-source returns (e.g. attribution avg_return_bps),
         multi-arm updates proceed with per-arm credit assignment.
+        Batch BR: prefer daily contribution ``source_rewards`` and pass
+        ``reward_mode='daily_contribution_source_rewards'`` for honesty tags.
 
         Returns summary with updates count and observation total.
         """
@@ -1539,13 +1720,20 @@ class EnsembleVoter:
             "live_authoritative": False,
         }
         if per_arm is not None:
-            summary["reward_mode"] = "attribution_source_rewards"
+            mode = (
+                str(reward_mode)
+                if reward_mode
+                else "attribution_source_rewards"
+            )
+            summary["reward_mode"] = mode
             summary["arms_updated"] = list(applied.keys())
             summary["reward_spread"] = (
                 max(applied.values()) - min(applied.values()) if applied else 0.0
             )
         else:
-            summary["reward_mode"] = "single_arm_or_scalar"
+            summary["reward_mode"] = (
+                str(reward_mode) if reward_mode else "single_arm_or_scalar"
+            )
         return summary
 
     @staticmethod

@@ -1906,18 +1906,21 @@ class DashboardGenerator:
             from src.strategy.ensemble_voter import EnsembleVoter
 
             ensemble_engine = EnsembleVoter()
-            # Daily reward train (advisory bandit): prefer differentiated
-            # attribution per-arm rewards (Batch BQ); fall back to scalar
-            # portfolio return only for single-arm / when multi-arm skip (BO).
+            # Daily reward train (advisory bandit): prefer daily contribution
+            # credit (Batch BR) then windowed attribution (Batch BQ); fall back
+            # to scalar only for single-arm / multi-arm skip (BO).
             # Failures never block vote. Bandit remains non-authoritative.
             try:
                 daily_ret = EnsembleVoter.load_latest_daily_return_from_performance()
                 if daily_ret is not None:
-                    src_rewards = EnsembleVoter.load_attribution_source_rewards()
+                    src_rewards, reward_mode = (
+                        EnsembleVoter.load_preferred_source_rewards()
+                    )
                     ensemble_engine.apply_daily_bandit_rewards(
                         daily_ret,
                         persist=True,
                         source_rewards=src_rewards,
+                        reward_mode=reward_mode if src_rewards else None,
                     )
             except SIGNAL_EXCEPTIONS as bandit_exc:
                 logger.debug("ensemble bandit daily reward skipped: %s", bandit_exc)
