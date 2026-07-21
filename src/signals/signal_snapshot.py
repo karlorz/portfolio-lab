@@ -86,6 +86,7 @@ class SignalSnapshot:
             regime_fit=self.regime_fit,
             asset_signals=self.asset_signals if self.asset_signals else None,
             explanation=self.explanation,
+            is_active=bool(self.is_active),
         )
 
     @classmethod

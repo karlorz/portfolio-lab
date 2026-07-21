@@ -69,8 +69,21 @@ class SignalAggregator:
         source: SignalSource,
         snapshot: Any,
     ) -> None:
-        if snapshot.is_active:
+        """Store snapshot readings for ensemble + dashboard disclosure.
+
+        Batch CV: previously only ``is_active`` snapshots were stored, so
+        intentional inactive states (e.g. international_momentum neutral /
+        conf<0.5) looked like **missing** fetch failures. Always store the
+        reading; vote path forces weight=0 when ``is_active`` is False.
+        """
+        if snapshot is None:
+            return
+        try:
             readings[source] = snapshot.to_signal_reading()
+        except (TypeError, ValueError, AttributeError) as exc:
+            logger.warning(
+                "Failed to convert snapshot for %s: %s", source, exc
+            )
 
     def _collect_msm_signal(
         self,

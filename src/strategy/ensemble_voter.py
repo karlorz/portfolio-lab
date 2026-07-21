@@ -137,6 +137,8 @@ class SignalReading:
     
     # Reasoning
     explanation: str = ""
+    # Batch CV: inactive readings are kept for disclosure but vote weight forced 0
+    is_active: bool = True
 
 
 @dataclass
@@ -2734,7 +2736,12 @@ class EnsembleVoter:
         weighted_signals = []
         for source, reading in readings.items():
             if source in weights:
-                reading.weight = weights[source]
+                # Batch CV: inactive snapshots stay in the vote trail for
+                # disclosure (source_breakdown) but must not move consensus.
+                if getattr(reading, "is_active", True):
+                    reading.weight = weights[source]
+                else:
+                    reading.weight = 0.0
                 weighted_signals.append(reading)
 
         # Log signal predictions for health tracking (v3.12)
