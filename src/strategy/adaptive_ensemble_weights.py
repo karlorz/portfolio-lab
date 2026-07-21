@@ -21,6 +21,7 @@ import logging
 import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional
 import numpy as np
 
@@ -103,16 +104,23 @@ class AdaptiveEnsembleWeights:
     - Persistent state saved to disk for EnsembleVoter to read
     """
 
-    def __init__(self, base_weights: Optional[Dict[str, float]] = None, config: Optional[Dict] = None):
+    def __init__(
+        self,
+        base_weights: Optional[Dict[str, float]] = None,
+        config: Optional[Dict] = None,
+        state_file: Optional[Path] = None,
+    ):
         self.config = {**DEFAULT_CONFIG, **(config or {})}
         self.base_weights = base_weights or {}
-        self.state_file = STATE_FILE
+        # Prefer explicit state_file (tests / isolation); default live STATE_FILE.
+        self.state_file = Path(state_file) if state_file is not None else STATE_FILE
 
         # Current computed state
         self.adjusted_weights: Dict[str, float] = {}
         self.multipliers: Dict[str, float] = {}
         self.history: List[WeightAdjustment] = []
         self.current_regime: str = "normal"
+        self._last_save_refused: Optional[str] = None
 
     # ── Public API ──
 
@@ -134,7 +142,8 @@ class AdaptiveEnsembleWeights:
             logger.info("No attribution data available, using base weights unchanged")
             self.adjusted_weights = dict(self.base_weights)
             self.multipliers = {k: 1.0 for k in self.base_weights}
-            self._save_state()
+            # Empty base + empty sources must not clobber a healthy on-disk state
+            self._save_state(force_empty=not bool(self.base_weights))
             return self.adjusted_weights
 
         # Get baseline weights for this regime
@@ -150,16 +159,19 @@ class AdaptiveEnsembleWeights:
             multipliers[source_name] = multiplier
             raw_adjusted[source_name] = base_weight * multiplier
 
-        # Add any attribution-only sources (that might not be in baseline)
-        for source_name, attribution in sources.items():
+        # Batch BJ: do NOT promote attribution-only ghost sources into the
+        # live adaptive mass. Ghosts (not in baseline / voter enum) previously
+        # diluted the norm so enum arms summed < 1 after EnsembleVoter drop.
+        skipped_ghosts: list[str] = []
+        for source_name in sources:
             if source_name not in raw_adjusted:
-                multiplier = self._compute_multiplier(source_name, attribution)
-                multipliers[source_name] = multiplier
-                # For extra sources, use a small default base weight
-                base = attribution.get("avg_weight", 0.01)
-                if base <= 0:
-                    base = 0.01
-                raw_adjusted[source_name] = base * multiplier
+                skipped_ghosts.append(source_name)
+        if skipped_ghosts:
+            logger.info(
+                "Adaptive weights skipped %d attribution-only ghost(s): %s",
+                len(skipped_ghosts),
+                ", ".join(sorted(skipped_ghosts)[:12]),
+            )
 
         # Apply min weight floor
         for source_name in raw_adjusted:
@@ -316,9 +328,31 @@ class AdaptiveEnsembleWeights:
             self.config["max_multiplier"],
         ))
 
-    def _save_state(self):
-        """Persist current state to JSON."""
+    def _save_state(self, *, force_empty: bool = False):
+        """Persist current state to JSON.
+
+        Batch BJ residual honesty: refuse to overwrite a non-empty on-disk
+        adaptive state with empty adjusted/multipliers (test isolation accidents
+        and empty-source updates must not wipe live cron state).
+        """
+        self._last_save_refused = None
         try:
+            new_empty = not self.adjusted_weights and not self.multipliers
+            if new_empty and not force_empty and self.state_file.exists():
+                try:
+                    prior = json.loads(self.state_file.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError, UnicodeDecodeError, TypeError):
+                    prior = {}
+                prior_adj = prior.get("adjusted_weights") if isinstance(prior, dict) else None
+                prior_nonempty = isinstance(prior_adj, dict) and len(prior_adj) > 0
+                if prior_nonempty:
+                    self._last_save_refused = "refuse_empty_overwrite_of_nonempty_state"
+                    logger.warning(
+                        "Refusing to overwrite non-empty adaptive state at %s "
+                        "with empty adjusted_weights (Batch BJ empty-write guard)",
+                        self.state_file,
+                    )
+                    return
             state = {
                 "timestamp": datetime.now().isoformat(),
                 "regime": self.current_regime,
@@ -328,7 +362,11 @@ class AdaptiveEnsembleWeights:
                 "baseline_weights": self.base_weights,
                 "config": self.config,
             }
-            save_results_json(state, output_path=str(self.state_file))
+            # Atomic write when possible
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.state_file.with_suffix(self.state_file.suffix + ".tmp")
+            save_results_json(state, output_path=str(tmp))
+            tmp.replace(self.state_file)
             logger.debug("Saved adaptive weights state to %s", self.state_file)
         except (OSError, TypeError, ValueError) as e:
             logger.warning("Failed to save adaptive weights state: %s", e)

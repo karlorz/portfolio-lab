@@ -378,10 +378,22 @@ def _stamp_generator_git_sha(
     *,
     status: str = "full_generate",
 ) -> Dict[str, Any]:
-    """Attach generator_git_sha when available (stats/analytics/graduation/overlay)."""
+    """Attach generator_git_sha when available (stats/analytics/graduation/overlay).
+
+    Batch BJ residual honesty (SLSA-style prior identity retention):
+    when the new tip differs from the previous full stamp, archive the prior
+    under ``last_full_generator_git_sha`` for lag forensics. Never clear an
+    existing last_full trail on full_generate.
+    """
     out = dict(payload)
     sha = _generator_git_sha_short()
     if sha:
+        prior = out.get("generator_git_sha")
+        prior_s = str(prior).strip() if prior not in (None, "") else ""
+        if prior_s and prior_s != sha:
+            out["last_full_generator_git_sha"] = prior_s
+        # Never drop an existing last_full trail when re-stamping same tip
+        # or when prior was already cleared by a partial_patch path.
         out["generator_git_sha"] = sha
         out["generator_git_sha_status"] = status
     return out
@@ -465,10 +477,9 @@ def _finalize_signal_metadata(output: Dict, *, finalized_at: str | None = None) 
     finalized = dict(output)
     finalized["generated_at"] = timestamp
     finalized["timestamp"] = timestamp
-    sha = _generator_git_sha_short()
-    if sha:
-        finalized["generator_git_sha"] = sha
-    return finalized
+    # Batch BJ: full stamp with last_full retention + status (same contract as
+    # health/overlay paths via _stamp_generator_git_sha).
+    return _stamp_generator_git_sha(finalized, status="full_generate")
 
 
 def _dist_data_dir_for_public_dir(public_dir: Path) -> Path:

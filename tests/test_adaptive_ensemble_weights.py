@@ -370,7 +370,7 @@ class TestIntegration:
     def test_attribution_with_extra_sources(
         self, tmp_state_dir, sample_base_weights
     ):
-        """Attribution with sources not in baseline should still work."""
+        """Attribution-only ghosts must not enter live adaptive mass (Batch BJ)."""
         attribution = {
             "timestamp": datetime.now().isoformat(),
             "sources": {
@@ -381,8 +381,9 @@ class TestIntegration:
         }
         weights = AdaptiveEnsembleWeights(base_weights=sample_base_weights)
         adapted = weights.update_weights(attribution, "normal")
-        assert "brand_new_source_x" in adapted, "Extra source should be included"
+        assert "brand_new_source_x" not in adapted, "Ghost must not dilute live weights"
         assert abs(sum(adapted.values()) - 1.0) < 0.01
+        assert "tsfm_momentum" in adapted
 
     def test_stale_attribution_handling(self, tmp_state_dir, sample_base_weights):
         """
@@ -408,8 +409,8 @@ class TestIntegration:
 
 class TestEdgeCases:
 
-    def test_empty_base_weights(self):
-        """Empty base weights should not crash."""
+    def test_empty_base_weights(self, tmp_state_dir):
+        """Empty base weights should not crash (isolated state path)."""
         weights = AdaptiveEnsembleWeights(base_weights={})
         adapted = weights.update_weights({"sources": {}, "timestamp": "now"}, "normal")
         assert adapted == {}
@@ -876,7 +877,7 @@ class TestWeightUpdateEdgeCases:
         assert abs(ratio_ab - 1.667) < 0.1
 
     def test_attribution_only_extra_sources(self, adaptive_weights):
-        """Sources in attribution but not in baseline: use avg_weight as base."""
+        """Ghost-only attribution with empty baseline → empty adapted (Batch BJ)."""
         attribution = {
             "timestamp": "now",
             "sources": {
@@ -894,9 +895,9 @@ class TestWeightUpdateEdgeCases:
         }
         weights = AdaptiveEnsembleWeights(base_weights={})  # empty baseline
         adapted = weights.update_weights(attribution, "normal")
-        assert abs(sum(adapted.values()) - 1.0) < 0.01
-        assert "extra_one" in adapted
-        assert "extra_two" in adapted
+        assert adapted == {}
+        assert "extra_one" not in adapted
+        assert "extra_two" not in adapted
 
     def test_single_source_zero_sharpe(self):
         """Single source with zero Sharpe yields no_data_multiplier."""
@@ -1072,12 +1073,13 @@ class TestStatePersistenceEdgeCases:
             f.write("{not json}")
         assert not adaptive_weights._load_state()
 
-    def test_save_load_empty_baseline(self):
-        """Save/load with empty baseline weights."""
+    def test_save_load_empty_baseline(self, tmp_state_dir):
+        """Save/load with empty baseline weights (isolated state path)."""
         weights = AdaptiveEnsembleWeights(base_weights={})
         weights.adjusted_weights = {}
         weights.multipliers = {}
-        weights._save_state()
+        # force_empty allows intentional empty baseline persistence in tests
+        weights._save_state(force_empty=True)
         loaded = weights._load_state()
         assert loaded
         assert weights.base_weights == {}
