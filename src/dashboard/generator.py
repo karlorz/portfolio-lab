@@ -696,9 +696,22 @@ def _compact_health_summary(report: Dict) -> Dict:
             summary["signal_health_total_tracked"] = sh_summary.get(
                 "total_tracked"
             ) or sh_summary.get("total")
+            # Batch CM: quality badge + freeze flag for compact consumers
+            if sh_summary.get("quality_badge"):
+                summary["signal_health_quality_badge"] = sh_summary.get("quality_badge")
+            if sh_summary.get("zero_healthy_sources"):
+                summary["signal_health_zero_healthy"] = True
+            if sh_summary.get("ensemble_weight_freeze_active"):
+                summary["ensemble_weight_freeze_active"] = True
+                summary["ensemble_weights_age_days"] = sh_summary.get(
+                    "ensemble_weights_age_days"
+                )
         overall = signal_health.get("overall_health") or signal_health.get("status")
         if overall:
             summary["signal_health_status"] = overall
+        qd = signal_health.get("quality_disclosure")
+        if isinstance(qd, dict) and qd.get("badge"):
+            summary["signal_quality_badge"] = qd.get("badge")
 
     return summary
 

@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "SIGNAL_HEALTH_EXCEPTIONS",
+    "attach_signal_quality_disclosure",
     "build_fred_readiness_section",
     "build_signal_health_section",
     "fred_readiness_unavailable_payload",
@@ -44,6 +47,158 @@ def fred_readiness_unavailable_payload(exc: BaseException) -> dict[str, Any]:
         "message": f"FRED readiness check unavailable: {exc}",
         "remediation": "Verify fredapi availability and FRED readiness dependencies.",
     }
+
+
+def attach_signal_quality_disclosure(
+    report: dict[str, Any],
+    *,
+    data_dir: Path | str | None = None,
+) -> dict[str, Any]:
+    """Batch CM: when healthy==0 of N, disclose quality gate + weight freeze.
+
+    Deep-research SRE guidance: zero healthy sources must surface at top-level
+    (not only demote system_status) and ensemble weight freeze age must be
+    visible so operators do not treat ops-green as quality-green.
+    """
+    out = dict(report)
+    summary = out.get("summary") if isinstance(out.get("summary"), dict) else {}
+    try:
+        healthy = int(summary.get("healthy") or 0)
+        total = int(
+            summary.get("total_tracked") or summary.get("total") or 0
+        )
+        degraded = int(summary.get("degraded") or 0)
+        unhealthy = int(summary.get("unhealthy") or 0)
+    except (TypeError, ValueError):
+        return out
+
+    if total <= 0:
+        return out
+
+    zero_healthy = healthy == 0
+    quality: dict[str, Any] = {
+        "schema_version": "signal-quality-disclosure/v1",
+        "zero_healthy_sources": zero_healthy,
+        "healthy": healthy,
+        "degraded": degraded,
+        "unhealthy": unhealthy,
+        "total_tracked": total,
+        "badge": f"{healthy}/{total} healthy sources",
+        "disclosure": (
+            "Signal quality is independent of ops health. When healthy==0, "
+            "champion baseline remains sole live allocation authority; "
+            "ensemble sleeves are advisory (live_authoritative: false)."
+        ),
+    }
+    if zero_healthy:
+        quality["severity"] = "degraded"
+        quality["operator_action"] = (
+            "Do not promote ensemble weights; investigate IC/accuracy on "
+            "degraded sleeves; optional hard-zero unhealthy arms (ADR pending)."
+        )
+        # List worst sleeves for runbook
+        scores = out.get("scores")
+        worst: list[dict[str, Any]] = []
+        if isinstance(scores, dict):
+            for name, row in scores.items():
+                if not isinstance(row, dict):
+                    continue
+                worst.append(
+                    {
+                        "source": name,
+                        "status": row.get("status"),
+                        "health_score": row.get("health_score"),
+                        "accuracy_30d": row.get("accuracy_30d"),
+                        "ic": row.get("ic"),
+                    }
+                )
+        elif isinstance(scores, list):
+            for row in scores:
+                if isinstance(row, dict):
+                    worst.append(
+                        {
+                            "source": row.get("source") or row.get("name"),
+                            "status": row.get("status"),
+                            "health_score": row.get("health_score"),
+                            "accuracy_30d": row.get("accuracy_30d"),
+                            "ic": row.get("ic"),
+                        }
+                    )
+        worst.sort(
+            key=lambda r: (
+                0 if r.get("status") == "unhealthy" else 1,
+                float(r.get("health_score") or 0.0),
+            )
+        )
+        quality["worst_sleeves"] = worst[:5]
+
+    # Ensemble static weights file age (often frozen for weeks/months)
+    try:
+        from src.paths import DATA_DIR as _DATA
+
+        root = Path(data_dir) if data_dir is not None else Path(_DATA)
+    except Exception:  # noqa: BLE001
+        root = Path(data_dir) if data_dir is not None else Path("data")
+
+    freeze: dict[str, Any] = {
+        "ensemble_weights_path": str(root / "ensemble_weights.json"),
+        "recommended_max_freeze_days": 7,
+        "policy": (
+            "When healthy==0, treat static ensemble_weights.json as frozen; "
+            "do not auto-reoptimize. Prefer champion 46/38/16 live authority."
+        ),
+    }
+    ew = root / "ensemble_weights.json"
+    if ew.is_file():
+        try:
+            mtime = ew.stat().st_mtime
+            age_days = max(
+                0.0,
+                (datetime.now(timezone.utc).timestamp() - mtime) / 86400.0,
+            )
+            freeze["ensemble_weights_mtime"] = datetime.fromtimestamp(
+                mtime, tz=timezone.utc
+            ).isoformat()
+            freeze["ensemble_weights_age_days"] = round(age_days, 2)
+            freeze["weight_file_stale"] = age_days > 7.0
+            freeze["weight_freeze_active"] = zero_healthy or age_days > 7.0
+        except OSError:
+            freeze["weight_freeze_active"] = zero_healthy
+    else:
+        freeze["ensemble_weights_present"] = False
+        freeze["weight_freeze_active"] = zero_healthy
+
+    # Adaptive state is still advisory when SH quality is zero-healthy
+    aw = root / "adaptive_weights_state.json"
+    if aw.is_file():
+        try:
+            import json
+
+            state = json.loads(aw.read_text(encoding="utf-8"))
+            if isinstance(state, dict):
+                freeze["adaptive_weights_timestamp"] = state.get("timestamp")
+                freeze["adaptive_regime"] = state.get("regime")
+                freeze["adaptive_note"] = (
+                    "adaptive_weights_state may still update; live routing "
+                    "must ignore it while zero_healthy_sources is true"
+                )
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            pass
+
+    quality["ensemble_weight_freeze"] = freeze
+    out["quality_disclosure"] = quality
+    # Promote badge onto summary for compact consumers
+    if isinstance(out.get("summary"), dict):
+        summary2 = dict(out["summary"])
+        summary2["quality_badge"] = quality["badge"]
+        summary2["zero_healthy_sources"] = zero_healthy
+        if freeze.get("weight_freeze_active"):
+            summary2["ensemble_weight_freeze_active"] = True
+            summary2["ensemble_weights_age_days"] = freeze.get(
+                "ensemble_weights_age_days"
+            )
+        out["summary"] = summary2
+    return out
 
 
 def build_signal_health_section(
@@ -109,7 +264,7 @@ def build_signal_health_section(
         }
         if label_resolve is not None:
             out["label_resolve"] = label_resolve
-        return out
+        return attach_signal_quality_disclosure(out)
     except SIGNAL_HEALTH_EXCEPTIONS as exc:
         if log_error:
             log_error("signal_health", exc)

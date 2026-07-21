@@ -598,10 +598,53 @@ class VIXTermStructureSignalGenerator:
             logger.debug("VIX row hydrate skipped: %s", e)
             row = raw_row
         try:
-            historical_data[as_of] = row
+            # Batch CM: never write the meta-stripped in-memory view from
+            # load_vix_data() — that drops _meta and can orphan the full history
+            # when the caller only held a partial dict. Re-read disk, merge row.
+            on_disk: Dict = {}
+            if self.VIX_DATA_PATH.exists():
+                try:
+                    raw = json.loads(self.VIX_DATA_PATH.read_text(encoding="utf-8"))
+                    if isinstance(raw, dict):
+                        on_disk = raw
+                except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                    on_disk = {}
+            # Prefer full disk history; fall back to caller's date rows only
+            if not on_disk:
+                on_disk = {
+                    k: v
+                    for k, v in historical_data.items()
+                    if isinstance(v, dict) and not str(k).startswith("_")
+                }
+            on_disk[as_of] = row
+            # Keep/refresh light meta so schema rebuilds remain honest
+            meta = on_disk.get("_meta") if isinstance(on_disk.get("_meta"), dict) else {}
+            date_keys = [
+                k
+                for k, v in on_disk.items()
+                if isinstance(v, dict)
+                and not str(k).startswith("_")
+                and len(str(k)) >= 10
+                and str(k)[4:5] == "-"
+            ]
+            meta = {
+                **meta,
+                "schema": meta.get("schema") or "vix_term_structure/v1",
+                "last_row_refresh_at": row.get("refreshed_at"),
+                "last_row_as_of": as_of,
+                "n_dates": len(date_keys),
+                "date_min": min(date_keys) if date_keys else None,
+                "date_max": max(date_keys) if date_keys else None,
+                "live_authoritative": False,
+            }
+            on_disk["_meta"] = meta
             self.VIX_DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
-            save_results_json(historical_data, output_path=str(self.VIX_DATA_PATH))
-            logger.info("Refreshed VIX term-structure file row as_of=%s from market.db", as_of)
+            save_results_json(on_disk, output_path=str(self.VIX_DATA_PATH))
+            logger.info(
+                "Refreshed VIX term-structure file row as_of=%s from market.db (n_dates=%d)",
+                as_of,
+                len(date_keys),
+            )
         except (OSError, TypeError, ValueError) as e:
             logger.warning("Failed to refresh vix_term_structure.json: %s", e)
     
