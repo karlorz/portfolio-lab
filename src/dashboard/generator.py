@@ -1906,12 +1906,19 @@ class DashboardGenerator:
             from src.strategy.ensemble_voter import EnsembleVoter
 
             ensemble_engine = EnsembleVoter()
-            # Daily reward train (advisory bandit): paper portfolio return → update_bandit
-            # so adaptive_learning leaves permanent cold_start. Failures never block vote.
+            # Daily reward train (advisory bandit): prefer differentiated
+            # attribution per-arm rewards (Batch BQ); fall back to scalar
+            # portfolio return only for single-arm / when multi-arm skip (BO).
+            # Failures never block vote. Bandit remains non-authoritative.
             try:
                 daily_ret = EnsembleVoter.load_latest_daily_return_from_performance()
                 if daily_ret is not None:
-                    ensemble_engine.apply_daily_bandit_rewards(daily_ret, persist=True)
+                    src_rewards = EnsembleVoter.load_attribution_source_rewards()
+                    ensemble_engine.apply_daily_bandit_rewards(
+                        daily_ret,
+                        persist=True,
+                        source_rewards=src_rewards,
+                    )
             except SIGNAL_EXCEPTIONS as bandit_exc:
                 logger.debug("ensemble bandit daily reward skipped: %s", bandit_exc)
 

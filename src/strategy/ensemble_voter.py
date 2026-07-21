@@ -1253,6 +1253,94 @@ class EnsembleVoter:
             logger.warning("Failed to save ensemble bandit state: %s", exc)
             return False
 
+    @staticmethod
+    def load_attribution_source_rewards(
+        data_dir: Optional[Path] = None,
+        *,
+        max_age_days: Optional[float] = None,
+    ) -> Optional[Dict[str, float]]:
+        """Load per-source pseudo-rewards from performance attribution.
+
+        Batch BQ: maps ``avg_return_bps / 1e4`` into decimal return units so
+        multi-arm bandit updates can differentiate signals. Windowed attribution
+        is a *proxy* for true daily credit assignment (linear/contextual bandit
+        ideal); still identifying vs identical portfolio PnL broadcast.
+
+        Preference order (when ``data_dir`` is None → default DATA_DIR):
+          1. ``{data_dir}/attribution/latest.json``
+          2. Newest ``{data_dir}/attribution/attribution_*.json``
+          3. Global ``ATTRIBUTION_DIR`` only when ``data_dir`` is default DATA_DIR
+             (never leaks live attribution into hermetic tests that pass tmp paths)
+
+        Returns None when missing/empty/unparseable. Never invents zeros for
+        unknown sources — callers apply only keys present.
+        """
+        explicit_dir = data_dir is not None
+        root = Path(data_dir) if explicit_dir else Path(DATA_DIR)
+        attr_dir = root / "attribution"
+        candidates: List[Path] = []
+        latest = attr_dir / "latest.json"
+        if latest.exists():
+            candidates.append(latest)
+        if attr_dir.exists():
+            dated = sorted(attr_dir.glob("attribution_*.json"), reverse=True)
+            for p in dated:
+                if p not in candidates:
+                    candidates.append(p)
+        # Live default only: also search ATTRIBUTION_DIR when distinct
+        if not explicit_dir:
+            try:
+                global_attr = Path(ATTRIBUTION_DIR)
+                if global_attr.exists() and global_attr.resolve() != attr_dir.resolve():
+                    g_latest = global_attr / "latest.json"
+                    if g_latest.exists() and g_latest not in candidates:
+                        candidates.insert(0, g_latest)
+                    for p in sorted(global_attr.glob("attribution_*.json"), reverse=True)[:3]:
+                        if p not in candidates:
+                            candidates.append(p)
+            except (OSError, TypeError, ValueError):
+                pass
+
+        for path in candidates:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            sources_block = payload.get("sources")
+            if not isinstance(sources_block, dict) or not sources_block:
+                continue
+            rewards: Dict[str, float] = {}
+            for name, meta in sources_block.items():
+                if not isinstance(meta, dict):
+                    continue
+                bps = meta.get("avg_return_bps")
+                if bps is None:
+                    continue
+                try:
+                    rewards[str(name)] = float(bps) / 10000.0
+                except (TypeError, ValueError):
+                    continue
+            if len(rewards) >= 2:
+                # Distinct values required for identification
+                vals = list(rewards.values())
+                spread = max(vals) - min(vals)
+                if spread < 1e-12:
+                    logger.info(
+                        "Attribution rewards non-identifying (zero spread) from %s",
+                        path,
+                    )
+                    continue
+                logger.debug(
+                    "Loaded %d attribution source rewards from %s (spread=%.6f)",
+                    len(rewards),
+                    path,
+                    spread,
+                )
+                return rewards
+        return None
+
     def apply_daily_bandit_rewards(
         self,
         daily_return: float,
@@ -1261,6 +1349,7 @@ class EnsembleVoter:
         *,
         persist: bool = True,
         noise_floor: Optional[float] = None,
+        source_rewards: Optional[Dict[str, float]] = None,
     ) -> Dict[str, Any]:
         """Apply one day of portfolio return as reward to ensemble bandit sources.
 
@@ -1272,6 +1361,11 @@ class EnsembleVoter:
         ``ENSEMBLE_BANDIT_REWARD_NOISE_FLOOR`` / 1e-6) are skipped entirely —
         no arm history append, no observation increment, no reward_days step —
         so flat paper NAV / floating-point dust cannot ramp blend.
+
+        Batch BO: multi-arm *identical* portfolio reward broadcast is skipped
+        (non-identification). Batch BQ: when ``source_rewards`` maps arms to
+        *differentiated* per-source returns (e.g. attribution avg_return_bps),
+        multi-arm updates proceed with per-arm credit assignment.
 
         Returns summary with updates count and observation total.
         """
@@ -1293,36 +1387,51 @@ class EnsembleVoter:
         )
         if floor < 0:
             floor = 0.0
-        if abs(reward) < floor:
-            logger.info(
-                "Skipping bandit reward update: |daily_return|=%.3e < noise_floor=%.3e",
-                abs(reward),
-                floor,
-            )
-            return {
-                "updates": 0,
-                "observations": int(self.bandit_observations),
-                "reward_days": int(getattr(self, "bandit_days", 0) or 0),
-                "days": int(getattr(self, "bandit_days", 0) or 0),
-                "bandit_days": int(getattr(self, "bandit_days", 0) or 0),
-                "daily_return": reward,
-                "noise_floor": floor,
-                "skipped": True,
-                "reason": "reward_below_noise_floor",
-            }
 
         if regime_name is None:
             current = getattr(self, "current_regime", Regime.NORMAL)
             regime_name = current.name if hasattr(current, "name") else str(current)
         regime_name = str(regime_name).upper()
 
+        # Normalize optional per-arm rewards (Batch BQ)
+        per_arm: Optional[Dict[str, float]] = None
+        if source_rewards:
+            cleaned: Dict[str, float] = {}
+            for k, v in source_rewards.items():
+                try:
+                    cleaned[str(k)] = float(v)
+                except (TypeError, ValueError):
+                    continue
+            if cleaned:
+                per_arm = cleaned
+
         if sources is None:
-            sources = [s.value for s in SignalSource]
+            if per_arm is not None:
+                sources = list(per_arm.keys())
+            else:
+                sources = [s.value for s in SignalSource]
         sources = [str(s) for s in sources]
-        # Batch BO: broadcasting the same portfolio return to every arm is
-        # statistically non-identifying (MAB cannot learn relative skill).
-        # Skip multi-arm identical reward appends; allow single-arm explicit list.
-        if len(sources) > 1:
+
+        # Multi-arm identical portfolio broadcast guard (Batch BO)
+        if len(sources) > 1 and per_arm is None:
+            # Still respect noise floor for the scalar portfolio return path
+            if abs(reward) < floor:
+                logger.info(
+                    "Skipping bandit reward update: |daily_return|=%.3e < noise_floor=%.3e",
+                    abs(reward),
+                    floor,
+                )
+                return {
+                    "updates": 0,
+                    "observations": int(self.bandit_observations),
+                    "reward_days": int(getattr(self, "bandit_days", 0) or 0),
+                    "days": int(getattr(self, "bandit_days", 0) or 0),
+                    "bandit_days": int(getattr(self, "bandit_days", 0) or 0),
+                    "daily_return": reward,
+                    "noise_floor": floor,
+                    "skipped": True,
+                    "reason": "reward_below_noise_floor",
+                }
             logger.info(
                 "Skipping bandit multi-arm identical reward broadcast: "
                 "daily_return=%.6f across %d arms (non-identification guard; "
@@ -1344,10 +1453,73 @@ class EnsembleVoter:
                 "arms_considered": len(sources),
             }
 
+        # Build (source, reward) pairs
+        pairs: List[Tuple[str, float]] = []
+        if per_arm is not None:
+            for src in sources:
+                if src not in per_arm:
+                    continue
+                r = float(per_arm[src])
+                if abs(r) < floor:
+                    continue
+                pairs.append((src, r))
+            if not pairs:
+                return {
+                    "updates": 0,
+                    "observations": int(self.bandit_observations),
+                    "reward_days": int(getattr(self, "bandit_days", 0) or 0),
+                    "days": int(getattr(self, "bandit_days", 0) or 0),
+                    "bandit_days": int(getattr(self, "bandit_days", 0) or 0),
+                    "daily_return": reward,
+                    "noise_floor": floor,
+                    "skipped": True,
+                    "reason": "attribution_rewards_below_noise_floor",
+                    "arms_considered": len(sources),
+                }
+            # Non-identification if multi-arm but all remaining rewards equal
+            if len(pairs) > 1:
+                rs = [r for _, r in pairs]
+                if max(rs) - min(rs) < 1e-12:
+                    return {
+                        "updates": 0,
+                        "observations": int(self.bandit_observations),
+                        "reward_days": int(getattr(self, "bandit_days", 0) or 0),
+                        "days": int(getattr(self, "bandit_days", 0) or 0),
+                        "bandit_days": int(getattr(self, "bandit_days", 0) or 0),
+                        "regime": regime_name,
+                        "daily_return": reward,
+                        "noise_floor": floor,
+                        "skipped": True,
+                        "reason": "identical_attribution_rewards_all_arms",
+                        "arms_considered": len(pairs),
+                    }
+        else:
+            # Single-arm explicit path (or sources already len==1)
+            if abs(reward) < floor:
+                logger.info(
+                    "Skipping bandit reward update: |daily_return|=%.3e < noise_floor=%.3e",
+                    abs(reward),
+                    floor,
+                )
+                return {
+                    "updates": 0,
+                    "observations": int(self.bandit_observations),
+                    "reward_days": int(getattr(self, "bandit_days", 0) or 0),
+                    "days": int(getattr(self, "bandit_days", 0) or 0),
+                    "bandit_days": int(getattr(self, "bandit_days", 0) or 0),
+                    "daily_return": reward,
+                    "noise_floor": floor,
+                    "skipped": True,
+                    "reason": "reward_below_noise_floor",
+                }
+            pairs = [(src, reward) for src in sources]
+
         updates = 0
-        for src in sources:
-            self.update_bandit(str(src), regime_name, reward)
+        applied: Dict[str, float] = {}
+        for src, r in pairs:
+            self.update_bandit(str(src), regime_name, r)
             updates += 1
+            applied[src] = r
 
         # One calendar reward day per apply, independent of arm count
         self.bandit_days = int(getattr(self, "bandit_days", 0) or 0) + 1
@@ -1355,7 +1527,7 @@ class EnsembleVoter:
         if persist:
             self.save_bandit_state()
 
-        return {
+        summary: Dict[str, Any] = {
             "updates": updates,
             "observations": int(self.bandit_observations),
             "days": int(self.bandit_days),
@@ -1364,7 +1536,17 @@ class EnsembleVoter:
             "daily_return": reward,
             "noise_floor": floor,
             "skipped": False,
+            "live_authoritative": False,
         }
+        if per_arm is not None:
+            summary["reward_mode"] = "attribution_source_rewards"
+            summary["arms_updated"] = list(applied.keys())
+            summary["reward_spread"] = (
+                max(applied.values()) - min(applied.values()) if applied else 0.0
+            )
+        else:
+            summary["reward_mode"] = "single_arm_or_scalar"
+        return summary
 
     @staticmethod
     def load_latest_daily_return_from_performance(
