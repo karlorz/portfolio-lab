@@ -8,6 +8,11 @@
 #   3. ulimit -v 6291456 — OS kernel enforces 6GB virtual memory cap
 #   4. PUBLIC_DATA_DIR=mktemp — dual-writes never hit live WWW (H16)
 #
+# Memory exit taxonomy (Batch BL):
+#   137 = SIGKILL (OOM killer / hard kill)
+#   139 = SIGSEGV (ulimit -v / RLIMIT_AS exceedance — common under virtual cap)
+# Capture EXIT with set +e around the suite so diagnostics always run.
+#
 # Usage:
 #   ./scripts/run-tests-safe              # safe mode (default; count from pytest output)
 #   ./scripts/run-tests-safe --ml-extract # extracted ML-kernel tests, ML disabled
@@ -56,6 +61,16 @@ _isolate_public_data_dir() {
     trap 'rm -rf "$PUBLIC_TMP"' EXIT
 }
 
+_emit_memory_diagnostics() {
+    local exit_code=$1
+    if [ "$exit_code" -eq 139 ]; then
+        echo "FATAL: SIGSEGV (139) — virtual memory cap (6GB / ulimit -v / RLIMIT_AS) exceeded."
+        echo "An ML library may have loaded despite guards. Investigate immediately."
+    elif [ "$exit_code" -eq 137 ]; then
+        echo "FATAL: SIGKILL (137) — system OOM killer or hard kill. Memory use too high."
+    fi
+}
+
 if [ "$MODE" = "safe" ]; then
     echo "=== Safe Test Run ==="
     echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"
@@ -65,8 +80,10 @@ if [ "$MODE" = "safe" ]; then
     echo ""
 
     # ulimit -v sets the maximum virtual memory in KB.
-    # 6291456 KB = 6144 MB = 6 GB. If exceeded, the process gets SIGSEGV (not SIGKILL),
-    # which is cleaner than OOM-killer and protects the host.
+    # 6291456 KB = 6144 MB = 6 GB. RLIMIT_AS exceedance → often SIGSEGV (139);
+    # OOM killer → SIGKILL (137). Batch BL: capture EXIT under set +e so both
+    # diagnostic branches are reachable (set -e previously aborted before EXIT=$?).
+    set +e
     (
         ulimit -v 6291456
         export PORTFOLIO_LAB_ENABLE_ML=0
@@ -74,19 +91,16 @@ if [ "$MODE" = "safe" ]; then
         exec uv run pytest tests/ -q --tb=short "${PYTEST_ARGS[@]}"
     )
     EXIT=$?
+    set -e
 
     echo ""
-    if [ $EXIT -eq 139 ]; then
-        echo "FATAL: SIGSEGV (139) — virtual memory cap (6GB) exceeded."
-        echo "An ML library may have loaded despite guards. Investigate immediately."
-    elif [ $EXIT -eq 137 ]; then
-        echo "FATAL: SIGKILL (137) — system OOM killer. Memory use too high."
-    elif [ $EXIT -ne 0 ]; then
+    _emit_memory_diagnostics "$EXIT"
+    if [ "$EXIT" -ne 0 ] && [ "$EXIT" -ne 137 ] && [ "$EXIT" -ne 139 ]; then
         echo "Some tests failed (exit $EXIT). See output above."
-    else
+    elif [ "$EXIT" -eq 0 ]; then
         echo "All safe tests passed."
     fi
-    exit $EXIT
+    exit "$EXIT"
 elif [ "$MODE" = "ml-extract" ]; then
     echo "=== ML Extract Test Run ==="
     echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"
@@ -94,6 +108,7 @@ elif [ "$MODE" = "ml-extract" ]; then
     echo "  Heavy tests: skipped; only ml_extract marker is included"
     echo ""
 
+    set +e
     (
         ulimit -v 6291456
         export PORTFOLIO_LAB_ENABLE_ML=0
@@ -101,19 +116,16 @@ elif [ "$MODE" = "ml-extract" ]; then
         exec uv run pytest tests/ -q --tb=short --include-ml-extract "${PYTEST_ARGS[@]}"
     )
     EXIT=$?
+    set -e
 
     echo ""
-    if [ $EXIT -eq 139 ]; then
-        echo "FATAL: SIGSEGV (139) — virtual memory cap exceeded."
-        echo "An ML library may have loaded despite guards. Investigate immediately."
-    elif [ $EXIT -eq 137 ]; then
-        echo "FATAL: SIGKILL (137) — system OOM killer. Memory use too high."
-    elif [ $EXIT -ne 0 ]; then
+    _emit_memory_diagnostics "$EXIT"
+    if [ "$EXIT" -ne 0 ] && [ "$EXIT" -ne 137 ] && [ "$EXIT" -ne 139 ]; then
         echo "Some ml_extract tests failed (exit $EXIT). See output above."
-    else
+    elif [ "$EXIT" -eq 0 ]; then
         echo "All ml_extract tests passed."
     fi
-    exit $EXIT
+    exit "$EXIT"
 else
     echo "=== ML Test Run ==="
     echo "  ML: enabled (PORTFOLIO_LAB_ENABLE_ML=1)"

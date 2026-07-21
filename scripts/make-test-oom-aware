@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# make-test-oom-aware — run `make test` and remap make's exit 2 when the log
+# shows a memory-class recipe failure (Error 137 / Error 139 / Killed).
+#
+# GNU Make always normalizes recipe failures to process exit 2. Operators and
+# CI that only inspect make's exit code cannot distinguish OOM from generic
+# failure. This wrapper tees output and re-exits with 137/139 when the log
+# proves a memory kill (Batch BL).
+#
+# Usage:
+#   ./scripts/make-test-oom-aware
+#   ./scripts/make-test-oom-aware test-unit
+
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$PROJECT_DIR"
+
+TARGET="${1:-test}"
+LOG="$(mktemp /tmp/plab-make-test.XXXXXX.log)"
+# shellcheck disable=SC2064
+trap 'rm -f "$LOG"' EXIT
+
+set +e
+make "$TARGET" 2>&1 | tee "$LOG"
+MAKE_EXIT=${PIPESTATUS[0]}
+set -e
+
+if [ "$MAKE_EXIT" -eq 0 ]; then
+  exit 0
+fi
+
+# Prefer explicit make "Error N" lines; also catch shell "Killed" / virtual memory.
+if grep -Eq 'Error 137|SIGKILL \(137\)|Killed' "$LOG"; then
+  echo "make-test-oom-aware: remapping make exit $MAKE_EXIT → 137 (OOM/SIGKILL evidence in log)" >&2
+  exit 137
+fi
+if grep -Eq 'Error 139|SIGSEGV \(139\)|virtual memory' "$LOG"; then
+  echo "make-test-oom-aware: remapping make exit $MAKE_EXIT → 139 (RLIMIT_AS/SIGSEGV evidence in log)" >&2
+  exit 139
+fi
+
+# Optional machine-readable stamp from make test recipe
+if [ -f data/test_last_exit.json ]; then
+  raw="$(python3 -c "import json; print(json.load(open('data/test_last_exit.json')).get('exit',''))" 2>/dev/null || true)"
+  if [ "$raw" = "137" ] || [ "$raw" = "139" ]; then
+    echo "make-test-oom-aware: remapping make exit $MAKE_EXIT → $raw (test_last_exit.json)" >&2
+    exit "$raw"
+  fi
+fi
+
+exit "$MAKE_EXIT"

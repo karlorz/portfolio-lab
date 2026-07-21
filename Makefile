@@ -164,10 +164,15 @@ test:
 	if [ $$EXIT -eq 124 ]; then \
 		echo "TIMEOUT (124): Test suite exceeded 3600s limit. Check for hanging tests."; \
 	elif [ $$EXIT -eq 137 ]; then \
-		echo "SIGKILL (137): memory limit exceeded (6GB virtual cap). Check for ML import leaks."; \
+		echo "SIGKILL (137): OOM killer / hard kill. Check for ML import leaks."; \
+	elif [ $$EXIT -eq 139 ]; then \
+		echo "SIGSEGV (139): virtual memory cap (ulimit -v / RLIMIT_AS) exceeded."; \
 	elif [ $$EXIT -ne 0 ]; then \
 		echo "Some tests failed (exit $$EXIT). Review output above."; \
 	fi; \
+	mkdir -p $(DATA_DIR) 2>/dev/null || true; \
+	printf '%s\n' "{\"exit\":$$EXIT,\"ts\":\"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"memory_class\":$$([ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ] && echo true || echo false)}" \
+		> $(DATA_DIR)/test_last_exit.json 2>/dev/null || true; \
 	exit $$EXIT
 
 .PHONY: test test-ml test-fast test-unit test-generator test-integration test-ml-extract
@@ -204,7 +209,9 @@ test-fast:
 	if [ $$EXIT -eq 124 ]; then \
 		echo "TIMEOUT (124): Fast test suite exceeded 120s limit."; \
 	elif [ $$EXIT -eq 137 ]; then \
-		echo "SIGKILL (137): memory limit exceeded."; \
+		echo "SIGKILL (137): OOM killer / hard kill."; \
+	elif [ $$EXIT -eq 139 ]; then \
+		echo "SIGSEGV (139): virtual memory cap (ulimit -v) exceeded."; \
 	elif [ $$EXIT -ne 0 ]; then \
 		echo "Some tests failed (exit $$EXIT). Review output above."; \
 	fi; \
@@ -238,7 +245,9 @@ test-unit:
 	if [ $$EXIT -eq 124 ]; then \
 		echo "TIMEOUT (124): Unit segment exceeded 2400s."; \
 	elif [ $$EXIT -eq 137 ]; then \
-		echo "SIGKILL (137): memory limit exceeded (6GB virtual)."; \
+		echo "SIGKILL (137): OOM killer / hard kill (6GB virtual)."; \
+	elif [ $$EXIT -eq 139 ]; then \
+		echo "SIGSEGV (139): virtual memory cap (ulimit -v / RLIMIT_AS) exceeded."; \
 	elif [ $$EXIT -ne 0 ]; then \
 		echo "Some unit-segment tests failed (exit $$EXIT)."; \
 	fi; \
@@ -350,7 +359,7 @@ data:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-data $$STATUS $$DUR; \
 	$(PYTHON_RUNTIME) -c "from src.dashboard.cron_scheduler_section import refresh_public_health_cron_section; refresh_public_health_cron_section()" 2>/dev/null || true; \
@@ -375,7 +384,7 @@ dashboard:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-dashboard $$STATUS $$DUR; \
 	exit $$EXIT
@@ -393,7 +402,7 @@ eval:
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 2 ]; then STATUS="blocked"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-eval $$STATUS $$DUR; \
 	exit $$EXIT
@@ -410,7 +419,7 @@ research:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-research $$STATUS $$DUR; \
 	exit $$EXIT
@@ -427,7 +436,7 @@ wiki-sync:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-wiki-sync $$STATUS $$DUR; \
 	exit $$EXIT
@@ -466,7 +475,7 @@ build:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-build $$STATUS $$DUR; \
 	exit $$EXIT
@@ -483,7 +492,7 @@ sync:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-position-sync $$STATUS $$DUR; \
 	exit $$EXIT
@@ -511,7 +520,7 @@ overlay-signals:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-overlay-signals $$STATUS $$DUR; \
 	exit $$EXIT
@@ -526,7 +535,7 @@ overlay-dashboard:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-overlay-dashboard $$STATUS $$DUR; \
 	exit $$EXIT
@@ -545,7 +554,7 @@ health:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-health $$STATUS $$DUR; \
 	exit $$EXIT
@@ -560,7 +569,7 @@ rebalance-health:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-rebalance-health $$STATUS $$DUR; \
 	exit $$EXIT
@@ -578,7 +587,7 @@ garch-risk:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-garch-risk $$STATUS $$DUR; \
 	exit $$EXIT
@@ -595,7 +604,7 @@ mark-to-market:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-mark-to-market $$STATUS $$DUR; \
 	exit $$EXIT
@@ -612,7 +621,7 @@ daily-pnl: mark-to-market
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-daily-pnl $$STATUS $$DUR; \
 	exit $$EXIT
@@ -646,7 +655,7 @@ unified-dashboard:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-unified-dashboard $$STATUS $$DUR; \
 	exit $$EXIT
@@ -683,7 +692,7 @@ prune-logs:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-prune-logs $$STATUS $$DUR; \
 	exit $$EXIT

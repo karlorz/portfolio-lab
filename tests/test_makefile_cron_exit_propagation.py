@@ -102,3 +102,15 @@ def test_health_exit_codes_documented_in_makefile() -> None:
     assert 'STATUS="error"' in text
     # Document propagation contract once (comment near health or top)
     assert "exit $$EXIT" in text
+
+
+def test_cron_status_maps_both_137_and_139_to_oom() -> None:
+    """Batch BL: RLIMIT_AS SIGSEGV (139) is memory-class, not generic error."""
+    text = MAKEFILE.read_text()
+    dual = 'elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom";'
+    assert dual in text
+    # No remaining 137-only STATUS=oom branch
+    bare = 'elif [ $$EXIT -eq 137 ]; then STATUS="oom";'
+    assert bare not in text
+    # At least health + eval share the dual mapping
+    assert text.count(dual) >= 10
