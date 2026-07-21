@@ -365,6 +365,10 @@ data:
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-data $$STATUS $$DUR; \
 	$(PYTHON_RUNTIME) -c "from src.dashboard.cron_scheduler_section import refresh_public_health_cron_section; refresh_public_health_cron_section()" 2>/dev/null || true; \
+	if [ $$EXIT -eq 0 ]; then \
+	  $(MAKE) --no-print-directory mirror-repo-public-data || \
+	  echo "WARN: mirror-repo-public-data soft-failed after data (repo public lag; non-blocking)"; \
+	fi; \
 	echo "Data pipeline done ($$STATUS, $${DUR}s)"; \
 	exit $$EXIT
 
@@ -401,6 +405,10 @@ dashboard:
 	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-dashboard $$STATUS $$DUR; \
+	if [ $$EXIT -eq 0 ]; then \
+	  $(MAKE) --no-print-directory mirror-repo-public-data || \
+	  echo "WARN: mirror-repo-public-data soft-failed after dashboard (repo public lag; non-blocking)"; \
+	fi; \
 	exit $$EXIT
 
 # ── Strategy Evaluator ───────────────────────────────────────────────

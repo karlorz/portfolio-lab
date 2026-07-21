@@ -41,3 +41,20 @@ def test_dashboard_delivery_ops_regen_still_has_core_steps():
     body = makefile.split("ops-regen:")[1].split("# ──")[0]
     assert "garch-risk" in body or "dashboard" in body
     assert "health" in body
+
+
+def test_data_and_dashboard_include_mirror_soft_gate():
+    """Batch CA: hourly data/dashboard success must soft-mirror live WWW → repo public/data.
+
+    Repo public/data is gitignored static checkout; without post-job mirror it
+    freezes while /var/www/portfolio-lab/data advances (c359/c360 false lag).
+    Soft-fail (||) matches ops-regen BX — never block the owning job.
+    """
+    makefile = Path("Makefile").read_text(encoding="utf-8")
+    # Extract recipe bodies (next target starts with .PHONY or bare target:)
+    data_body = makefile.split("\ndata:")[1].split("\n.PHONY:")[0]
+    dash_body = makefile.split("\ndashboard:")[1].split("\n# ──")[0]
+    for body, name in ((data_body, "data"), (dash_body, "dashboard")):
+        assert "mirror-repo-public-data" in body, f"{name} missing mirror soft-gate"
+        assert "||" in body, f"{name} mirror must soft-fail with ||"
+        assert "non-blocking" in body or "soft-failed" in body, f"{name} needs soft-fail message"
