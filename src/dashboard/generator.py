@@ -2812,16 +2812,43 @@ class DashboardGenerator:
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.warning("Using default values: %s", e)
 
-        # Coverage fail → demote primary GARCH role (still publish diagnostics)
+        # Coverage fail → demote primary GARCH only on over-exceedance hard fail.
+        # Under-exceedance is efficiency warning (over-conservative), not demotion.
         cov = garch_cvar.get("coverage_diagnostics")
         if isinstance(cov, dict):
             coverage_pass = cov.get("coverage_pass")
-            if coverage_pass is False and garch_cvar.get("garch_active"):
+            direction = cov.get("coverage_direction") or cov.get("exceedance_bias")
+            hard_fail = cov.get("coverage_hard_fail")
+            if hard_fail is None:
+                # Directed hard fail (over) OR legacy undirected coverage_pass=false
+                # without direction metadata (treat as hard fail for safety).
+                if direction in (None, "", "ok") and coverage_pass is False:
+                    hard_fail = True
+                    direction = direction or "over"  # assume over for legacy
+                else:
+                    hard_fail = bool(
+                        coverage_pass is False and direction == "over"
+                    )
+            direction = direction or "ok"
+            # Surface direction on risk metrics for operators
+            garch_cvar["coverage_direction"] = direction
+            garch_cvar["exceedance_bias"] = direction
+            if hard_fail and garch_cvar.get("garch_active"):
                 garch_cvar["garch_active"] = False
                 garch_cvar["runtime_role"] = "advisory_degraded"
                 garch_cvar["garch_active_reason"] = (
-                    "coverage_pass=false (Kupiec/coverage diagnostics failed); "
-                    "GARCH not primary risk authority"
+                    f"coverage_hard_fail (direction={direction}, "
+                    f"coverage_pass={coverage_pass}); "
+                    "over-exceedance — GARCH not primary risk authority"
+                )
+            elif cov.get("coverage_efficiency_warning") and garch_cvar.get(
+                "garch_active"
+            ):
+                garch_cvar.setdefault("runtime_role", "primary")
+                garch_cvar["garch_active_reason"] = (
+                    f"coverage_efficiency_warning (direction={direction}); "
+                    "under-exceedance — advisory capital inefficiency, "
+                    "GARCH remains primary"
                 )
             elif coverage_pass is True:
                 garch_cvar.setdefault("runtime_role", "primary")

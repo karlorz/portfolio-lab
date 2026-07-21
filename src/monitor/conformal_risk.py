@@ -316,6 +316,26 @@ def _coverage_summary(
         float(np.mean(exceedances[-effective_window:])) if effective_window else 0.0
     )
 
+    # Direction of Kupiec miss: over = too many breaches (risk underestimation),
+    # under = too few (over-conservative / capital inefficiency). Only over is a
+    # hard red for primary GARCH demotion; under is an efficiency warning.
+    rate_delta = exceedance_rate - expected_exceedance_rate
+    if abs(rate_delta) < 1e-12:
+        coverage_direction = "ok"
+    elif rate_delta > 0:
+        coverage_direction = "over"
+    else:
+        coverage_direction = "under"
+    kupiec_stat_pass = bool(kupiec_p_value >= 0.05)
+    # Hard fail only when Kupiec rejects AND exceedances are over-expected.
+    coverage_hard_fail = bool(not kupiec_stat_pass and coverage_direction == "over")
+    coverage_efficiency_warning = bool(
+        not kupiec_stat_pass and coverage_direction == "under"
+    )
+    # coverage_pass remains the demotion gate: True unless hard over-fail.
+    # Under-exceedance Kupiec fails no longer force coverage_pass=false.
+    coverage_pass = not coverage_hard_fail
+
     summary: Dict[str, Any] = {
         "observations": n_obs,
         "alpha": expected_exceedance_rate,
@@ -323,13 +343,17 @@ def _coverage_summary(
         "exceedance_count": exceedance_count,
         "exceedance_rate": round(exceedance_rate, 6),
         "coverage_rate": round(coverage_rate, 6),
-        "coverage_pass": bool(kupiec_p_value >= 0.05),
+        "coverage_pass": coverage_pass,
+        "coverage_direction": coverage_direction,
+        "exceedance_bias": coverage_direction,  # alias for operator surfaces
+        "coverage_hard_fail": coverage_hard_fail,
+        "coverage_efficiency_warning": coverage_efficiency_warning,
         "rolling_window": effective_window,
         "rolling_exceedance_rate": round(rolling_exceedance_rate, 6),
         "longest_violation_cluster": _longest_true_run(exceedances),
         "kupiec_statistic": round(kupiec_statistic, 6),
         "kupiec_p_value": round(kupiec_p_value, 6),
-        "kupiec_pass": bool(kupiec_p_value >= 0.05),
+        "kupiec_pass": kupiec_stat_pass,
         "christoffersen_statistic": round(christoffersen_statistic, 6),
         "christoffersen_p_value": round(christoffersen_p_value, 6),
         "christoffersen_pass": bool(christoffersen_p_value >= 0.05),

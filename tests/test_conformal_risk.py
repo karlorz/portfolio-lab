@@ -291,6 +291,61 @@ class TestConformalCoverageDiagnostics:
         assert diagnostics["by_regime"]["high_vol"]["observations"] == 100
         assert diagnostics["by_regime"]["high_vol"]["exceedance_rate"] == pytest.approx(0.20)
         assert diagnostics["by_regime"]["high_vol"]["coverage_pass"] is False
+        assert diagnostics["by_regime"]["high_vol"]["coverage_direction"] == "over"
+
+    def test_over_exceedance_is_hard_fail(self):
+        """Rate >> alpha → direction=over, coverage_hard_fail, coverage_pass false."""
+        returns = np.full(500, 0.001)
+        var_thresholds = np.full(500, -0.02)
+        returns[:80] = -0.03  # 16% exceedances vs 5% alpha
+
+        diagnostics = conformal_coverage_diagnostics(
+            returns, var_thresholds, alpha=0.05
+        )
+        assert diagnostics["exceedance_rate"] > 0.05
+        assert diagnostics["coverage_direction"] == "over"
+        assert diagnostics["exceedance_bias"] == "over"
+        assert diagnostics["kupiec_pass"] is False
+        assert diagnostics["coverage_hard_fail"] is True
+        assert diagnostics["coverage_pass"] is False
+        assert diagnostics["coverage_efficiency_warning"] is False
+
+    def test_under_exceedance_is_efficiency_warning_not_hard_fail(self):
+        """Rate << alpha → direction=under; not demotion-grade coverage_pass fail.
+
+        Under-exceedance (over-conservative VaR) is capital inefficiency, not
+        risk underestimation — coverage_pass stays True for hard-fail gates.
+        """
+        rng = np.random.default_rng(42)
+        # Mild positive returns so almost never breach a deep VaR threshold
+        returns = rng.normal(loc=0.001, scale=0.002, size=500)
+        var_thresholds = np.full(500, -0.05)  # very deep threshold → few breaches
+
+        diagnostics = conformal_coverage_diagnostics(
+            returns, var_thresholds, alpha=0.05
+        )
+        assert diagnostics["exceedance_rate"] < 0.05
+        assert diagnostics["coverage_direction"] == "under"
+        assert diagnostics["exceedance_bias"] == "under"
+        # With near-zero breaches Kupiec often rejects under-coverage
+        if diagnostics["kupiec_pass"] is False:
+            assert diagnostics["coverage_hard_fail"] is False
+            assert diagnostics["coverage_efficiency_warning"] is True
+            assert diagnostics["coverage_pass"] is True  # not demotion-grade
+        else:
+            # Statistically ok under-bias still labels direction
+            assert diagnostics["coverage_pass"] is True
+
+    def test_calibrated_sequence_direction_ok(self):
+        returns = np.full(500, 0.001)
+        var_thresholds = np.full(500, -0.02)
+        returns[::20] = -0.03  # exactly 5%
+        diagnostics = conformal_coverage_diagnostics(
+            returns, var_thresholds, alpha=0.05
+        )
+        assert diagnostics["coverage_direction"] == "ok"
+        assert diagnostics["coverage_pass"] is True
+        assert diagnostics["coverage_hard_fail"] is False
 
 
 class TestEdgeCases:
