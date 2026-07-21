@@ -472,9 +472,13 @@ ops-regen:
 	@$(MAKE) --no-print-directory dashboard
 	@$(MAKE) --no-print-directory wiki-sync
 	@$(MAKE) --no-print-directory health
+	@# Batch BX: soft-gate repo public/data mirror (never block ops-regen)
+	@$(MAKE) --no-print-directory mirror-repo-public-data || \
+		echo "WARN: mirror-repo-public-data soft-failed (repo public lag; non-blocking)"
 	@echo "=== Ops regen complete: $$(date) ==="
 	@echo "Verify: PUBLIC_DATA_DIR signals.json generator_git_sha matches git rev-parse --short HEAD"
 	@echo "Verify: PUBLIC_DATA_DIR/garch_cvar.json exists; garch_active honest vs coverage_pass"
+	@echo "Verify: make mirror-repo-public-data-lag → exit 0 (repo public/data vs live)"
 
 # ── App Build ────────────────────────────────────────────────────────
 
