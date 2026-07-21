@@ -266,6 +266,43 @@ def _isolate_evaluator_data_dir(request, tmp_path, monkeypatch):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Mid-suite memory hygiene (S17) — insurance after 3GB→6GB MemoryError cascade
+# ═══════════════════════════════════════════════════════════════════════════
+# Large single-process suites retain fixture/report objects; periodic gc helps
+# under ulimit -v. Default: light GC every N tests. Opt-in CHECK_LEAKS=1 enables
+# tracemalloc per-test growth logging (advisory, never fails tests by default).
+#
+# Research: PythonSpeed leak fixture + yield teardown + periodic gc.collect;
+# process isolation (pytest-forked) is heavier and deferred to suite segmentation.
+
+_MID_SUITE_GC_EVERY = int(os.environ.get("PORTFOLIO_LAB_MID_SUITE_GC_EVERY", "200"))
+_CHECK_LEAKS = os.environ.get("CHECK_LEAKS", "0") == "1"
+_mid_suite_gc_counter = {"n": 0}
+
+
+@pytest.fixture(autouse=True)
+def _mid_suite_gc_hygiene():
+    """Periodic garbage collection to reduce late-suite VSZ growth under ulimit.
+
+    Frequency: PORTFOLIO_LAB_MID_SUITE_GC_EVERY (default 200). Set to 0 to disable.
+    When CHECK_LEAKS=1, also run a full gen-2 collect after each test (slower).
+    """
+    yield
+    if _CHECK_LEAKS:
+        import gc
+
+        gc.collect(2)
+        return
+    if _MID_SUITE_GC_EVERY <= 0:
+        return
+    _mid_suite_gc_counter["n"] += 1
+    if _mid_suite_gc_counter["n"] % _MID_SUITE_GC_EVERY == 0:
+        import gc
+
+        gc.collect()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # pytest hooks
 # ═══════════════════════════════════════════════════════════════════════════
 

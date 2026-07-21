@@ -515,16 +515,77 @@ class OverlayDashboardGenerator:
             payload = _stamp_generator_git_sha(payload)
         except Exception:  # noqa: BLE001 — never block overlay save on stamp
             pass
-        save_results_json(payload, output_path=str(self.OUTPUT_PATH))
-        # Dual-write live PUBLIC SSOT when distinct from private dashboard tree.
+
+        private_path = Path(self.OUTPUT_PATH)
+        public_path = None
+        paths_identical = True
         try:
             from src.paths import PUBLIC_DATA_DIR
 
-            public_path = PUBLIC_DATA_DIR / "overlay_dashboard.json"
-            if public_path.resolve() != self.OUTPUT_PATH.resolve():
+            public_path = Path(PUBLIC_DATA_DIR) / "overlay_dashboard.json"
+            try:
+                paths_identical = private_path.resolve() == public_path.resolve()
+            except OSError:
+                paths_identical = False
+        except Exception:  # noqa: BLE001 — PUBLIC_DATA_DIR may be unavailable
+            public_path = None
+            paths_identical = True
+
+        # Intent stamp before private write (mirrors rebalance_health dual-write)
+        try:
+            from src.dashboard.generator import _attach_dual_write_provenance
+
+            payload = _attach_dual_write_provenance(
+                payload,
+                private_path=private_path,
+                public_path=public_path,
+                dual_write_attempted=bool(public_path) and not paths_identical,
+                dual_write_ok=None if (public_path and not paths_identical) else True,
+                paths_identical=paths_identical,
+            )
+        except Exception:  # noqa: BLE001 — never block overlay save on provenance
+            pass
+
+        private_path.parent.mkdir(parents=True, exist_ok=True)
+        save_results_json(payload, output_path=str(private_path))
+
+        # Dual-write live PUBLIC SSOT when distinct from private dashboard tree.
+        if public_path is not None and not paths_identical:
+            try:
+                public_path.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    from src.dashboard.generator import _attach_dual_write_provenance
+
+                    payload = _attach_dual_write_provenance(
+                        payload,
+                        private_path=private_path,
+                        public_path=public_path,
+                        dual_write_attempted=True,
+                        dual_write_ok=True,
+                        paths_identical=False,
+                    )
+                    # Keep private in sync with success completeness block
+                    save_results_json(payload, output_path=str(private_path))
+                except Exception:  # noqa: BLE001
+                    pass
                 save_results_json(payload, output_path=str(public_path))
-        except Exception as e:  # noqa: BLE001
-            logger.warning("overlay public dual-write skipped: %s", e)
+            except OSError as e:
+                logger.warning("overlay public dual-write skipped: %s", e)
+                try:
+                    from src.dashboard.generator import _attach_dual_write_provenance
+
+                    payload = _attach_dual_write_provenance(
+                        payload,
+                        private_path=private_path,
+                        public_path=public_path,
+                        dual_write_attempted=True,
+                        dual_write_ok=False,
+                        paths_identical=False,
+                        note=str(e),
+                    )
+                    save_results_json(payload, output_path=str(private_path))
+                except Exception:  # noqa: BLE001
+                    pass
         logger.info("Dashboard saved to %s", self.OUTPUT_PATH)
 
 
