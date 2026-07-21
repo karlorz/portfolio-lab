@@ -2112,32 +2112,61 @@ class EnsembleVoter:
         The floor is applied as a lower bound, not an equalizer: signals
         with higher quality still get proportionally more weight.
 
+        Batch BM: never raise or reinflate arms hard-zeroed by the health
+        gate (``_health_gate_slept``). Soft floors must not undo quality sleep.
+
         Args:
             weights: Current weight dict {SignalSource: weight}.
             floor: Minimum weight fraction per active signal. If None,
                 uses DEFAULT_DIVERSITY_FLOOR.
 
         Returns:
-            Adjusted weights dict summing to 1.0.
+            Adjusted weights dict summing to 1.0 (or all-zero if freeze).
         """
         if floor is None:
             floor = DEFAULT_DIVERSITY_FLOOR
         if floor <= 0:
             return weights
 
-        # Only apply to signals that were active (weight > 0) before this step
-        active = {k: v for k, v in weights.items() if v > 0}
+        slept_names = {
+            str(s) for s in (getattr(self, "_health_gate_slept", None) or [])
+        }
+
+        def _src_name(source) -> str:
+            return source.value if hasattr(source, "value") else str(source)
+
+        # Only apply to signals that were active (weight > 0) and not health-slept
+        active = {
+            k: v
+            for k, v in weights.items()
+            if v > 0 and _src_name(k) not in slept_names
+        }
         if len(active) <= 1:
+            # Still force slept arms to zero if somehow positive
+            if slept_names:
+                cleaned = dict(weights)
+                for k in list(cleaned):
+                    if _src_name(k) in slept_names:
+                        cleaned[k] = 0.0
+                total_c = sum(cleaned.values())
+                if total_c > 0:
+                    return {k: v / total_c for k, v in cleaned.items()}
+                return cleaned
             return weights
 
         total = sum(weights.values())
         if total <= 0:
             return weights
 
-        # Normalize to get fractional weights
-        frac = {k: v / total for k, v in weights.items()}
+        # Normalize to get fractional weights; keep slept at 0
+        frac = {}
+        for k, v in weights.items():
+            if _src_name(k) in slept_names:
+                frac[k] = 0.0
+            else:
+                frac[k] = v / total
 
-        # Identify signals below the floor
+        # Identify signals below the floor (never raise slept)
         adjusted = dict(frac)
         raised_count = 0
         for source in active:
@@ -2145,18 +2174,30 @@ class EnsembleVoter:
                 adjusted[source] = floor
                 raised_count += 1
 
-        if raised_count == 0:
+        if raised_count == 0 and not slept_names:
             return weights  # No adjustment needed
 
-        # Re-normalize so weights sum to 1.0
+        # Re-normalize so weights sum to 1.0 (slept stay 0)
         new_total = sum(adjusted.values())
         if new_total > 0:
             adjusted = {k: v / new_total for k, v in adjusted.items()}
+            for k in adjusted:
+                if _src_name(k) in slept_names:
+                    adjusted[k] = 0.0
+            # Renorm once more if slept zeros left a hole (shouldn't)
+            nt = sum(adjusted.values())
+            if nt > 0 and abs(nt - 1.0) > 1e-9:
+                adjusted = {k: v / nt for k, v in adjusted.items()}
 
-        logger.info(
-            "Diversity floor applied: raised %d/%d active signals (floor=%.1f%%)",
-            raised_count, len(active), floor * 100,
-        )
+        if raised_count:
+            logger.info(
+                "Diversity floor applied: raised %d/%d active signals (floor=%.1f%%); "
+                "health-slept excluded=%d",
+                raised_count,
+                len(active),
+                floor * 100,
+                len(slept_names),
+            )
 
         return adjusted
 

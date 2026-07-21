@@ -261,13 +261,82 @@ def _fingerprint_file(path: Path):
     return (digest.hexdigest(), size, stat.st_mtime_ns)
 
 
+# Production journal writers (cron/ops). Size growth whose new tail lines look
+# like these is external concurrent append, not a pytest leak (Batch BM).
+_PRODUCTION_PERF_MARKERS = (
+    b'"source": "capture_daily_pnl"',
+    b'"source":"capture_daily_pnl"',
+    b'"source": "evaluator"',
+    b'"source":"evaluator"',
+    b'"source": "paper_trading"',
+    b'"source":"paper_trading"',
+)
+_TEST_LEAK_MARKERS = (
+    b"pytest",
+    b"PYTEST",
+    b"tmp_path",
+    b"/tmp/plab-pytest",
+    b"conftest",
+    b"unittest",
+)
+
+
+def _classify_performance_jsonl_growth(
+    path: Path,
+    before_size: int,
+    after_size: int,
+) -> str:
+    """Classify live journal size change.
+
+    Returns:
+      ``external_append`` — growth looks like cron/ops production rows
+      ``test_leak`` — growth looks like suite pollution or truncate/wipe
+      ``unknown_growth`` — growth without clear markers (fail closed)
+    """
+    if after_size < before_size:
+        return "test_leak"  # truncate / rewrite-smaller is never external-safe
+    if after_size == before_size:
+        return "external_append"  # same-size rewrite already allowed by size-only
+    # Read only the new tail bytes
+    try:
+        with path.open("rb") as handle:
+            handle.seek(before_size)
+            new_bytes = handle.read(after_size - before_size)
+    except OSError:
+        return "unknown_growth"
+    if not new_bytes.strip():
+        return "external_append"
+    if any(m in new_bytes for m in _TEST_LEAK_MARKERS):
+        return "test_leak"
+    # JSONL lines: require every non-empty new line to look production-like
+    lines = [ln.strip() for ln in new_bytes.splitlines() if ln.strip()]
+    if not lines:
+        return "external_append"
+    prod_hits = 0
+    for ln in lines:
+        if any(m in ln for m in _PRODUCTION_PERF_MARKERS):
+            prod_hits += 1
+            continue
+        # Paper journal rows often omit source but carry mode=paper + total_value
+        if b'"mode": "paper"' in ln or b'"mode":"paper"' in ln:
+            if b"total_value" in ln or b"daily_return" in ln:
+                prod_hits += 1
+                continue
+        # Unclassified line → not a clean external-only append
+        return "unknown_growth"
+    if prod_hits == len(lines):
+        return "external_append"
+    return "unknown_growth"
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _guard_live_performance_jsonl():
-    """Fail the session if live data/performance.jsonl grows/shrinks during tests.
+    """Fail the session if live data/performance.jsonl is polluted by tests.
 
-    Host tasker/cron may rewrite the same-size journal while pytest runs on a
-    live lab host; those external rewrites must not fail the suite. Tests that
-    leak appends change file size — that is what we gate on.
+    Host tasker/cron may rewrite the same-size journal or *append* real
+    capture_daily_pnl rows while a long suite runs. Same-size rewrites are
+    ignored; growth is classified — production-marker tails warn+pass;
+    truncate or test-looking growth fails (Batch BM).
     """
     if os.environ.get("PORTFOLIO_LAB_ALLOW_LIVE_PERF_WRITES", "0") == "1":
         yield
@@ -279,14 +348,38 @@ def _guard_live_performance_jsonl():
         return
     before_size = None if before is None else before[1]
     after_size = None if after is None else after[1]
-    if before_size != after_size:
-        pytest.fail(
-            f"Live {_LIVE_PERFORMANCE_JSONL} size changed during pytest "
-            f"(before={before}, after={after}). Isolate "
-            "src.strategy.evaluator.DATA_DIR (autouse) or mark tests "
-            "allow_live_data only when intentional. Set "
-            "PORTFOLIO_LAB_ALLOW_LIVE_PERF_WRITES=1 to bypass."
+    if before_size == after_size:
+        return
+    # File created during suite
+    if before_size is None and after_size is not None:
+        kind = _classify_performance_jsonl_growth(
+            _LIVE_PERFORMANCE_JSONL, 0, after_size
         )
+    elif before_size is not None and after_size is None:
+        kind = "test_leak"
+    else:
+        kind = _classify_performance_jsonl_growth(
+            _LIVE_PERFORMANCE_JSONL, int(before_size), int(after_size)
+        )
+    if kind == "external_append":
+        import warnings
+
+        warnings.warn(
+            f"Live {_LIVE_PERFORMANCE_JSONL} size changed during pytest "
+            f"(before_size={before_size}, after_size={after_size}) but new tail "
+            "matches production journal markers — treating as concurrent cron "
+            "append (Batch BM). Isolate DATA_DIR if tests should never see live.",
+            UserWarning,
+            stacklevel=1,
+        )
+        return
+    pytest.fail(
+        f"Live {_LIVE_PERFORMANCE_JSONL} size changed during pytest "
+        f"(before={before}, after={after}, class={kind}). Isolate "
+        "src.strategy.evaluator.DATA_DIR (autouse) or mark tests "
+        "allow_live_data only when intentional. Set "
+        "PORTFOLIO_LAB_ALLOW_LIVE_PERF_WRITES=1 to bypass."
+    )
 
 
 # H18: live operator PUBLIC SSOT pollution guard (investigate c307–c308)
