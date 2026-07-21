@@ -313,13 +313,67 @@ def main():
         data = _stamp_generator_git_sha(data)
     except Exception:  # noqa: BLE001 — never block rebalance export
         pass
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    save_results_json(data, output_path=str(OUTPUT_PATH))
 
-    # Also copy to public/data/ for dashboard fetch
-    public_dir = PUBLIC_DATA_DIR
-    public_dir.mkdir(parents=True, exist_ok=True)
-    save_results_json(data, output_path=str(public_dir / "rebalance_health.json"))
+    private_path = OUTPUT_PATH
+    public_path = Path(PUBLIC_DATA_DIR) / "rebalance_health.json"
+    paths_identical = False
+    try:
+        paths_identical = private_path.resolve() == public_path.resolve()
+    except OSError:
+        paths_identical = False
+
+    try:
+        from src.dashboard.generator import _attach_dual_write_provenance
+
+        data = _attach_dual_write_provenance(
+            data,
+            private_path=private_path,
+            public_path=public_path,
+            dual_write_attempted=not paths_identical,
+            dual_write_ok=None if not paths_identical else True,
+            paths_identical=paths_identical,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+    private_path.parent.mkdir(parents=True, exist_ok=True)
+    save_results_json(data, output_path=str(private_path))
+
+    if not paths_identical:
+        try:
+            public_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                from src.dashboard.generator import _attach_dual_write_provenance
+
+                data = _attach_dual_write_provenance(
+                    data,
+                    private_path=private_path,
+                    public_path=public_path,
+                    dual_write_attempted=True,
+                    dual_write_ok=True,
+                    paths_identical=False,
+                )
+                save_results_json(data, output_path=str(private_path))
+            except Exception:  # noqa: BLE001
+                pass
+            save_results_json(data, output_path=str(public_path))
+        except OSError as exc:
+            logger.warning("Public rebalance_health dual-write failed: %s", exc)
+            try:
+                from src.dashboard.generator import _attach_dual_write_provenance
+
+                data = _attach_dual_write_provenance(
+                    data,
+                    private_path=private_path,
+                    public_path=public_path,
+                    dual_write_attempted=True,
+                    dual_write_ok=False,
+                    paths_identical=False,
+                    note=str(exc),
+                )
+                save_results_json(data, output_path=str(private_path))
+            except Exception:  # noqa: BLE001
+                pass
 
     logger.info("Rebalance health data exported to %s", OUTPUT_PATH)
     logger.info("  Executions: %d", data['total_executions'])

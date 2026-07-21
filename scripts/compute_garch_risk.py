@@ -313,6 +313,7 @@ def main():
     try:
         public_root = Path(PUBLIC_DATA_DIR)
         public_root.mkdir(parents=True, exist_ok=True)
+        public_path = public_root / "garch_cvar.json"
         public_payload = {
             **risk_payload,
             "schema_version": "garch-cvar/v1",
@@ -323,12 +324,23 @@ def main():
             ),
         }
         try:
-            from src.dashboard.generator import _stamp_generator_git_sha
+            from src.dashboard.generator import (
+                _stamp_generator_git_sha,
+                _attach_dual_write_provenance,
+            )
 
             public_payload = _stamp_generator_git_sha(public_payload)
+            public_payload = _attach_dual_write_provenance(
+                public_payload,
+                private_path=report_path,
+                public_path=public_path,
+                dual_write_attempted=True,
+                dual_write_ok=True,
+                paths_identical=False,
+                note="private SSOT is .health_report.json; public is garch_cvar.json",
+            )
         except Exception:  # noqa: BLE001 — never block dual-write
             pass
-        public_path = public_root / "garch_cvar.json"
         # Atomic write: temp + rename (same FS) so readers never see partial JSON
         tmp_path = public_path.with_suffix(".json.tmp")
         with open(tmp_path, "w") as f:

@@ -51,6 +51,8 @@ DUAL_WRITE_PROVENANCE_FILES = (
     "incidents.json",
     "health_ops.json",
     "unified_dashboard.json",
+    "rebalance_health.json",
+    "garch_cvar.json",
 )
 
 
