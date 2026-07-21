@@ -1504,6 +1504,7 @@ class DashboardGenerator:
             "inactive",
             "zero_weight",
             "zero_baseline",  # Batch CU: intentional weight-0 roster arms
+            "health_sleep",  # Batch CW: CN unhealthy / degraded+neg-IC sleep
             "unavailable",
         }
         if configured_source_status:
@@ -1590,11 +1591,18 @@ class DashboardGenerator:
     def _build_configured_source_status(
         regime: Any,
         source_breakdown: List[Dict[str, Any]],
+        health_gate_slept: Dict[str, str] | None = None,
     ) -> List[Dict[str, Any]]:
         """Explain configured source state, including missing stale configured sources."""
         configured_weights = DashboardGenerator._get_configured_ensemble_source_weights(regime)
         if not configured_weights:
             return []
+
+        slept_map = {
+            str(k): str(v)
+            for k, v in (health_gate_slept or {}).items()
+            if k is not None
+        }
 
         rows_by_source = {
             str(row.get("source", "")): row
@@ -1610,6 +1618,7 @@ class DashboardGenerator:
             row = rows_by_source.get(source)
             collected = row is not None
             effective_weight = 0.0
+            sleep_reason = slept_map.get(source)
             if row is not None:
                 try:
                     row_weight = float(row.get("weight", 0.0))
@@ -1617,12 +1626,16 @@ class DashboardGenerator:
                     row_weight = 0.0
                 contributing = bool(np.isfinite(row_weight) and row_weight > 0)
                 effective_weight = row_weight if contributing else 0.0
-                status = "active" if contributing else "zero_weight"
-                reason = (
-                    "Collected and contributing to the ensemble vote."
-                    if contributing
-                    else "Collected but assigned zero effective weight."
-                )
+                if contributing:
+                    status = "active"
+                    reason = "Collected and contributing to the ensemble vote."
+                elif sleep_reason:
+                    # Batch CW: CN health-gate sleep is not a generic zero_weight
+                    status = "health_sleep"
+                    reason = f"Health-gated sleep: {sleep_reason}"
+                else:
+                    status = "zero_weight"
+                    reason = "Collected but assigned zero effective weight."
             else:
                 contributing = False
                 # Batch CU: intentional zero-baseline (e.g. multi_speed_momentum
@@ -1651,7 +1664,7 @@ class DashboardGenerator:
                 # Zero baseline drops 0 mass but still discloses status (Batch CU)
                 dropped_weight_mass += cfg_w
 
-            statuses.append({
+            entry: Dict[str, Any] = {
                 "source": source,
                 "label": DashboardGenerator._format_ensemble_source_label(source),
                 "configured": True,
@@ -1662,7 +1675,10 @@ class DashboardGenerator:
                 "contributing": contributing,
                 "status": status,
                 "reason": reason,
-            })
+            }
+            if sleep_reason:
+                entry["health_sleep_reason"] = sleep_reason
+            statuses.append(entry)
 
         # Renormalize over contributors so sum(active_weight) ≈ 1 when any active
         for row in statuses:
@@ -2124,9 +2140,13 @@ class DashboardGenerator:
                 source_breakdown = self._build_ensemble_source_breakdown(
                     ensemble_result.source_votes
                 )
+                sleep_map = getattr(ensemble_result, "health_gate_slept", None) or {}
+                if not isinstance(sleep_map, dict):
+                    sleep_map = {}
                 configured_source_status = self._build_configured_source_status(
                     ensemble_result.regime,
                     source_breakdown,
+                    health_gate_slept=sleep_map,
                 )
                 source_counts = self._build_ensemble_source_count_metadata(
                     ensemble_result.regime,
@@ -2155,6 +2175,12 @@ class DashboardGenerator:
                         ensemble_result
                     ),
                     "source_breakdown": source_breakdown,
+                    # Batch CW: top-level sleep disclosure for ops panels
+                    "health_gate_slept": sleep_map,
+                    "health_gate_freeze": bool(
+                        getattr(ensemble_result, "health_gate_freeze", False)
+                    ),
+                    "health_gate_slept_count": len(sleep_map),
                 }
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("ensemble_voting", e)
@@ -5149,9 +5175,14 @@ class DashboardGenerator:
                     ensemble["weight_entropy"] = round(weight_entropy, 4)
                     ensemble["n_eff"] = round(float(np.exp(weight_entropy)), 2)
 
+            # Batch CW: preserve health_gate_slept through staleness rebuild
+            sleep_map = ensemble.get("health_gate_slept") or {}
+            if not isinstance(sleep_map, dict):
+                sleep_map = {}
             ensemble["configured_source_status"] = self._build_configured_source_status(
                 ensemble.get("regime", "normal"),
                 ensemble["source_breakdown"],
+                health_gate_slept=sleep_map,
             )
             ensemble.update(self._build_ensemble_source_count_metadata(
                 ensemble.get("regime", "normal"),

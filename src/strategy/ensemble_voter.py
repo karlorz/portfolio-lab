@@ -176,6 +176,10 @@ class EnsembleVote:
     # Runtime disclosure for adaptive-learning branches.
     adaptive_learning: Dict[str, Any] = field(default_factory=dict)
 
+    # Batch CW: health-gate sleep map (source → reason) for dashboard disclosure
+    health_gate_slept: Optional[Dict[str, str]] = None
+    health_gate_freeze: bool = False
+
 
 # Regime-dependent weights (6 active signals, renormalized per regime)
 # MSM disabled (net-negative -0.012 Sharpe), weight redistributed to ALT_DATA and INTL_MOM.
@@ -2216,6 +2220,8 @@ class EnsembleVoter:
         """
         self._health_gate_freeze = False
         self._health_gate_slept: list[str] = []
+        # Batch CW: source → reason (and optional diagnostics) for disclosure
+        self._health_gate_sleep_reasons: Dict[str, str] = {}
         try:
             from src.signals.health_tracker import SignalHealthTracker, SignalHealthStatus
             health_tracker = SignalHealthTracker()
@@ -2226,6 +2232,7 @@ class EnsembleVoter:
 
             adjusted_weights = {}
             slept: list[str] = []
+            sleep_reasons: Dict[str, str] = {}
             for source_enum, base_weight in weights.items():
                 source_str = source_enum.value
                 if source_str in health_scores:
@@ -2253,11 +2260,13 @@ class EnsembleVoter:
                     if hard_zero:
                         multiplier = 0.0
                         slept.append(source_str)
+                        reason = sleep_reason or "hard_zero"
+                        sleep_reasons[source_str] = reason
                         logger.info(
                             "Health-gated %s: weight %.2f%% → 0%% (%s, score=%.2f, ic=%s)",
                             source_str,
                             base_weight * 100,
-                            sleep_reason or "hard_zero",
+                            reason,
                             hs,
                             ic_val,
                         )
@@ -2277,6 +2286,7 @@ class EnsembleVoter:
                     adjusted_weights[source_enum] = base_weight
 
             self._health_gate_slept = slept
+            self._health_gate_sleep_reasons = sleep_reasons
             total = sum(adjusted_weights.values())
             if total > 0:
                 weights = {k: v / total for k, v in adjusted_weights.items()}
@@ -2903,6 +2913,7 @@ class EnsembleVoter:
             n_eff = 0.0
             active_weight_mass = 0.0
 
+        sleep_reasons = dict(getattr(self, "_health_gate_sleep_reasons", None) or {})
         return EnsembleVote(
             timestamp=str(datetime.now()),
             regime=regime,
@@ -2920,6 +2931,8 @@ class EnsembleVoter:
             n_eff=round(n_eff, 2),
             weight_entropy=round(weight_entropy, 4),
             adaptive_learning=self.get_adaptive_learning_status(regime.name),
+            health_gate_slept=sleep_reasons or None,
+            health_gate_freeze=bool(getattr(self, "_health_gate_freeze", False)),
         )
 
     def _persist_vote(self, vote: EnsembleVote, weighted_consensus: float) -> None:
