@@ -181,7 +181,10 @@ class TestEndToEndFlow:
 
         collar = generate_collar_signal(spot=550.0, vix=16.0)
         crypto = generate_crypto_signal()
-        bond = generate_bond_duration_signal()
+        # Explicit yields so bond is live-valid (no SSOT → defaults is degraded)
+        bond = generate_bond_duration_signal(
+            yield_10y=4.5, yield_2y=4.0, real_rate=2.0, rate_change_6m=0.15
+        )
         rng = np.random.RandomState(42)
         kurt = detect_kurtosis_regime(list(rng.normal(0, 0.01, 200)))
 

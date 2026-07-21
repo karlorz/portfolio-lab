@@ -138,7 +138,7 @@ def test_public_data_consistency_checker_accepts_matching_public_and_dist_data(t
     checker = _load_consistency_checker()
     _write_public_data_artifacts(tmp_path)
 
-    result = checker.check_public_data_consistency(tmp_path)
+    result = checker.check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
 
     assert result.ok is True, result.errors
 
@@ -151,7 +151,7 @@ def test_public_data_consistency_checker_rejects_stale_public_index(tmp_path: Pa
         index_generated_at="2026-06-12T03:12:34.220521+00:00",
     )
 
-    result = checker.check_public_data_consistency(tmp_path)
+    result = checker.check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
 
     assert result.ok is False
     assert any("public/data/index.json is older than source_manifest.json" in error for error in result.errors)
@@ -162,7 +162,7 @@ def test_public_data_consistency_checker_rejects_dist_data_copy_mismatch(tmp_pat
     _write_public_data_artifacts(tmp_path)
     _write_json(tmp_path / "dist/data/health.json", {"status": "critical"})
 
-    result = checker.check_public_data_consistency(tmp_path)
+    result = checker.check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
 
     assert result.ok is False
     assert any("dist/data/health.json does not match public/data/health.json" in error for error in result.errors)

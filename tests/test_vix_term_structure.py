@@ -1123,7 +1123,7 @@ class TestVIXExtendedCoverage:
 
     @patch("src.signals.vix_term_structure.VIXTermStructureSignalGenerator.load_vix_data")
     def test_generate_signal_date_none(self, mock_load_data):
-        """Test generate_signal() with date=None uses datetime.now()."""
+        """Test generate_signal() with date=None uses latest resolved levels."""
         mock_load_data.return_value = {
             "2026-05-12": {
                 "date": "2026-05-12",
@@ -1134,7 +1134,11 @@ class TestVIXExtendedCoverage:
         }
 
         generator = VIXTermStructureSignalGenerator()
-        signal = generator.generate_signal(date=None)
+        # Live path also consults market.db; pin it off so load_vix_data mock wins
+        with patch.object(
+            generator, "fetch_levels_from_market_db", return_value=None
+        ):
+            signal = generator.generate_signal(date=None)
 
         assert signal.is_valid
         # Latest mock data is 2026-05-12 which has backwardation (vix=25, vix3m=22)

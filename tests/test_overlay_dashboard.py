@@ -1336,6 +1336,9 @@ class TestSaveEdgeCases:
                         "public_mtime",
                         "dual_write_lag_seconds",
                         "dual_write_lag_stale",
+                        "content_hash_identical",
+                        "private_content_hash",
+                        "public_content_hash",
                     }
                 }
                 out["provenance_completeness"] = pc

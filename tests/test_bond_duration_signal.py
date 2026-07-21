@@ -707,13 +707,18 @@ class TestGenerateSignalEdgeCases:
         assert signal.is_valid
 
     def test_generate_partial_params_none_2y(self, generator):
-        """When yield_2y is None, generator falls back to default."""
+        """When yield_2y is None, missing leg falls back; defaults demote is_valid."""
         signal = generator.generate_signal(
             yield_10y=5.0, yield_2y=None, real_rate=2.0, rate_change_6m=0.1
         )
         assert isinstance(signal, BondDurationSignal)
         assert signal.yield_10y == 5.0
-        assert signal.is_valid
+        # Honesty: any defaulted yield leg marks using_defaults / degraded
+        if signal.using_defaults:
+            assert signal.is_valid is False
+            assert signal.source_status == "degraded"
+        else:
+            assert signal.is_valid is True
 
     def test_generate_all_defaults(self, generator):
         """When SSOT and market DB unavailable, textbook defaults are disclosed as degraded."""
