@@ -163,9 +163,57 @@ class OverlayDashboardGenerator:
                 continue
         return None
 
-    def _get_collar_data(self) -> Dict[str, Any]:
-        """Collect collar overlay data from SSOT file or live generate (no hardcode spot)."""
+    def _live_spy_mark(self) -> Optional[float]:
+        """Current SPY mark from price SSOT (prices.json / public)."""
         try:
+            from src.paths import PUBLIC_DATA_DIR, PRICES_JSON
+
+            for path in (
+                Path(PRICES_JSON),
+                Path(PUBLIC_DATA_DIR) / "prices.json",
+                Path(DATA_DIR) / "prices.json",
+            ):
+                if not path.is_file():
+                    continue
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                    continue
+                if not isinstance(data, dict):
+                    continue
+                # shapes: {"SPY": {"close": x}} or {"SPY": x} or nested latest
+                spy = data.get("SPY") or data.get("spy")
+                if isinstance(spy, (int, float)) and float(spy) > 0:
+                    return float(spy)
+                if isinstance(spy, dict):
+                    for k in ("close", "price", "last", "mark"):
+                        v = spy.get(k)
+                        if v is not None and float(v) > 0:
+                            return float(v)
+                # series form
+                if isinstance(spy, list) and spy:
+                    last = spy[-1]
+                    if isinstance(last, (int, float)):
+                        return float(last)
+                    if isinstance(last, dict):
+                        for k in ("close", "price", "last"):
+                            if last.get(k) is not None:
+                                return float(last[k])
+        except Exception:  # noqa: BLE001
+            return None
+        return None
+
+    def _get_collar_data(self) -> Dict[str, Any]:
+        """Collect collar overlay data; refresh underlying from live SPY marks.
+
+        Saved collar_signal.json can stick to a stale underlying while SPY
+        marks advance. Prefer live generate when mark drift or age exceeds
+        thresholds; otherwise stamp status and demote active when stale.
+        """
+        STALE_AGE_MINUTES = 30
+        SPY_TICK_THRESHOLD = 0.50  # dollars — |underlying − SPY| above this is stale
+        try:
+            live_spy = self._live_spy_mark()
             saved = self._load_collar_signal_file()
             if saved is not None:
                 strikes = saved.get("strikes") if isinstance(saved.get("strikes"), dict) else {}
@@ -174,8 +222,86 @@ class OverlayDashboardGenerator:
                 net = strikes.get("net_premium", saved.get("net_premium", 0.0))
                 is_cashless = strikes.get("is_cashless", saved.get("is_cashless", False))
                 regime = saved.get("regime", "unknown")
+                underlying = saved.get("underlying_price")
+                try:
+                    underlying_f = float(underlying) if underlying is not None else None
+                except (TypeError, ValueError):
+                    underlying_f = None
+                stale_reason = None
+                # Age gate
+                ts = saved.get("timestamp") or saved.get("generated_at")
+                age_min = None
+                if ts:
+                    try:
+                        from datetime import datetime, timezone
+
+                        t = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                        if t.tzinfo is None:
+                            t = t.replace(tzinfo=timezone.utc)
+                        age_min = (
+                            datetime.now(timezone.utc) - t.astimezone(timezone.utc)
+                        ).total_seconds() / 60.0
+                        if age_min > STALE_AGE_MINUTES:
+                            stale_reason = f"age={age_min:.0f}m>{STALE_AGE_MINUTES}m"
+                    except (TypeError, ValueError):
+                        pass
+                # Mark drift gate — force regenerate when SPY moved
+                if (
+                    live_spy is not None
+                    and underlying_f is not None
+                    and abs(live_spy - underlying_f) > SPY_TICK_THRESHOLD
+                ):
+                    drift = abs(live_spy - underlying_f)
+                    stale_reason = (
+                        f"|underlying-SPY|={drift:.2f}>{SPY_TICK_THRESHOLD}"
+                    )
+
+                if stale_reason and live_spy is not None:
+                    # Regenerate with current SPY mark
+                    from src.signals.collar_signal import CollarSignalGenerator
+
+                    gen = CollarSignalGenerator()
+                    signal = gen.generate_signal(spot=live_spy)
+                    underlying = float(getattr(signal, "underlying_price", 0) or live_spy)
+                    payload = {
+                        "active": bool(signal.is_valid),
+                        "regime": signal.regime,
+                        "call_strike": signal.call_strike,
+                        "put_strike": signal.put_strike,
+                        "net_premium": signal.strikes.net_premium,
+                        "is_cashless": signal.strikes.is_cashless,
+                        "max_upside_pct": signal.max_upside_pct,
+                        "max_downside_pct": signal.max_downside_pct,
+                        "vix_level": signal.vix_level,
+                        "confidence": signal.confidence,
+                        "underlying_price": underlying if underlying > 0 else live_spy,
+                        "spy_mark": live_spy,
+                        "spot_source": "prices.json_refresh",
+                        "source": "collar_refresh_from_spy_marks",
+                        "live_authoritative": False,
+                        "role": "advisory_overlay",
+                        "stale_reason_cleared": stale_reason,
+                        "status_text": (
+                            f"Collar refreshed from SPY ${live_spy:.2f}: "
+                            f"{signal.regime}, call ${signal.call_strike:.0f}, "
+                            f"put ${signal.put_strike:.0f}"
+                        ),
+                    }
+                    return self._stamp_freshness(
+                        payload, getattr(signal, "timestamp", None)
+                    )
+
+                active = bool(saved.get("is_valid", True))
+                status = (
+                    f"Collar: {regime}, call ${float(call):.0f}, put ${float(put):.0f}"
+                )
+                if stale_reason:
+                    active = False
+                    status = f"STALE ({stale_reason}) — {status}"
+                if live_spy is not None and underlying_f is not None:
+                    status += f", underlying ${underlying_f:.2f} vs SPY ${live_spy:.2f}"
                 return self._stamp_freshness({
-                    "active": bool(saved.get("is_valid", True)),
+                    "active": active,
                     "regime": regime,
                     "call_strike": call,
                     "put_strike": put,
@@ -185,16 +311,25 @@ class OverlayDashboardGenerator:
                     "max_downside_pct": saved.get("max_downside_pct"),
                     "vix_level": saved.get("vix_level"),
                     "confidence": saved.get("confidence"),
-                    "underlying_price": saved.get("underlying_price"),
+                    "underlying_price": underlying_f,
+                    "spy_mark": live_spy,
                     "source": "collar_signal.json",
+                    "stale": bool(stale_reason),
+                    "stale_reason": stale_reason,
                     "live_authoritative": False,
                     "role": "advisory_overlay",
-                    "status_text": f"Collar: {regime}, call ${float(call):.0f}, put ${float(put):.0f}",
+                    "status_text": status,
                 }, saved.get("timestamp") or saved.get("generated_at"))
 
             from src.signals.collar_signal import generate_collar_signal
             # Live fetch inside generator — do not hardcode spot=550 / vix=16
-            signal = generate_collar_signal()
+            # Prefer explicit SPY mark when available
+            if live_spy is not None:
+                from src.signals.collar_signal import CollarSignalGenerator
+
+                signal = CollarSignalGenerator().generate_signal(spot=live_spy)
+            else:
+                signal = generate_collar_signal()
             underlying = float(getattr(signal, "underlying_price", 0) or 0)
             return self._stamp_freshness({
                 "active": signal.is_valid,
@@ -208,6 +343,7 @@ class OverlayDashboardGenerator:
                 "vix_level": signal.vix_level,
                 "confidence": signal.confidence,
                 "underlying_price": underlying if underlying > 0 else None,
+                "spy_mark": live_spy,
                 "spot_source": "collar_signal_generate",
                 "source": "generate_collar_signal",
                 "live_authoritative": False,

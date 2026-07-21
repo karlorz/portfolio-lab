@@ -3353,28 +3353,83 @@ class DashboardGenerator:
                 else:
                     context_stats[symbol] = entry
         
-        # Paper portfolio metrics with SPY comparison
-        perf_log = DATA_DIR / "performance.jsonl"
+        # Paper portfolio metrics with SPY comparison.
+        # Prefer daily_pnl.jsonl session series (SSOT) over performance.jsonl
+        # which historically interleaves evaluator micro-noise.
         paper_metrics = {}
         spy_comparison = None
-        if perf_log.exists():
-            with open(perf_log) as f:
-                tail_lines = deque(f, maxlen=500)
-                if len(tail_lines) >= 20:
-                    raw_entries = [json.loads(l) for l in tail_lines]
+        daily_returns: list[float] = []
+        daily_values: list[float] = []
+        return_source = "none"
 
-                    # performance.jsonl contains intraday entries; raw count
-                    # overstates trading days and inflates Sharpe.
-                    daily_entries = self._deduplicate_performance_entries_by_date(raw_entries)
+        def _material_return(val: Any) -> bool:
+            try:
+                return abs(float(val)) >= 1e-6
+            except (TypeError, ValueError):
+                return False
 
-                    daily_returns = [
-                        e.get("daily_return", 0)
-                        for e in daily_entries
-                        if e.get("daily_return") is not None
-                    ]
-                    daily_values = [e.get("total_value", 0) for e in daily_entries]
+        pnl_log = DATA_DIR / "daily_pnl.jsonl"
+        if pnl_log.exists():
+            try:
+                by_date: dict[str, dict] = {}
+                with open(pnl_log) as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            row = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if not isinstance(row, dict):
+                            continue
+                        d = str(row.get("date") or "")[:10]
+                        if not d:
+                            continue
+                        by_date[d] = row
+                ordered = [by_date[d] for d in sorted(by_date.keys())]
+                # Keep only material session returns for Sharpe input
+                for e in ordered:
+                    if not _material_return(e.get("daily_return")):
+                        continue
+                    daily_returns.append(float(e["daily_return"]))
+                    try:
+                        daily_values.append(float(e.get("total_value") or 0))
+                    except (TypeError, ValueError):
+                        daily_values.append(0.0)
+                if len(daily_returns) >= 5:
+                    return_source = "daily_pnl.jsonl_session"
+            except OSError:
+                daily_returns, daily_values = [], []
 
-                    if daily_returns and daily_values:
+        if return_source == "none":
+            perf_log = DATA_DIR / "performance.jsonl"
+            if perf_log.exists():
+                with open(perf_log) as f:
+                    tail_lines = deque(f, maxlen=500)
+                    if len(tail_lines) >= 5:
+                        raw_entries = []
+                        for l in tail_lines:
+                            try:
+                                raw_entries.append(json.loads(l))
+                            except json.JSONDecodeError:
+                                continue
+                        daily_entries = self._deduplicate_performance_entries_by_date(
+                            raw_entries
+                        )
+                        for e in daily_entries:
+                            dr = e.get("daily_return")
+                            if dr is None or not _material_return(dr):
+                                continue
+                            daily_returns.append(float(dr))
+                            try:
+                                daily_values.append(float(e.get("total_value") or 0))
+                            except (TypeError, ValueError):
+                                daily_values.append(0.0)
+                        if daily_returns:
+                            return_source = "performance.jsonl_daily_dedup"
+
+        if daily_returns and len(daily_returns) >= 5:
                         std_r = float(np.std(daily_returns))
                         raw_sharpe = (
                             float(np.mean(daily_returns) / std_r * np.sqrt(252))
@@ -3384,6 +3439,7 @@ class DashboardGenerator:
                         # Honesty: same implausibility gate as graduation (raw > 3.0).
                         # Keep raw value; never coerce to 0.0 (looked like zero skill).
                         implausible = bool(raw_sharpe > 3.0)
+                        n_pts = len(daily_returns)
                         paper_metrics = {
                             "sharpe": round(raw_sharpe, 2),
                             "sharpe_raw": round(raw_sharpe, 4),
@@ -3396,18 +3452,29 @@ class DashboardGenerator:
                             "sharpe_note": (
                                 (
                                     f"implausible raw Sharpe {raw_sharpe:.2f} > 3.0 "
-                                    f"over {len(daily_values)} daily points "
+                                    f"over {n_pts} daily points "
                                     "(likely short-sample / low-vol artifact; "
                                     "not graduation-ready skill)"
                                 )
                                 if implausible
                                 else None
                             ),
-                            "total_return": round((daily_values[-1] - daily_values[0]) / daily_values[0] * 100, 2),
-                            "max_value": round(max(daily_values), 2),
-                            "min_value": round(min(daily_values), 2),
-                            "days_tracked": len(daily_values),
-                            "return_source": "performance.jsonl_daily_dedup",
+                            "total_return": (
+                                round(
+                                    (daily_values[-1] - daily_values[0])
+                                    / daily_values[0]
+                                    * 100,
+                                    2,
+                                )
+                                if daily_values
+                                and daily_values[0]
+                                and daily_values[-1]
+                                else None
+                            ),
+                            "max_value": round(max(daily_values), 2) if daily_values else None,
+                            "min_value": round(min(daily_values), 2) if daily_values else None,
+                            "days_tracked": n_pts,
+                            "return_source": return_source,
                         }
                         
                         # Calculate SPY comparison if we have enough data

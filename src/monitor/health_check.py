@@ -42,6 +42,7 @@ __all__ = [
     "run_health_check",
     "check_scheduler_drift",
     "publish_ops_health_surfaces",
+    "publish_health_alerts_json",
     "refresh_signals_health_kill_fields",
     "load_ops_monitor_report",
     "apply_ops_monitor_to_dashboard_health",
@@ -506,6 +507,94 @@ def refresh_signals_health_kill_fields(
         logger.info("Refreshed signals.health kill fields at %s", signals_path)
     except OSError as exc:
         logger.warning("Failed to write signals health kill refresh: %s", exc)
+
+
+def publish_health_alerts_json(report: dict[str, Any] | None = None) -> Path | None:
+    """Write PUBLIC_DATA_DIR/alerts.json from health SLO + kill surfaces.
+
+    Health cron previously left alerts.json frozen at the last full dashboard
+    generate. Build a compact alerts payload so ``generated_at`` tracks the
+    health job stamp. Best-effort; never raises to callers.
+    """
+    public = Path(PUBLIC_DATA_DIR)
+    out_path = public / "alerts.json"
+    try:
+        from src.dashboard.health_slo_alerts import build_health_slo_alerts
+        from src.dashboard.generator import _stamp_generator_git_sha
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("alerts publish imports failed: %s", exc)
+        return None
+
+    health_payload: dict[str, Any] = report if isinstance(report, dict) else {}
+    if not health_payload:
+        for candidate in (Path(HEALTH_PATH), public / "health.json", public / "health_ops.json"):
+            if not candidate.is_file():
+                continue
+            try:
+                blob = json.loads(candidate.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                continue
+            if isinstance(blob, dict):
+                health_payload = blob
+                break
+
+    now_utc = datetime.now(timezone.utc).isoformat()
+    # Prefer health stamp so operators can correlate
+    stamp = (
+        health_payload.get("generated_at")
+        or health_payload.get("timestamp")
+        or now_utc
+    )
+    alerts = list(build_health_slo_alerts(health_payload) or [])
+    # Include kill row when present on health checks
+    try:
+        from src.dashboard.kill_authority import load_kill_switch_payload
+
+        kill_payload = load_kill_switch_payload(DATA_DIR)
+        if kill_payload and kill_payload.get("enabled"):
+            alerts.insert(
+                0,
+                {
+                    "type": "kill_switch",
+                    "level": kill_payload.get("level") or "error",
+                    "reason": kill_payload.get("reason"),
+                    "incident_id": kill_payload.get("incident_id"),
+                    "enabled": True,
+                    "message": kill_payload.get("message")
+                    or kill_payload.get("reason")
+                    or "kill switch enabled",
+                },
+            )
+    except Exception:  # noqa: BLE001 — kill surface optional
+        pass
+
+    output: dict[str, Any] = {
+        "alerts": alerts,
+        "count": len(alerts),
+        "generated_at": stamp,
+        "source": "health_check_job",
+        "health_generated_at": health_payload.get("generated_at")
+        or health_payload.get("timestamp"),
+    }
+    try:
+        output = _stamp_generator_git_sha(output, status="partial_patch")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        public.mkdir(parents=True, exist_ok=True)
+        # Dual-write private copy for forensics
+        data_alerts = Path(DATA_DIR) / "alerts.json"
+        for path in (out_path, data_alerts):
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(output, indent=2) + "\n", encoding="utf-8")
+            except OSError as exc:
+                logger.warning("Failed to write alerts at %s: %s", path, exc)
+        logger.info("Health job wrote alerts.json (%d alerts) at %s", len(alerts), out_path)
+        return out_path
+    except OSError as exc:
+        logger.warning("alerts.json publish failed: %s", exc)
+        return None
 
 
 def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
@@ -1395,6 +1484,13 @@ def run_health_check() -> dict:
         publish_ops_health_surfaces(report)
     except Exception as exc:  # noqa: BLE001 — never fail health job on public side publish
         logger.warning("Ops health surface publish failed: %s", exc)
+
+    # Batch AQ: health-only cron must refresh alerts.json so operators are not
+    # stuck on a half-hour-old full-dashboard alerts snapshot.
+    try:
+        publish_health_alerts_json(report)
+    except Exception as exc:  # noqa: BLE001 — never fail health job on alerts
+        logger.warning("Health alerts.json publish failed: %s", exc)
 
     return report
 

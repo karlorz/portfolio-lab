@@ -969,11 +969,30 @@ def main() -> int:
         portfolio.history.append(perf)
         portfolio.save_state()
 
-        # Log performance
-        with open(PERFORMANCE_LOG, 'a') as f:
-            f.write(json.dumps(perf) + '\n')
-
-        _prune_performance_log()
+        # Session-metrics SSOT: do not append evaluator intraday micro-noise
+        # (|daily_return| ~ 1e-8) to performance.jsonl. Material session returns
+        # (and capture_daily_pnl rows) remain the metric input path.
+        try:
+            dr = float(perf.get("daily_return") or 0.0)
+        except (TypeError, ValueError):
+            dr = 0.0
+        material = abs(dr) >= 1e-6
+        if material:
+            row = dict(perf)
+            row.setdefault("source", "evaluator_session")
+            row.setdefault("schema_version", "performance-session/v1")
+            # Stamp session date for dedup (ET when available)
+            if not row.get("date"):
+                ts = str(row.get("timestamp") or "")
+                row["date"] = ts[:10] if len(ts) >= 10 else None
+            with open(PERFORMANCE_LOG, 'a') as f:
+                f.write(json.dumps(row) + '\n')
+            _prune_performance_log()
+        else:
+            logger.debug(
+                "Skipping performance.jsonl append for micro-noise daily_return=%s",
+                dr,
+            )
     
     # Check graduation criteria (paper mode only)
     if mode == "paper":

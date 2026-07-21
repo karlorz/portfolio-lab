@@ -19,6 +19,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
+from zoneinfo import ZoneInfo
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -26,6 +27,19 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.paths import DATA_DIR, resolve_runtime_public_data_dir
 
 INITIAL_CAPITAL = 100000  # Default from evaluator PAPER_CONFIG
+
+_ET = ZoneInfo("America/New_York")
+
+
+def us_cash_session_date(now: Optional[datetime] = None) -> str:
+    """America/New_York calendar date for MTM history keys (match capture_daily_pnl)."""
+    if now is None:
+        now = datetime.now(tz=_ET)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=ZoneInfo("UTC")).astimezone(_ET)
+    else:
+        now = now.astimezone(_ET)
+    return now.strftime("%Y-%m-%d")
 
 
 def get_prices_file() -> Path:
@@ -95,14 +109,23 @@ def mark_to_market(portfolio: Dict[str, Any], prices: Dict[str, float]) -> Dict[
     mode = portfolio.get("mode", "paper")
     history = portfolio.get("history", [])
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = us_cash_session_date()
     previous_total = INITIAL_CAPITAL
 
-    # Find the most recent total_value from history
+    # previous_total = last history entry with date *strictly before* session date.
+    # Same-day intermediate peaks must not poison the DoD baseline (Batch AO).
     for entry in reversed(history):
+        ts = str(entry.get("timestamp") or entry.get("date") or "")
+        entry_date = ts[:10] if len(ts) >= 10 else ""
+        if entry_date and entry_date >= today:
+            continue  # skip same-session / future rows
         tv = entry.get("total_value", 0)
-        if tv > 0:
-            previous_total = tv
+        try:
+            tv_f = float(tv)
+        except (TypeError, ValueError):
+            continue
+        if tv_f > 0:
+            previous_total = tv_f
             break
 
     # Update each position with current market price
@@ -123,21 +146,32 @@ def mark_to_market(portfolio: Dict[str, Any], prices: Dict[str, float]) -> Dict[
     for pos in positions.values():
         pos["weight"] = round(pos["value"] / total_value, 4) if total_value > 0 else 0
 
-    # Compute daily return
+    # Compute daily return vs prior session close only
     daily_return = (total_value - previous_total) / previous_total if previous_total > 0 else 0
 
     # Update or append today's history entry
     today_entry = {
         "timestamp": datetime.now().isoformat(),
+        "date": today,
         "total_value": round(total_value, 2),
         "cash": round(cash, 2),
         "daily_return": round(daily_return, 6),
         "positions_count": len(positions),
         "mode": mode,
+        "previous_total": round(previous_total, 2),
+        "session_date": today,
     }
 
-    # Remove any existing entry for today (idempotent)
-    history = [h for h in history if not h.get("timestamp", "").startswith(today)]
+    # Remove any existing entry for today (idempotent) — match session date key
+    def _entry_date(h: Dict[str, Any]) -> str:
+        if h.get("session_date"):
+            return str(h["session_date"])[:10]
+        if h.get("date"):
+            return str(h["date"])[:10]
+        ts = str(h.get("timestamp") or "")
+        return ts[:10] if len(ts) >= 10 else ""
+
+    history = [h for h in history if _entry_date(h) != today]
     history.append(today_entry)
 
     # Keep last 100 history entries
