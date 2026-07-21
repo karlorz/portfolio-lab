@@ -745,6 +745,13 @@ class PerformanceAttribution:
             for src_key, src_data in data.get("sources", {}).items():
                 sources[src_key] = SourceAttribution(**src_data)
             data["sources"] = sources
+            # Provenance stamps (Batch AY) are operator metadata, not dataclass fields
+            for meta_key in (
+                "generator_git_sha",
+                "generator_git_sha_status",
+                "provenance_completeness",
+            ):
+                data.pop(meta_key, None)
             return AttributionReport(**data)
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.error("Error loading report: %s", e)
