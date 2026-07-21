@@ -6,6 +6,7 @@ from src.dashboard.health_report import (
     build_symbol_freshness_entry,
     classify_market_data_freshness,
     derive_system_status,
+    signal_health_status_contribution,
     summarize_stale_symbol_count,
 )
 
@@ -32,6 +33,47 @@ def test_derive_system_status_escalation() -> None:
     assert derive_system_status(backend_error=True) == "degraded"
     assert derive_system_status(failed_jobs=1, stale_count=6) == "warning"
     assert derive_system_status(slo_status="critical", failed_jobs=3) == "critical"
+
+
+def test_signal_health_zero_healthy_demotes_system_status() -> None:
+    """Batch BN: 0/N healthy tracked sources → system_status not healthy."""
+    sh = {
+        "status": "degraded",
+        "overall_health": "degraded",
+        "summary": {
+            "healthy": 0,
+            "degraded": 7,
+            "unhealthy": 2,
+            "total_tracked": 9,
+        },
+    }
+    assert signal_health_status_contribution(sh) == "degraded"
+    assert derive_system_status(signal_health=sh) == "degraded"
+    # Cannot stay green when all tracked sleeves are non-healthy
+    assert derive_system_status(current="healthy", signal_health=sh) != "healthy"
+    # Critical path still wins over signal_health demotion
+    assert (
+        derive_system_status(slo_status="critical", signal_health=sh) == "critical"
+    )
+
+
+def test_signal_health_all_unhealthy_is_critical() -> None:
+    sh = {
+        "summary": {
+            "healthy": 0,
+            "degraded": 0,
+            "unhealthy": 5,
+            "total_tracked": 5,
+        },
+    }
+    assert signal_health_status_contribution(sh) == "critical"
+    assert derive_system_status(signal_health=sh) == "critical"
+
+
+def test_signal_health_absent_does_not_demote() -> None:
+    assert signal_health_status_contribution(None) is None
+    assert signal_health_status_contribution({}) is None
+    assert derive_system_status(signal_health=None) == "healthy"
 
 
 def test_build_symbol_freshness_entry() -> None:

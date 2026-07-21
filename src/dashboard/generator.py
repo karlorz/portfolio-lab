@@ -549,6 +549,21 @@ def _compact_health_summary(report: Dict) -> Dict:
     # matches signals.broker.kill_switch without requiring broker-only reads.
     summary.update(project_compact_kill_fields(report))
 
+    # Batch BN: surface signal_health rollup so compact view discloses 0/N healthy
+    signal_health = report.get("signal_health")
+    if isinstance(signal_health, dict):
+        sh_summary = signal_health.get("summary")
+        if isinstance(sh_summary, dict):
+            summary["signal_health_healthy"] = sh_summary.get("healthy")
+            summary["signal_health_degraded"] = sh_summary.get("degraded")
+            summary["signal_health_unhealthy"] = sh_summary.get("unhealthy")
+            summary["signal_health_total_tracked"] = sh_summary.get(
+                "total_tracked"
+            ) or sh_summary.get("total")
+        overall = signal_health.get("overall_health") or signal_health.get("status")
+        if overall:
+            summary["signal_health_status"] = overall
+
     return summary
 
 
@@ -3747,6 +3762,7 @@ class DashboardGenerator:
             slo_status=slo_status,
             failed_jobs=failed_jobs,
             stale_count=stale_count,
+            signal_health=health_data.get("signal_health"),
         )
         health_data["system_status"] = elevate_system_status_for_kill(
             health_data["system_status"],
