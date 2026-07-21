@@ -408,6 +408,23 @@ export interface OpenIncidentsHealth {
   incidents?: Array<Record<string, unknown>>;
 }
 
+/** Dual-write provenance_completeness block (Batch AS+; advisory split-brain forensics). */
+export interface ProvenanceCompleteness {
+  generator_git_sha_present?: boolean;
+  dual_write_attempted?: boolean;
+  dual_write_ok?: boolean | null;
+  dual_write_lag_seconds?: number | null;
+  dual_write_lag_stale?: boolean;
+  dual_write_lag_threshold_seconds?: number;
+  dual_write_lag_unit?: string;
+  paths_identical?: boolean | null;
+  private_path?: string | null;
+  public_path?: string | null;
+  note?: string;
+  disclosure?: string;
+  [key: string]: unknown;
+}
+
 export interface HealthData {
   cron_jobs: CronJobStatus[];
   data_freshness: Record<string, DataFreshness>;
@@ -417,6 +434,11 @@ export interface HealthData {
   data_pipeline_slo?: DataPipelineSlo;
   kill_switch?: KillSwitchHealth;
   open_incidents?: OpenIncidentsHealth;
+  /** Code tip that produced this artifact (when stamped). */
+  generator_git_sha?: string | null;
+  generator_git_sha_status?: string | null;
+  /** Dual-write lag / split-brain forensics (health_ops or dual-write producers). */
+  provenance_completeness?: ProvenanceCompleteness | null;
   error?: string;
 }
 

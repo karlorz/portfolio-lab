@@ -177,6 +177,10 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const [stats, setStats] = useState<StatsData | null>(null);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [health, setHealth] = useState<HealthData | null>(null);
+  /** Dual-write provenance from health_ops when health.json lacks the block (M11). */
+  const [healthOpsProvenance, setHealthOpsProvenance] = useState<
+    HealthData['provenance_completeness'] | null
+  >(null);
   const [incidentSummary, setIncidentSummary] = useState<IncidentLifecycleSummary | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [rebalanceHealth, setRebalanceHealth] = useState<RebalanceHealthData | null>(null);
@@ -200,13 +204,14 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const fetchCoreData = async () => {
     const requestGeneration = ++coreFetchGeneration.current;
     try {
-      const [signalsRes, dashboardRes, alertsRes, statsRes, healthRes, incidentsRes] = await Promise.all([
+      const [signalsRes, dashboardRes, alertsRes, statsRes, healthRes, incidentsRes, healthOpsRes] = await Promise.all([
         fetch('/data/signals.json'),
         fetch('/data/dashboard.json'),
         fetch('/data/alerts.json'),
         fetch('/data/stats.json'),
         fetch('/data/health.json'),
         fetch('/data/incidents.json'),
+        fetch('/data/health_ops.json'),
       ]);
       if (requestGeneration !== coreFetchGeneration.current) return;
 
@@ -253,6 +258,23 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         const raw = healthRaw;
         const validated = validateFetchData(raw, HealthDataSchema, 'health');
         if (validated) setHealth(validated as HealthData);
+      }
+      // health_ops dual-write block (Batch AS+) — optional; ignore parse failures
+      try {
+        if (healthOpsRes.ok) {
+          const opsRaw = await healthOpsRes.json();
+          if (requestGeneration !== coreFetchGeneration.current) return;
+          const pc = opsRaw?.provenance_completeness;
+          setHealthOpsProvenance(
+            pc && typeof pc === 'object' ? pc : null,
+          );
+        } else {
+          setHealthOpsProvenance(null);
+        }
+      } catch {
+        if (requestGeneration === coreFetchGeneration.current) {
+          setHealthOpsProvenance(null);
+        }
       }
       const incidentsRaw = await safeParseJson(incidentsRes, 'incidents');
       if (requestGeneration !== coreFetchGeneration.current) return;
@@ -441,8 +463,12 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
 
   const healthOperationsSummary = health
     ? summarizeHealthOperations(health, {
-      alerts: alerts?.alerts,
+      // alerts state is Alert[] (not {alerts: Alert[]})
+      alerts,
       broker: signals?.broker ?? null,
+      // Prefer health.json block; fall back to health_ops dual-write surface
+      dualWriteProvenance:
+        health.provenance_completeness ?? healthOpsProvenance ?? null,
     })
     : null;
   const dashboardIncidents = useMemo(
