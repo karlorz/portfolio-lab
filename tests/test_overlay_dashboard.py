@@ -1256,8 +1256,13 @@ class TestSaveEdgeCases:
         )
         gen.save(data)
         content = output.read_text()
-        assert "old" not in content
-        assert "active_overlays" in content
+        # Provenance block may contain the substring "threshold" — assert on JSON keys
+        import json as json_mod
+
+        parsed = json_mod.loads(content)
+        assert "old" not in parsed
+        assert "active_overlays" in parsed
+        assert parsed.get("active_overlays") == 0
 
     def test_save_to_deeply_nested_dir(self, tmp_path):
         gen = OverlayDashboardGenerator()
@@ -1315,7 +1320,30 @@ class TestSaveEdgeCases:
         first_content = output.read_text()
         gen.save(data)
         second_content = output.read_text()
-        assert first_content == second_content
+        # dual_write lag mtimes may tick between writes — compare business payload
+        import json as json_mod
+
+        def _stable(payload: dict) -> dict:
+            out = dict(payload)
+            pc = out.get("provenance_completeness")
+            if isinstance(pc, dict):
+                pc = {
+                    k: v
+                    for k, v in pc.items()
+                    if k
+                    not in {
+                        "private_mtime",
+                        "public_mtime",
+                        "dual_write_lag_seconds",
+                        "dual_write_lag_stale",
+                    }
+                }
+                out["provenance_completeness"] = pc
+            return out
+
+        assert _stable(json_mod.loads(first_content)) == _stable(
+            json_mod.loads(second_content)
+        )
 
 
 class TestDataCollectionWithMocks:
