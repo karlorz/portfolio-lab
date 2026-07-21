@@ -164,14 +164,50 @@ def _get_portfolio_section() -> Dict[str, Any]:
     }
 
 
+def _normalize_drawdown_to_percent(
+    value: Any,
+    *,
+    source_hint: str = "",
+) -> tuple[Optional[float], str]:
+    """Canonical drawdown unit is **percent** (e.g. −5.85 for a 5.85% DD).
+
+    Producers disagree:
+    - evaluator / paper history: fraction (−0.0585)
+    - compute_garch_risk / risk_metrics: percent-like (−10.52)
+
+    Heuristic: |v| <= 1 (and v != 0) → fraction → *100; |v| > 1 → already percent.
+    Explicit ``*_pct`` twins and ``drawdown_unit`` source hints override when set.
+    Returns (normalized_or_None, unit_label) where unit_label is always "percent"
+    for finite values.
+    """
+    if value is None:
+        return None, "percent"
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None, "percent"
+    if v == 0.0:
+        return 0.0, "percent"
+    # Policy-style limits often stored as −15.0 already percent; fractions are
+    # peak-to-trough ratios with abs < 1 (e.g. −0.0585).
+    if abs(v) <= 1.0:
+        # Treat as fraction unless source already labeled percent (rare edge)
+        if source_hint in {"percent", "pct", "%"}:
+            return round(v, 6), "percent"
+        return round(v * 100.0, 6), "percent"
+    return round(v, 6), "percent"
+
+
 def _normalize_risk_payload(metrics: Dict[str, Any], *, source: str) -> Dict[str, Any]:
     """Map risk_metrics.json or GARCH .health_report.json into unified risk section.
 
     Drawdown honesty: prefer ``measured_max_drawdown`` over policy ``max_drawdown``
     / ``max_drawdown_limit`` so operators never read −15 policy as live NAV DD.
+    All published drawdown fields are **percent** with ``drawdown_unit: percent``.
     GARCH active: honor explicit demote (``garch_active=false`` + runtime_role)
     even when ``filter_active`` is still true on the private health report.
     """
+    unit_hint = str(metrics.get("drawdown_unit") or metrics.get("dd_unit") or "").lower()
     # health_report uses var_95/cvar_95; risk_metrics uses var_95_daily/cvar_95_daily
     var_daily = metrics.get("var_95_daily", metrics.get("var_95"))
     cvar_daily = metrics.get("cvar_95_daily", metrics.get("cvar_95"))
@@ -186,19 +222,44 @@ def _normalize_risk_payload(metrics: Dict[str, Any], *, source: str) -> Dict[str
         garch_filtered = bool(metrics.get("filter_active", garch_active))
     # Prefer measured NAV peak-to-trough; fall back to max_drawdown only when
     # it is not the renamed policy limit slot.
-    measured_dd = metrics.get("measured_max_drawdown")
-    policy_limit = metrics.get("max_drawdown_limit")
+    measured_dd_raw = metrics.get("measured_max_drawdown")
+    # Prefer explicit percent twin if present (already percent)
+    if metrics.get("measured_max_drawdown_pct") is not None:
+        measured_dd, _ = _normalize_drawdown_to_percent(
+            metrics.get("measured_max_drawdown_pct"),
+            source_hint="percent",
+        )
+    else:
+        measured_dd, _ = _normalize_drawdown_to_percent(
+            measured_dd_raw, source_hint=unit_hint
+        )
+    policy_limit_raw = metrics.get("max_drawdown_limit")
+    if metrics.get("max_drawdown_limit_pct") is not None:
+        policy_limit, _ = _normalize_drawdown_to_percent(
+            metrics.get("max_drawdown_limit_pct"), source_hint="percent"
+        )
+    else:
+        # Same fraction/percent heuristic as measured DD (no forced "percent"
+        # default — policy is often stored as −0.15 fraction).
+        policy_limit, _ = _normalize_drawdown_to_percent(
+            policy_limit_raw, source_hint=unit_hint
+        )
     raw_max_dd = metrics.get("max_drawdown")
     if measured_dd is not None:
         max_drawdown = measured_dd
     elif raw_max_dd is not None:
-        max_drawdown = raw_max_dd
+        max_drawdown, _ = _normalize_drawdown_to_percent(
+            raw_max_dd, source_hint=unit_hint
+        )
     else:
         max_drawdown = None
-    measured_cur = metrics.get("measured_current_drawdown")
-    current_dd = (
-        measured_cur if measured_cur is not None else metrics.get("current_drawdown")
+    measured_cur_raw = metrics.get("measured_current_drawdown")
+    current_raw = (
+        measured_cur_raw
+        if measured_cur_raw is not None
+        else metrics.get("current_drawdown")
     )
+    current_dd, _ = _normalize_drawdown_to_percent(current_raw, source_hint=unit_hint)
     out: Dict[str, Any] = {
         "available": True,
         "timestamp": metrics.get("timestamp"),
@@ -208,6 +269,7 @@ def _normalize_risk_payload(metrics: Dict[str, Any], *, source: str) -> Dict[str
         "tail_severity": metrics.get("tail_severity"),
         "max_drawdown": max_drawdown,
         "current_drawdown": current_dd,
+        "drawdown_unit": "percent",
         "volatility_annual": metrics.get("volatility_annual"),
         "garch_active": bool(garch_active),
         "garch_filtered": bool(garch_filtered),
@@ -215,8 +277,14 @@ def _normalize_risk_payload(metrics: Dict[str, Any], *, source: str) -> Dict[str
     }
     if measured_dd is not None:
         out["measured_max_drawdown"] = measured_dd
+        out["measured_max_drawdown_pct"] = measured_dd
+    if current_dd is not None:
+        out["measured_current_drawdown"] = current_dd
     if policy_limit is not None:
         out["max_drawdown_limit"] = policy_limit
+        out["max_drawdown_limit_pct"] = (
+            abs(policy_limit) if policy_limit is not None else None
+        )
     if metrics.get("drawdown_field_semantics"):
         out["drawdown_field_semantics"] = metrics.get("drawdown_field_semantics")
     if metrics.get("garch_active_reason"):

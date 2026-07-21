@@ -533,3 +533,47 @@ class TestMain:
                 with pytest.raises(SystemExit) as excinfo:
                     main()
                 assert excinfo.value.code == 1
+
+
+class TestUsCashSessionDate:
+    """daily_pnl date keys use America/New_York, not host-local midnight."""
+
+    def test_asia_midnight_stays_on_us_session_day(self):
+        """00:10 Asia/Hong_Kong must not invent a next US calendar row early."""
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from scripts.capture_daily_pnl import us_cash_session_date, compute_pnl_snapshot
+
+        # 2026-07-22 00:10 HKT == 2026-07-21 12:10 ET (still Jul 21 session)
+        now_hkt = datetime(2026, 7, 22, 0, 10, tzinfo=ZoneInfo("Asia/Hong_Kong"))
+        assert us_cash_session_date(now_hkt) == "2026-07-21"
+
+        # Explicit override still wins
+        pf = {
+            "mode": "paper",
+            "cash": 10000,
+            "positions": {},
+            "history": [],
+        }
+        snap = compute_pnl_snapshot(pf, as_of_date="2026-07-20")
+        assert snap["date"] == "2026-07-20"
+
+    def test_default_date_uses_et_not_host_strftime(self, monkeypatch):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        import scripts.capture_daily_pnl as cap
+
+        # Freeze "now" to a known ET afternoon
+        fixed = datetime(2026, 7, 21, 15, 30, tzinfo=ZoneInfo("America/New_York"))
+
+        class _FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                if tz is None:
+                    return fixed.replace(tzinfo=None)
+                return fixed.astimezone(tz)
+
+        monkeypatch.setattr(cap, "datetime", _FixedDateTime)
+        # us_cash_session_date uses datetime.now(tz=_ET) — patch module datetime
+        assert cap.us_cash_session_date() == "2026-07-21"
+

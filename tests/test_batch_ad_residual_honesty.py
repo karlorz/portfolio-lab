@@ -95,6 +95,58 @@ def test_unified_risk_demotes_when_only_risk_metrics_has_false(tmp_path):
     assert section["max_drawdown"] == pytest.approx(-8.0)
 
 
+def test_normalize_drawdown_fraction_to_percent():
+    """Evaluator-style fraction (−0.0585) becomes percent (−5.85)."""
+    from src.monitor.unified_dashboard import (
+        _normalize_drawdown_to_percent,
+        _normalize_risk_payload,
+    )
+
+    pct, unit = _normalize_drawdown_to_percent(-0.0585)
+    assert unit == "percent"
+    assert pct == pytest.approx(-5.85)
+
+    # Already percent — not double-scaled
+    pct2, _ = _normalize_drawdown_to_percent(-10.52)
+    assert pct2 == pytest.approx(-10.52)
+
+    section = _normalize_risk_payload(
+        {
+            "timestamp": "2026-07-20T12:00:00",
+            "var_95_daily": -1.2,
+            "cvar_95_daily": -1.9,
+            "measured_max_drawdown": -0.0585,  # fraction from evaluator
+            "measured_current_drawdown": -0.03,
+            "max_drawdown_limit": -0.15,  # fraction policy
+            "garch_active": True,
+        },
+        source="test",
+    )
+    assert section["drawdown_unit"] == "percent"
+    assert section["max_drawdown"] == pytest.approx(-5.85)
+    assert section["measured_max_drawdown"] == pytest.approx(-5.85)
+    assert section["measured_max_drawdown_pct"] == pytest.approx(-5.85)
+    assert section["current_drawdown"] == pytest.approx(-3.0)
+    assert section["max_drawdown_limit"] == pytest.approx(-15.0)
+
+
+def test_normalize_drawdown_percent_not_double_scaled():
+    from src.monitor.unified_dashboard import _normalize_risk_payload
+
+    section = _normalize_risk_payload(
+        {
+            "measured_max_drawdown": -10.52,
+            "measured_current_drawdown": -7.3,
+            "max_drawdown_limit": -15.0,
+            "garch_active": True,
+        },
+        source="risk_metrics",
+    )
+    assert section["max_drawdown"] == pytest.approx(-10.52)
+    assert section["measured_max_drawdown"] == pytest.approx(-10.52)
+    assert section["drawdown_unit"] == "percent"
+
+
 def test_garch_cvar_timestamp_is_utc_aware():
     from src.monitor.garch_cvar import GARCHFilteredCVaR
     import numpy as np

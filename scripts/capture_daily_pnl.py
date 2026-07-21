@@ -19,6 +19,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
+from zoneinfo import ZoneInfo
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -32,6 +33,31 @@ try:
     INITIAL_CAPITAL = PAPER_CONFIG.get("initial_capital", 100000)
 except ImportError:
     INITIAL_CAPITAL = 100000
+
+# US cash equity session calendar — never host-local midnight.
+_ET = ZoneInfo("America/New_York")
+
+
+def us_cash_session_date(now: Optional[datetime] = None) -> str:
+    """America/New_York calendar date for daily_pnl row keys.
+
+    Policy: date keys follow the US cash session calendar, not the host
+    local timezone. A host past local midnight in Asia/Hong_Kong must not
+    invent a 'tomorrow' US session row while ET is still the prior day.
+
+    Before 16:00 ET this returns the current ET calendar date (intraday /
+    pre-close capture). After 16:00 ET the date remains the same ET day
+    until ET midnight rolls to the next session date. Explicit
+    ``as_of_date`` overrides this default.
+    """
+    if now is None:
+        now = datetime.now(tz=_ET)
+    elif now.tzinfo is None:
+        # Naive → interpret as UTC then convert (tests often freeze UTC)
+        now = now.replace(tzinfo=ZoneInfo("UTC")).astimezone(_ET)
+    else:
+        now = now.astimezone(_ET)
+    return now.strftime("%Y-%m-%d")
 
 
 def load_portfolio(mode: str = "paper") -> Optional[Dict[str, Any]]:
@@ -159,7 +185,7 @@ def compute_pnl_snapshot(
             "unrealized_pnl": round(unrealized, 2),
         }
 
-    date = as_of_date or datetime.now().strftime("%Y-%m-%d")
+    date = as_of_date or us_cash_session_date()
     history = portfolio.get("history", [])
     daily_return = compute_daily_return(
         total_value,
@@ -295,7 +321,7 @@ def append_performance_jsonl(snapshot: Dict[str, Any], performance_path: Optiona
     Does not replace evaluator intra-day rows from other timestamps on other days.
     """
     path = performance_path or (DATA_DIR / "performance.jsonl")
-    date = snapshot.get("date") or datetime.now().strftime("%Y-%m-%d")
+    date = snapshot.get("date") or us_cash_session_date()
     row = {
         "timestamp": snapshot.get("timestamp") or datetime.now().isoformat(),
         "date": date,
