@@ -1373,12 +1373,13 @@ class TestLoadState:
         finally:
             gc.DATA_DIR = original
 
-    def test_load_state_circuit_breaker_state_file_fallback(self, tmp_path):
-        """Prefer .circuit_breaker_state.json when .circuit_breaker.json missing."""
+    def test_load_state_circuit_breaker_ssot_only_no_invent(self, tmp_path):
+        """Batch BP: legacy .circuit_breaker_state.json is NOT CB confidence SSOT."""
         import src.strategy.graduation_checklist as gc
         original = gc.DATA_DIR
         gc.DATA_DIR = Path(tmp_path)
         try:
+            # Only legacy drawdown paper file — must not invent consecutive_ok
             with open(tmp_path / ".circuit_breaker_state.json", "w") as f:
                 json.dump({
                     "status": "green",
@@ -1388,11 +1389,38 @@ class TestLoadState:
             checklist = GraduationChecklist()
             state = checklist._load_state()
             cb = state.get("circuit_breaker") or {}
-            assert cb.get("status") == "green"
-            # Green file without consecutive_ok gets a healthy default streak
-            assert int(cb.get("consecutive_ok", 0)) >= 3
+            assert cb.get("ssot_missing") is True or cb.get("consecutive_ok") == 0
+            assert int(cb.get("consecutive_ok", 0)) == 0
+            result = checklist._check_circuit_breaker(state)
+            assert result.passed is False
+            assert result.value == 0
+        finally:
+            gc.DATA_DIR = original
+
+    def test_load_state_circuit_breaker_ssot_file(self, tmp_path):
+        """Batch BP: consecutive_ok comes only from .circuit_breaker.json."""
+        import src.strategy.graduation_checklist as gc
+        original = gc.DATA_DIR
+        gc.DATA_DIR = Path(tmp_path)
+        try:
+            with open(tmp_path / ".circuit_breaker.json", "w") as f:
+                json.dump({
+                    "status": "green",
+                    "trips": 0,
+                    "consecutive_ok": 9,
+                    "schema_version": "graduation-circuit-breaker/v1",
+                }, f)
+            # Poison legacy file with higher invented streak — must be ignored
+            with open(tmp_path / ".circuit_breaker_state.json", "w") as f:
+                json.dump({"status": "green", "max_drawdown": 0.0}, f)
+            checklist = GraduationChecklist()
+            state = checklist._load_state()
+            cb = state.get("circuit_breaker") or {}
+            assert cb.get("ssot_path") == ".circuit_breaker.json"
+            assert int(cb.get("consecutive_ok", 0)) == 9
             result = checklist._check_circuit_breaker(state)
             assert result.passed is True
+            assert result.value == 9
         finally:
             gc.DATA_DIR = original
 

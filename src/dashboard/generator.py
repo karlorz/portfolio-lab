@@ -5112,78 +5112,116 @@ class DashboardGenerator:
         }
 
     def generate_graduation_json(self) -> Optional[Path]:
-        """Generate graduation readiness progress for dashboard.
+        """Generate graduation readiness progress for dashboard (dual private+public)."""
+        return refresh_graduation_dual_surfaces(
+            public_dir=PUBLIC_DIR,
+            data_dir=DATA_DIR,
+            paper_trading_builder=self._paper_trading_summary_for_dashboard,
+            display_value=self._graduation_display_value,
+        )
 
-        Emits a dual-shape payload:
-        - Producer fields: readiness_score, is_graduation_ready, criteria name/required
-        - Frontend schema aliases: readiness_pct, eligible, paper_trading, and
-          criteria id/label/threshold (panel String()-coerces numeric value)
-        """
-        try:
-            from src.strategy.graduation_checklist import GraduationChecklist
 
-            checklist = GraduationChecklist()
-            state = checklist._load_state()
-            results = checklist.check(state)
-            score = checklist.readiness_score(results)
-            is_ready = checklist.is_graduation_ready(results)
+def refresh_graduation_dual_surfaces(
+    *,
+    public_dir: Path | None = None,
+    data_dir: Path | None = None,
+    paper_trading_builder=None,
+    display_value=None,
+) -> Optional[Path]:
+    """Compute graduation once; write public graduation.json + private report.
 
-            # Build progress data for dashboard (dual-shape per criterion)
-            criteria_progress = []
-            for name, result in results.items():
-                criteria_progress.append({
-                    # Producer fields (existing consumers / Python tests)
-                    "name": name,
-                    "passed": result.passed,
-                    "value": result.value,
-                    "required": result.required,
-                    "description": result.description,
-                    # Frontend GraduationChecklistPanel fields
-                    "id": name,
-                    "label": result.description or name,
-                    "threshold": self._graduation_display_value(result.required),
-                })
+    Batch BP: single compute path so private/public readiness and CB criterion
+    cannot invent different consecutive_ok values. Safe to call from health
+    when ``.circuit_breaker.json`` consecutive_ok changes (no DB required).
+    """
+    try:
+        from src.strategy.graduation_checklist import GraduationChecklist
+        from src.paths import DATA_DIR as _DEFAULT_DATA, PUBLIC_DATA_DIR as _DEFAULT_PUB
 
-            trading_days_result = results.get("min_trading_days")
-            n_days = trading_days_result.value if trading_days_result is not None else 0
-            min_trading_days = (
-                trading_days_result.required
-                if trading_days_result is not None
-                else checklist.criteria["min_trading_days"]["value"]
-            )
-            manual_approval = results.get("manual_approval")
-            paper_trading = self._paper_trading_summary_for_dashboard(
+        pub = Path(public_dir) if public_dir is not None else Path(_DEFAULT_PUB)
+        # DATA_DIR for checklist is module-level; callers monkeypatch as needed.
+        _ = data_dir  # reserved for future path injection
+
+        checklist = GraduationChecklist()
+        state = checklist._load_state()
+        results = checklist.check(state)
+        score = checklist.readiness_score(results)
+        is_ready = checklist.is_graduation_ready(results)
+
+        _display = display_value or (
+            lambda v: str(v) if v is not None else ""
+        )
+        criteria_progress = []
+        for name, result in results.items():
+            criteria_progress.append({
+                "name": name,
+                "passed": result.passed,
+                "value": result.value,
+                "required": result.required,
+                "description": result.description,
+                "id": name,
+                "label": result.description or name,
+                "threshold": _display(result.required),
+            })
+
+        trading_days_result = results.get("min_trading_days")
+        n_days = trading_days_result.value if trading_days_result is not None else 0
+        min_trading_days = (
+            trading_days_result.required
+            if trading_days_result is not None
+            else checklist.criteria["min_trading_days"]["value"]
+        )
+        manual_approval = results.get("manual_approval")
+        if paper_trading_builder is not None:
+            paper_trading = paper_trading_builder(
                 state,
                 days_elapsed=n_days,
                 days_required=min_trading_days,
             )
+        else:
+            paper_trading = {
+                "days_elapsed": n_days,
+                "days_required": min_trading_days,
+            }
 
-            graduation_data = _stamp_generator_git_sha({
-                # Producer / ops fields
-                "readiness_score": score,
-                "is_graduation_ready": is_ready,
-                "manual_approval_required": True,
-                "manual_approval_pending": not bool(manual_approval and manual_approval.passed),
-                "trading_days": n_days,
-                "min_trading_days": min_trading_days,
-                "criteria_met": sum(1 for n, r in results.items() if n != "manual_approval" and r.passed),
-                "criteria_total": sum(1 for n in results if n != "manual_approval"),
-                "criteria": criteria_progress,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                # Frontend GraduationDataSchema / panel aliases
-                "readiness_pct": score,
-                "eligible": is_ready,
-                "paper_trading": paper_trading,
-            })
+        cb_result = results.get("circuit_breaker_confidence")
+        graduation_data = _stamp_generator_git_sha({
+            "readiness_score": score,
+            "is_graduation_ready": is_ready,
+            "manual_approval_required": True,
+            "manual_approval_pending": not bool(
+                manual_approval and manual_approval.passed
+            ),
+            "trading_days": n_days,
+            "min_trading_days": min_trading_days,
+            "criteria_met": sum(
+                1 for n, r in results.items() if n != "manual_approval" and r.passed
+            ),
+            "criteria_total": sum(1 for n in results if n != "manual_approval"),
+            "criteria": criteria_progress,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "readiness_pct": score,
+            "eligible": is_ready,
+            "paper_trading": paper_trading,
+            "circuit_breaker_ssot": ".circuit_breaker.json",
+            "circuit_breaker_consecutive_ok": (
+                cb_result.value if cb_result is not None else None
+            ),
+        })
 
-            out_path = PUBLIC_DIR / "graduation.json"
-            save_results_json(graduation_data, output_path=str(out_path))
-
-            return out_path
-
-        except SIGNAL_EXCEPTIONS as e:
+        out_path = pub / "graduation.json"
+        save_results_json(graduation_data, output_path=str(out_path))
+        try:
+            checklist.save_report(results)
+        except Exception as priv_exc:  # noqa: BLE001
+            logger.warning("Private graduation report dual-write failed: %s", priv_exc)
+        return out_path
+    except Exception as e:  # noqa: BLE001 — health path must not crash
+        try:
             _log_signal_error("graduation", e)
-            return None
+        except Exception:  # noqa: BLE001
+            logger.warning("graduation dual-surface refresh failed: %s", e)
+        return None
 
     @staticmethod
     def _latest_stale_explainability_metadata(source_dir: Path) -> Dict[str, Any]:

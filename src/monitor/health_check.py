@@ -1263,6 +1263,42 @@ def run_health_check() -> dict:
             "status": grad_cb.get("status"),
             "updated_at": grad_cb.get("updated_at"),
         }
+        # Batch BP: refresh graduation dual surfaces when CB streak changes so
+        # public graduation.json does not lag SSOT until next dashboard :15.
+        try:
+            prev_ok = None
+            # Compare to last published public graduation CB criterion if present
+            pub_grad = Path(PUBLIC_DATA_DIR) / "graduation.json"
+            if pub_grad.is_file():
+                try:
+                    prior = json.loads(pub_grad.read_text(encoding="utf-8"))
+                    prev_ok = prior.get("circuit_breaker_consecutive_ok")
+                    if prev_ok is None and isinstance(prior.get("criteria"), list):
+                        for c in prior["criteria"]:
+                            if (
+                                isinstance(c, dict)
+                                and c.get("name") == "circuit_breaker_confidence"
+                            ):
+                                prev_ok = c.get("value")
+                                break
+                except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                    prev_ok = None
+            new_ok = grad_cb.get("consecutive_ok")
+            if prev_ok is None or int(prev_ok or -1) != int(new_ok or -1):
+                from src.dashboard.generator import refresh_graduation_dual_surfaces
+
+                refresh_graduation_dual_surfaces(
+                    public_dir=Path(PUBLIC_DATA_DIR),
+                    data_dir=Path(DATA_DIR),
+                )
+                logger.info(
+                    "Refreshed graduation dual-write after CB consecutive_ok "
+                    "%s → %s",
+                    prev_ok,
+                    new_ok,
+                )
+        except Exception as grad_exc:  # noqa: BLE001 — never fail health on grad
+            logger.warning("Graduation refresh after CB update failed: %s", grad_exc)
 
     try:
         from src.dashboard.generator import _stamp_generator_git_sha

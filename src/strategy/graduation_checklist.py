@@ -226,6 +226,7 @@ class GraduationChecklist:
         if path is None:
             path = DATA_DIR / ".graduation_report.json"
 
+        cb = results.get("circuit_breaker_confidence")
         report = {
             "timestamp": datetime.now().isoformat(),
             "readiness_score": self.readiness_score(results),
@@ -239,6 +240,11 @@ class GraduationChecklist:
                 }
                 for name, result in results.items()
             },
+            # Batch BP: stamp CB SSOT identity for dual-surface equality checks
+            "circuit_breaker_ssot": ".circuit_breaker.json",
+            "circuit_breaker_consecutive_ok": (
+                cb.value if cb is not None else None
+            ),
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         save_results_json(report, output_path=str(path))
@@ -484,23 +490,24 @@ class GraduationChecklist:
 
         # TCA scorecard (producer removed v977)
 
-        # Circuit breaker — dual-path SSOT (.circuit_breaker.json preferred,
-        # else .circuit_breaker_state.json paper-risk file with status key).
+        # Circuit breaker confidence SSOT (Batch BP):
+        # Only ``.circuit_breaker.json`` (health_check consecutive_ok producer).
+        # Never invent consecutive_ok from legacy ``.circuit_breaker_state.json``
+        # (drawdown paper file without consecutive_ok) — that caused private
+        # reports to claim CB=required while live SSOT was lower.
         cb_payload = None
-        for cb_name in (".circuit_breaker.json", ".circuit_breaker_state.json"):
-            cb_file = DATA_DIR / cb_name
-            if not cb_file.exists():
-                continue
+        cb_ssot = DATA_DIR / ".circuit_breaker.json"
+        if cb_ssot.exists():
             try:
-                with open(cb_file) as f:
+                with open(cb_ssot) as f:
                     raw = json.load(f)
                 if isinstance(raw, dict):
                     cb_payload = dict(raw)
-                    break
-            except (OSError, json.JSONDecodeError, TypeError, ValueError):
-                continue
+                    cb_payload["ssot_path"] = ".circuit_breaker.json"
+            except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                logger.warning("Failed to read graduation CB SSOT %s: %s", cb_ssot, exc)
         if cb_payload is not None:
-            # Normalize status/severity and consecutive_ok for green paper state
+            # Normalize status/severity; never invent consecutive_ok if missing
             status = cb_payload.get("status") or cb_payload.get("severity") or "green"
             if isinstance(status, str):
                 status_l = status.lower()
@@ -508,26 +515,20 @@ class GraduationChecklist:
                     status_l = "green"
                 cb_payload["status"] = status_l
             if "consecutive_ok" not in cb_payload:
-                # Green/ok paper file without trip counter: treat as healthy streak
-                # of at least the required threshold so dual-file split does not
-                # hard-fail graduation solely due to missing consecutive_ok key.
-                status_l = str(cb_payload.get("status", "green")).lower()
-                trips = int(cb_payload.get("trips", 0) or 0)
-                if status_l in ("green", "ok", "yellow", "normal") and trips == 0:
-                    required = int(
-                        self.criteria.get("circuit_breaker_confidence", {}).get("value", 3)
-                        if hasattr(self, "criteria")
-                        else 3
-                    )
-                    # DEFAULT_CRITERIA fallback when criteria not yet bound
-                    try:
-                        required = int(self.criteria["circuit_breaker_confidence"]["value"])
-                    except (AttributeError, KeyError, TypeError, ValueError):
-                        required = int(
-                            GraduationChecklist.DEFAULT_CRITERIA["circuit_breaker_confidence"]["value"]
-                        )
-                    cb_payload["consecutive_ok"] = required
+                # Missing streak counter → fail-closed value 0 (do not invent)
+                cb_payload["consecutive_ok"] = 0
+                cb_payload["consecutive_ok_invented"] = False
+                cb_payload["consecutive_ok_missing"] = True
             state["circuit_breaker"] = cb_payload
+        else:
+            # No SSOT file yet → explicit zero (health producer not run)
+            state["circuit_breaker"] = {
+                "status": "unknown",
+                "trips": 0,
+                "consecutive_ok": 0,
+                "ssot_path": ".circuit_breaker.json",
+                "ssot_missing": True,
+            }
 
         # Health report history (check how long all checks have been passing)
         health_file = DATA_DIR / ".health_report.json"
