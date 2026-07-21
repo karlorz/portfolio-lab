@@ -21,6 +21,31 @@ IGNORED_UNMANAGED_PUBLIC_JSON = {
     *REQUIRED_DATA_FILES,
 }
 
+# Operator/dashboard JSON that producers stamp with generator_git_sha (Batch AO/AP).
+# Pure market blobs (prices/historical/yields) are excluded — content digests live
+# in source_manifest, not code provenance stamps.
+PROVENANCE_CONTRACT_FILES = (
+    "index.json",
+    "source_manifest.json",
+    "data_quality.json",
+    "health.json",
+    "health_ops.json",
+    "alerts.json",
+    "incidents.json",
+    "decision_registry.json",
+    "stats.json",
+    "analytics.json",
+    "graduation.json",
+    "signals.json",
+    "adaptive_sizing.json",
+    "risk_decomposition.json",
+    "overlay_dashboard.json",
+    "rebalance_health.json",
+    "labs_registry.json",
+)
+# Status values that claim a successful full stamp without null sha
+_PROVENANCE_FULL_STATUSES = frozenset({"full", "full_generate"})
+
 
 @dataclass(frozen=True)
 class ConsistencyResult:
@@ -526,6 +551,58 @@ def _check_kill_and_graduation_alerts(
                 )
 
 
+
+def _check_generator_git_sha_provenance(
+    public_data: Path,
+    errors: list[str],
+    warnings: list[str],
+) -> None:
+    """Canary: contract JSON has generator_git_sha or explicit unavailable status.
+
+    - Missing stamp on present contract files → warning (stale tree until regen).
+    - Dishonest stamp (status claims full* but sha null/absent) → error (fail-closed).
+    """
+    for filename in PROVENANCE_CONTRACT_FILES:
+        path = public_data / filename
+        if not path.exists():
+            continue
+        local_errors: list[str] = []
+        payload = _load_json(path, local_errors)
+        if payload is None:
+            # Malformed JSON already surfaces elsewhere; avoid double-counting
+            # hard errors when file is optional and unreadable.
+            if local_errors and filename in REQUIRED_DATA_FILES:
+                continue
+            for msg in local_errors:
+                warnings.append(f"provenance canary skipped unreadable {filename}: {msg}")
+            continue
+
+        sha = payload.get("generator_git_sha")
+        status = payload.get("generator_git_sha_status")
+        status_s = str(status).strip().lower() if status is not None else ""
+
+        if status_s in _PROVENANCE_FULL_STATUSES and not sha:
+            errors.append(
+                f"public/data/{filename} claims generator_git_sha_status={status!r} "
+                "but generator_git_sha is missing/null (dishonest provenance)"
+            )
+            continue
+
+        if sha:
+            continue
+
+        if status_s in {"unavailable", "partial_patch", "partial"}:
+            # Explicit honesty — acceptable without live sha
+            continue
+
+        # Present operator artifact without stamp: warn (do not block deploy on
+        # pre-stamp trees until producers re-run).
+        warnings.append(
+            f"public/data/{filename} missing generator_git_sha "
+            "(regenerate producer or stamp unavailable status)"
+        )
+
+
 def check_public_data_consistency(
     app_dir: str | Path,
     *,
@@ -576,6 +653,7 @@ def check_public_data_consistency(
         _check_compact_prices_match_market_db(root, errors)
     _check_critical_health_has_slo_alert(public_data, health, errors)
     _check_kill_and_graduation_alerts(root, public_data, errors)
+    _check_generator_git_sha_provenance(public_data, errors, warnings)
 
     return ConsistencyResult(ok=not errors, errors=errors, warnings=warnings)
 
