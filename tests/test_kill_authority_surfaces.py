@@ -493,6 +493,231 @@ def test_publish_ops_health_surfaces_clears_sticky_public_kill_after_resolve(
     assert public.get("ops_health_source") == "monitor.health_check"
 
 
+def test_apply_ops_monitor_prefers_disk_kill_over_stale_monitor_when_enabled(
+    tmp_path, monkeypatch
+):
+    """Public dual-write must never rehydrate a lagging monitor kill identity.
+
+    Live failure mode (2026-07-21): data/kill_switch.json is warning/signal_staleness
+    while a sticky monitor report (or old test fixture) still projects halt +
+    test incident id. apply_ops_monitor_to_dashboard_health must project disk SSOT
+    whenever kill is enabled — not only on clear.
+    """
+    from src.monitor.health_check import apply_ops_monitor_to_dashboard_health
+
+    data_dir = tmp_path / "data"
+    public_dir = tmp_path / "public"
+    data_dir.mkdir()
+    public_dir.mkdir()
+
+    live_id = "92f2cbd3-7a04-4b5a-9913-b2253f7217fa"
+    (data_dir / "kill_switch.json").write_text(
+        json.dumps(
+            _kill_payload(
+                level="warning",
+                reason="unresolved_incident:signal_staleness",
+                message="2/23 signals unavailable: convexity_harvest, volatility_parity",
+                source="incident_lifecycle",
+                channel="signal_staleness",
+                incident_id=live_id,
+                timestamp="2026-07-21T02:15:30.406689+00:00",
+            )
+        )
+    )
+    (data_dir / "incidents.json").write_text(
+        json.dumps(
+            {
+                "open_count": 1,
+                "incidents": [
+                    {
+                        "incident_id": live_id,
+                        "channel": "signal_staleness",
+                        "severity": "p2",
+                        "state": "firing",
+                        "message": "partial signal staleness",
+                        "kill_switch_level": "warning",
+                    }
+                ],
+            }
+        )
+    )
+
+    # Sticky public WWW still shows old test halt
+    health_data = {
+        "system_status": "critical",
+        "generated_at": "2026-07-19T08:00:00+00:00",
+        "kill_switch": {
+            "status": "critical",
+            "enabled": True,
+            "level": "halt",
+            "reason": "max_drawdown_-25.0%",
+            "incident_id": INCIDENT_ID,
+            "message": "Paper trading halted: max drawdown breached",
+            "source": "incident_manager",
+            "timestamp": "2026-07-12T12:00:00+00:00",
+            "mode": "paper",
+        },
+        "open_incidents": {
+            "status": "critical",
+            "open_count": 1,
+            "incidents": [
+                {
+                    "incident_id": INCIDENT_ID,
+                    "state": "open",
+                    "kill_switch_level": "halt",
+                }
+            ],
+        },
+    }
+
+    # Lagging monitor report still projects the old test halt (not disk)
+    stale_report = {
+        "status": "critical",
+        "timestamp": "2026-07-12T12:00:00+00:00",
+        "scope": "operational_readiness",
+        "checks": {
+            "kill_switch": {
+                "status": "critical",
+                "enabled": True,
+                "level": "halt",
+                "reason": "max_drawdown_-25.0%",
+                "incident_id": INCIDENT_ID,
+                "message": "Paper trading halted: max drawdown breached",
+                "source": "incident_manager",
+                "timestamp": "2026-07-12T12:00:00+00:00",
+                "mode": "paper",
+            },
+            "open_incidents": {
+                "status": "critical",
+                "open_count": 1,
+                "incidents": [
+                    {
+                        "incident_id": INCIDENT_ID,
+                        "state": "open",
+                        "kill_switch_level": "halt",
+                    }
+                ],
+            },
+        },
+        "service": "portfolio-lab",
+    }
+
+    apply_ops_monitor_to_dashboard_health(
+        health_data,
+        stale_report,
+        data_dir=data_dir,
+        public_dir=public_dir,
+    )
+
+    kill = health_data["kill_switch"]
+    assert kill["enabled"] is True
+    assert kill["level"] == "warning", kill
+    assert kill["incident_id"] == live_id, kill
+    assert kill["reason"] == "unresolved_incident:signal_staleness", kill
+    assert kill["incident_id"] != INCIDENT_ID
+    open_inc = health_data["open_incidents"]
+    assert open_inc["open_count"] == 1
+    assert open_inc["incidents"][0]["incident_id"] == live_id
+    assert health_data.get("ops_health_source") == "monitor.health_check"
+
+
+def test_publish_ops_health_surfaces_overwrites_stale_public_kill_with_disk(
+    tmp_path, monkeypatch
+):
+    """End-to-end: publish_ops_health_surfaces rewrites public health kill from disk."""
+    from src.monitor import health_check as hc
+
+    data_dir = tmp_path / "data"
+    public_dir = tmp_path / "public"
+    data_dir.mkdir()
+    public_dir.mkdir()
+
+    live_id = "92f2cbd3-7a04-4b5a-9913-b2253f7217fa"
+    (data_dir / "kill_switch.json").write_text(
+        json.dumps(
+            _kill_payload(
+                level="warning",
+                reason="unresolved_incident:signal_staleness",
+                message="partial signal staleness",
+                source="incident_lifecycle",
+                channel="signal_staleness",
+                incident_id=live_id,
+                timestamp="2026-07-21T02:15:30.406689+00:00",
+            )
+        )
+    )
+    (data_dir / "incidents.json").write_text(
+        json.dumps(
+            {
+                "open_count": 1,
+                "incidents": [
+                    {
+                        "incident_id": live_id,
+                        "channel": "signal_staleness",
+                        "severity": "p2",
+                        "state": "firing",
+                        "kill_switch_level": "warning",
+                    }
+                ],
+            }
+        )
+    )
+    (public_dir / "health.json").write_text(
+        json.dumps(
+            {
+                "system_status": "critical",
+                "generated_at": "2026-07-12T12:00:00+00:00",
+                "kill_switch": {
+                    "status": "critical",
+                    "enabled": True,
+                    "level": "halt",
+                    "reason": "max_drawdown_-25.0%",
+                    "incident_id": INCIDENT_ID,
+                },
+            }
+        )
+    )
+
+    monkeypatch.setattr(hc, "DATA_DIR", data_dir)
+    monkeypatch.setattr(hc, "PUBLIC_DATA_DIR", public_dir)
+    monkeypatch.setattr(hc, "HEALTH_PATH", data_dir / "health.json")
+    monkeypatch.setattr(hc, "health_ops_path", lambda: public_dir / "health_ops.json")
+
+    # Stale monitor report (would previously win when kill enabled)
+    report = {
+        "status": "critical",
+        "timestamp": "2026-07-12T12:00:00+00:00",
+        "scope": "operational_readiness",
+        "checks": {
+            "kill_switch": {
+                "status": "critical",
+                "enabled": True,
+                "level": "halt",
+                "reason": "max_drawdown_-25.0%",
+                "incident_id": INCIDENT_ID,
+            },
+            "open_incidents": {
+                "status": "critical",
+                "open_count": 1,
+                "incidents": [{"incident_id": INCIDENT_ID, "kill_switch_level": "halt"}],
+            },
+        },
+        "service": "portfolio-lab",
+    }
+    hc.publish_ops_health_surfaces(report)
+
+    public = json.loads((public_dir / "health.json").read_text())
+    assert public["kill_switch"]["level"] == "warning", public["kill_switch"]
+    assert public["kill_switch"]["incident_id"] == live_id
+    assert public["kill_switch"]["reason"] == "unresolved_incident:signal_staleness"
+    assert public["open_incidents"]["incidents"][0]["incident_id"] == live_id
+    # H20: ops merge stamps dual-write provenance on health.json for M11 badge
+    pc = public.get("provenance_completeness")
+    assert isinstance(pc, dict), public
+    assert pc.get("dual_write_attempted") is True
+    assert pc.get("dual_write_ok") is True
+
+
 def test_run_health_check_persists_kill_fields(tmp_path, monkeypatch):
     from src.monitor import health_check as hc
 
@@ -575,7 +800,7 @@ def test_consistency_requires_kill_switch_alert_when_enabled(tmp_path: Path) -> 
     index_path.write_text(json.dumps(index, sort_keys=True))
     shutil.copyfile(index_path, tmp_path / "dist" / "data" / "index.json")
 
-    result = check_public_data_consistency(tmp_path)
+    result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
     assert result.ok is False
     assert any("kill_switch" in e for e in result.errors)
 
@@ -596,7 +821,8 @@ def test_consistency_requires_graduation_candidate_when_promote_present(tmp_path
     index_path.write_text(json.dumps(index, sort_keys=True))
     shutil.copyfile(index_path, tmp_path / "dist" / "data" / "index.json")
 
-    result = check_public_data_consistency(tmp_path)
+    # env={} so H16 session PUBLIC_DATA_DIR isolation cannot hijack resolve
+    result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
     assert result.ok is False
     assert any("graduation_candidate" in e for e in result.errors)
 
@@ -628,7 +854,7 @@ def test_consistency_skips_graduation_alert_for_promote_blocked_tombstone(
     index_path.write_text(json.dumps(index, sort_keys=True))
     shutil.copyfile(index_path, tmp_path / "dist" / "data" / "index.json")
 
-    result = check_public_data_consistency(tmp_path)
+    result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
     assert result.ok is True, result.errors
 
 
@@ -660,7 +886,7 @@ def test_consistency_accepts_matching_kill_identity(tmp_path: Path) -> None:
     shutil.copyfile(public_data / "health.json", tmp_path / "dist" / "data" / "health.json")
     shutil.copyfile(index_path, tmp_path / "dist" / "data" / "index.json")
 
-    result = check_public_data_consistency(tmp_path)
+    result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
     assert result.ok is True, result.errors
 
 
@@ -692,7 +918,7 @@ def test_consistency_rejects_divergent_kill_incident_id(tmp_path: Path) -> None:
     shutil.copyfile(public_data / "health.json", tmp_path / "dist" / "data" / "health.json")
     shutil.copyfile(index_path, tmp_path / "dist" / "data" / "index.json")
 
-    result = check_public_data_consistency(tmp_path)
+    result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
     assert result.ok is False
     assert any("incident_id" in e for e in result.errors)
 
@@ -731,7 +957,7 @@ def test_consistency_rejects_missing_alert_identity_fields(tmp_path: Path) -> No
     shutil.copyfile(public_data / "health.json", tmp_path / "dist" / "data" / "health.json")
     shutil.copyfile(index_path, tmp_path / "dist" / "data" / "index.json")
 
-    result = check_public_data_consistency(tmp_path)
+    result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
     assert result.ok is False
     joined = " ".join(result.errors)
     assert "missing incident_id" in joined
@@ -767,7 +993,7 @@ def test_consistency_rejects_missing_public_health_kill_switch(tmp_path: Path) -
     shutil.copyfile(public_data / "health.json", tmp_path / "dist" / "data" / "health.json")
     shutil.copyfile(index_path, tmp_path / "dist" / "data" / "index.json")
 
-    result = check_public_data_consistency(tmp_path)
+    result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
     assert result.ok is False
     assert any("missing kill_switch" in e for e in result.errors)
 

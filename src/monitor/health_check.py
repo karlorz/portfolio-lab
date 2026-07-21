@@ -282,6 +282,42 @@ def _disk_kill_ssot_is_clear(data_dir: Path | None) -> bool:
     return int(open_inc.get("open_count") or 0) == 0
 
 
+def _disk_kill_and_open_incidents(
+    data_dir: Path | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Project kill_switch.json + incidents.json into dashboard-shaped blocks.
+
+    Always prefer disk authority over any lagging monitor report identity
+    (level / incident_id / reason). Monitor report may still supply ops_* stamps.
+    """
+    root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+    try:
+        from src.dashboard.kill_authority import (
+            load_kill_switch_payload,
+            load_open_incidents_summary,
+            project_kill_switch_fields,
+        )
+    except ImportError:
+        disk_kill = {
+            "status": "ok",
+            "enabled": False,
+            "level": None,
+            "reason": None,
+            "source": None,
+            "message": None,
+            "timestamp": None,
+            "incident_id": None,
+            "mode": None,
+            "channel": None,
+        }
+        disk_open = {"status": "ok", "open_count": 0, "incidents": []}
+        return disk_kill, disk_open
+    return (
+        project_kill_switch_fields(load_kill_switch_payload(root)),
+        load_open_incidents_summary(root),
+    )
+
+
 def apply_ops_monitor_to_dashboard_health(
     health_data: dict[str, Any],
     ops_report: dict[str, Any] | None = None,
@@ -295,9 +331,10 @@ def apply_ops_monitor_to_dashboard_health(
     the dual-SSOT fields that ``publish_ops_health_surfaces`` merges after
     ``make health``.
 
-    Disk kill SSOT wins: when kill_switch.json is absent/disabled and
-    incidents open_count is 0, do not overwrite dashboard kill/open_incidents
-    with lagging monitor report fields (stale enabled kill resurrection).
+    Disk kill SSOT always wins for kill_switch / open_incidents identity
+    (enabled or clear). A lagging monitor report must never rehydrate a stale
+    halt + test incident_id when kill_switch.json already moved to a live
+    warning, and must never resurrect a kill that resolve already cleared.
     """
     report = ops_report if isinstance(ops_report, dict) else load_ops_monitor_report(
         data_dir=data_dir, public_dir=public_dir
@@ -311,12 +348,6 @@ def apply_ops_monitor_to_dashboard_health(
     health_data["ops_health_timestamp"] = projected.get("ops_health_timestamp")
     health_data["ops_health_source"] = "monitor.health_check"
 
-    # Disk SSOT for kill/incidents: never let a lagging monitor snapshot
-    # rehydrate a kill that resolve already cleared on disk. When SSOT is
-    # clear, actively re-project disk onto the payload so sticky public
-    # health.json (pre-resolve enabled kill) is cleared on make health —
-    # not only when generate_health_json pre-seeds the block.
-    ssot_clear = _disk_kill_ssot_is_clear(data_dir)
     sticky_kill = isinstance(health_data.get("kill_switch"), dict) and bool(
         health_data["kill_switch"].get("enabled")
     )
@@ -324,47 +355,34 @@ def apply_ops_monitor_to_dashboard_health(
         isinstance(health_data.get("open_incidents"), dict)
         and int(health_data["open_incidents"].get("open_count") or 0) > 0
     )
+
+    # Always re-project disk authority for kill/open — clear *and* enabled paths.
+    disk_kill, disk_open = _disk_kill_and_open_incidents(data_dir)
+    health_data["kill_switch"] = disk_kill
+    health_data["open_incidents"] = disk_open
+
+    ssot_clear = _disk_kill_ssot_is_clear(data_dir)
     if ssot_clear:
-        root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
-        try:
-            from src.dashboard.kill_authority import (
-                load_kill_switch_payload,
-                load_open_incidents_summary,
-                project_kill_switch_fields,
-            )
-        except ImportError:
-            disk_kill = {
-                "status": "ok",
-                "enabled": False,
-                "level": None,
-                "reason": None,
-                "source": None,
-                "message": None,
-                "timestamp": None,
-                "incident_id": None,
-                "mode": None,
-                "channel": None,
-            }
-            disk_open = {"status": "ok", "open_count": 0, "incidents": []}
-        else:
-            disk_kill = project_kill_switch_fields(load_kill_switch_payload(root))
-            disk_open = load_open_incidents_summary(root)
-        health_data["kill_switch"] = disk_kill
-        health_data["open_incidents"] = disk_open
         # Demote system_status only when payload still carried enabled kill /
         # open incidents (sticky public health). Do not wipe SLO-derived
         # critical from generate_health_json when kill fields were already clear.
         if "system_status" in health_data and (sticky_kill or sticky_open):
             health_data["system_status"] = "healthy"
     else:
-        if isinstance(projected.get("kill_switch"), dict) and projected["kill_switch"]:
-            health_data["kill_switch"] = projected["kill_switch"]
-        if isinstance(projected.get("open_incidents"), dict) and projected["open_incidents"]:
-            health_data["open_incidents"] = projected["open_incidents"]
+        # Kill still active: elevate from ops rollup + disk kill identity.
         if "system_status" in health_data:
-            health_data["system_status"] = _elevate_public_system_status(
+            elevated = _elevate_public_system_status(
                 health_data.get("system_status"), ops_status
             )
+            try:
+                from src.dashboard.kill_authority import elevate_system_status_for_kill
+
+                elevated = elevate_system_status_for_kill(
+                    elevated, disk_kill, disk_open
+                )
+            except ImportError:
+                pass
+            health_data["system_status"] = elevated
     return health_data
 
 
@@ -372,12 +390,13 @@ def refresh_signals_health_kill_fields(
     report: dict[str, Any],
     *,
     public_dir: Path | None = None,
+    data_dir: Path | None = None,
 ) -> None:
-    """Patch signals.json#health compact kill fields from monitor / disk SSOT.
+    """Patch signals.json#health compact kill fields from disk SSOT.
 
     Operators reading signals.health must not wait for a full dashboard cycle
-    after kill clear. SSOT order: kill_switch.json projection via monitor
-    report (already disk-backed in run_health_check) → signals embeds.
+    after kill clear or identity change. Always project kill_switch.json +
+    incidents.json — never trust a lagging monitor report for kill identity.
     """
     root_public = Path(public_dir) if public_dir is not None else Path(PUBLIC_DATA_DIR)
     signals_path = root_public / "signals.json"
@@ -398,16 +417,11 @@ def refresh_signals_health_kill_fields(
         logger.warning("Cannot import kill projectors for signals refresh: %s", exc)
         return
 
-    # Prefer compact fields from monitor report (checks.*); fall back to
-    # top-level projection shape.
-    compact = project_compact_kill_fields(report)
-    if not compact:
-        compact = project_compact_kill_fields(
-            {
-                "kill_switch": (report.get("checks") or {}).get("kill_switch"),
-                "open_incidents": (report.get("checks") or {}).get("open_incidents"),
-            }
-        )
+    # Disk authority wins for kill/open identity (enabled or clear).
+    disk_kill, disk_open = _disk_kill_and_open_incidents(data_dir)
+    compact = project_compact_kill_fields(
+        {"kill_switch": disk_kill, "open_incidents": disk_open}
+    )
 
     health = payload.get("health")
     if not isinstance(health, dict):
@@ -418,21 +432,14 @@ def refresh_signals_health_kill_fields(
     # Always apply compact kill keys (including enabled:false clears).
     for key, value in compact.items():
         health[key] = value
-    # When kill is disabled/absent, force clear sticky enabled flag.
-    kill_check = (report.get("checks") or {}).get("kill_switch") if isinstance(
-        report.get("checks"), dict
-    ) else report.get("kill_switch")
-    if isinstance(kill_check, dict) and not kill_check.get("enabled"):
+    if not disk_kill.get("enabled"):
         health["kill_switch_enabled"] = False
-        if "kill_switch_level" in health and kill_check.get("level") is None:
+        if disk_kill.get("level") is None:
             health["kill_switch_level"] = None
-    open_check = (report.get("checks") or {}).get("open_incidents") if isinstance(
-        report.get("checks"), dict
-    ) else report.get("open_incidents")
-    if isinstance(open_check, dict) and int(open_check.get("open_count") or 0) == 0:
+    if int(disk_open.get("open_count") or 0) == 0:
         health["open_incidents_count"] = 0
-        if open_check.get("status"):
-            health["open_incidents_status"] = open_check.get("status")
+        if disk_open.get("status"):
+            health["open_incidents_status"] = disk_open.get("status")
 
     if report.get("status") is not None:
         health.setdefault("status", report.get("status"))
@@ -545,14 +552,54 @@ def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
                     )
             except Exception:  # noqa: BLE001
                 pass
+            # H20: stamp dual-write provenance on health.json so M11 badge does not
+            # depend solely on health_ops.json (merge path is partial dual-write).
+            try:
+                from src.dashboard.generator import _attach_dual_write_provenance
+
+                payload = _attach_dual_write_provenance(
+                    payload,
+                    private_path=HEALTH_PATH,
+                    public_path=public_health,
+                    dual_write_attempted=True,
+                    dual_write_ok=True,
+                    paths_identical=False,
+                    note=(
+                        "ops_health_merge dual-write: kill/open from disk SSOT; "
+                        "health_ops remains monitor schema surface"
+                    ),
+                )
+            except Exception:  # noqa: BLE001 — never block health merge on provenance
+                pass
             try:
                 public_health.write_text(json.dumps(payload, indent=2), encoding="utf-8")
                 logger.info("Merged ops kill authority into %s", public_health)
             except OSError as exc:
                 logger.warning("Failed to merge ops health into %s: %s", public_health, exc)
+                try:
+                    from src.dashboard.generator import _attach_dual_write_provenance
+
+                    # Re-stamp private monitor report if public health write failed
+                    report_fail = _attach_dual_write_provenance(
+                        report,
+                        private_path=HEALTH_PATH,
+                        public_path=public_health,
+                        dual_write_attempted=True,
+                        dual_write_ok=False,
+                        paths_identical=False,
+                        note=f"public health.json merge write failed: {exc}",
+                    )
+                    # Best-effort re-write health_ops with dual_write_ok=false
+                    ops_path.write_text(
+                        json.dumps(report_fail, indent=2), encoding="utf-8"
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
 
     try:
-        refresh_signals_health_kill_fields(report)
+        refresh_signals_health_kill_fields(
+            report, public_dir=Path(PUBLIC_DATA_DIR), data_dir=Path(DATA_DIR)
+        )
     except Exception as exc:  # noqa: BLE001 — never fail health job on signals patch
         logger.warning("signals.health kill refresh failed: %s", exc)
 
