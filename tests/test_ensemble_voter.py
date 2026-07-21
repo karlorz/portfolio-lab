@@ -50,6 +50,27 @@ def _make_voter(tmp_path):
     return voter
 
 
+def _make_bl_vote(**overrides):
+    """Precomputed vote for get_bl_views tests — avoids live compute_vote + IC health."""
+    base = dict(
+        timestamp=datetime.now().isoformat(),
+        regime=Regime.NORMAL,
+        regime_confidence=0.7,
+        num_sources=6,
+        weighted_consensus=0.5,
+        agreement_ratio=0.8,
+        equity_bias=0.5,
+        duration_bias=-0.2,
+        gold_bias=0.3,
+        action="increase_equity",
+        confidence=0.7,
+        reasoning="Bullish",
+        source_votes=[],
+    )
+    base.update(overrides)
+    return EnsembleVote(**base)
+
+
 def _make_price_df(n=100, drift=0.0004, vol=0.015, seed=42):
     np.random.seed(seed)
     spy = [500.0]
@@ -1047,11 +1068,24 @@ class TestGetRebalanceConfig:
 
 
 class TestGetBLViews:
-    """Tests for get_bl_views() — BL view generation from ensemble vote."""
+    """Tests for get_bl_views() — BL view generation from ensemble vote.
+
+    Always pass a precomputed vote and stub the health tracker so these unit
+    tests never hit live compute_vote / SignalHealthTracker.compute_ic (20s+
+    each on lab hosts and the #1 cause of make-test stalls around 34%).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _isolate_bl_health(self):
+        with patch(
+            "src.strategy.ensemble_voter._get_health_tracker",
+            return_value=None,
+        ):
+            yield
 
     def test_returns_views_dict(self):
         voter = EnsembleVoter()
-        result = voter.get_bl_views()
+        result = voter.get_bl_views(vote=_make_bl_vote())
         assert 'views' in result
         assert 'tau' in result
         assert 'prior' in result
@@ -1059,36 +1093,26 @@ class TestGetBLViews:
     def test_views_is_blviews_instance(self):
         from src.strategy.black_litterman_mapper import BLViews
         voter = EnsembleVoter()
-        result = voter.get_bl_views()
+        result = voter.get_bl_views(vote=_make_bl_vote())
         assert isinstance(result['views'], BLViews)
 
     def test_default_tau(self):
         voter = EnsembleVoter()
-        result = voter.get_bl_views()
+        result = voter.get_bl_views(vote=_make_bl_vote())
         assert result['tau'] == 0.15
 
     def test_custom_tau(self):
         voter = EnsembleVoter()
-        result = voter.get_bl_views(tau=0.30)
+        result = voter.get_bl_views(vote=_make_bl_vote(), tau=0.30)
         assert result['tau'] == 0.30
         assert result['views'].tau == 0.30
 
     def test_with_precomputed_vote(self):
         voter = EnsembleVoter()
-        vote = EnsembleVote(
-            timestamp=datetime.now().isoformat(),
-            regime=Regime.NORMAL,
-            regime_confidence=0.7,
-            num_sources=6,
-            weighted_consensus=0.5,
-            agreement_ratio=0.8,
+        vote = _make_bl_vote(
             equity_bias=0.5,
             duration_bias=-0.2,
             gold_bias=0.3,
-            action="increase_equity",
-            confidence=0.7,
-            reasoning="Bullish",
-            source_votes=[],
         )
         result = voter.get_bl_views(vote=vote)
         assert result['equity_bias'] == 0.5
@@ -1097,7 +1121,7 @@ class TestGetBLViews:
 
     def test_views_have_absolute_views(self):
         voter = EnsembleVoter()
-        result = voter.get_bl_views()
+        result = voter.get_bl_views(vote=_make_bl_vote())
         views = result['views']
         assert 'SPY' in views.absolute_views
         assert 'GLD' in views.absolute_views
@@ -1105,7 +1129,7 @@ class TestGetBLViews:
 
     def test_views_have_confidences(self):
         voter = EnsembleVoter()
-        result = voter.get_bl_views()
+        result = voter.get_bl_views(vote=_make_bl_vote())
         views = result['views']
         assert len(views.view_confidences) == 3
         for c in views.view_confidences:
@@ -1113,7 +1137,7 @@ class TestGetBLViews:
 
     def test_market_prior(self):
         voter = EnsembleVoter()
-        result = voter.get_bl_views(prior="market")
+        result = voter.get_bl_views(vote=_make_bl_vote(), prior="market")
         assert result['prior'] == "market"
         assert result['views'].prior == "market"
 
@@ -1827,14 +1851,15 @@ class TestGetBLViewsAdditional:
         mock_tracker.get_health_report.side_effect = ValueError("Tracker crashed")
         with patch('src.strategy.ensemble_voter._get_health_tracker',
                    return_value=mock_tracker):
-            result = voter.get_bl_views()
+            result = voter.get_bl_views(vote=_make_bl_vote())
             assert 'views' in result
             assert result['health_scores_used'] == {}
 
     def test_get_bl_views_default_prior_equal(self, tmp_path):
         """Default prior should be 'equal'."""
         voter = EnsembleVoter(data_path=tmp_path)
-        result = voter.get_bl_views()
+        with patch("src.strategy.ensemble_voter._get_health_tracker", return_value=None):
+            result = voter.get_bl_views(vote=_make_bl_vote())
         assert result['prior'] == 'equal'
 
 
@@ -3376,17 +3401,19 @@ class TestCLIEntryPoints:
 # ===========================================================================
 
 class TestGetBLViewsEdgeCases:
-    """Edge cases for get_bl_views()."""
+    """Edge cases for get_bl_views() — isolated from live vote/health paths."""
 
     def test_get_bl_views_zero_tau(self):
         voter = EnsembleVoter()
-        result = voter.get_bl_views(tau=0.0)
+        with patch("src.strategy.ensemble_voter._get_health_tracker", return_value=None):
+            result = voter.get_bl_views(vote=_make_bl_vote(), tau=0.0)
         assert result['tau'] == 0.0
         assert result['views'].tau == 0.0
 
     def test_get_bl_views_negative_tau(self):
         voter = EnsembleVoter()
-        result = voter.get_bl_views(tau=-0.1)
+        with patch("src.strategy.ensemble_voter._get_health_tracker", return_value=None):
+            result = voter.get_bl_views(vote=_make_bl_vote(), tau=-0.1)
         assert result['tau'] == -0.1
         assert result['views'].tau == -0.1
 
@@ -3402,27 +3429,36 @@ class TestGetBLViewsEdgeCases:
         }
         with patch('src.strategy.ensemble_voter._get_health_tracker',
                    return_value=mock_tracker):
-            result = voter.get_bl_views()
+            result = voter.get_bl_views(vote=_make_bl_vote())
         assert 'multi_speed_momentum' in result['health_scores_used']
         assert result['health_scores_used']['multi_speed_momentum'] == 0.85
         assert result['health_scores_used']['cross_asset_rv'] == 0.72
 
     def test_get_bl_views_empty_vote_readings(self):
         """get_bl_views with a vote that has 0 sources should still return basic structure."""
-        vote = EnsembleVote(
-            timestamp='2026-06-01T12:00:00', regime=Regime.NORMAL,
-            regime_confidence=0.5, num_sources=0, weighted_consensus=0.0,
-            agreement_ratio=0.0, equity_bias=0.0, duration_bias=0.0, gold_bias=0.0,
-            action='neutral', confidence=0.0, reasoning='', source_votes=[],
+        vote = _make_bl_vote(
+            timestamp='2026-06-01T12:00:00',
+            regime_confidence=0.5,
+            num_sources=0,
+            weighted_consensus=0.0,
+            agreement_ratio=0.0,
+            equity_bias=0.0,
+            duration_bias=0.0,
+            gold_bias=0.0,
+            action='neutral',
+            confidence=0.0,
+            reasoning='',
         )
         voter = EnsembleVoter()
-        result = voter.get_bl_views(vote=vote)
+        with patch("src.strategy.ensemble_voter._get_health_tracker", return_value=None):
+            result = voter.get_bl_views(vote=vote)
         assert result['views'] is not None
         assert result['equity_bias'] == 0.0
 
     def test_get_bl_views_with_prior_market(self):
         voter = EnsembleVoter()
-        result = voter.get_bl_views(prior='market')
+        with patch("src.strategy.ensemble_voter._get_health_tracker", return_value=None):
+            result = voter.get_bl_views(vote=_make_bl_vote(), prior='market')
         assert result['prior'] == 'market'
 
 
