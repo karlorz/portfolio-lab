@@ -1503,6 +1503,7 @@ class DashboardGenerator:
             "stale",
             "inactive",
             "zero_weight",
+            "zero_baseline",  # Batch CU: intentional weight-0 roster arms
             "unavailable",
         }
         if configured_source_status:
@@ -1624,15 +1625,30 @@ class DashboardGenerator:
                 )
             else:
                 contributing = False
-                status = "missing"
-                reason = "Configured source did not produce an active ensemble reading."
-                if source == "google_trends":
-                    status, reason = DashboardGenerator._google_trends_inactive_disclosure()
+                # Batch CU: intentional zero-baseline (e.g. multi_speed_momentum
+                # weight 0.0 all regimes) is skipped by collector — disclose as
+                # zero_baseline, not "missing" (SRE: zero-weight arm ≠ failure).
+                if cfg_w <= 0.0:
+                    status = "zero_baseline"
+                    reason = (
+                        "Configured baseline weight is 0 for this regime; "
+                        "collector intentionally skips (not a fetch failure)."
+                    )
+                else:
+                    status = "missing"
+                    reason = (
+                        "Configured source did not produce an active ensemble reading."
+                    )
+                    if source == "google_trends":
+                        status, reason = (
+                            DashboardGenerator._google_trends_inactive_disclosure()
+                        )
 
             if contributing:
                 contributing_mass += effective_weight
             else:
                 # Stale/missing/zero: configured mass does not participate in vote
+                # Zero baseline drops 0 mass but still discloses status (Batch CU)
                 dropped_weight_mass += cfg_w
 
             statuses.append({
