@@ -256,6 +256,7 @@ class OverlayDashboardGenerator:
                         f"|underlying-SPY|={drift:.2f}>{SPY_TICK_THRESHOLD}"
                     )
 
+                # Prefer regenerate when we have a live SPY mark and are stale
                 if stale_reason and live_spy is not None:
                     # Regenerate with current SPY mark
                     from src.signals.collar_signal import CollarSignalGenerator

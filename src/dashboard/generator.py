@@ -3450,10 +3450,18 @@ class DashboardGenerator:
         return_source = "none"
 
         def _material_return(val: Any) -> bool:
+            """Include real session returns; drop evaluator micro-noise (~1e-8).
+
+            Exact 0.0 is a valid flat session (Sharpe 0). Tiny non-zero noise
+            from intraday evaluator rows must not enter the metric series.
+            """
             try:
-                return abs(float(val)) >= 1e-6
+                v = float(val)
             except (TypeError, ValueError):
                 return False
+            if v == 0.0:
+                return True
+            return abs(v) >= 1e-6
 
         pnl_log = DATA_DIR / "daily_pnl.jsonl"
         if pnl_log.exists():
@@ -3484,7 +3492,7 @@ class DashboardGenerator:
                         daily_values.append(float(e.get("total_value") or 0))
                     except (TypeError, ValueError):
                         daily_values.append(0.0)
-                if len(daily_returns) >= 5:
+                if len(daily_returns) >= 3:
                     return_source = "daily_pnl.jsonl_session"
             except OSError:
                 daily_returns, daily_values = [], []
@@ -3494,7 +3502,9 @@ class DashboardGenerator:
             if perf_log.exists():
                 with open(perf_log) as f:
                     tail_lines = deque(f, maxlen=500)
-                    if len(tail_lines) >= 5:
+                    # Raw tail can be short after dedup; require only enough
+                    # lines to form a 3-day session series after filters.
+                    if len(tail_lines) >= 3:
                         raw_entries = []
                         for l in tail_lines:
                             try:
@@ -3516,7 +3526,7 @@ class DashboardGenerator:
                         if daily_returns:
                             return_source = "performance.jsonl_daily_dedup"
 
-        if daily_returns and len(daily_returns) >= 5:
+        if daily_returns and len(daily_returns) >= 3:
                         std_r = float(np.std(daily_returns))
                         raw_sharpe = (
                             float(np.mean(daily_returns) / std_r * np.sqrt(252))

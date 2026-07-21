@@ -11,8 +11,12 @@ def test_get_collar_data_loads_saved_signal_file(tmp_path, monkeypatch):
 
     signals_dir = tmp_path / "signals"
     signals_dir.mkdir()
+    from datetime import datetime, timezone
+
+    # Fresh stamp so age-based stale demotion does not fire without SPY marks
+    fresh_ts = datetime.now(timezone.utc).isoformat()
     payload = {
-        "timestamp": "2026-07-20T21:40:04",
+        "timestamp": fresh_ts,
         "signal_state": "collared",
         "call_strike": 767.06,
         "put_strike": 714.62,

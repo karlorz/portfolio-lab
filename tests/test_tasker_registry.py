@@ -40,6 +40,8 @@ def test_default_registry_loads_expected_portfolio_lab_tasks():
         "portfolio-lab-prune-logs",
         "portfolio-lab-build",
         "portfolio-lab-autonomous-agent",
+        "portfolio-lab-prod-ideas",
+        "portfolio-lab-fetch-trends",
     }
 
     assert {task.id for task in registry.tasks} == expected_ids
