@@ -188,6 +188,10 @@ def _contract_for_filename(filename: str, relative_path: str | None = None) -> t
         return "attribution", "attribution-report/v1"
     if filename.startswith("attribution_") and filename.endswith(".json"):
         return "attribution", "attribution-report/v1"
+    if relative_path and relative_path.startswith("explainability/"):
+        return "explainability", "explainability/v1"
+    if filename.startswith("explainability_") and filename.endswith(".json"):
+        return "explainability", "explainability/v1"
     if "experiment_diff" in filename or "experiment-diff" in filename:
         return "labs", EXPERIMENT_DIFF_SCHEMA_VERSION
     if "labs" in filename or "scorecard" in filename or "replay" in filename:
@@ -365,6 +369,35 @@ def _discover_attribution_public_paths(public_dir: Path) -> list[Path]:
         reverse=True,
     )
     paths.extend(dated[:30])
+    return paths
+
+
+def _discover_explainability_public_paths(public_dir: Path) -> list[Path]:
+    """Discover explainability dual-write under public/data/explainability/ (H21).
+
+    Generator writes explainability/explainability_latest.json; if the path list
+    omits it or only a partial generate ran, discovery still catalogs the surface.
+    """
+    expl_dir = public_dir / "explainability"
+    if not expl_dir.is_dir():
+        return []
+    paths: list[Path] = []
+    latest = expl_dir / "explainability_latest.json"
+    if latest.is_file():
+        paths.append(latest)
+    # Optional dated explainability_*.json (cap newest 10)
+    dated = sorted(
+        (
+            p
+            for p in expl_dir.glob("explainability_*.json")
+            if p.is_file()
+            and p.name != "explainability_latest.json"
+            and not _is_labs_page_shard_path(p)
+        ),
+        key=lambda p: p.name,
+        reverse=True,
+    )
+    paths.extend(dated[:10])
     return paths
 
 
@@ -866,6 +899,9 @@ def build_public_data_index(
         _register(path)
 
     for path in _discover_attribution_public_paths(public_dir):
+        _register(path)
+
+    for path in _discover_explainability_public_paths(public_dir):
         _register(path)
 
     for filename in _OPTIONAL_PUBLIC_DATA_FILES:

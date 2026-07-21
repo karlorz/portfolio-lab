@@ -119,9 +119,11 @@ class VolatilityParityAllocator:
         
         # Adjust based on VIX regime
         # High VIX = reduce equity, increase gold/bonds
+        # None vix_level (missing futures feed) → base champion weights, not crash.
         vix_level = convexity_signal.vix_level
-        
-        if vix_level > 30:
+        if vix_level is None:
+            weights = base_weights
+        elif vix_level > 30:
             # Stress regime: more defensive
             weights = {
                 'SPY': 0.35,
@@ -173,7 +175,10 @@ class VolatilityParityAllocator:
         # 1. VIX is low (cheap insurance)
         # 2. Short VIX position is large (hedge the harvest)
         vix_level = convexity_signal.vix_level
-        
+        if vix_level is None:
+            # Missing VIX feed: no short harvest sizing, modest flat tail.
+            return 0.0, 1.0, 0.0
+
         if vix_level < 15:
             # Cheap vol, buy more insurance
             tail_pct = 2.0
@@ -221,7 +226,8 @@ class VolatilityParityAllocator:
         
         # Cash buffer
         # Minimum 13% per spec, increase if high uncertainty
-        if convexity_signal.vix_level > 25:
+        vix_level = convexity_signal.vix_level
+        if vix_level is not None and vix_level > 25:
             cash_pct = 18.0  # More cash in high vol
         elif convexity_signal.exit_triggered:
             cash_pct = 15.0  # Extra cash if recent exit
@@ -292,9 +298,31 @@ class VolatilityParityAllocator:
     def get_current_allocation(self) -> Dict:
         """Get current allocation for today"""
         today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        now_ts = datetime.now(timezone.utc).isoformat()
         allocation = self.generate_allocation(today)
+        alloc = allocation.to_dict()
+        # Staleness TTL + kill classifier require generated_at and must not
+        # leave a bare missing section (null → unavailable kill fuel).
+        alloc.setdefault("generated_at", now_ts)
+        alloc.setdefault("timestamp", now_ts)
+        alloc.setdefault("weight_unit", "percent_of_portfolio_0_100")
+        alloc.setdefault("live_authoritative", False)
+        alloc.setdefault("role", "advisory_research_sleeve")
+        # Surface convexity feed health on the sleeve for operators
+        try:
+            cx = self.vix_strategy.get_current_signal()
+            if isinstance(cx, dict):
+                alloc.setdefault("status", cx.get("status") or "ok")
+                alloc.setdefault("runtime_status", cx.get("runtime_status"))
+                alloc.setdefault("freshness_status", cx.get("freshness_status"))
+                alloc.setdefault("vix_source", cx.get("vix_source"))
+                alloc.setdefault("asof", cx.get("asof"))
+                if cx.get("asof_lag_days") is not None:
+                    alloc.setdefault("asof_lag_days", cx.get("asof_lag_days"))
+        except Exception:  # noqa: BLE001 — never fail allocation publish
+            alloc.setdefault("status", "ok")
         return {
-            'allocation': allocation.to_dict(),
+            'allocation': alloc,
             'summary': {
                 'total_capital_allocation': allocation.total_allocation,
                 'total_vol_contribution': allocation.total_vol_contribution,

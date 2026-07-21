@@ -361,8 +361,12 @@ class ConvexityHarvestStrategy:
     def get_current_signal(self) -> Dict:
         """Get current convexity harvest signal for today's date"""
         today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        now_ts = datetime.now(timezone.utc).isoformat()
         position = self.generate_signal(today)
         payload = position.to_dict()
+        # Staleness TTL requires generated_at; always stamp wall-clock produce time.
+        payload["generated_at"] = now_ts
+        payload["timestamp"] = now_ts
         # Honesty fields for dashboard consumers
         if position.exit_reason and str(position.exit_reason).startswith("unavailable"):
             payload["status"] = "unavailable"

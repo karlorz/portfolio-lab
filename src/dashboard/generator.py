@@ -1813,7 +1813,12 @@ class DashboardGenerator:
             # Get convexity harvest signal
             convexity_engine = ConvexityHarvestStrategy()
             convexity_signal = convexity_engine.get_current_signal()
-            
+            if isinstance(convexity_signal, dict):
+                # Ensure TTL fields always present for staleness classifier
+                now_ts = datetime.now(timezone.utc).isoformat()
+                convexity_signal.setdefault("generated_at", now_ts)
+                convexity_signal.setdefault("timestamp", now_ts)
+
             # Get volatility parity allocation (full to_dict provenance —
             # weight_unit / role / live_authoritative — not bare pct fields only)
             vol_allocator = VolatilityParityAllocator(vix_strategy=convexity_engine)
@@ -1823,11 +1828,14 @@ class DashboardGenerator:
                 if isinstance(alloc, dict):
                     vol_parity_signal = dict(alloc)
                     # Ensure advisory provenance even if older to_dict path
+                    now_ts = datetime.now(timezone.utc).isoformat()
                     vol_parity_signal.setdefault(
                         "weight_unit", "percent_of_portfolio_0_100"
                     )
                     vol_parity_signal.setdefault("live_authoritative", False)
                     vol_parity_signal.setdefault("role", "advisory_research_sleeve")
+                    vol_parity_signal.setdefault("generated_at", now_ts)
+                    vol_parity_signal.setdefault("timestamp", now_ts)
                 else:
                     vol_parity_signal = alloc
         except SIGNAL_EXCEPTIONS as e:
