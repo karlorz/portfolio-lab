@@ -71,6 +71,37 @@ def test_quality_disclosure_not_zero_when_some_healthy(tmp_path):
     assert out["summary"]["quality_badge"] == "3/9 healthy sources"
 
 
+def test_batch_cq_stale_file_not_freeze_when_healthy_gt_zero(tmp_path):
+    """Batch CQ: age>7d is advisory stale only; freeze requires healthy==0."""
+    import os
+    import time
+
+    ew = tmp_path / "ensemble_weights.json"
+    ew.write_text(json.dumps({"normal": {"a": 0.5}}), encoding="utf-8")
+    old = time.time() - 46 * 86400
+    os.utime(ew, (old, old))
+
+    report = {
+        "summary": {
+            "healthy": 3,
+            "degraded": 5,
+            "unhealthy": 1,
+            "total_tracked": 9,
+        },
+        "scores": {},
+    }
+    out = attach_signal_quality_disclosure(report, data_dir=tmp_path)
+    freeze = out["quality_disclosure"]["ensemble_weight_freeze"]
+    assert freeze["weight_file_stale"] is True
+    assert freeze["weight_freeze_active"] is False
+    assert freeze["freeze_reason"] is None
+    assert freeze["ensemble_weights_age_days"] > 40
+    assert "stale_note" in freeze
+    assert out["summary"].get("ensemble_weight_freeze_active") is not True
+    assert out["summary"].get("ensemble_weights_file_stale") is True
+    assert out["summary"].get("ensemble_weights_age_days") > 40
+
+
 def test_vts_persist_file_row_preserves_history(tmp_path, monkeypatch):
     from src.signals.vix_term_structure import VIXTermStructureSignalGenerator
 

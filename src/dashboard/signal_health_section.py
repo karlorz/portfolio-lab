@@ -166,12 +166,15 @@ def attach_signal_quality_disclosure(
         "ensemble_weights_path": str(root / "ensemble_weights.json"),
         "recommended_max_freeze_days": 7,
         "policy": (
-            "When healthy==0, treat static ensemble_weights.json as frozen; "
-            "do not auto-reoptimize. Prefer champion 46/38/16 live authority."
+            "weight_freeze_active only when healthy==0 (do not auto-reoptimize; "
+            "champion 46/38/16 remains live authority). File age >7d is "
+            "weight_file_stale advisory only while healthy>0 (Batch CQ) — "
+            "stale mtime must not freeze after SH recovery."
         ),
     }
     ew = root / "ensemble_weights.json"
     if ew.is_file():
+        freeze["ensemble_weights_present"] = True
         try:
             mtime = ew.stat().st_mtime
             age_days = max(
@@ -183,12 +186,27 @@ def attach_signal_quality_disclosure(
             ).isoformat()
             freeze["ensemble_weights_age_days"] = round(age_days, 2)
             freeze["weight_file_stale"] = age_days > 7.0
-            freeze["weight_freeze_active"] = zero_healthy or age_days > 7.0
+            # Batch CQ: freeze is a zero-healthy gate, not an age gate.
+            # Age residual after CP (3/9 healthy + 46d file) was false freeze.
+            freeze["weight_freeze_active"] = zero_healthy
+            freeze["freeze_reason"] = (
+                "zero_healthy_sources" if zero_healthy else None
+            )
+            if freeze["weight_file_stale"] and not zero_healthy:
+                freeze["stale_note"] = (
+                    "ensemble_weights.json exceeds recommended_max_freeze_days; "
+                    "advisory only while healthy>0 — schedule adaptive refresh, "
+                    "do not treat as weight_freeze_active"
+                )
         except OSError:
             freeze["weight_freeze_active"] = zero_healthy
+            freeze["freeze_reason"] = (
+                "zero_healthy_sources" if zero_healthy else None
+            )
     else:
         freeze["ensemble_weights_present"] = False
         freeze["weight_freeze_active"] = zero_healthy
+        freeze["freeze_reason"] = "zero_healthy_sources" if zero_healthy else None
 
     # Adaptive state is still advisory when SH quality is zero-healthy
     aw = root / "adaptive_weights_state.json"
@@ -214,11 +232,15 @@ def attach_signal_quality_disclosure(
         summary2 = dict(out["summary"])
         summary2["quality_badge"] = quality["badge"]
         summary2["zero_healthy_sources"] = zero_healthy
-        if freeze.get("weight_freeze_active"):
-            summary2["ensemble_weight_freeze_active"] = True
+        if freeze.get("ensemble_weights_age_days") is not None:
             summary2["ensemble_weights_age_days"] = freeze.get(
                 "ensemble_weights_age_days"
             )
+        if freeze.get("weight_freeze_active"):
+            summary2["ensemble_weight_freeze_active"] = True
+        elif freeze.get("weight_file_stale"):
+            # Advisory stale file — not freeze (Batch CQ)
+            summary2["ensemble_weights_file_stale"] = True
         out["summary"] = summary2
     return out
 
