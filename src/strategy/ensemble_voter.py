@@ -2198,10 +2198,13 @@ class EnsembleVoter:
         return weights
 
     def _apply_health_weights(self, weights: Dict) -> Dict:
-        """Apply health-adjusted weighting (v3.12) — soft floor + hard-zero unhealthy.
+        """Apply health-adjusted weighting (v3.12) — soft floor + hard-zero gates.
 
         Batch BH residual honesty:
         - status == unhealthy → multiplier 0 (quality sleep / hard exclude)
+        - Batch CN: status == degraded **and** IC < 0 → multiplier 0
+          (negative-IC degraded arms are fail-closed; soft floor only for
+          degraded/healthy with non-negative IC — hybrid 2025–2026 SRE policy)
         - otherwise soft floor max(0.2, health_score) for graceful degrade
         - if all arms hard-gated: freeze adaptive blend (all-zero mass, do not
           reinflate toxic arms via renorm)
@@ -2223,24 +2226,46 @@ class EnsembleVoter:
                 if source_str in health_scores:
                     health = health_scores[source_str]
                     status = str(getattr(health, "status", "") or "").lower()
-                    if status == SignalHealthStatus.UNHEALTHY.value:
+                    hs = float(getattr(health, "health_score", 0.0) or 0.0)
+                    ic_raw = getattr(health, "ic", None)
+                    try:
+                        ic_val = float(ic_raw) if ic_raw is not None else None
+                    except (TypeError, ValueError):
+                        ic_val = None
+
+                    hard_zero = status == SignalHealthStatus.UNHEALTHY.value
+                    sleep_reason = "unhealthy" if hard_zero else None
+                    # Batch CN: degraded + negative IC is toxic drag — hard sleep
+                    if (
+                        not hard_zero
+                        and status == SignalHealthStatus.DEGRADED.value
+                        and ic_val is not None
+                        and ic_val < 0.0
+                    ):
+                        hard_zero = True
+                        sleep_reason = f"degraded_negative_ic({ic_val:.3f})"
+
+                    if hard_zero:
                         multiplier = 0.0
                         slept.append(source_str)
                         logger.info(
-                            "Health-gated %s: weight %.2f%% → 0%% (status=unhealthy, score=%.2f)",
+                            "Health-gated %s: weight %.2f%% → 0%% (%s, score=%.2f, ic=%s)",
                             source_str,
                             base_weight * 100,
-                            float(getattr(health, "health_score", 0.0) or 0.0),
+                            sleep_reason or "hard_zero",
+                            hs,
+                            ic_val,
                         )
                     else:
-                        multiplier = max(0.2, min(1.0, float(health.health_score)))
-                        if health.health_score < 0.5:
+                        multiplier = max(0.2, min(1.0, hs))
+                        if hs < 0.5:
                             logger.info(
-                                "Health-adjusted %s: weight %.2f%% → %.2f%% (health=%.2f)",
+                                "Health-adjusted %s: weight %.2f%% → %.2f%% (health=%.2f, ic=%s)",
                                 source_str,
                                 base_weight * 100,
                                 base_weight * multiplier * 100,
-                                health.health_score,
+                                hs,
+                                ic_val,
                             )
                     adjusted_weights[source_enum] = base_weight * multiplier
                 else:

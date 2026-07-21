@@ -2718,6 +2718,8 @@ class TestApplyHealthWeightsEdgeCases:
             mock_instance = MagicMock()
             mock_score = MagicMock()
             mock_score.health_score = 1.0
+            mock_score.status = "healthy"
+            mock_score.ic = 0.1
             mock_instance.calculate_all_health_scores.return_value = {
                 'multi_speed_momentum': mock_score,
                 'cross_asset_rv': mock_score,
@@ -2728,13 +2730,15 @@ class TestApplyHealthWeightsEdgeCases:
             assert result[k] > 0
 
     def test_all_health_zero(self, tmp_path):
-        """Health scores of 0 should clamp multiplier to 0.2."""
+        """Health scores of 0 (degraded, IC>=0) clamp multiplier to 0.2 soft floor."""
         voter = _make_voter(tmp_path)
         weights = {SignalSource.MULTI_SPEED_MOM: 0.6, SignalSource.CROSS_ASSET_RV: 0.4}
         with patch('src.signals.health_tracker.SignalHealthTracker') as MockTracker:
             mock_instance = MagicMock()
             mock_score = MagicMock()
             mock_score.health_score = 0.0
+            mock_score.status = "degraded"
+            mock_score.ic = 0.0  # non-negative IC keeps soft floor (Batch CN)
             mock_instance.calculate_all_health_scores.return_value = {
                 'multi_speed_momentum': mock_score,
                 'cross_asset_rv': mock_score,
@@ -2753,8 +2757,12 @@ class TestApplyHealthWeightsEdgeCases:
             mock_instance = MagicMock()
             mock_score_good = MagicMock()
             mock_score_good.health_score = 1.0
+            mock_score_good.status = "healthy"
+            mock_score_good.ic = 0.2
             mock_score_bad = MagicMock()
             mock_score_bad.health_score = 0.5
+            mock_score_bad.status = "degraded"
+            mock_score_bad.ic = 0.05
             mock_instance.calculate_all_health_scores.return_value = {
                 'multi_speed_momentum': mock_score_good,
                 'cross_asset_rv': mock_score_bad,
@@ -2776,6 +2784,8 @@ class TestApplyHealthWeightsEdgeCases:
             mock_instance = MagicMock()
             mock_score = MagicMock()
             mock_score.health_score = 0.5
+            mock_score.status = "degraded"
+            mock_score.ic = 0.0
             mock_instance.calculate_all_health_scores.return_value = {
                 'multi_speed_momentum': mock_score,
                 # CROSS_ASSET_RV and ALTERNATIVE_DATA have no health scores
@@ -2784,6 +2794,60 @@ class TestApplyHealthWeightsEdgeCases:
             result = voter._apply_health_weights(weights)
         assert len(result) == 3
         assert abs(sum(result.values()) - 1.0) < 0.01
+
+    def test_unhealthy_status_hard_zeros(self, tmp_path):
+        """Batch BH/CN: status=unhealthy → weight 0 after renorm (not soft 0.2 floor)."""
+        voter = _make_voter(tmp_path)
+        weights = {
+            SignalSource.MULTI_SPEED_MOM: 0.5,
+            SignalSource.VIX_TERM_STRUCTURE: 0.5,
+        }
+        with patch('src.signals.health_tracker.SignalHealthTracker') as MockTracker:
+            mock_instance = MagicMock()
+            good = MagicMock()
+            good.health_score = 0.8
+            good.status = "healthy"
+            good.ic = 0.1
+            bad = MagicMock()
+            bad.health_score = 0.43
+            bad.status = "unhealthy"
+            bad.ic = 0.05
+            mock_instance.calculate_all_health_scores.return_value = {
+                'multi_speed_momentum': good,
+                'vix_term_structure': bad,
+            }
+            MockTracker.return_value = mock_instance
+            result = voter._apply_health_weights(weights)
+        assert result[SignalSource.VIX_TERM_STRUCTURE] == 0.0
+        assert result[SignalSource.MULTI_SPEED_MOM] == pytest.approx(1.0)
+        assert "vix_term_structure" in voter._health_gate_slept
+
+    def test_degraded_negative_ic_hard_zeros(self, tmp_path):
+        """Batch CN: degraded + IC < 0 sleeps arm (fail-closed hybrid policy)."""
+        voter = _make_voter(tmp_path)
+        weights = {
+            SignalSource.CROSS_ASSET_RV: 0.5,
+            SignalSource.CROSS_ASSET_REGIME_ARB: 0.5,
+        }
+        with patch('src.signals.health_tracker.SignalHealthTracker') as MockTracker:
+            mock_instance = MagicMock()
+            good = MagicMock()
+            good.health_score = 0.57
+            good.status = "degraded"
+            good.ic = 0.15
+            toxic = MagicMock()
+            toxic.health_score = 0.5
+            toxic.status = "degraded"
+            toxic.ic = -0.29
+            mock_instance.calculate_all_health_scores.return_value = {
+                'cross_asset_rv': good,
+                'cross_asset_regime_arb': toxic,
+            }
+            MockTracker.return_value = mock_instance
+            result = voter._apply_health_weights(weights)
+        assert result[SignalSource.CROSS_ASSET_REGIME_ARB] == 0.0
+        assert result[SignalSource.CROSS_ASSET_RV] == pytest.approx(1.0)
+        assert "cross_asset_regime_arb" in voter._health_gate_slept
 
 
 # ===========================================================================
