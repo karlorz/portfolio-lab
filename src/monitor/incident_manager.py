@@ -20,6 +20,21 @@ DEFAULT_INCIDENT_LOG_PATH = DATA_DIR / "incidents.jsonl"
 DEFAULT_INCIDENT_SUMMARY_PATH = DATA_DIR / "incidents.json"
 DEFAULT_KILL_SWITCH_PATH = DATA_DIR / "kill_switch.json"
 
+
+def _is_test_isolation_path(path: Path | str | None) -> bool:
+    """True when path is under portfolio-lab pytest dual-write isolation (Batch AX / CI).
+
+    Live producers must never embed ``plab-pytest-public.*`` into production
+    ``data/incidents.json`` provenance when a test process rebinds PUBLIC_DATA_DIR
+    but still targets the real private summary path.
+
+    Only the deliberate isolation prefix is matched — generic ``/tmp/pytest-*``
+    (pytest's own tmp root) is not treated as PUBLIC isolation by itself.
+    """
+    if path is None:
+        return False
+    return "plab-pytest" in str(path)
+
 _KILL_SWITCH_LEVEL_RANK = {
     "none": 0,
     "warning": 1,
@@ -233,10 +248,80 @@ class IncidentManager:
         public_summary = Path(PUBLIC_DATA_DIR) / "incidents.json"
         dual_ok: bool | None = None
         paths_identical = False
+        skip_dual_for_isolation = False
         try:
             paths_identical = public_summary.resolve() == self.summary_path.resolve()
         except OSError:
             paths_identical = False
+
+        # Batch CI: never contaminate production private SSOT with pytest public
+        # isolation paths (plab-pytest-public.*). Tests that dual-write both
+        # sides under tmp still work (private also under tmp / isolation).
+        #
+        # Rebound to live WWW only when private summary is the real project
+        # DATA_DIR incidents path — never when private is a pytest tmp tree
+        # (would clobber operator public with test open-set).
+        private_is_live_ssot = False
+        try:
+            private_is_live_ssot = (
+                self.summary_path.resolve()
+                == (Path(DATA_DIR) / "incidents.json").resolve()
+            )
+        except OSError:
+            private_is_live_ssot = False
+
+        if (
+            not paths_identical
+            and _is_test_isolation_path(public_summary)
+            and private_is_live_ssot
+        ):
+            skip_dual_for_isolation = True
+            live_candidate = Path("/var/www/portfolio-lab/data") / "incidents.json"
+            try:
+                if live_candidate.parent.is_dir() and not _is_test_isolation_path(
+                    live_candidate
+                ):
+                    public_summary = live_candidate
+                    skip_dual_for_isolation = False
+                    try:
+                        paths_identical = (
+                            public_summary.resolve() == self.summary_path.resolve()
+                        )
+                    except OSError:
+                        paths_identical = False
+                    logger.warning(
+                        "Incidents dual-write: rebound pytest PUBLIC_DATA_DIR to "
+                        "live operator tree %s (private is live DATA_DIR SSOT)",
+                        public_summary,
+                    )
+                else:
+                    paths_identical = True  # skip dual; stamp local-only
+                    logger.warning(
+                        "Incidents dual-write skipped: PUBLIC_DATA_DIR is test "
+                        "isolation (%s) while private summary is live (%s)",
+                        PUBLIC_DATA_DIR,
+                        self.summary_path,
+                    )
+            except OSError:
+                paths_identical = True
+                skip_dual_for_isolation = True
+        elif (
+            not paths_identical
+            and _is_test_isolation_path(public_summary)
+            and not private_is_live_ssot
+            and not _is_test_isolation_path(self.summary_path)
+        ):
+            # Private is neither live DATA_DIR nor isolation-named (odd lab
+            # path) — refuse dual-write into pytest public to avoid embedding
+            # plab-pytest into any non-test private body.
+            skip_dual_for_isolation = True
+            paths_identical = True
+            logger.warning(
+                "Incidents dual-write skipped: pytest public (%s) vs non-live "
+                "private (%s)",
+                public_summary,
+                self.summary_path,
+            )
 
         # Stamp completeness *before* private write so both trees share metadata
         try:
@@ -246,10 +331,15 @@ class IncidentManager:
             summary = _attach_dual_write_provenance(
                 summary,
                 private_path=self.summary_path,
-                public_path=public_summary,
-                dual_write_attempted=not paths_identical,
-                dual_write_ok=None if not paths_identical else True,
-                paths_identical=paths_identical,
+                public_path=public_summary if not skip_dual_for_isolation else self.summary_path,
+                dual_write_attempted=not paths_identical and not skip_dual_for_isolation,
+                dual_write_ok=None if (not paths_identical and not skip_dual_for_isolation) else True,
+                paths_identical=paths_identical or skip_dual_for_isolation,
+                note=(
+                    "skipped dual-write: pytest PUBLIC_DATA_DIR isolation vs live private"
+                    if skip_dual_for_isolation
+                    else None
+                ),
             )
         except Exception:  # noqa: BLE001
             pass
@@ -261,7 +351,7 @@ class IncidentManager:
         # open-set derivation). Prevents secondary writers with a partial
         # process view from inventing a divergent public open set.
         try:
-            if not paths_identical:
+            if not paths_identical and not skip_dual_for_isolation:
                 public_summary.parent.mkdir(parents=True, exist_ok=True)
                 tmp = public_summary.with_suffix(".json.tmp")
                 # Refresh dual_write_ok=True into body for public tree

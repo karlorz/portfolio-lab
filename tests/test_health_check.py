@@ -230,7 +230,7 @@ class TestCheckDataFreshness:
         assert freshness["cron"]["backends"]["tasker"]["status"] == "ok"
 
     def test_enabled_unknown_tasker_rows_degrade_cron_health(self, tmp_path, monkeypatch):
-        """Enabled scheduled rows without runtime evidence should not collapse to healthy."""
+        """Enabled scheduled rows with unmapped status still degrade (true unknown)."""
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
         (tmp_path / "cron_status.json").write_text(json.dumps({
@@ -238,7 +238,7 @@ class TestCheckDataFreshness:
             "jobs": [
                 {
                     "name": "portfolio-lab-health",
-                    "status": "pending",
+                    "status": "mystery_state",
                     "state": "scheduled",
                     "enabled": True,
                     "manual_only": False,
@@ -253,6 +253,47 @@ class TestCheckDataFreshness:
         assert freshness["cron"]["jobs"][0]["status"] == "unknown"
         assert freshness["cron"]["status"] in {"warning", "degraded"}
         assert freshness["cron"]["backends"]["tasker"]["status"] == "degraded"
+
+    def test_pending_never_run_weekly_job_does_not_degrade_cron(self, tmp_path, monkeypatch):
+        """Batch CI: pending weekly fetch-trends must not force cron degraded."""
+        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        (tmp_path / "cron_status.json").write_text(json.dumps({
+            "backend": "tasker",
+            "jobs": [
+                {
+                    "name": "portfolio-lab-health",
+                    "status": "success",
+                    "state": "scheduled",
+                    "enabled": True,
+                    "manual_only": False,
+                    "last_run": "2026-07-21T19:30:00+00:00",
+                    "backend": "tasker",
+                },
+                {
+                    "name": "portfolio-lab-fetch-trends",
+                    "status": "pending",
+                    "state": "scheduled",
+                    "enabled": True,
+                    "manual_only": False,
+                    "last_run": None,
+                    "schedule": "20 4 * * 0",
+                    "backend": "tasker",
+                },
+            ],
+        }))
+
+        freshness = _check_data_freshness()
+
+        trends = next(
+            j for j in freshness["cron"]["jobs"] if j["name"] == "portfolio-lab-fetch-trends"
+        )
+        assert trends["status"] == "pending"
+        tasker = freshness["cron"]["backends"]["tasker"]
+        assert tasker.get("unknown_active_jobs") in (None, 0)
+        assert tasker.get("pending_never_run_jobs") == 1
+        assert tasker["status"] == "ok"
+        assert freshness["cron"]["status"] == "ok"
 
     def test_unreadable_hermes_cron_state_warns_without_crashing(self):
         """Permission-denied Hermes state should degrade health, not crash CI."""

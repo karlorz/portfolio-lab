@@ -216,7 +216,13 @@ def rollup_failed_cron_jobs(
 
 
 def normalize_cron_status(value: Any) -> str:
-    """Map scheduler-specific status strings to dashboard status values."""
+    """Map scheduler-specific status strings to dashboard status values.
+
+    Batch CI: preserve ``pending`` / ``queued`` / ``waiting`` so never-run
+    weekly jobs (e.g. portfolio-lab-fetch-trends before first Sunday fire) are
+    not collapsed to ``unknown``. ``unknown`` is reserved for unmapped or
+    truly missing evidence — only that tier degrades backend unknown_active.
+    """
     status = str(value or "").strip().lower()
     if status in {"ok", "success", "succeeded", "completed", "pass", "passed"}:
         return "ok"
@@ -224,6 +230,9 @@ def normalize_cron_status(value: Any) -> str:
         return "error"
     if status in {"disabled", "paused"}:
         return "disabled"
+    # Never-run / not-yet-fired scheduled work (tasker seeds status=pending).
+    if status in {"pending", "queued", "waiting", "never_run", "not_run"}:
+        return "pending"
     return "unknown"
 
 
@@ -319,6 +328,9 @@ def summarize_backend(
         and not is_health_self_job(job)
         and is_sticky_cron_error_recovered(job, data_dirs=data_dirs, now=now)
     ]
+    # True unknown (unmapped status) still degrades. Pending never-run does not
+    # — weekly / sparse jobs sit as pending until first fire without meaning
+    # scheduler failure (Batch CI / deep-research last_success-age guidance).
     active_unknown_jobs = sum(
         1
         for job in jobs
@@ -326,6 +338,15 @@ def summarize_backend(
         and not job.get("manual_only", False)
         and job.get("state") not in {"manual_only", "paused"}
         and job.get("status") == "unknown"
+    )
+    active_pending_never_run = sum(
+        1
+        for job in jobs
+        if job.get("enabled", True)
+        and not job.get("manual_only", False)
+        and job.get("state") not in {"manual_only", "paused"}
+        and job.get("status") == "pending"
+        and not job.get("last_run")
     )
     backend_status = status or ("degraded" if failed_jobs or active_unknown_jobs else "ok")
     summary = {
@@ -342,6 +363,8 @@ def summarize_backend(
         ]
     if active_unknown_jobs:
         summary["unknown_active_jobs"] = active_unknown_jobs
+    if active_pending_never_run:
+        summary["pending_never_run_jobs"] = active_pending_never_run
     if reason:
         summary["reason"] = reason
     return summary
