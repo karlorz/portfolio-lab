@@ -354,7 +354,11 @@ class VIXTermStructureSignalGenerator:
             return None
 
     def load_vix_data(self) -> Dict:
-        """Load VIX term structure data from storage."""
+        """Load VIX term structure data from storage.
+
+        Batch BV: strip ``_meta`` / non-date keys so provenance never sorts
+        as the latest calendar day (``max(keys)`` would prefer ``_meta``).
+        """
         if not self.VIX_DATA_PATH.exists():
             logger.warning("VIX data file not found: %s", self.VIX_DATA_PATH)
             return {}
@@ -362,7 +366,17 @@ class VIXTermStructureSignalGenerator:
         try:
             with open(self.VIX_DATA_PATH, 'r') as f:
                 data = json.load(f)
-            return data if isinstance(data, dict) else {}
+            if not isinstance(data, dict):
+                return {}
+            return {
+                k: v
+                for k, v in data.items()
+                if isinstance(v, dict)
+                and not str(k).startswith("_")
+                and str(k) not in {"meta", "schema"}
+                and len(str(k)) >= 10
+                and str(k)[4:5] == "-"
+            }
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.error("Error loading VIX data: %s", e)
             return {}
@@ -371,7 +385,14 @@ class VIXTermStructureSignalGenerator:
         if not data:
             return None
         try:
-            return max(data.keys())
+            dates = [
+                k
+                for k in data.keys()
+                if not str(k).startswith("_")
+                and len(str(k)) >= 10
+                and str(k)[4:5] == "-"
+            ]
+            return max(dates) if dates else None
         except ValueError:
             return None
 

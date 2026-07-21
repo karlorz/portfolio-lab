@@ -117,8 +117,15 @@ class VIXDataManager:
                 loaded = {}
                 skipped = []
                 for date, ts in raw_data.items():
+                    # Batch BV: skip provenance meta / non-date keys
+                    if str(date).startswith("_") or str(date) in {"meta", "schema"}:
+                        continue
                     if not isinstance(ts, dict):
                         skipped.append((date, "record is not an object"))
+                        continue
+                    # Date-like keys only (YYYY-MM-DD)
+                    if len(str(date)) < 10 or str(date)[4:5] != "-":
+                        skipped.append((date, "key is not a calendar date"))
                         continue
                     try:
                         loaded[date] = VIXTermStructure.from_dict(ts)
