@@ -303,11 +303,42 @@ def main():
             risk_payload.get("garch_active_reason")
             or "garch_active=false (filter inactive or coverage demote)"
         )
+    # Residual honesty (Batch BG): coverage demote must revise top-level status.
+    # Tail/cvar status is set earlier; never leave status=healthy when the model
+    # was demoted to advisory_degraded (Kupiec/coverage fail). Basel traffic-light
+    # yellow/red → not healthy for primary use.
+    coverage = report.get("coverage_diagnostics")
+    coverage_failed = (
+        isinstance(coverage, dict) and coverage.get("coverage_pass") is False
+    )
+    demoted = (
+        report.get("runtime_role") == "advisory_degraded"
+        or (report.get("garch_active") is False and coverage_failed)
+    )
+    if demoted:
+        prior_status = str(report.get("status") or "healthy").lower()
+        if prior_status in {"healthy", "ok", "good", ""}:
+            report["status"] = "degraded"
+        # Keep unhealthy if tail severity already elevated it
+        report["summary"] = {
+            "passed": 0 if report["status"] != "healthy" else 1,
+            "total_checks": 1,
+            "runtime_role": report.get("runtime_role") or "advisory_degraded",
+            "garch_active": bool(report.get("garch_active")),
+            "status_reason": report.get("garch_active_reason")
+            or "coverage demote or inactive filter",
+        }
+        risk_payload["status"] = report["status"]
+        if report.get("runtime_role"):
+            risk_payload["runtime_role"] = report["runtime_role"]
     # Ensure measured NAV DD is primary; policy stays in limit fields only
     if report.get("measured_max_drawdown") is not None:
         report.pop("max_drawdown", None)
     with open(report_path, "w") as f:
         json.dump(report, f, indent=2, default=str)
+    # Re-stamp private risk_metrics after status honesty so dual SSOT matches.
+    with open(risk_metrics_path, "w") as f:
+        json.dump(risk_payload, f, indent=2, default=str)
 
     # Public dual-write: non-dotfile GARCH-CVaR for WWW / index consumers
     try:

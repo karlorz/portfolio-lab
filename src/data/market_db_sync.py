@@ -24,6 +24,35 @@ QUALITY_STATUS_FAIL = "fail"
 DEFAULT_SPLIT_LIKE_RETURN_PCT = 40.0
 DEFAULT_CRITICAL_RETURN_PCT = 90.0
 
+# Volatility indices (and aliases) do not undergo equity-style splits. Large
+# daily % moves (Volmageddon ~+115%, COVID ~+40–45%, Aug-2024 ~+65%) are regime
+# jumps, not corporate actions — do not flag split_like / extreme equity heuristics.
+VOLATILITY_INDEX_SYMBOLS = frozenset(
+    {
+        "^VIX",
+        "^VIX3M",
+        "^VIX6M",
+        "^VIX9D",
+        "VIX",
+        "VIX3M",
+        "VIX6M",
+        "VIX9D",
+    }
+)
+
+
+def is_volatility_index_symbol(symbol: str) -> bool:
+    """True for VIX-family indices that skip equity split-like return gates."""
+    normalized = (symbol or "").strip().upper()
+    if not normalized:
+        return False
+    if normalized in VOLATILITY_INDEX_SYMBOLS:
+        return True
+    # Catch ^VIX* / VIX* family without listing every tenor
+    bare = normalized[1:] if normalized.startswith("^") else normalized
+    return bare.startswith("VIX")
+
+
 QUALITY_ISSUE_KEYS = (
     "duplicate_dates",
     "empty_symbols",
@@ -259,11 +288,15 @@ def _audit_prices_payload(
             )
 
         sorted_prices = sorted(valid_prices)
+        # VIX-family: skip equity split/extreme return gates (regime jumps, not splits).
+        skip_return_anomaly_gates = is_volatility_index_symbol(symbol)
         for (previous_date, previous_price), (date, price) in zip(
             sorted_prices,
             sorted_prices[1:],
             strict=False,
         ):
+            if skip_return_anomaly_gates:
+                continue
             return_pct = _compute_return_pct(previous_price, price)
             absolute_return_pct = abs(return_pct)
             if absolute_return_pct >= critical_return_pct:
@@ -283,15 +316,16 @@ def _audit_prices_payload(
         symbol_status = QUALITY_STATUS_FAIL if symbol_blocking_count else QUALITY_STATUS_OK
         if symbol_status == QUALITY_STATUS_OK and symbol_warning_count:
             symbol_status = QUALITY_STATUS_WARN
-        symbols.append(
-            {
-                "symbol": symbol,
-                "status": symbol_status,
-                "row_count": len(records),
-                "latest_date": latest_date,
-                "issue_counts": symbol_counts,
-            }
-        )
+        symbol_row: dict[str, Any] = {
+            "symbol": symbol,
+            "status": symbol_status,
+            "row_count": len(records),
+            "latest_date": latest_date,
+            "issue_counts": symbol_counts,
+        }
+        if skip_return_anomaly_gates:
+            symbol_row["return_anomaly_gates"] = "skipped_volatility_index"
+        symbols.append(symbol_row)
 
     blocking = first_blocking_error is not None
     status = (

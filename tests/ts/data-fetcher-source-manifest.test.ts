@@ -753,6 +753,34 @@ describe('market data fetcher source provenance', () => {
     });
   });
 
+  it('skips split_like equity gates on VIX-family crisis jumps (Batch BG)', () => {
+    const report = buildPriceDataQualityReport(
+      {
+        SPY: [
+          { d: '2018-02-02', p: 100 },
+          { d: '2018-02-05', p: 98 },
+        ],
+        '^VIX3M': [
+          { d: '2018-02-02', p: 17 },
+          { d: '2018-02-05', p: 37 }, // ~+118% regime jump, not a split
+        ],
+      },
+      '2018-02-06T00:00:00Z',
+      {
+        criticalReturnPct: 90,
+        maxLatestLagDays: Number.POSITIVE_INFINITY,
+        splitLikeReturnPct: 40,
+      },
+    );
+
+    expect(report.overall_status).toBe('ok');
+    expect(report.issue_counts.split_like_returns).toBe(0);
+    expect(report.issue_counts.extreme_returns).toBe(0);
+    const vix = report.symbols.find((s) => s.symbol === '^VIX3M');
+    expect(vix?.status).toBe('ok');
+    expect(vix?.return_anomaly_count).toBe(0);
+  });
+
   it('keeps price data quality reports deterministic and compact', () => {
     const payload = {
       TLT: [{ d: '2026-06-11', p: 88.75 }],

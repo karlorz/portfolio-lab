@@ -174,6 +174,17 @@ const DEFAULT_SPARSE_INDEX_SYMBOLS: readonly string[] = [
   'VIX6M',
 ];
 
+/**
+ * VIX-family volatility indices: large daily % moves are regime jumps
+ * (Volmageddon ~+115%, COVID ~+40–45%), not equity splits. Skip split_like /
+ * extreme equity return gates so they do not degrade the prices manifest.
+ */
+const DEFAULT_VOLATILITY_INDEX_SYMBOLS: readonly string[] = [
+  ...DEFAULT_SPARSE_INDEX_SYMBOLS,
+  '^VIX9D',
+  'VIX9D',
+];
+
 function isSparseIndexSymbol(
   symbol: string,
   options: PriceDataQualityOptions,
@@ -181,6 +192,21 @@ function isSparseIndexSymbol(
   const configured = options.sparseIndexSymbols ?? DEFAULT_SPARSE_INDEX_SYMBOLS;
   const normalized = symbol.trim().toUpperCase();
   return configured.some((candidate) => candidate.trim().toUpperCase() === normalized);
+}
+
+/** True for VIX-family indices that skip equity split-like return gates. */
+export function isVolatilityIndexSymbol(symbol: string): boolean {
+  const normalized = symbol.trim().toUpperCase();
+  if (!normalized) {
+    return false;
+  }
+  if (DEFAULT_VOLATILITY_INDEX_SYMBOLS.some(
+    (candidate) => candidate.trim().toUpperCase() === normalized,
+  )) {
+    return true;
+  }
+  const bare = normalized.startsWith('^') ? normalized.slice(1) : normalized;
+  return bare.startsWith('VIX');
 }
 
 function readEnvNumber(name: string): number | undefined {
@@ -397,8 +423,13 @@ function applyReturnAnomalyChecks(
       left.date.localeCompare(right.date) || left.index - right.index
     ));
     const anomalies: ReturnAnomalyIssue[] = [];
+    // VIX-family: skip equity split/extreme return gates (regime jumps, not splits).
+    const skipReturnAnomalyGates = isVolatilityIndexSymbol(audit.summary.symbol);
 
     for (let index = 1; index < sorted.length; index += 1) {
+      if (skipReturnAnomalyGates) {
+        break;
+      }
       const previous = sorted[index - 1];
       const current = sorted[index];
       if (current.date === previous.date) {
