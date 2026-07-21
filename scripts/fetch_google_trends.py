@@ -13,6 +13,7 @@ Requires: pytrends (pip install pytrends)
 import argparse
 import json
 import logging
+import random
 import sys
 import time
 from datetime import datetime, timedelta
@@ -31,6 +32,9 @@ SEARCH_TERMS = [
 
 # Rate limiting: pytrends has aggressive rate limits
 RATE_LIMIT_DELAY = 2.0  # seconds between requests
+# Batch CL: jitter between batches (deep-research: avoid thundering herd on 429)
+RATE_LIMIT_JITTER_MIN = 8.0
+RATE_LIMIT_JITTER_MAX = 20.0
 # Batch CG: exponential backoff on HTTP 429 (initial, factor, max, retries)
 RATE_LIMIT_BACKOFF_INITIAL = 30.0
 RATE_LIMIT_BACKOFF_FACTOR = 2.0
@@ -82,7 +86,10 @@ def fetch_trends(
         batch = terms[batch_start : batch_start + batch_size]
 
         if batch_start > 0:
-            time.sleep(RATE_LIMIT_DELAY)
+            # Fixed delay + jitter (Batch CL / deep-research anti-429)
+            time.sleep(RATE_LIMIT_DELAY + random.uniform(
+                RATE_LIMIT_JITTER_MIN, RATE_LIMIT_JITTER_MAX
+            ))
 
         attempt = 0
         delay = RATE_LIMIT_BACKOFF_INITIAL
@@ -127,6 +134,7 @@ def fetch_trends(
                         )
                         break
                     wait = min(delay, RATE_LIMIT_BACKOFF_MAX)
+                    wait += random.uniform(0, min(15.0, wait * 0.25))  # jitter
                     logger.info(
                         "Rate limited (attempt %d/%d), waiting %.0fs...",
                         attempt,
@@ -139,6 +147,53 @@ def fetch_trends(
                 break
 
     return results, saw_rate_limit
+
+
+def merge_trends_cache(
+    cached: dict[str, dict[str, int]],
+    fresh: dict[str, dict[str, int]],
+) -> dict[str, dict[str, int]]:
+    """Merge incremental fetch into historical cache (Batch CL).
+
+    Fresh date keys overwrite cache for the same term; terms only in cache
+    are retained so a partial 429 still advances recent windows.
+    """
+    if not cached:
+        return dict(fresh)
+    if not fresh:
+        return dict(cached)
+    out: dict[str, dict[str, int]] = {}
+    for term in set(cached) | set(fresh):
+        merged = dict(cached.get(term) or {})
+        merged.update(fresh.get(term) or {})
+        # keep chronological key order for consumers
+        out[term] = {k: merged[k] for k in sorted(merged)}
+    return out
+
+
+def load_trends_cache(path: Path) -> dict[str, dict[str, int]]:
+    """Load existing google_trends.json when shape is term→{date→volume}."""
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict[str, int]] = {}
+    for term, series in raw.items():
+        if not isinstance(series, dict):
+            continue
+        cleaned: dict[str, int] = {}
+        for d, v in series.items():
+            try:
+                cleaned[str(d)] = int(v)
+            except (TypeError, ValueError):
+                continue
+        if cleaned:
+            out[str(term)] = cleaned
+    return out
 
 
 def main():
@@ -163,12 +218,23 @@ def main():
         default=RATE_LIMIT_MAX_RETRIES,
         help=f"429 retries per batch (default: {RATE_LIMIT_MAX_RETRIES})",
     )
+    parser.add_argument(
+        "--no-cache-merge",
+        action="store_true",
+        help="Replace artifact entirely (default: merge into existing cache)",
+    )
     args = parser.parse_args()
 
     terms = args.terms if args.terms else SEARCH_TERMS
     output_path = Path(args.output)
+    cached = {} if args.no_cache_merge else load_trends_cache(output_path)
 
-    logger.info("Fetching %d days of Google Trends data for %d terms...", args.days, len(terms))
+    logger.info(
+        "Fetching %d days of Google Trends data for %d terms (cache_terms=%d)...",
+        args.days,
+        len(terms),
+        len(cached),
+    )
 
     data, rate_limited = fetch_trends(terms, days=args.days, max_retries=args.max_retries)
 
@@ -182,6 +248,9 @@ def main():
             sys.exit(EXIT_RATE_LIMITED)
         logger.error("No data fetched. Check network connectivity and rate limits.")
         sys.exit(1)
+
+    if not args.no_cache_merge:
+        data = merge_trends_cache(cached, data)
 
     # Ensure output directory exists
     output_path.parent.mkdir(parents=True, exist_ok=True)

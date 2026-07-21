@@ -4912,13 +4912,13 @@ class DashboardGenerator:
                 continue
 
             try:
-                # Parse ISO timestamp — handle both Z and +00:00 suffixes
+                # Parse ISO timestamp — handle both Z and +00:00 suffixes.
+                # Batch CL: naive timestamps are host-local wall clock (lab CST,
+                # etc.). Prefer astimezone(UTC) so local evening is not treated
+                # as UTC (false age 0 / false future).
                 ts_str_clean = ts_str.replace("Z", "+00:00")
                 ts = datetime.fromisoformat(ts_str_clean)
-                if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=timezone.utc)
-                else:
-                    ts = ts.astimezone(timezone.utc)
+                ts = ts.astimezone(timezone.utc)
                 age_seconds = max((now - ts).total_seconds(), 0.0)
                 age_hours = age_seconds / 3600.0
                 signal_age_hours[signal_key] = round(age_hours, 2)
@@ -4942,10 +4942,7 @@ class DashboardGenerator:
         if producer_ts and "alternative_data" in timestamped_signals:
             try:
                 pts = datetime.fromisoformat(producer_ts.replace("Z", "+00:00"))
-                if pts.tzinfo is None:
-                    pts = pts.replace(tzinfo=timezone.utc)
-                else:
-                    pts = pts.astimezone(timezone.utc)
+                pts = pts.astimezone(timezone.utc)  # Batch CL: naive = local
                 producer_age_hours = max((now - pts).total_seconds(), 0.0) / 3600.0
                 producer_fresh = producer_age_hours * 3600.0 <= ttl_seconds
                 projected_ts = signal_timestamps.get("alternative_data")
@@ -4953,11 +4950,10 @@ class DashboardGenerator:
                 producer_ahead = False
                 if projected_ts:
                     try:
-                        ets = datetime.fromisoformat(str(projected_ts).replace("Z", "+00:00"))
-                        if ets.tzinfo is None:
-                            ets = ets.replace(tzinfo=timezone.utc)
-                        else:
-                            ets = ets.astimezone(timezone.utc)
+                        ets = datetime.fromisoformat(
+                            str(projected_ts).replace("Z", "+00:00")
+                        )
+                        ets = ets.astimezone(timezone.utc)
                         producer_ahead = pts > ets
                     except (ValueError, TypeError):
                         producer_ahead = True

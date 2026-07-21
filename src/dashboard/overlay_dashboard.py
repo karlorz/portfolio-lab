@@ -706,6 +706,21 @@ class OverlayDashboardGenerator:
                 except Exception:  # noqa: BLE001
                     pass
                 save_results_json(payload, output_path=str(public_path))
+                # Batch CL: post-sync lag/hash (same sticky-lag fix as unified/rebalance CJ)
+                try:
+                    from src.dashboard.generator import (
+                        finalize_dual_write_provenance_after_sync,
+                    )
+
+                    payload = finalize_dual_write_provenance_after_sync(
+                        payload,
+                        private_path=private_path,
+                        public_path=public_path,
+                        dual_write_ok=True,
+                        note="post_sync overlay dual-write (Batch CL)",
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
             except OSError as e:
                 logger.warning("overlay public dual-write skipped: %s", e)
                 try:

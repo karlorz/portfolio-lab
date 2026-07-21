@@ -22,12 +22,17 @@ import math
 import os
 import statistics
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 import numpy as np
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.paths import PRICES_JSON, SIGNALS_DIR, DATA_DIR
+
+
+def _utc_now_iso() -> str:
+    """UTC ISO timestamp so staleness parsers (naive→UTC) never see local wall clock."""
+    return datetime.now(timezone.utc).isoformat()
 from src.backtest.metrics import save_results_json
 from src.data.price_cache import get_prices
 from src.data.crypto_fg import get_crypto_fg, CryptoFgData
@@ -499,7 +504,7 @@ class AlternativeDataSignalGenerator:
             confidence /= weight_sum
 
         return AlternativeDataComposite(
-            timestamp=datetime.now().isoformat(),
+            timestamp=_utc_now_iso(),
             composite_score=round(composite, 4),
             confidence=round(confidence, 4),
             regime=self._determine_regime(composite),
@@ -586,8 +591,13 @@ class AlternativeDataSignalGenerator:
         """Validate signal meets quality criteria."""
         if signal.confidence < 0.3:
             return False
-        signal_time = datetime.fromisoformat(signal.timestamp)
-        age_hours = (datetime.now() - signal_time).total_seconds() / 3600
+        ts = str(signal.timestamp).replace("Z", "+00:00")
+        signal_time = datetime.fromisoformat(ts)
+        if signal_time.tzinfo is None:
+            signal_time = signal_time.replace(tzinfo=timezone.utc)
+        else:
+            signal_time = signal_time.astimezone(timezone.utc)
+        age_hours = (datetime.now(timezone.utc) - signal_time).total_seconds() / 3600
         if age_hours > 48:
             return False
         return True
@@ -599,7 +609,7 @@ class AlternativeDataSignalGenerator:
         if signal is None:
             return SignalSnapshot(
                 source="alternative_data",
-                timestamp=datetime.now().isoformat(),
+                timestamp=_utc_now_iso(),
                 value=0.0,
                 confidence=0.0,
                 is_active=False,
