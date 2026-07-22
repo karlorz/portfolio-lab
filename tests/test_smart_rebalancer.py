@@ -812,7 +812,12 @@ class TestDataclassFields:
     def test_cost_budget_tracker_has_correct_fields(self):
         import dataclasses
         fields = {f.name: f for f in dataclasses.fields(CostBudgetTracker)}
-        assert set(fields) == {'annual_limit_pct', 'warning_threshold_pct', 'ytd_costs'}
+        assert set(fields) == {
+            'annual_limit_pct',
+            'warning_threshold_pct',
+            'ytd_costs',
+            'ytd_year',  # Batch DY: calendar year for YTD view
+        }
         assert fields['annual_limit_pct'].type is float
         assert fields['annual_limit_pct'].default == 0.005
         assert fields['warning_threshold_pct'].type is float

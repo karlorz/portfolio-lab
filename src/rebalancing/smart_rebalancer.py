@@ -85,10 +85,60 @@ class CostBudgetTracker:
     annual_limit_pct: float = 0.005     # 0.5% default
     warning_threshold_pct: float = 0.004  # Alert at 80%
     ytd_costs: List[Dict] = field(default_factory=list)
+    # Calendar year for YTD view (Batch DY); None → datetime.now().year
+    ytd_year: Optional[int] = None
+
+    @staticmethod
+    def _entry_year(date_val: Any) -> Optional[int]:
+        text = str(date_val or "").strip()
+        if len(text) >= 4 and text[:4].isdigit():
+            try:
+                return int(text[:4])
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
+    def _entry_day_key(date_val: Any) -> str:
+        """Normalize date to YYYY-MM-DD for dedupe (strip time suffix)."""
+        text = str(date_val or "").strip()
+        if not text:
+            return ""
+        # ISO with T → date part; bare date ok
+        if "T" in text:
+            return text.split("T", 1)[0][:10]
+        return text[:10]
+
+    @staticmethod
+    def _symbols_key(symbols: Any) -> Tuple[str, ...]:
+        if not symbols:
+            return tuple()
+        try:
+            return tuple(sorted(str(s) for s in symbols))
+        except TypeError:
+            return tuple()
+
+    def _active_year(self) -> int:
+        if self.ytd_year is not None:
+            return int(self.ytd_year)
+        return datetime.now().year
+
+    def _costs_in_year(self, year: Optional[int] = None) -> List[Dict]:
+        y = int(year) if year is not None else self._active_year()
+        out: List[Dict] = []
+        for c in self.ytd_costs:
+            if not isinstance(c, dict):
+                continue
+            cy = self._entry_year(c.get("date"))
+            # Missing year → include (legacy / fail-open into current window)
+            if cy is None or cy == y:
+                out.append(c)
+        return out
 
     @property
     def ytd_total_bps(self) -> float:
-        return sum(c.get('cost_bps', 0) for c in self.ytd_costs)
+        # Batch DY: year-scoped sum (calendar YTD view)
+        return sum(float(c.get("cost_bps", 0) or 0) for c in self._costs_in_year())
 
     @property
     def ytd_total_pct(self) -> float:
@@ -99,11 +149,109 @@ class CostBudgetTracker:
         return max(0, self.annual_limit_pct - self.ytd_total_pct)
 
     def add_cost(self, cost_bps: float, date: str, symbols: List[str]):
+        """Append a cost row with composite-key idempotency (Batch DY).
+
+        Exact duplicate of (rounded cost_bps, calendar day, sorted symbols)
+        is skipped so re-runs / double record_rebalance do not inflate YTD.
+        Zero-cost rows are still stored only when non-duplicate (rare audit).
+        """
+        try:
+            bps = float(cost_bps)
+        except (TypeError, ValueError):
+            return
+        day = self._entry_day_key(date)
+        syms = list(symbols or [])
+        key = (round(bps, 4), day, self._symbols_key(syms))
+        for existing in self.ytd_costs:
+            if not isinstance(existing, dict):
+                continue
+            try:
+                ek = (
+                    round(float(existing.get("cost_bps", 0) or 0), 4),
+                    self._entry_day_key(existing.get("date")),
+                    self._symbols_key(existing.get("symbols")),
+                )
+            except (TypeError, ValueError):
+                continue
+            if ek == key:
+                return  # idempotent no-op
         self.ytd_costs.append({
-            'cost_bps': cost_bps,
+            'cost_bps': bps,
             'date': date,
-            'symbols': symbols,
+            'symbols': syms,
         })
+
+    def sanitize_ledger(
+        self,
+        *,
+        as_of_year: Optional[int] = None,
+        drop_prior_years_from_storage: bool = False,
+        drop_zero_cost: bool = True,
+    ) -> Dict[str, Any]:
+        """Dedupe exact cost rows + optional year hygiene (Batch DY).
+
+        Composite key: (cost_bps rounded 4dp, calendar day, sorted symbols).
+        Does not invent costs — only collapses exact dups and zero noise.
+        """
+        year = int(as_of_year) if as_of_year is not None else self._active_year()
+        before = list(self.ytd_costs)
+        before_count = len(before)
+        dropped_zero = 0
+        dropped_duplicate = 0
+        dropped_prior_year = 0
+        seen: set = set()
+        cleaned: List[Dict] = []
+
+        for entry in before:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                bps = float(entry.get("cost_bps", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            day = self._entry_day_key(entry.get("date"))
+            syms = list(entry.get("symbols") or [])
+            cy = self._entry_year(entry.get("date"))
+
+            if drop_prior_years_from_storage and cy is not None and cy < year:
+                dropped_prior_year += 1
+                continue
+            if drop_zero_cost and abs(bps) < 1e-12:
+                dropped_zero += 1
+                continue
+
+            key = (round(bps, 4), day, self._symbols_key(syms))
+            if key in seen:
+                dropped_duplicate += 1
+                continue
+            seen.add(key)
+            cleaned.append(
+                {
+                    "cost_bps": bps,
+                    "date": entry.get("date") if entry.get("date") is not None else day,
+                    "symbols": syms,
+                }
+            )
+
+        self.ytd_costs = cleaned
+        after_count = len(cleaned)
+        changed = (
+            dropped_zero > 0
+            or dropped_duplicate > 0
+            or dropped_prior_year > 0
+            or after_count != before_count
+        )
+        return {
+            "changed": changed,
+            "before_count": before_count,
+            "after_count": after_count,
+            "kept": after_count,
+            "dropped_zero": dropped_zero,
+            "dropped_duplicate": dropped_duplicate,
+            "dropped_prior_year": dropped_prior_year,
+            "as_of_year": year,
+            "ytd_total_bps": self.ytd_total_bps,
+        }
 
     def is_over_budget(self) -> bool:
         return self.ytd_total_pct >= self.annual_limit_pct
@@ -186,6 +334,9 @@ class SmartRebalancingController:
         self.last_rebalance_clock_source: Optional[str] = None
         self.last_rebalance_reconciled: bool = False
         self.last_rebalance_reconciled_from: Optional[str] = None
+        # Batch DY: ledger sanitize meta
+        self.ledger_sanitized: bool = False
+        self.ledger_sanitize_report: Optional[Dict[str, Any]] = None
         self.data_dir = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
         if state_path is not None:
             self.state_path = Path(state_path)
@@ -646,6 +797,8 @@ class SmartRebalancingController:
             "last_rebalance_clock_source": self.last_rebalance_clock_source,
             "last_rebalance_reconciled": bool(self.last_rebalance_reconciled),
             "last_rebalance_reconciled_from": self.last_rebalance_reconciled_from,
+            "ledger_sanitized": bool(self.ledger_sanitized),
+            "ledger_sanitize_report": self.ledger_sanitize_report,
             "deferred_until": (
                 self.deferred_until.isoformat() if self.deferred_until else None
             ),
@@ -702,6 +855,9 @@ class SmartRebalancingController:
         self.last_rebalance_reconciled = bool(data.get("last_rebalance_reconciled"))
         rf = data.get("last_rebalance_reconciled_from")
         self.last_rebalance_reconciled_from = str(rf) if rf else None
+        self.ledger_sanitized = bool(data.get("ledger_sanitized"))
+        rep = data.get("ledger_sanitize_report")
+        self.ledger_sanitize_report = rep if isinstance(rep, dict) else None
 
         du = data.get("deferred_until")
         if du:
@@ -709,6 +865,18 @@ class SmartRebalancingController:
                 self.deferred_until = datetime.fromisoformat(str(du))
             except (TypeError, ValueError):
                 self.deferred_until = None
+
+        # Batch DY: collapse exact-dup / zero-cost pollution on load; persist if changed
+        try:
+            report = self.cost_tracker.sanitize_ledger()
+            if report.get("changed"):
+                self.ledger_sanitized = True
+                self.ledger_sanitize_report = report
+                self.save_state()
+            elif data.get("ledger_sanitized"):
+                self.ledger_sanitized = True
+        except Exception as exc:  # noqa: BLE001 — never fail load on sanitize
+            logger.warning("cost ledger sanitize on load skipped: %s", exc)
 
         return True
 
@@ -755,6 +923,9 @@ class SmartRebalancingController:
             'remaining_budget_ratio_unit': 'portfolio_fraction',
             'is_over_budget': self.cost_tracker.is_over_budget(),
             'is_warning': self.cost_tracker.is_warning(),
+            'ytd_cost_entries': len(self.cost_tracker._costs_in_year()),
+            'ledger_sanitized': bool(self.ledger_sanitized),
+            'ledger_sanitize_report': self.ledger_sanitize_report,
             'last_rebalance': self.last_rebalance.isoformat() if self.last_rebalance else None,
             'last_rebalance_clock_source': self.last_rebalance_clock_source,
             'last_rebalance_reconciled': bool(self.last_rebalance_reconciled),

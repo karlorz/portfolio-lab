@@ -131,3 +131,12 @@
 - ClaudeMd?:      no
 - WorkflowShift?: no
 - Deep-research: event sourcing last_rebalance from RebalanceCompleted / fill event time; venue SSOT
+
+## [2026-07-22] retro | loop cycle: batch-dy-cost-ledger-sanitize
+- Friction:       ytd 214 bps from exact-dup cost rows + zero noise; budget false over
+- Miss:           add_cost was append-only without composite-key idempotency; YTD not year-scoped
+- Improve:        sanitize on load (dedupe/zero); add_cost idempotent; ytd_total year filter
+- Generalize?:    yes (ledger composite-key dedupe; YTD as year view)
+- ClaudeMd?:      no
+- WorkflowShift?: no
+- Deep-research: TCA append-only ledger + composite dedupe; fiscal YTD views not mutable wipe
