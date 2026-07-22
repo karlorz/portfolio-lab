@@ -3175,6 +3175,9 @@ class DashboardGenerator:
                     and row.get("status") == "zero_baseline"
                     and isinstance(row.get("shadow"), dict)
                 ]
+                # Batch DQ: surface concentration SLI on ensemble payload
+                aw_map = weight_rollup.get("active_weights") or {}
+                max_aw = max(aw_map.values()) if aw_map else 0.0
                 ensemble_signal = {
                     "regime": ensemble_result.regime.value,
                     "regime_confidence": ensemble_result.regime_confidence,
@@ -3190,6 +3193,14 @@ class DashboardGenerator:
                     "configured_source_status": configured_source_status,
                     "n_eff": round(getattr(ensemble_result, 'n_eff', 0), 2),
                     "weight_entropy": round(getattr(ensemble_result, 'weight_entropy', 0), 4),
+                    "max_active_weight": round(float(max_aw), 5),
+                    "ensemble_concentration_ok": bool(
+                        float(max_aw) <= float(
+                            weight_rollup.get("per_signal_active_weight_cap")
+                            or DashboardGenerator.PER_SIGNAL_ACTIVE_WEIGHT_CAP
+                        )
+                        + 1e-6
+                    ),
                     "adaptive_learning": self._build_ensemble_adaptive_learning_disclosure(
                         ensemble_result
                     ),
@@ -3903,6 +3914,48 @@ class DashboardGenerator:
             output["health"] = _compact_health_summary(health_report)
         except Exception as e:
             output["health"] = _compact_health_summary({"status": "error", "error": str(e)})
+
+        # Batch DQ: project ensemble concentration SLI onto compact health so
+        # partial writers (health kill refresh, alt patch) that advance
+        # generated_at cannot hide a pre-cap sticky CAR>50% snapshot without
+        # operators noticing via health.ensemble_concentration_ok.
+        try:
+            health = output.get("health")
+            if not isinstance(health, dict):
+                health = {}
+                output["health"] = health
+            ev = output.get("ensemble_voting")
+            if isinstance(ev, dict):
+                aw = ev.get("active_weights") or {}
+                max_aw = float(ev.get("max_active_weight") or 0.0)
+                if not max_aw and isinstance(aw, dict) and aw:
+                    max_aw = float(max(aw.values()))
+                cap = float(
+                    ev.get("per_signal_active_weight_cap")
+                    or DashboardGenerator.PER_SIGNAL_ACTIVE_WEIGHT_CAP
+                )
+                ok = bool(max_aw <= cap + 1e-6) if max_aw or aw else True
+                if "ensemble_concentration_ok" in ev:
+                    ok = bool(ev.get("ensemble_concentration_ok"))
+                health["ensemble_max_active_weight"] = round(max_aw, 5)
+                health["ensemble_per_signal_weight_cap"] = cap
+                health["ensemble_concentration_ok"] = ok
+                health["ensemble_n_eff"] = ev.get("n_eff")
+                if not ok:
+                    health["ensemble_concentration_status"] = "concentrated"
+                    # Degrade compact health status when concentration breaches
+                    if health.get("status") in (None, "ok", "healthy", "unknown"):
+                        health["status"] = "warning"
+                else:
+                    health["ensemble_concentration_status"] = "ok"
+                # Stale partial-patch forensic: if git status is partial_patch,
+                # flag that ensemble may lag full generate (operators check sha).
+                if output.get("generator_git_sha_status") == "partial_patch":
+                    health["ensemble_may_lag_full_generate"] = True
+                else:
+                    health["ensemble_may_lag_full_generate"] = False
+        except Exception as conc_exc:  # noqa: BLE001
+            logger.warning("ensemble concentration health project skipped: %s", conc_exc)
 
         # Fire external alerts on staleness state transitions (+ recovery ownership)
         try:

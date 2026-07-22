@@ -512,6 +512,40 @@ def refresh_signals_health_kill_fields(
     except Exception:  # noqa: BLE001 — never fail kill refresh on elevate
         pass
 
+    # Batch DQ: re-project ensemble concentration from sticky ensemble_voting
+    # so partial patches that advance generated_at still disclose CAR>cap.
+    try:
+        ev = payload.get("ensemble_voting")
+        if isinstance(ev, dict) and isinstance(health, dict):
+            aw = ev.get("active_weights") or {}
+            max_aw = float(ev.get("max_active_weight") or 0.0)
+            if not max_aw and isinstance(aw, dict) and aw:
+                max_aw = float(max(aw.values()))
+            cap = float(ev.get("per_signal_active_weight_cap") or 0.50)
+            ok = bool(max_aw <= cap + 1e-6) if (max_aw or aw) else True
+            if "ensemble_concentration_ok" in ev:
+                ok = bool(ev.get("ensemble_concentration_ok"))
+            health["ensemble_max_active_weight"] = round(max_aw, 5)
+            health["ensemble_per_signal_weight_cap"] = cap
+            health["ensemble_concentration_ok"] = ok
+            health["ensemble_n_eff"] = ev.get("n_eff")
+            health["ensemble_concentration_status"] = (
+                "ok" if ok else "concentrated"
+            )
+            if not ok and health.get("status") in (
+                None,
+                "ok",
+                "healthy",
+                "unknown",
+            ):
+                health["status"] = "warning"
+            health["ensemble_may_lag_full_generate"] = (
+                payload.get("generator_git_sha_status") == "partial_patch"
+                or True  # this path is always a partial patch
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
     payload["health"] = health
     # Partial rewrite must advance top-level generated_at (mtime honesty)
     from datetime import datetime, timezone
@@ -532,6 +566,9 @@ def refresh_signals_health_kill_fields(
             payload.setdefault("last_full_generator_git_sha", prior)
         payload["generator_git_sha"] = None
         payload["generator_git_sha_status"] = "partial_patch"
+    # After honesty stamp, concentration lag flag is definitive for this path
+    if isinstance(payload.get("health"), dict):
+        payload["health"]["ensemble_may_lag_full_generate"] = True
     try:
         text = json.dumps(payload, indent=2)
         signals_path.write_text(text, encoding="utf-8")
