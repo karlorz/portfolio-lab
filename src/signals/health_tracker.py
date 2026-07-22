@@ -324,6 +324,103 @@ class SignalHealthTracker:
         
         self.log_prediction(prediction)
 
+    def count_provenance_rows(
+        self,
+        source: str,
+        *,
+        lookback_days: int = 90,
+        metadata_substring: str = "provenance_batch",
+    ) -> Dict[str, Any]:
+        """Batch DF: count prediction rows with non-empty provenance metadata.
+
+        Used for post-fix shadow IC cohorts (e.g. polarity_policy stamped
+        after Batch DC). Returns counts only — no auto-invert / force-wake.
+        """
+        end_date = datetime.now().strftime("%Y-%m-%d")
+        start_date = (
+            datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=lookback_days)
+        ).strftime("%Y-%m-%d")
+        with sqlite_connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT COUNT(*) FROM signal_predictions
+                WHERE source = ?
+                  AND date(timestamp) BETWEEN date(?) AND date(?)
+                """,
+                (source, start_date, end_date),
+            )
+            n_all = int(cursor.fetchone()[0] or 0)
+            cursor.execute(
+                """
+                SELECT COUNT(*) FROM signal_predictions
+                WHERE source = ?
+                  AND date(timestamp) BETWEEN date(?) AND date(?)
+                  AND metadata IS NOT NULL
+                  AND metadata != ''
+                  AND metadata != '{}'
+                  AND metadata LIKE ?
+                """,
+                (source, start_date, end_date, f"%{metadata_substring}%"),
+            )
+            n_prov = int(cursor.fetchone()[0] or 0)
+            cursor.execute(
+                """
+                SELECT COUNT(*) FROM signal_predictions
+                WHERE source = ?
+                  AND date(timestamp) BETWEEN date(?) AND date(?)
+                  AND metadata IS NOT NULL
+                  AND metadata LIKE ?
+                  AND actual_direction IS NOT NULL
+                """,
+                (source, start_date, end_date, f"%{metadata_substring}%"),
+            )
+            n_labeled = int(cursor.fetchone()[0] or 0)
+            # polarity-stamped cohort (Batch DC+)
+            cursor.execute(
+                """
+                SELECT COUNT(*) FROM signal_predictions
+                WHERE source = ?
+                  AND date(timestamp) BETWEEN date(?) AND date(?)
+                  AND metadata LIKE '%polarity_policy%'
+                """,
+                (source, start_date, end_date),
+            )
+            n_polarity = int(cursor.fetchone()[0] or 0)
+            cursor.execute(
+                """
+                SELECT signal_value, actual_direction FROM signal_predictions
+                WHERE source = ?
+                  AND date(timestamp) BETWEEN date(?) AND date(?)
+                  AND metadata LIKE '%polarity_policy%'
+                  AND actual_direction IS NOT NULL
+                  AND signal_value IS NOT NULL
+                """,
+                (source, start_date, end_date),
+            )
+            pairs = cursor.fetchall()
+        ic_post = None
+        if len(pairs) >= 10:
+            try:
+                signals = [r[0] for r in pairs]
+                actuals = [r[1] for r in pairs]
+                ic_post = self._spearman_rank_correlation(signals, actuals)
+            except Exception:  # noqa: BLE001
+                ic_post = None
+        return {
+            "source": source,
+            "window_days": lookback_days,
+            "n_rows": n_all,
+            "n_with_provenance": n_prov,
+            "n_provenance_labeled": n_labeled,
+            "n_polarity_stamped": n_polarity,
+            "ic_polarity_cohort": None if ic_post is None else round(float(ic_post), 4),
+            "provenance_coverage": (
+                round(n_prov / n_all, 4) if n_all else None
+            ),
+            "policy": "shadow_ic_post_fix_no_auto_invert",
+        }
+
     def repair_neutral_predicted_directions(
         self,
         source: Optional[str] = None,

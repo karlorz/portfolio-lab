@@ -139,6 +139,8 @@ class SignalReading:
     explanation: str = ""
     # Batch CV: inactive readings are kept for disclosure but vote weight forced 0
     is_active: bool = True
+    # Batch DF: provenance for health tracker (pattern, polarity_policy, composite, …)
+    metadata: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -2787,15 +2789,26 @@ class EnsembleVoter:
                     reading.weight = 0.0
                 weighted_signals.append(reading)
 
-        # Log signal predictions for health tracking (v3.12)
+        # Log signal predictions for health tracking (v3.12 / Batch DF provenance)
         try:
             tracker = _get_health_tracker()
             if tracker is not None:
                 for reading in weighted_signals:
+                    meta = getattr(reading, "metadata", None)
+                    if not isinstance(meta, dict):
+                        meta = {}
+                    else:
+                        meta = dict(meta)
+                    # Compact provenance always stamped for post-fix IC cohorts
+                    meta.setdefault("provenance_batch", "df")
+                    if getattr(reading, "explanation", None):
+                        meta.setdefault("explanation", str(reading.explanation)[:200])
+                    meta.setdefault("is_active", bool(getattr(reading, "is_active", True)))
                     tracker.log_prediction_simple(
                         source=reading.source.value,
                         signal_value=reading.value,
                         confidence=reading.confidence,
+                        metadata=meta,
                     )
         except (KeyError, ValueError, TypeError, AttributeError, OSError, sqlite3.Error) as e:
             logger.warning("Health tracking log failed: %s", e)

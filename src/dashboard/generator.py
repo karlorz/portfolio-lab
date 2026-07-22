@@ -2121,7 +2121,7 @@ class DashboardGenerator:
                     "— keep slept; no auto-invert (production health-gate policy)."
                 )
 
-            return {
+            out: Dict[str, Any] = {
                 "source": source,
                 "window_days": 90,
                 "n_rows": n,
@@ -2136,6 +2136,29 @@ class DashboardGenerator:
                 "auto_invert_policy": "disabled",
                 "alignment_issue": issue,
             }
+            # Batch DF: post-fix provenance / polarity cohort coverage
+            try:
+                from src.signals.health_tracker import SignalHealthTracker
+
+                prov = SignalHealthTracker().count_provenance_rows(source)
+                out["provenance"] = prov
+                if (
+                    int(prov.get("n_polarity_stamped") or 0) < 10
+                    and source == "cross_asset_regime_arb"
+                ):
+                    base = issue or ""
+                    out["alignment_issue"] = (
+                        (base + " | ") if base else ""
+                    ) + (
+                        "post_fix_cohort_thin — polarity metadata just started; "
+                        f"n_polarity_stamped={prov.get('n_polarity_stamped', 0)}; "
+                        "shadow IC until labeled provenance sample ≥10; no auto-invert."
+                    )
+                elif prov.get("ic_polarity_cohort") is not None:
+                    out["ic_post_polarity_fix"] = prov.get("ic_polarity_cohort")
+            except Exception:  # noqa: BLE001
+                pass
+            return out
         except Exception:  # noqa: BLE001
             return None
 
