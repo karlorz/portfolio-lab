@@ -2630,11 +2630,19 @@ class DashboardGenerator:
 
         return statuses
 
+    # Batch DP: match EnsembleVoter.DEFAULT_PER_SIGNAL_WEIGHT_CAP for rollup safety
+    PER_SIGNAL_ACTIVE_WEIGHT_CAP = 0.50
+
     @staticmethod
     def _ensemble_active_weights_rollup(
         configured_source_status: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        """Rollup renormed active weights + dropped configured mass after stale drop."""
+        """Rollup renormed active weights + dropped configured mass after stale drop.
+
+        Batch DP: after renorm over contributing arms, clip to 50% per-signal
+        and water-fill so dashboard active_weights never re-concentrates past
+        the voter cap when inactive/slept mass was dropped upstream.
+        """
         active_weights: Dict[str, float] = {}
         dropped = 0.0
         active_mass = 0.0
@@ -2648,15 +2656,74 @@ class DashboardGenerator:
                 active_mass += float(row.get("effective_weight") or 0.0)
             else:
                 dropped += float(row.get("configured_weight") or 0.0)
+
+        cap = DashboardGenerator.PER_SIGNAL_ACTIVE_WEIGHT_CAP
+        capped = False
+        if active_weights:
+            # Renorm to simplex first
+            total0 = sum(max(0.0, float(v)) for v in active_weights.values())
+            if total0 > 0:
+                active_weights = {
+                    k: max(0.0, float(v)) / total0 for k, v in active_weights.items()
+                }
+            # Single contributing arm cannot diversify — leave at 1.0
+            positive = [k for k, v in active_weights.items() if v > 1e-12]
+            if len(positive) >= 2:
+                for _ in range(16):
+                    over = [k for k, v in active_weights.items() if v > cap + 1e-12]
+                    if not over:
+                        break
+                    capped = True
+                    excess = 0.0
+                    for k in over:
+                        excess += active_weights[k] - cap
+                        active_weights[k] = cap
+                    under = [
+                        k for k, v in active_weights.items() if v < cap - 1e-12
+                    ]
+                    if not under:
+                        break
+                    under_sum = sum(active_weights[k] for k in under)
+                    if under_sum <= 0:
+                        share = excess / len(under)
+                        for k in under:
+                            active_weights[k] = min(
+                                cap, active_weights[k] + share
+                            )
+                    else:
+                        scale = (under_sum + excess) / under_sum
+                        for k in under:
+                            active_weights[k] = min(
+                                cap, active_weights[k] * scale
+                            )
+                # Final renorm if clip left mass short
+                total1 = sum(active_weights.values())
+                if total1 > 0 and abs(total1 - 1.0) > 1e-9 and not any(
+                    v > cap + 1e-12 for v in active_weights.values()
+                ):
+                    active_weights = {
+                        k: v / total1 for k, v in active_weights.items()
+                    }
+            active_weights = {
+                k: round(float(v), 5) for k, v in active_weights.items()
+            }
+
+        disclosure = (
+            "active_weights renormalized over contributing sources; "
+            "stale/missing configured mass in dropped_weight_mass"
+        )
+        if capped:
+            disclosure += (
+                f"; Batch DP per-signal cap {cap:.0%} applied after renorm"
+            )
         return {
             "active_weights": active_weights,
             "dropped_weight_mass": round(dropped, 5),
             "active_weight_mass": round(active_mass, 5),
             "active_weights_sum": round(sum(active_weights.values()), 5),
-            "weight_disclosure": (
-                "active_weights renormalized over contributing sources; "
-                "stale/missing configured mass in dropped_weight_mass"
-            ),
+            "weight_disclosure": disclosure,
+            "per_signal_active_weight_cap": cap,
+            "per_signal_active_weight_cap_applied": capped,
         }
 
     @staticmethod

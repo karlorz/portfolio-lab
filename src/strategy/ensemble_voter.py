@@ -2216,6 +2216,12 @@ class EnsembleVoter:
         # 50% per-signal cap — re-apply after those paths (and pin soft-delete).
         weights = self._cap_per_signal_weights(weights, regime.name)
 
+        # Batch DP: inactive_signal arms (e.g. intl RS neutral) still held pipeline
+        # mass after DN cap; _apply_weights_to_readings zeroed them without renorm,
+        # so dashboard active_weights rollup re-concentrated CAR past 50%.
+        # Zero inactive mass, renorm, re-cap before assign.
+        weights = self._zero_inactive_and_recap(weights, readings, regime.name)
+
         # Apply weights to readings
         weighted_signals = self._apply_weights_to_readings(readings, weights)
 
@@ -3062,6 +3068,48 @@ class EnsembleVoter:
             logger.warning("Could not apply turnover-aware weights: %s", e)
         return weights
 
+    def _zero_inactive_and_recap(
+        self,
+        weights: Dict,
+        readings: Dict[SignalSource, SignalReading],
+        regime_name: str,
+    ) -> Dict:
+        """Zero inactive_signal mass, renorm awake arms, re-apply per-signal cap.
+
+        Batch DP: sleeping-expert style — only awake (is_active) arms keep vote
+        mass. Soft-delete stays pinned at 0. Re-cap after renorm so no arm
+        exceeds DEFAULT_PER_SIGNAL_WEIGHT_CAP once inactive mass is dropped.
+        """
+        if not weights or not readings:
+            return weights
+        out = {k: float(v or 0.0) for k, v in weights.items()}
+        soft = self._static_zero_baseline_sources(regime_name)
+        inactive: list = []
+        for source, reading in readings.items():
+            if source in soft:
+                out[source] = 0.0
+                continue
+            if not getattr(reading, "is_active", True):
+                if float(out.get(source, 0.0) or 0.0) > 1e-12:
+                    inactive.append(
+                        source.value if hasattr(source, "value") else str(source)
+                    )
+                out[source] = 0.0
+        for src in soft:
+            if src in out:
+                out[src] = 0.0
+        total = sum(max(0.0, v) for v in out.values())
+        if total > 0 and abs(total - 1.0) > 1e-9:
+            out = {k: max(0.0, float(v or 0.0)) / total for k, v in out.items()}
+        out = self._cap_per_signal_weights(out, regime_name)
+        if inactive:
+            logger.info(
+                "Batch DP: redistributed mass from %d inactive_signal arm(s): %s",
+                len(inactive),
+                ",".join(inactive),
+            )
+        return out
+
     def _apply_weights_to_readings(
         self,
         readings: Dict[SignalSource, SignalReading],
@@ -3073,6 +3121,7 @@ class EnsembleVoter:
             if source in weights:
                 # Batch CV: inactive snapshots stay in the vote trail for
                 # disclosure (source_breakdown) but must not move consensus.
+                # Batch DP: pipeline already zeroed+renormed inactive mass.
                 if getattr(reading, "is_active", True):
                     reading.weight = weights[source]
                 else:
