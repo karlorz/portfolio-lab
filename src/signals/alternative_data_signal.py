@@ -349,8 +349,10 @@ class AlternativeDataSignalGenerator:
         # Weighted blend: more weight on medium term
         blended = 0.3 * mom_1m + 0.4 * mom_3m + 0.3 * mom_6m
 
-        # Scale to -1..+1 (SPY typical 3m momentum ±5-12%)
-        value = max(-1.0, min(1.0, blended / 0.06))
+        # Batch DE: tanh soft-scale (was hard clip blended/0.06 → perpetual +1.0
+        # in moderate bull trends, dominating composite long-bias / IC collapse).
+        # Scale so ~6% blended maps near 0.76, not hard 1.0; preserves rank.
+        value = float(math.tanh(blended / 0.08))
 
         # Confidence: higher with consistent direction across timeframes
         directions = [mom_1m > 0, mom_3m > 0, mom_6m > 0]
@@ -366,6 +368,7 @@ class AlternativeDataSignalGenerator:
                 "spy_3m": round(mom_3m * 100, 2),
                 "spy_6m": round(mom_6m * 100, 2),
                 "direction_consistency": consistency,
+                "scale": "tanh_0.08",
             },
         )
 
@@ -444,10 +447,9 @@ class AlternativeDataSignalGenerator:
         value = 1.0 - (fg_data.value / 50.0)
         value = max(-1.0, min(1.0, value))
         
-        # Confidence: higher at extremes (0 or 100), lower at neutral (50)
-        # 0 or 100 -> 0.9
-        # 50 -> 0.4
-        confidence = 0.9 - 0.5 * (abs(fg_data.value - 50) / 50)
+        # Batch DE: confidence was inverted vs docstring (extremes got LOW conf).
+        # Correct: higher at extremes (0 or 100) → 0.9; neutral (50) → 0.4
+        confidence = 0.4 + 0.5 * (abs(fg_data.value - 50) / 50)
         confidence = max(0.3, min(0.9, confidence))
         
         return ComponentSignal(
@@ -458,6 +460,7 @@ class AlternativeDataSignalGenerator:
                 "fg_value": fg_data.value,
                 "fg_classification": fg_data.classification,
                 "api_timestamp": fg_data.timestamp,
+                "confidence_policy": "extremes_high_batch_de",
             },
         )
 

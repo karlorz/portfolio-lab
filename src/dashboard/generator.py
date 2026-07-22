@@ -1601,6 +1601,8 @@ class DashboardGenerator:
     # on *all* horizons (30/60/90) so a single short-window bounce cannot re-arm.
     IC_REENTRY_EPS: float = 0.02
     IC_REENTRY_HORIZONS: tuple[int, ...] = (30, 60, 90)
+    # Batch DE: short-horizon IC for half-life / recent collapse disclosure
+    IC_SHORT_HORIZON_DAYS: int = 14
 
     @staticmethod
     def _evaluate_ic_reentry(
@@ -1713,6 +1715,7 @@ class DashboardGenerator:
                     except Exception:  # noqa: BLE001
                         return None
 
+                ic_14 = _safe_ic(int(DashboardGenerator.IC_SHORT_HORIZON_DAYS))
                 ic_30 = _safe_ic(30)
                 ic_60 = _safe_ic(60)
                 ic_90 = ic_val if ic_val is not None else _safe_ic(90)
@@ -1729,11 +1732,13 @@ class DashboardGenerator:
                     health_score=hs_f,
                     half_life=hl_f,
                     reentry=reentry,
+                    ic_14d=ic_14,
                 )
-                out[str(name)] = {
+                row: Dict[str, Any] = {
                     "status": status,
                     "health_score": None if hs_f is None else round(hs_f, 4),
                     "ic": None if ic_val is None else round(ic_val, 4),
+                    "ic_14d": None if ic_14 is None else round(ic_14, 4),
                     "ic_30d": None if ic_30 is None else round(ic_30, 4),
                     "ic_60d": None if ic_60 is None else round(ic_60, 4),
                     "ic_90d": None if ic_90 is None else round(ic_90, 4),
@@ -1745,9 +1750,78 @@ class DashboardGenerator:
                     "reentry_eligible": reentry["reentry_eligible"],
                     "recovery_hint": hint,
                 }
+                # Batch DE: alt_data component long-bias / saturation diagnostic
+                if str(name) == "alternative_data":
+                    comp = DashboardGenerator._alt_data_component_bias_diagnostic()
+                    if comp:
+                        row["component_bias"] = comp
+                        if comp.get("bias_issue") and not reentry.get("reentry_eligible"):
+                            row["recovery_hint"] = (
+                                f"{hint} | components: {comp['bias_issue']}"
+                            )
+                out[str(name)] = row
             except Exception:  # noqa: BLE001
                 continue
         return out
+
+    @staticmethod
+    def _alt_data_component_bias_diagnostic() -> Dict[str, Any] | None:
+        """Batch DE: live component saturation / long-bias for alternative_data."""
+        try:
+            from src.paths import DATA_DIR
+            import json
+
+            path = DATA_DIR / "signals" / "alternative_data_latest.json"
+            if not path.exists():
+                path = DATA_DIR / "alternative_data_state.json"
+            if not path.exists():
+                return None
+            data = json.loads(path.read_text())
+            raw = data.get("raw_data") if isinstance(data.get("raw_data"), dict) else data
+            components = raw.get("components") if isinstance(raw, dict) else None
+            if not isinstance(components, dict) or not components:
+                return None
+            vals = {}
+            saturated = []
+            n_pos = 0
+            n = 0
+            for k, v in components.items():
+                try:
+                    fv = float(v)
+                except (TypeError, ValueError):
+                    continue
+                vals[str(k)] = round(fv, 4)
+                n += 1
+                if fv > 0:
+                    n_pos += 1
+                if abs(fv) >= 0.95:
+                    saturated.append(str(k))
+            pos_rate = (n_pos / n) if n else None
+            try:
+                composite = float(raw.get("composite_score"))
+            except (TypeError, ValueError):
+                composite = None
+            issue = None
+            if saturated and pos_rate is not None and pos_rate >= 0.6:
+                issue = (
+                    f"component_saturation({','.join(saturated)}) with "
+                    f"{pos_rate:.0%} components positive — composite long-bias risk; "
+                    "Batch DE soft-scales broad_momentum; keep slept until multi-horizon IC>eps."
+                )
+            elif pos_rate is not None and pos_rate >= 0.85:
+                issue = (
+                    f"component_long_bias ({pos_rate:.0%} positive) — "
+                    "macro composite rarely bears; do not force-wake on IC30 alone."
+                )
+            return {
+                "composite_score": composite,
+                "components": vals,
+                "component_positive_rate": None if pos_rate is None else round(pos_rate, 4),
+                "saturated_components": saturated,
+                "bias_issue": issue,
+            }
+        except Exception:  # noqa: BLE001
+            return None
 
     @staticmethod
     def _health_recovery_hint(
@@ -1759,8 +1833,20 @@ class DashboardGenerator:
         health_score: float | None,
         half_life: float | None,
         reentry: Dict[str, Any] | None = None,
+        ic_14d: float | None = None,
     ) -> str:
-        """Operator-facing recovery guidance for slept/degraded arms (Batch CZ/DA)."""
+        """Operator-facing recovery guidance for slept/degraded arms (Batch CZ/DA/DE)."""
+        # Batch DE: very-short IC collapse overrides optimistic mid-window bounce
+        if (
+            ic_14d is not None
+            and ic_14d < -0.1
+            and isinstance(reentry, dict)
+            and not reentry.get("reentry_eligible")
+        ):
+            return (
+                f"Recent IC14d={ic_14d:.3f} collapse — wait for multi-horizon recovery "
+                "(14d then 30/60/90); do not force-wake on older positive windows."
+            )
         # Batch DA: prefer multi-horizon reentry state when present
         if isinstance(reentry, dict):
             if reentry.get("reentry_eligible"):
