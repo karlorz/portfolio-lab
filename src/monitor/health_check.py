@@ -48,6 +48,7 @@ __all__ = [
     "apply_ops_monitor_to_dashboard_health",
     "reconcile_monitor_health_with_disk_ssot",
     "update_graduation_circuit_breaker_state",
+    "attach_shared_freshness_slis_to_ops_report",
 ]
 
 HEALTH_PATH = Path(os.environ.get("HEALTH_CHECK_PATH", str(DATA_DIR / "health.json")))
@@ -1550,6 +1551,102 @@ def _compute_system_status(checks: dict, circuit: dict) -> str:
     return "unknown"
 
 
+def attach_shared_freshness_slis_to_ops_report(
+    report: dict[str, Any] | None,
+    *,
+    data_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Attach mirror-lag + execution-timeline SLIs to monitor health_ops (Batch EK).
+
+    Deep-research: ops health report and compact dashboard health must share the
+    same freshness metrics so operators do not see split-brain (signals.health
+    shows rewrite_inflated / lagging while health_ops is silent).
+    """
+    if not isinstance(report, dict):
+        report = {}
+
+    # --- repo public/data mirror lag (same probe as compact signals.health) ---
+    try:
+        from src.dashboard.generator import project_repo_public_mirror_lag_onto_health
+        from src.monitor.repo_public_mirror_lag import summarize_repo_public_mirror_lag
+
+        lag_summary = summarize_repo_public_mirror_lag()
+        projected: dict[str, Any] = {}
+        projected = project_repo_public_mirror_lag_onto_health(projected, lag_summary)
+        # Top-level keys for health_ops consumers (match compact naming)
+        for key in (
+            "repo_public_mirror_lagging_count",
+            "repo_public_mirror_total",
+            "repo_public_mirror_lagging_paths",
+            "repo_public_mirror_lag_status",
+            "repo_public_mirror_lag_badge",
+            "repo_public_mirror_lag_policy",
+            "repo_public_mirror_source",
+            "repo_public_mirror_dest",
+        ):
+            if key in projected:
+                report[key] = projected[key]
+        report["repo_public_mirror_lag"] = {
+            "lagging_count": projected.get("repo_public_mirror_lagging_count"),
+            "total": projected.get("repo_public_mirror_total"),
+            "status": projected.get("repo_public_mirror_lag_status"),
+            "badge": projected.get("repo_public_mirror_lag_badge"),
+            "paths": projected.get("repo_public_mirror_lagging_paths"),
+            "source": projected.get("repo_public_mirror_source"),
+            "dest": projected.get("repo_public_mirror_dest"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("ops report mirror lag SLI skipped: %s", exc)
+        report.setdefault("repo_public_mirror_lag_status", "unknown")
+
+    # --- rebalance execution timeline (disk panel, same as Batch EI) ---
+    try:
+        from src.dashboard.generator import project_execution_timeline_onto_health
+
+        root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+        rebalance_health_panel: dict[str, Any] | None = None
+        for path in (
+            root / "rebalance_health.json",
+            Path(PUBLIC_DATA_DIR) / "rebalance_health.json",
+        ):
+            if not path.is_file():
+                continue
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if isinstance(loaded, dict):
+                rebalance_health_panel = loaded
+                break
+        projected_tl: dict[str, Any] = {}
+        projected_tl = project_execution_timeline_onto_health(
+            projected_tl, rebalance_health_panel
+        )
+        for key in (
+            "rebalance_execution_timeline_status",
+            "rebalance_execution_timeline_badge",
+            "rebalance_unique_execution_days",
+            "rebalance_raw_history_entries",
+            "rebalance_snapshot_rewrite_files",
+            "rebalance_execution_timeline_policy",
+        ):
+            if key in projected_tl:
+                report[key] = projected_tl[key]
+        report["rebalance_execution_timeline"] = {
+            "status": projected_tl.get("rebalance_execution_timeline_status"),
+            "badge": projected_tl.get("rebalance_execution_timeline_badge"),
+            "unique_days": projected_tl.get("rebalance_unique_execution_days"),
+            "raw_entries": projected_tl.get("rebalance_raw_history_entries"),
+            "rewrite_files": projected_tl.get("rebalance_snapshot_rewrite_files"),
+            "source": "disk" if rebalance_health_panel is not None else "missing",
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("ops report execution timeline SLI skipped: %s", exc)
+        report.setdefault("rebalance_execution_timeline_status", "unknown")
+
+    return report
+
+
 def _stamp_health_self_job_running_success(freshness: dict[str, Any]) -> None:
     """Overwrite portfolio-lab-health row so a successful run does not publish prior error.
 
@@ -1706,6 +1803,15 @@ def run_health_check() -> dict:
                 )
         except Exception as grad_exc:  # noqa: BLE001 — never fail health on grad
             logger.warning("Graduation refresh after CB update failed: %s", grad_exc)
+
+    # Batch EK: share freshness SLIs with compact signals.health (deep-research:
+    # dual surfaces must not diverge on mirror lag / execution timeline).
+    try:
+        report = attach_shared_freshness_slis_to_ops_report(
+            report, data_dir=Path(DATA_DIR)
+        )
+    except Exception as sli_exc:  # noqa: BLE001 — never fail health on SLI attach
+        logger.warning("Shared freshness SLI attach skipped: %s", sli_exc)
 
     try:
         from src.dashboard.generator import _stamp_generator_git_sha
