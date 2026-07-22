@@ -431,8 +431,11 @@ class CrossAssetRegimeArbDetector:
                     f"Gold weakening ({gd.value}) while equity neutral — early recovery pattern")
 
         # Equity diverging from bonds/gold (broad catch-all for remaining active divergences)
+        # Batch DC: sign must follow equity regime. Prior always-positive magnitude
+        # biased ~96% of live predictions long (IC≈−0.30 vs SPY labels). BEAR → negative.
         if eq != AssetRegime.NEUTRAL:
-            sig = np.clip(0.15 * eq_str, 0.02, 0.3)
+            mag = float(np.clip(0.15 * eq_str, 0.02, 0.3))
+            sig = mag if eq == AssetRegime.BULL else -mag
             return (DivergencePattern.EQUITY_ROTATION, sig,
                     f"Equity ({eq.value}) diverging from bonds ({bd.value}) and gold ({gd.value}) — sector rotation")
 
@@ -557,30 +560,49 @@ class CrossAssetRegimeArbDetector:
                 "explanation": "Cross-asset regime arb unavailable (no data)",
             }
 
+        pattern = signal.divergence.pattern
+        sv = float(signal.signal_value)
+
+        # Batch DC: map pattern → per-asset polarity for ensemble equity bias.
+        # RISK_ROTATION's canonical signal_value is a positive "alert" magnitude
+        # (gold/safe-haven interest) — SPY must not inherit that long bias.
+        if pattern == DivergencePattern.NO_DIVERGENCE:
+            spy_sv = 0.0
+        elif pattern == DivergencePattern.RISK_ROTATION:
+            spy_sv = -abs(sv)
+        else:
+            spy_sv = sv
+
         asset_signals = {
-            "SPY": signal.signal_value if signal.divergence.pattern != DivergencePattern.NO_DIVERGENCE else 0.0,
-            "TLT": signal.signal_value if signal.divergence.pattern in (
+            "SPY": spy_sv,
+            "TLT": sv if pattern in (
                 DivergencePattern.FLIGHT_TO_SAFETY,
                 DivergencePattern.INFLATION_FEAR,
             ) else 0.0,
-            "GLD": signal.signal_value if signal.divergence.pattern in (
+            "GLD": abs(sv) if pattern in (
                 DivergencePattern.RISK_ROTATION,
                 DivergencePattern.INFLATION_FEAR,
             ) else 0.0,
         }
 
+        # Ensemble scalar follows SPY polarity (health IC is vs SPY labels).
+        ensemble_value = spy_sv
+
         return {
             "active": signal.active,
-            "signal_value": signal.signal_value,
+            "signal_value": ensemble_value,
             "confidence": signal.overall_conviction,
             "timestamp": signal.timestamp,
             "asset_signals": asset_signals,
-            "pattern": signal.divergence.pattern.value,
+            "pattern": pattern.value,
             "explanation": signal.divergence.explanation,
             "equity_regime": signal.equity.asset_regime.value,
             "bond_regime": signal.bonds.regime.value,
             "gold_regime": signal.gold.regime.value,
             "persistence_days": signal.divergence.persistence_days,
+            # Batch DC: raw classifier magnitude before SPY polarity map
+            "classifier_signal_value": sv,
+            "polarity_policy": "no_auto_invert_spy_mapped",
         }
 
     def get_signal_snapshot(self):

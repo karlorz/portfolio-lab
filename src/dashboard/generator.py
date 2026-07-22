@@ -1925,7 +1925,7 @@ class DashboardGenerator:
 
     @staticmethod
     def _label_alignment_diagnostic(source: str) -> Dict[str, Any] | None:
-        """Batch DB: predict-direction vs |signal| deadband honesty for slept arms."""
+        """Batch DB/DC: deadband honesty + polarity bias (no auto-invert)."""
         try:
             from src.signals.health_tracker import SignalHealthTracker
             from src.paths import MARKET_DB
@@ -1941,7 +1941,9 @@ class DashboardGenerator:
                       SUM(CASE WHEN ABS(signal_value) >= ? AND predicted_direction = 0
                                THEN 1 ELSE 0 END) AS mislabeled_neutral,
                       SUM(CASE WHEN ABS(signal_value) >= ? THEN 1 ELSE 0 END) AS abs_ge_db,
-                      AVG(ABS(signal_value)) AS mean_abs
+                      AVG(ABS(signal_value)) AS mean_abs,
+                      SUM(CASE WHEN signal_value > 0 THEN 1 ELSE 0 END) AS n_pos,
+                      SUM(CASE WHEN signal_value < 0 THEN 1 ELSE 0 END) AS n_neg
                     FROM signal_predictions
                     WHERE source = ?
                       AND signal_value IS NOT NULL
@@ -1949,14 +1951,48 @@ class DashboardGenerator:
                     """,
                     (deadband, deadband, source),
                 ).fetchone()
+                # polarity: raw vs sign-flipped Spearman IC (Batch DC)
+                pairs = conn.execute(
+                    """
+                    SELECT signal_value, actual_direction
+                    FROM signal_predictions
+                    WHERE source = ?
+                      AND signal_value IS NOT NULL
+                      AND actual_direction IS NOT NULL
+                      AND date(timestamp) >= date('now', '-90 day')
+                    """,
+                    (source,),
+                ).fetchall()
             if not row or not row[0]:
                 return None
-            n, pred0, mislab, abs_ge, mean_abs = row
+            n, pred0, mislab, abs_ge, mean_abs, n_pos, n_neg = row
             n = int(n or 0)
             pred0 = int(pred0 or 0)
             mislab = int(mislab or 0)
             abs_ge = int(abs_ge or 0)
+            n_pos = int(n_pos or 0)
+            n_neg = int(n_neg or 0)
             rate_pred0 = (pred0 / n) if n else None
+            pos_rate = (n_pos / n) if n else None
+
+            ic_raw = None
+            ic_flipped = None
+            if len(pairs) >= 10:
+                try:
+                    import numpy as np
+                    from scipy.stats import spearmanr
+
+                    s = np.asarray([p[0] for p in pairs], dtype=float)
+                    a = np.asarray([p[1] for p in pairs], dtype=float)
+                    ic_raw = float(spearmanr(s, a).statistic)
+                    ic_flipped = float(spearmanr(-s, a).statistic)
+                    if ic_raw != ic_raw:  # NaN
+                        ic_raw = None
+                        ic_flipped = None
+                except Exception:  # noqa: BLE001
+                    ic_raw = None
+                    ic_flipped = None
+
             issue = None
             if n and rate_pred0 is not None and rate_pred0 > 0.9 and abs_ge > 0:
                 issue = (
@@ -1964,6 +2000,31 @@ class DashboardGenerator:
                     f"while |signal| often ≥ {deadband:g}; accuracy health is uninformative; "
                     "prefer multi-horizon IC; repair via repair_neutral_predicted_directions."
                 )
+            elif (
+                pos_rate is not None
+                and pos_rate > 0.85
+                and ic_raw is not None
+                and ic_raw < -0.05
+                and ic_flipped is not None
+                and ic_flipped > 0
+            ):
+                issue = (
+                    "sign_bias_long_with_negative_ic — predictions overwhelmingly "
+                    f"positive ({pos_rate:.0%}) while IC={ic_raw:.3f}; flipped IC≈"
+                    f"{ic_flipped:.3f}. Do NOT auto-invert; fix classifier polarity "
+                    "(Batch DC EQUITY_ROTATION / SPY map) and shadow-monitor."
+                )
+            elif (
+                ic_raw is not None
+                and ic_raw < -0.1
+                and ic_flipped is not None
+                and ic_flipped > abs(ic_raw) * 0.5
+            ):
+                issue = (
+                    f"polarity_flip_hypothesis IC={ic_raw:.3f} vs flipped={ic_flipped:.3f} "
+                    "— keep slept; no auto-invert (production health-gate policy)."
+                )
+
             return {
                 "source": source,
                 "window_days": 90,
@@ -1973,6 +2034,10 @@ class DashboardGenerator:
                 "abs_signal_ge_deadband": abs_ge,
                 "mean_abs_signal": None if mean_abs is None else round(float(mean_abs), 4),
                 "direction_deadband": deadband,
+                "signal_positive_rate": None if pos_rate is None else round(pos_rate, 4),
+                "ic_raw": None if ic_raw is None else round(ic_raw, 4),
+                "ic_sign_flipped": None if ic_flipped is None else round(ic_flipped, 4),
+                "auto_invert_policy": "disabled",
                 "alignment_issue": issue,
             }
         except Exception:  # noqa: BLE001
@@ -2143,7 +2208,7 @@ class DashboardGenerator:
                 if status == "health_sleep" and "reentry" in m:
                     entry["reentry"] = m["reentry"]
                     entry["reentry_eligible"] = bool(m.get("reentry_eligible"))
-                # Batch DB: label/direction alignment for slept arms
+                # Batch DB/DC: label/direction/polarity for slept arms
                 if status == "health_sleep":
                     diag = DashboardGenerator._label_alignment_diagnostic(source)
                     if diag:
@@ -2152,6 +2217,19 @@ class DashboardGenerator:
                             entry["reason"] = (
                                 f"{entry['reason']} | label: {diag['alignment_issue']}"
                             )
+                            # Prefer polarity guidance over generic deep-neg when present
+                            if "auto_invert" in (diag.get("alignment_issue") or "").lower() or (
+                                "sign_bias" in (diag.get("alignment_issue") or "")
+                                or "polarity" in (diag.get("alignment_issue") or "")
+                            ):
+                                entry["recovery_hint"] = (
+                                    "Polarity/sign-bias detected — do not auto-invert; "
+                                    "Batch DC maps EQUITY_ROTATION to equity regime sign; "
+                                    "shadow-monitor IC after classifier fix before reentry."
+                                )
+                                entry["reason"] = (
+                                    f"{entry['reason']} | recovery: {entry['recovery_hint']}"
+                                )
             statuses.append(entry)
 
         # Renormalize over contributors so sum(active_weight) ≈ 1 when any active
