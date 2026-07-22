@@ -900,6 +900,10 @@ class TestModuleExports:
             'MarketConditions', 'RebalanceDecisionResult',
             'CostBudgetTracker', 'SmartRebalancingController',
             'create_sample_portfolio',
+            # Batch EA: event-sourced cost ledger rebuild from order fills
+            'collect_unique_order_fills',
+            'estimate_day_cost_bps_from_fills',
+            'rebuild_ytd_costs_from_order_fills',
         }
         from src.rebalancing import smart_rebalancer as mod
         assert set(mod.__all__) == expected

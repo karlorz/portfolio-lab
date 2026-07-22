@@ -354,12 +354,190 @@ class CostBudgetTracker:
         return self.ytd_total_pct >= self.warning_threshold_pct
 
 
-from src.costs.etf_cost_table import ETF_COST_BPS, DEFAULT_COST_BPS as _DEFAULT_COST_BPS
+from src.costs.etf_cost_table import (
+    ETF_COST_BPS,
+    DEFAULT_COST_BPS as _DEFAULT_COST_BPS,
+    get_cost_bps as _get_etf_cost_bps,
+)
 
 logger = logging.getLogger(__name__)
 
 
-__all__ = ['RebalanceDecision', 'UrgencyLevel', 'PortfolioSnapshot', 'MarketConditions', 'RebalanceDecisionResult', 'CostBudgetTracker', 'SmartRebalancingController', 'create_sample_portfolio']
+__all__ = [
+    'RebalanceDecision',
+    'UrgencyLevel',
+    'PortfolioSnapshot',
+    'MarketConditions',
+    'RebalanceDecisionResult',
+    'CostBudgetTracker',
+    'SmartRebalancingController',
+    'create_sample_portfolio',
+    'collect_unique_order_fills',
+    'estimate_day_cost_bps_from_fills',
+    'rebuild_ytd_costs_from_order_fills',
+]
+
+
+def _fill_notional(order: Dict[str, Any]) -> float:
+    for key in ("fill_value", "estimated_value", "value", "notional"):
+        if order.get(key) is not None:
+            try:
+                return abs(float(order.get(key)))
+            except (TypeError, ValueError):
+                continue
+    # qty * price fallback
+    try:
+        qty = float(order.get("fill_shares") or order.get("shares") or 0)
+        px = float(order.get("fill_price") or order.get("estimated_price") or 0)
+        return abs(qty * px)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def collect_unique_order_fills(
+    data_dir: str | Path,
+    *,
+    year: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """Collect unique fills from order-history-*.json (dedupe snapshot rewrites).
+
+    Daily files rewrite the same orders.jsonl tail with file date=today (Batch DS).
+    Composite key: (event timestamp, symbol, side, notional rounded 2dp).
+    """
+    root = Path(data_dir)
+    seen: set = set()
+    fills: List[Dict[str, Any]] = []
+    for path in sorted(root.glob("order-history-*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        orders = payload.get("recent_orders")
+        if not isinstance(orders, list) or not orders:
+            orders = payload.get("orders")
+        if not isinstance(orders, list):
+            continue
+        for order in orders:
+            if not isinstance(order, dict):
+                continue
+            ts_raw = order.get("timestamp")
+            if not ts_raw:
+                continue
+            ts_text = str(ts_raw).strip().replace("Z", "+00:00")
+            try:
+                if "T" in ts_text:
+                    dt = datetime.fromisoformat(ts_text)
+                else:
+                    dt = datetime.strptime(ts_text[:10], "%Y-%m-%d")
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                else:
+                    dt = dt.astimezone(timezone.utc)
+            except (TypeError, ValueError):
+                continue
+            if year is not None and dt.year != int(year):
+                continue
+            symbol = str(order.get("symbol") or "?").upper()
+            side = str(order.get("side") or "").lower()
+            notional = _fill_notional(order)
+            if notional <= 0:
+                continue
+            key = (dt.isoformat(), symbol, side, round(notional, 2))
+            if key in seen:
+                continue
+            seen.add(key)
+            fills.append(
+                {
+                    "timestamp": dt.isoformat(),
+                    "date": dt.strftime("%Y-%m-%d"),
+                    "symbol": symbol,
+                    "side": side,
+                    "fill_value": notional,
+                    "reason": order.get("reason"),
+                    "source_file": path.name,
+                }
+            )
+    fills.sort(key=lambda f: f["timestamp"])
+    return fills
+
+
+def estimate_day_cost_bps_from_fills(
+    fills: List[Dict[str, Any]],
+    *,
+    portfolio_value: float = 100_000.0,
+) -> float:
+    """Estimate portfolio-level cost bps for one rebalance day from fills.
+
+    Per-fill: portfolio_bps += (notional / portfolio_value) * etf_one_way_bps.
+    Uses centralized ETF cost table (SPY 2 / GLD 5 / TLT 8).
+    """
+    if portfolio_value <= 0:
+        portfolio_value = 100_000.0
+    total = 0.0
+    for fill in fills:
+        if not isinstance(fill, dict):
+            continue
+        try:
+            notional = abs(float(fill.get("fill_value") or 0))
+        except (TypeError, ValueError):
+            continue
+        if notional <= 0:
+            continue
+        sym = str(fill.get("symbol") or "")
+        one_way = float(_get_etf_cost_bps(sym))
+        total += (notional / portfolio_value) * one_way
+    return round(total, 4)
+
+
+def rebuild_ytd_costs_from_order_fills(
+    data_dir: str | Path,
+    *,
+    year: Optional[int] = None,
+    portfolio_value: float = 100_000.0,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Project YTD cost rows from unique order fills grouped by event day.
+
+    Returns (rows, meta). Rows are suitable for CostBudgetTracker.ytd_costs.
+    Does not invent costs beyond ETF table × notional share of portfolio.
+    """
+    y = int(year) if year is not None else datetime.now().year
+    fills = collect_unique_order_fills(data_dir, year=y)
+    by_day: Dict[str, List[Dict[str, Any]]] = {}
+    for fill in fills:
+        by_day.setdefault(fill["date"], []).append(fill)
+
+    rows: List[Dict[str, Any]] = []
+    for day in sorted(by_day.keys()):
+        day_fills = by_day[day]
+        symbols = sorted({f["symbol"] for f in day_fills})
+        bps = estimate_day_cost_bps_from_fills(
+            day_fills, portfolio_value=portfolio_value
+        )
+        if bps <= 0:
+            continue
+        rows.append(
+            {
+                "cost_bps": bps,
+                "date": day,
+                "symbols": symbols,
+                "source": "order_fill_rebuild",
+                "fill_count": len(day_fills),
+                "fill_notional": round(
+                    sum(float(f.get("fill_value") or 0) for f in day_fills), 2
+                ),
+            }
+        )
+    meta = {
+        "year": y,
+        "unique_fills": len(fills),
+        "event_days": len(rows),
+        "portfolio_value": portfolio_value,
+        "ytd_total_bps": round(sum(r["cost_bps"] for r in rows), 4),
+        "source": "order_fill_rebuild",
+    }
+    return rows, meta
 
 class SmartRebalancingController:
     """
@@ -438,6 +616,10 @@ class SmartRebalancingController:
         # Batch DY: ledger sanitize meta
         self.ledger_sanitized: bool = False
         self.ledger_sanitize_report: Optional[Dict[str, Any]] = None
+        # Batch EA: ledger provenance from order-fill rebuild
+        self.ledger_source: Optional[str] = None
+        self.ledger_rebuild_meta: Optional[Dict[str, Any]] = None
+        self.ytd_costs_superseded: Optional[List[Dict]] = None
         self.data_dir = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
         if state_path is not None:
             self.state_path = Path(state_path)
@@ -837,6 +1019,78 @@ class SmartRebalancingController:
             "source": source,
         }
 
+    def rebuild_cost_ledger_from_order_history(
+        self,
+        *,
+        year: Optional[int] = None,
+        portfolio_value: Optional[float] = None,
+        data_dir: Optional[str | Path] = None,
+        persist: bool = True,
+        only_if_polluted: bool = False,
+    ) -> Dict[str, Any]:
+        """Replace YTD costs with event-sourced estimate from order fills (Batch EA).
+
+        Archives prior ``ytd_costs`` under ``ytd_costs_superseded`` for audit.
+        Order log is SSOT; polluted manual/test rows are not invented costs.
+        """
+        root = Path(data_dir) if data_dir is not None else self.data_dir
+        y = int(year) if year is not None else datetime.now().year
+        pv = float(portfolio_value) if portfolio_value is not None else 100_000.0
+
+        if only_if_polluted:
+            # Heuristic: many same-day synthetic rows or already over budget with
+            # no order_fill_rebuild source → rebuild
+            sources = {
+                str(c.get("source") or "")
+                for c in self.cost_tracker.ytd_costs
+                if isinstance(c, dict)
+            }
+            if "order_fill_rebuild" in sources and not self.cost_tracker.is_over_budget():
+                return {
+                    "rebuilt": False,
+                    "reason": "already_fill_sourced_and_under_budget",
+                    "ytd_total_bps": self.cost_tracker.ytd_total_bps,
+                }
+
+        rows, meta = rebuild_ytd_costs_from_order_fills(
+            root, year=y, portfolio_value=pv
+        )
+        if not rows and not list(root.glob("order-history-*.json")):
+            return {
+                "rebuilt": False,
+                "reason": "no_order_history_files",
+                "ytd_total_bps": self.cost_tracker.ytd_total_bps,
+            }
+
+        prior = list(self.cost_tracker.ytd_costs)
+        prior_total = self.cost_tracker.ytd_total_bps
+        self.ytd_costs_superseded = prior
+        self.cost_tracker.ytd_costs = rows
+        # Clear quarantine of synthetic pollution; re-sanitize under cap
+        self.cost_tracker.quarantined_costs = []
+        san = self.cost_tracker.sanitize_ledger(as_of_year=y)
+        self.ledger_sanitized = bool(san.get("changed") or self.ledger_sanitized)
+        self.ledger_sanitize_report = san
+        self.ledger_source = "order_fill_rebuild"
+        self.ledger_rebuild_meta = {
+            **meta,
+            "prior_ytd_total_bps": prior_total,
+            "prior_entries": len(prior),
+            "after_ytd_total_bps": self.cost_tracker.ytd_total_bps,
+            "after_entries": len(self.cost_tracker.ytd_costs),
+        }
+        if persist:
+            self.save_state()
+        return {
+            "rebuilt": True,
+            "reason": "rebuilt_from_order_fills",
+            "event_days": meta.get("event_days"),
+            "unique_fills": meta.get("unique_fills"),
+            "ytd_total_bps": self.cost_tracker.ytd_total_bps,
+            "prior_ytd_total_bps": prior_total,
+            "ledger_source": self.ledger_source,
+        }
+
     def reconcile_from_rebalance_health(
         self,
         rebalance_health: Optional[Dict[str, Any]] = None,
@@ -900,6 +1154,9 @@ class SmartRebalancingController:
             "last_rebalance_reconciled_from": self.last_rebalance_reconciled_from,
             "ledger_sanitized": bool(self.ledger_sanitized),
             "ledger_sanitize_report": self.ledger_sanitize_report,
+            "ledger_source": self.ledger_source,
+            "ledger_rebuild_meta": self.ledger_rebuild_meta,
+            "ytd_costs_superseded": self.ytd_costs_superseded,
             "quarantined_costs": list(self.cost_tracker.quarantined_costs),
             "max_single_trade_cost_bps": self.cost_tracker.max_single_trade_cost_bps,
             "deferred_until": (
@@ -985,6 +1242,12 @@ class SmartRebalancingController:
         self.ledger_sanitized = bool(data.get("ledger_sanitized"))
         rep = data.get("ledger_sanitize_report")
         self.ledger_sanitize_report = rep if isinstance(rep, dict) else None
+        src = data.get("ledger_source")
+        self.ledger_source = str(src) if src else None
+        rb = data.get("ledger_rebuild_meta")
+        self.ledger_rebuild_meta = rb if isinstance(rb, dict) else None
+        supers = data.get("ytd_costs_superseded")
+        self.ytd_costs_superseded = supers if isinstance(supers, list) else None
 
         du = data.get("deferred_until")
         if du:
@@ -1053,6 +1316,8 @@ class SmartRebalancingController:
             'ytd_cost_entries': len(self.cost_tracker._costs_in_year()),
             'ledger_sanitized': bool(self.ledger_sanitized),
             'ledger_sanitize_report': self.ledger_sanitize_report,
+            'ledger_source': self.ledger_source,
+            'ledger_rebuild_meta': self.ledger_rebuild_meta,
             'max_single_trade_cost_bps': self.cost_tracker.max_single_trade_cost_bps,
             'ytd_outlier_quarantined_count': len(self.cost_tracker.quarantined_costs),
             'ytd_outlier_quarantined_bps': round(

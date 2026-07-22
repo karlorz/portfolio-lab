@@ -149,3 +149,12 @@
 - ClaudeMd?:      no
 - WorkflowShift?: no
 - Deep-research: max single-trade cost cap 15–50 bps; isolate outliers from budget metrics
+
+## [2026-07-22] retro | loop cycle: batch-ea-rebuild-ledger-from-fills
+- Friction:       After DZ still 63 bps from synthetic May test rows; only 3 real event days
+- Miss:           Cost ledger never projected from order-fill event log (SSOT)
+- Improve:        Rebuild YTD from unique fills × ETF bps / portfolio notional; archive prior
+- Generalize?:    yes (event-sourced TCA projector; snapshot-rewrite dedupe)
+- ClaudeMd?:      no
+- WorkflowShift?: no
+- Deep-research: rebuild TCA ledger from fills in notional bps; order events SSOT
