@@ -194,3 +194,12 @@
 - ClaudeMd?:      no
 - WorkflowShift?: no
 - Deep-research: dual-signal cron pending + artifact freshness; SRE false-positive reduction
+
+## [2026-07-22] retro | loop cycle: batch-ef-record-cost-on-execute
+- Friction:       EA rebuild required because order_router never called record_execution on fills
+- Miss:           Cost ledger only offline; controller lagged until DX/EA
+- Improve:        On non-dry-run execute_orders, estimate ETF bps × notional and record_execution
+- Generalize?:    yes (fill event = cost SSOT; dry_run never writes ledger)
+- ClaudeMd?:      no
+- WorkflowShift?: no
+- Deep-research: TCA cost capture on fill/execution event; OMS event-driven
