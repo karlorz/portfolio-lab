@@ -1596,13 +1596,78 @@ class DashboardGenerator:
         except (ImportError, AttributeError, KeyError, ValueError, TypeError, OSError, RuntimeError) as e:
             return "unavailable", f"Google Trends status unavailable: {e}"
 
+    # Batch DA: multi-horizon IC reentry hysteresis (disclosure; never force-wake)
+    # Sleep stays fail-closed at IC < 0 (voter). Reentry needs IC > REENTRY_IC_EPS
+    # on *all* horizons (30/60/90) so a single short-window bounce cannot re-arm.
+    IC_REENTRY_EPS: float = 0.02
+    IC_REENTRY_HORIZONS: tuple[int, ...] = (30, 60, 90)
+
+    @staticmethod
+    def _evaluate_ic_reentry(
+        *,
+        ic_30d: float | None,
+        ic_60d: float | None,
+        ic_90d: float | None,
+        reentry_eps: float | None = None,
+    ) -> Dict[str, Any]:
+        """Hysteresis reentry checklist from multi-horizon IC (Batch DA).
+
+        Policy (sleeping-experts + control hysteresis):
+        - Do not force-wake if any horizon IC is missing or < 0.
+        - Eligible only when every horizon IC > reentry_eps (default +0.02),
+          i.e. a positive gap above the sleep threshold (0) to prevent chatter.
+        - Disclosure only: this does not change voter weights.
+        """
+        eps = (
+            float(DashboardGenerator.IC_REENTRY_EPS)
+            if reentry_eps is None
+            else float(reentry_eps)
+        )
+        horizons = {
+            "ic_30d": ic_30d,
+            "ic_60d": ic_60d,
+            "ic_90d": ic_90d,
+        }
+        missing = [k for k, v in horizons.items() if v is None]
+        negative = [k for k, v in horizons.items() if v is not None and v < 0.0]
+        below_eps = [
+            k for k, v in horizons.items() if v is not None and v <= eps
+        ]
+        eligible = not missing and not negative and not below_eps
+        if missing:
+            blocked = f"insufficient_ic_horizons({','.join(missing)})"
+        elif negative:
+            blocked = f"negative_ic_horizon({','.join(negative)})"
+        elif below_eps:
+            blocked = f"below_reentry_eps({eps:g};{','.join(below_eps)})"
+        else:
+            blocked = None
+        return {
+            "reentry_eligible": bool(eligible),
+            "reentry_eps": eps,
+            "sleep_threshold": 0.0,
+            "horizons": {
+                k: (None if v is None else round(float(v), 4))
+                for k, v in horizons.items()
+            },
+            "horizons_all_positive": bool(
+                not missing and not negative and all(
+                    v is not None and v > 0.0 for v in horizons.values()
+                )
+            ),
+            "horizons_all_above_eps": bool(eligible),
+            "reentry_blocked_reason": blocked,
+            "policy": "multi_horizon_hysteresis_no_force_wake",
+        }
+
     @staticmethod
     def _signal_health_metrics_map() -> Dict[str, Dict[str, Any]]:
-        """Batch CZ: compact SH metrics for sleep/recovery disclosure (best-effort)."""
+        """Batch CZ/DA: SH metrics + multi-horizon IC reentry for sleep disclosure."""
         try:
             from src.signals.health_tracker import SignalHealthTracker
 
-            scores = SignalHealthTracker().calculate_all_health_scores()
+            tracker = SignalHealthTracker()
+            scores = tracker.calculate_all_health_scores()
         except Exception:  # noqa: BLE001 — never block signals gen on SH metrics
             return {}
         out: Dict[str, Dict[str, Any]] = {}
@@ -1639,6 +1704,23 @@ class DashboardGenerator:
                     hl_f = None
                 status = str(getattr(health, "status", "") or "")
                 collapse = bool(getattr(health, "window_collapse_90_60", False))
+
+                # Batch DA: multi-horizon IC (primary HealthScore.ic is ~90d)
+                def _safe_ic(days: int) -> float | None:
+                    try:
+                        raw = tracker.compute_ic(str(name), lookback_days=days)
+                        return float(raw) if raw is not None else None
+                    except Exception:  # noqa: BLE001
+                        return None
+
+                ic_30 = _safe_ic(30)
+                ic_60 = _safe_ic(60)
+                ic_90 = ic_val if ic_val is not None else _safe_ic(90)
+                reentry = DashboardGenerator._evaluate_ic_reentry(
+                    ic_30d=ic_30,
+                    ic_60d=ic_60,
+                    ic_90d=ic_90,
+                )
                 hint = DashboardGenerator._health_recovery_hint(
                     status=status,
                     ic=ic_val,
@@ -1646,15 +1728,21 @@ class DashboardGenerator:
                     acc60=acc60_f,
                     health_score=hs_f,
                     half_life=hl_f,
+                    reentry=reentry,
                 )
                 out[str(name)] = {
                     "status": status,
                     "health_score": None if hs_f is None else round(hs_f, 4),
                     "ic": None if ic_val is None else round(ic_val, 4),
+                    "ic_30d": None if ic_30 is None else round(ic_30, 4),
+                    "ic_60d": None if ic_60 is None else round(ic_60, 4),
+                    "ic_90d": None if ic_90 is None else round(ic_90, 4),
                     "accuracy_30d": None if acc30_f is None else round(acc30_f, 4),
                     "accuracy_60d": None if acc60_f is None else round(acc60_f, 4),
                     "ic_half_life_days": hl_f,
                     "window_collapse_90_60": collapse,
+                    "reentry": reentry,
+                    "reentry_eligible": reentry["reentry_eligible"],
                     "recovery_hint": hint,
                 }
             except Exception:  # noqa: BLE001
@@ -1670,8 +1758,54 @@ class DashboardGenerator:
         acc60: float | None,
         health_score: float | None,
         half_life: float | None,
+        reentry: Dict[str, Any] | None = None,
     ) -> str:
-        """Operator-facing recovery guidance for slept/degraded arms (Batch CZ)."""
+        """Operator-facing recovery guidance for slept/degraded arms (Batch CZ/DA)."""
+        # Batch DA: prefer multi-horizon reentry state when present
+        if isinstance(reentry, dict):
+            if reentry.get("reentry_eligible"):
+                return (
+                    "Multi-horizon IC reentry eligible (all horizons > "
+                    f"{reentry.get('reentry_eps', DashboardGenerator.IC_REENTRY_EPS)}); "
+                    "shadow-monitor then allow natural health gate wake — do not force."
+                )
+            blocked = reentry.get("reentry_blocked_reason") or ""
+            horizons = reentry.get("horizons") or {}
+            if blocked.startswith("negative_ic_horizon"):
+                short_pos = (
+                    horizons.get("ic_30d") is not None
+                    and float(horizons["ic_30d"]) > 0
+                    and any(
+                        horizons.get(k) is not None and float(horizons[k]) < 0
+                        for k in ("ic_60d", "ic_90d")
+                    )
+                )
+                if short_pos:
+                    return (
+                        "Short-horizon IC bounce only — multi-horizon hysteresis "
+                        "blocks reentry until 60d/90d IC also clear; do not force-wake."
+                    )
+                if ic is not None and ic < -0.15:
+                    return (
+                        "Deeply negative multi-horizon IC — investigate label/feature "
+                        "alignment; keep slept until all horizons > reentry eps."
+                    )
+                return (
+                    f"Reentry blocked ({blocked}) — sleep until all IC horizons "
+                    f"> {reentry.get('reentry_eps', DashboardGenerator.IC_REENTRY_EPS)}; "
+                    "shadow-monitor only."
+                )
+            if blocked.startswith("below_reentry_eps"):
+                return (
+                    "Horizons non-negative but below reentry hysteresis eps — "
+                    "wait for confirmed multi-horizon IC > eps; do not force-wake."
+                )
+            if blocked.startswith("insufficient_ic"):
+                return (
+                    "Insufficient multi-horizon IC sample — keep slept; "
+                    "do not force-wake without horizon evidence."
+                )
+
         st = (status or "").lower()
         if ic is not None and ic < -0.15:
             return (
@@ -1831,6 +1965,10 @@ class DashboardGenerator:
                     entry["recovery_hint"] = m["recovery_hint"]
                     # Append concise recovery cue to reason for compact UIs
                     entry["reason"] = f"{reason} | recovery: {m['recovery_hint']}"
+                # Batch DA: surface reentry hysteresis at row level
+                if status == "health_sleep" and "reentry" in m:
+                    entry["reentry"] = m["reentry"]
+                    entry["reentry_eligible"] = bool(m.get("reentry_eligible"))
             statuses.append(entry)
 
         # Renormalize over contributors so sum(active_weight) ≈ 1 when any active
