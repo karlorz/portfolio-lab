@@ -2609,12 +2609,16 @@ class EnsembleVoter:
                         )
                     else:
                         multiplier = max(0.2, min(1.0, hs))
-                        if status == SignalHealthStatus.UNHEALTHY.value:
+                        # Batch DU: only disclose soft-floor when arm still has
+                        # vote mass (skip zero-baseline / already-zero weight).
+                        still_votes = float(base_weight or 0.0) > 1e-12
+                        if still_votes and status == SignalHealthStatus.UNHEALTHY.value:
                             soft_floor[source_str] = (
                                 f"unhealthy_soft_floor(score={hs:.2f},ic={ic_val})"
                             )
                         elif (
-                            status == SignalHealthStatus.DEGRADED.value
+                            still_votes
+                            and status == SignalHealthStatus.DEGRADED.value
                             and hs < 0.55
                         ):
                             soft_floor[source_str] = (

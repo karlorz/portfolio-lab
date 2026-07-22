@@ -6316,13 +6316,16 @@ class DashboardGenerator:
                     ensemble["weight_entropy"] = round(weight_entropy, 4)
                     ensemble["n_eff"] = round(float(np.exp(weight_entropy)), 2)
 
-            # Batch CW/CX/CZ: preserve gate maps + recovery metrics through staleness rebuild
+            # Batch CW/CX/CZ/DU: preserve gate maps + recovery metrics through staleness rebuild
             sleep_map = ensemble.get("health_gate_slept") or {}
             if not isinstance(sleep_map, dict):
                 sleep_map = {}
             regime_map = ensemble.get("regime_gated") or {}
             if not isinstance(regime_map, dict):
                 regime_map = {}
+            soft_floor_map = ensemble.get("health_gate_soft_floor") or {}
+            if not isinstance(soft_floor_map, dict):
+                soft_floor_map = {}
             sh_metrics = DashboardGenerator._signal_health_metrics_map()
             ensemble["configured_source_status"] = self._build_configured_source_status(
                 ensemble.get("regime", "normal"),
@@ -6330,6 +6333,7 @@ class DashboardGenerator:
                 health_gate_slept=sleep_map,
                 regime_gated=regime_map,
                 health_metrics=sh_metrics,
+                health_gate_soft_floor=soft_floor_map,
             )
             if sleep_map:
                 ensemble["health_gate_recovery"] = [
