@@ -49,6 +49,9 @@ __all__ = [
     "reconcile_monitor_health_with_disk_ssot",
     "update_graduation_circuit_breaker_state",
     "attach_shared_freshness_slis_to_ops_report",
+    "load_graduation_cb_ssot",
+    "project_graduation_cb_onto_report",
+    "reconcile_graduation_cb_projection",
 ]
 
 HEALTH_PATH = Path(os.environ.get("HEALTH_CHECK_PATH", str(DATA_DIR / "health.json")))
@@ -707,6 +710,15 @@ def refresh_signals_health_kill_fields(
         if isinstance(health, dict):
             lag_summary = summarize_repo_public_mirror_lag()
             health = project_repo_public_mirror_lag_onto_health(health, lag_summary)
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Batch EM: re-project graduation CB consecutive_ok from disk SSOT so
+    # compact signals.health cannot stick at 0/yellow after EL climb.
+    try:
+        if isinstance(health, dict):
+            root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+            health = project_graduation_cb_onto_compact_health(health, data_dir=root)
     except Exception:  # noqa: BLE001
         pass
 
@@ -1379,7 +1391,155 @@ def update_graduation_circuit_breaker_state(
         )
     except OSError as exc:
         logger.warning("Failed to write graduation CB state %s: %s", path, exc)
+    # Batch EM: dual-project SSOT onto monitor health.json so out-of-band CB
+    # updates (or EL-style producer-only climbs) cannot leave sticky
+    # graduation_circuit_breaker at consecutive_ok=0 / yellow while SSOT is green.
+    try:
+        reconcile_graduation_cb_projection(data_dir=root)
+    except Exception as proj_exc:  # noqa: BLE001 — never fail CB write on project
+        logger.warning("Graduation CB health re-projection skipped: %s", proj_exc)
     return payload
+
+
+def load_graduation_cb_ssot(
+    data_dir: Path | None = None,
+) -> dict[str, Any] | None:
+    """Load private graduation CB SSOT from ``DATA_DIR/.circuit_breaker.json``."""
+    root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+    path = root / ".circuit_breaker.json"
+    if not path.is_file():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError, UnicodeDecodeError):
+        return None
+    return raw if isinstance(raw, dict) else None
+
+
+def project_graduation_cb_onto_report(
+    report: dict[str, Any] | None,
+    *,
+    data_dir: Path | None = None,
+    ssot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Project ``.circuit_breaker.json`` SSOT onto ``graduation_circuit_breaker``.
+
+    Batch EM (deep-research dual-surface consistency): every materialize of
+    monitor health must re-read private SSOT rather than trust sticky
+    ``health.json`` fields written by an older job. Mirrors Batch EI disk
+    load of rebalance_health for timeline SLIs.
+    """
+    if not isinstance(report, dict):
+        report = {}
+    blob = ssot if isinstance(ssot, dict) else load_graduation_cb_ssot(data_dir)
+    if blob is None:
+        existing = report.get("graduation_circuit_breaker")
+        if isinstance(existing, dict):
+            existing = dict(existing)
+            existing.setdefault("graduation_cb_source", "missing")
+            report["graduation_circuit_breaker"] = existing
+        else:
+            report["graduation_circuit_breaker"] = {
+                "graduation_cb_source": "missing",
+            }
+        return report
+
+    report["graduation_circuit_breaker"] = {
+        "consecutive_ok": blob.get("consecutive_ok"),
+        "status": blob.get("status"),
+        "updated_at": blob.get("updated_at"),
+        "signal_health_blocked": bool(blob.get("signal_health_blocked")),
+        "signal_health_contribution": blob.get("signal_health_contribution"),
+        "system_status": blob.get("system_status"),
+        "graduation_cb_source": "disk_ssot",
+        "schema_version": blob.get("schema_version"),
+        "producer": blob.get("producer"),
+    }
+    return report
+
+
+def project_graduation_cb_onto_compact_health(
+    health: dict[str, Any] | None,
+    *,
+    data_dir: Path | None = None,
+    ssot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Project graduation CB SSOT onto compact ``signals.json#health`` keys."""
+    if not isinstance(health, dict):
+        health = {}
+    blob = ssot if isinstance(ssot, dict) else load_graduation_cb_ssot(data_dir)
+    if blob is None:
+        health.setdefault("graduation_cb_source", "missing")
+        return health
+    health["graduation_circuit_breaker_status"] = blob.get("status")
+    health["graduation_circuit_breaker_consecutive_ok"] = blob.get("consecutive_ok")
+    health["graduation_circuit_breaker_updated_at"] = blob.get("updated_at")
+    health["graduation_circuit_breaker_signal_health_blocked"] = bool(
+        blob.get("signal_health_blocked")
+    )
+    health["graduation_circuit_breaker_signal_health_contribution"] = blob.get(
+        "signal_health_contribution"
+    )
+    health["graduation_cb_source"] = "disk_ssot"
+    return health
+
+
+def reconcile_graduation_cb_projection(
+    *,
+    data_dir: Path | None = None,
+    health_path: Path | None = None,
+) -> bool:
+    """Rewrite monitor ``health.json`` graduation_circuit_breaker from SSOT.
+
+    Returns True when a write occurred (fields differed from disk SSOT).
+    """
+    root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+    path = Path(health_path) if health_path is not None else (root / "health.json")
+    if not path.is_file():
+        return False
+    ssot = load_graduation_cb_ssot(root)
+    if ssot is None:
+        return False
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, TypeError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+
+    prev = payload.get("graduation_circuit_breaker")
+    prev = prev if isinstance(prev, dict) else {}
+    projected = project_graduation_cb_onto_report({}, data_dir=root, ssot=ssot)
+    new_block = projected.get("graduation_circuit_breaker") or {}
+    # Compare operator-visible fields only
+    keys = (
+        "consecutive_ok",
+        "status",
+        "updated_at",
+        "signal_health_blocked",
+        "signal_health_contribution",
+    )
+    same = all(prev.get(k) == new_block.get(k) for k in keys)
+    if same and prev.get("graduation_cb_source") == "disk_ssot":
+        return False
+
+    payload["graduation_circuit_breaker"] = new_block
+    payload["graduation_cb_reconciled_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        logger.warning(
+            "Failed to reconcile graduation CB projection at %s: %s", path, exc
+        )
+        return False
+    logger.info(
+        "Reconciled graduation CB projection at %s (consecutive_ok=%s status=%s)",
+        path,
+        new_block.get("consecutive_ok"),
+        new_block.get("status"),
+    )
+    return True
 
 
 def _check_fred_md_cache() -> dict:
@@ -1606,6 +1766,13 @@ def attach_shared_freshness_slis_to_ops_report(
         logger.warning("ops report mirror lag SLI skipped: %s", exc)
         report.setdefault("repo_public_mirror_lag_status", "unknown")
 
+    # --- graduation CB SSOT re-projection (Batch EM) ---
+    try:
+        root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+        report = project_graduation_cb_onto_report(report, data_dir=root)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("ops report graduation CB SLI skipped: %s", exc)
+
     # --- rebalance execution timeline (disk panel, same as Batch EI) ---
     try:
         from src.dashboard.generator import project_execution_timeline_onto_health
@@ -1769,8 +1936,8 @@ def run_health_check() -> dict:
         "scope": "operational_readiness",
     }
     if isinstance(grad_cb, dict):
-        # Batch EL: surface SH block reason so operators see why streak freezes
-        # without opening private .circuit_breaker.json.
+        # Batch EL/EM: surface SH block reason + mark projection source so
+        # operators see why streak freezes without opening private SSOT.
         report["graduation_circuit_breaker"] = {
             "consecutive_ok": grad_cb.get("consecutive_ok"),
             "status": grad_cb.get("status"),
@@ -1780,7 +1947,16 @@ def run_health_check() -> dict:
                 "signal_health_contribution"
             ),
             "system_status": grad_cb.get("system_status"),
+            "graduation_cb_source": "producer",
+            "schema_version": grad_cb.get("schema_version"),
+            "producer": grad_cb.get("producer"),
         }
+    else:
+        # Fall back to disk SSOT if producer failed mid-run
+        try:
+            report = project_graduation_cb_onto_report(report, data_dir=DATA_DIR)
+        except Exception:  # noqa: BLE001
+            pass
         # Batch BP: refresh graduation dual surfaces when CB streak changes so
         # public graduation.json does not lag SSOT until next dashboard :15.
         try:
