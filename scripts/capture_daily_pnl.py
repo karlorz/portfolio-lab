@@ -483,9 +483,29 @@ def main():
         sys.exit(1)
 
     snapshot = compute_pnl_snapshot(portfolio, append_path=append_path)
+    # Stamp write-SSOT provenance on every capture row.
+    snapshot["return_source"] = "capture_daily_pnl"
+    snapshot["write_ssot"] = "daily_pnl.jsonl"
 
     save_snapshot(snapshot, append_path, latest_path)
     append_performance_jsonl(snapshot)
+
+    # Align the other four surfaces: history rewrite + paper-trading-performance
+    # regen so current_value cannot lag after a successful capture (c358).
+    try:
+        from src.monitor.paper_return_ssot import apply_capture_ssot_side_effects
+
+        side = apply_capture_ssot_side_effects(
+            DATA_DIR, snapshot, mode=args.mode
+        )
+        logger.info(
+            "SSOT side-effects: history_updated=%s snapshot=%s agree=%s",
+            (side.get("history") or {}).get("updated"),
+            side.get("paper_trading_performance"),
+            (side.get("comparison") or {}).get("agree"),
+        )
+    except Exception as exc:  # noqa: BLE001 — capture must not fail on side-effects
+        logger.warning("SSOT side-effects failed (non-fatal): %s", exc)
 
     logger.info("Date: %s | Value: $%.2f | P&L: $%.2f (%.2f%%) | Daily: %.4f%% | DD: %.2f%% | Positions: %d",
                 snapshot['date'], snapshot['total_value'], snapshot['total_pnl'],

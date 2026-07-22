@@ -595,6 +595,19 @@ def refresh_signals_health_kill_fields(
     except Exception:  # noqa: BLE001
         pass
 
+    # Batch EB: re-project paper return five-surface SSOT agreement from DATA_DIR
+    # so partial patches disclose history/snapshot drift vs daily_pnl write SSOT.
+    try:
+        from src.dashboard.generator import project_paper_return_ssot_onto_health
+        from src.monitor.paper_return_ssot import compare_five_surfaces
+
+        if isinstance(health, dict):
+            root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+            cmp = compare_five_surfaces(root)
+            health = project_paper_return_ssot_onto_health(health, cmp)
+    except Exception:  # noqa: BLE001
+        pass
+
     payload["health"] = health
     # Partial rewrite must advance top-level generated_at (mtime honesty)
     from datetime import datetime, timezone

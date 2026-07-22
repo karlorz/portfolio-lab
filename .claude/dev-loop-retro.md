@@ -158,3 +158,12 @@
 - ClaudeMd?:      no
 - WorkflowShift?: no
 - Deep-research: rebuild TCA ledger from fills in notional bps; order events SSOT
+
+## [2026-07-22] retro | loop cycle: batch-eb-paper-return-ssot
+- Friction:       portfolio_paper.history ret 0.008 vs daily_pnl SSOT 0.0; multi-surface drift
+- Miss:           Capture wrote daily_pnl but did not align history / performance snapshot; no compact SLI
+- Improve:        paper_return_ssot module + capture side-effects + wiki_sync SSOT path; health projection
+- Generalize?:    yes (write SSOT + fan-out alignment; five-surface compare)
+- ClaudeMd?:      no
+- WorkflowShift?: no
+- Deep-research: NAV/session return SSOT; previous-day base; MTM single feed

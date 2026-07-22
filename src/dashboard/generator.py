@@ -54,6 +54,7 @@ __all__ = [
     "DB_PATH",
     "project_alternative_data_signal",
     "project_smart_rebalance_budget_onto_health",
+    "project_paper_return_ssot_onto_health",
 ]
 
 # Legacy flat keys (pre seven-component producer) → panel component names
@@ -898,6 +899,76 @@ def project_smart_rebalance_budget_onto_health(
 
     # Soft elevate: over-budget or multi-day controller lag → warning
     if (is_over or lagging) and health.get("status") in (
+        None,
+        "ok",
+        "healthy",
+        "unknown",
+    ):
+        health["status"] = "warning"
+
+    return health
+
+
+def project_paper_return_ssot_onto_health(
+    health: dict[str, Any] | None,
+    comparison: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Project five-surface paper return SSOT agreement onto compact health.
+
+    Write authority is ``daily_pnl.jsonl`` / ``daily_pnl_latest.json``. Other
+    surfaces (portfolio history, unified dashboard, stats, paper-trading-
+    performance) must match session NAV/return within epsilon (Batch EB / c358).
+    Soft warning on disagreement — does not change routing authority.
+    """
+    if not isinstance(health, dict):
+        health = {}
+    if not isinstance(comparison, dict):
+        health.setdefault("paper_return_ssot_status", "unknown")
+        health.setdefault("paper_return_ssot_agree", None)
+        return health
+
+    agree = comparison.get("agree")
+    ssot = comparison.get("ssot") if isinstance(comparison.get("ssot"), dict) else {}
+    disagreements = comparison.get("disagreements")
+    if not isinstance(disagreements, list):
+        disagreements = []
+    surfaces = comparison.get("surfaces")
+    surface_names: list[str] = []
+    if isinstance(surfaces, list):
+        for s in surfaces:
+            if isinstance(s, dict) and s.get("surface"):
+                surface_names.append(str(s.get("surface")))
+    elif isinstance(surfaces, dict):
+        surface_names = [str(k) for k in surfaces.keys()]
+
+    disagree_surfaces = []
+    for d in disagreements:
+        if isinstance(d, dict) and d.get("surface"):
+            disagree_surfaces.append(str(d.get("surface")))
+
+    health["paper_return_ssot_agree"] = bool(agree) if agree is not None else None
+    if agree is True:
+        health["paper_return_ssot_status"] = "ok"
+    elif agree is False:
+        health["paper_return_ssot_status"] = "disagree"
+    else:
+        health["paper_return_ssot_status"] = "unknown"
+    health["paper_return_ssot_date"] = ssot.get("date")
+    health["paper_return_ssot_nav"] = ssot.get("total_value")
+    health["paper_return_ssot_daily_return"] = ssot.get("daily_return")
+    health["paper_return_ssot_source"] = ssot.get("return_source")
+    health["paper_return_ssot_disagreement_count"] = len(disagreements)
+    health["paper_return_ssot_surfaces"] = ",".join(disagree_surfaces[:8]) or None
+    if disagree_surfaces:
+        health["paper_return_ssot_why"] = (
+            str(disagreements[0].get("why_not"))
+            if disagreements and isinstance(disagreements[0], dict)
+            else "disagree"
+        )
+    else:
+        health["paper_return_ssot_why"] = None
+
+    if agree is False and health.get("status") in (
         None,
         "ok",
         "healthy",
@@ -4198,6 +4269,20 @@ class DashboardGenerator:
             logger.warning(
                 "smart rebalance budget health project skipped: %s", budget_exc
             )
+
+        # Batch EB: project five-surface paper return SSOT agreement onto compact
+        # health so portfolio_history / snapshot drift cannot hide from ops.
+        try:
+            health = output.get("health")
+            if not isinstance(health, dict):
+                health = {}
+                output["health"] = health
+            from src.monitor.paper_return_ssot import compare_five_surfaces
+
+            cmp = compare_five_surfaces(Path(DATA_DIR))
+            output["health"] = project_paper_return_ssot_onto_health(health, cmp)
+        except Exception as ssot_exc:  # noqa: BLE001
+            logger.warning("paper return SSOT health project skipped: %s", ssot_exc)
 
         # Fire external alerts on staleness state transitions (+ recovery ownership)
         try:

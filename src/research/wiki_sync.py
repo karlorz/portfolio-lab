@@ -294,7 +294,53 @@ Based on recent regime patterns:
         Paper trading P&L is personal app state, not research knowledge.
         Written to DATA_DIR (not wiki vault) to avoid polluting shared
         knowledge base with user-specific runtime data.
+
+        Prefer daily_pnl.jsonl session SSOT (c358) when available so
+        current_value cannot lag the capture path. Fall back to the legacy
+        performance.jsonl path when daily_pnl is thin.
         """
+        # c358: prefer write-SSOT series when capture has enough session history.
+        try:
+            from src.monitor.paper_return_ssot import (
+                load_daily_pnl_sessions,
+                write_paper_trading_performance_from_ssot,
+            )
+
+            sessions = load_daily_pnl_sessions(DATA_DIR)
+            if len(sessions) >= 5:
+                paper_mark = self._portfolio_paper_mark(DATA_DIR)
+                cv = paper_mark["total_value"] if paper_mark is not None else None
+                path = write_paper_trading_performance_from_ssot(
+                    DATA_DIR, current_value=cv
+                )
+                if path is not None:
+                    # Enrich with graduation block for wiki_sync consumers.
+                    try:
+                        summary = json.loads(path.read_text(encoding="utf-8"))
+                        perf = summary.get("performance") or {}
+                        summary["graduation"] = self._graduation_status_dict(
+                            float(perf.get("total_return") or 0),
+                            float(perf.get("sharpe") or 0),
+                            float(perf.get("max_drawdown") or 0),
+                            int(perf.get("days_tracked") or 0),
+                            data_dir=DATA_DIR,
+                        )
+                        summary["schema_version"] = "paper-trading-performance/v3-ssot"
+                        generator_git_sha = None
+                        try:
+                            from src.monitor.decision_registry import _git_sha_short
+
+                            generator_git_sha = _git_sha_short()
+                        except Exception:
+                            generator_git_sha = None
+                        summary["generator_git_sha"] = generator_git_sha
+                        save_results_json(summary, output_path=str(path))
+                    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                        logger.debug("SSOT snapshot enrich failed: %s", exc)
+                    return path
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("daily_pnl SSOT snapshot path skipped: %s", exc)
+
         perf_log = DATA_DIR / "performance.jsonl"
         if not perf_log.exists():
             return None
@@ -401,6 +447,7 @@ Based on recent regime patterns:
             "phantom_cash_days_dropped": phantom_days_dropped,
             "generator_git_sha": generator_git_sha,
             "schema_version": "paper-trading-performance/v2",
+            "return_source": "performance.jsonl_fallback",
         }
 
         save_results_json(summary, output_path=str(page_path))
