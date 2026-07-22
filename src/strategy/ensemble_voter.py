@@ -1041,11 +1041,67 @@ class EnsembleVoter:
         """Collect VIX term structure signal (compat wrapper over aggregator)."""
         self._ensure_signal_aggregator()._collect_vix_term_structure_signal(readings, active_sources, regime)
 
+    @staticmethod
+    def _static_zero_baseline_sources(regime_name: str) -> set:
+        """SignalSource keys with intentional REGIME_WEIGHTS soft-delete (weight 0).
+
+        Soft-delete is economic/ADR policy — bandit blend, adaptive floors,
+        exploration noise, and diversity floors must not reinflate these arms
+        until a human promotes non-zero static weights.
+        """
+        regime_enum = getattr(Regime, str(regime_name).upper(), Regime.NORMAL)
+        static = REGIME_WEIGHTS.get(regime_enum, {}) or {}
+        zeros: set = set()
+        for src, w in static.items():
+            try:
+                if float(w or 0.0) <= 0.0:
+                    zeros.add(src)
+            except (TypeError, ValueError):
+                zeros.add(src)
+        return zeros
+
+    @staticmethod
+    def _pin_zero_baseline_weights(weights: Dict, regime_name: str) -> Dict:
+        """Force soft-delete arms to 0 and renormalize remaining mass.
+
+        Batch DK: bandit ε-mass + adaptive min_weight + Dirichlet exploration
+        previously reinflated multi_speed_momentum (~5–13% vote mass) despite
+        REGIME_WEIGHTS soft-delete. Pin after each reinflation-capable stage.
+        """
+        if not weights:
+            return weights
+        zeros = EnsembleVoter._static_zero_baseline_sources(regime_name)
+        if not zeros:
+            return weights
+        pinned = dict(weights)
+        changed = False
+        for src in zeros:
+            if src in pinned and float(pinned.get(src) or 0.0) != 0.0:
+                pinned[src] = 0.0
+                changed = True
+            elif src in pinned:
+                pinned[src] = 0.0
+        if not changed and all(
+            float(pinned.get(s) or 0.0) == 0.0 for s in zeros if s in pinned
+        ):
+            # Still renorm if zeros already 0 but total drifted
+            total = sum(float(v or 0.0) for v in pinned.values())
+            if total > 0 and abs(total - 1.0) > 1e-9:
+                return {k: float(v or 0.0) / total for k, v in pinned.items()}
+            return pinned
+        total = sum(float(v or 0.0) for v in pinned.values())
+        if total > 0:
+            pinned = {k: float(v or 0.0) / total for k, v in pinned.items()}
+        return pinned
+
     def get_blended_weights(self, regime_name: str) -> dict:
         """Get regime weights blended between static REGIME_WEIGHTS and bandit.
 
         Starts 100% static (bandit_blend=0.0), gradually shifts toward
         up to 70% bandit after 252 days of observations.
+
+        Batch DK: static-zero soft-delete arms stay at 0 after blend+renorm
+        (bandit posterior must not reintroduce vote mass).
         """
         regime_enum = getattr(Regime, regime_name, Regime.NORMAL)
         static = dict(REGIME_WEIGHTS.get(regime_enum, {}))
@@ -1074,7 +1130,11 @@ class EnsembleVoter:
         for sig_value in static_by_value:
             bandit_w = bandit.get(sig_value, 0.0)
             static_w = static_by_value[sig_value]
-            blended[sig_value] = static_w * (1 - blend) + bandit_w * blend
+            # Hard-pin soft-delete: never mix bandit mass into static-zero arms
+            if float(static_w or 0.0) <= 0.0:
+                blended[sig_value] = 0.0
+            else:
+                blended[sig_value] = static_w * (1 - blend) + bandit_w * blend
 
         # Normalize to sum=1.0
         total = sum(blended.values())
@@ -1083,7 +1143,8 @@ class EnsembleVoter:
 
         # Convert back to SignalSource keys
         value_to_source = {s.value: s for s in SignalSource}
-        return {value_to_source[k]: v for k, v in blended.items() if k in value_to_source}
+        out = {value_to_source[k]: v for k, v in blended.items() if k in value_to_source}
+        return self._pin_zero_baseline_weights(out, regime_name)
 
     def get_adaptive_learning_status(self, regime_name: Optional[str] = None) -> Dict[str, Any]:
         """Disclose adaptive-learning branch status without changing weights."""
@@ -1880,7 +1941,10 @@ class EnsembleVoter:
         weights = self.get_blended_weights(regime.name)
         weights = self._apply_regime_gating(weights, regime.name, regime_confidence)
         weights = self._apply_adaptive_weights(weights, regime)
+        # Batch DK: adaptive may receive non-zero base if blend leaked; re-pin
+        weights = self._pin_zero_baseline_weights(weights, regime.name)
         weights = self._apply_ic_weights(weights, regime)
+        weights = self._pin_zero_baseline_weights(weights, regime.name)
         weights = self._apply_health_weights(weights)
         weights = self._apply_correlation_penalty(weights)
         if os.environ.get("ENSEMBLE_DISABLE_REGIME_WEIGHTS", "").lower() not in ("1", "true"):
@@ -1889,27 +1953,41 @@ class EnsembleVoter:
             weights = self._apply_mdp_constraint(weights)
         weights = self._apply_utility_reweighting(weights, regime)
         weights = self._apply_exploration_noise(weights, regime)
+        weights = self._pin_zero_baseline_weights(weights, regime.name)
         weights = self._apply_diversity_floor(weights)
+        weights = self._pin_zero_baseline_weights(weights, regime.name)
         weights = self._apply_turnover_validation(weights, readings, regime)
+        weights = self._pin_zero_baseline_weights(weights, regime.name)
+
+        # Soft-delete static zeros — exclude from analysis equal-weight floors
+        soft_delete = self._static_zero_baseline_sources(regime.name)
 
         # Safety fallback: when explicit readings are provided for analysis/tests,
         # avoid degenerate outcomes where static regime weights entirely mute
-        # one or more provided sources.
+        # one or more provided sources. Soft-delete arms stay excluded.
         active_weights = {
             source: max(0.0, weights.get(source, 0.0))
             for source in readings
+            if source not in soft_delete
         }
         active_weight_sum = sum(active_weights.values())
         nonzero_sources = [source for source, weight in active_weights.items() if weight > 0]
+        floor_eligible = [s for s in readings if s not in soft_delete]
 
         if readings and active_weight_sum <= 0:
-            if caller_supplied_readings and regime == Regime.NORMAL:
-                fallback_weight = 1.0 / len(readings)
-                weights = {source: fallback_weight for source in readings}
+            if caller_supplied_readings and regime == Regime.NORMAL and floor_eligible:
+                fallback_weight = 1.0 / len(floor_eligible)
+                weights = {
+                    source: (fallback_weight if source in floor_eligible else 0.0)
+                    for source in readings
+                }
+                # Preserve any non-reading keys at 0
+                for src in soft_delete:
+                    weights[src] = 0.0
                 logger.info(
                     "All active ensemble weights were zero after adjustments; "
-                    "falling back to equal-weight over %d readings",
-                    len(readings),
+                    "falling back to equal-weight over %d readings (soft-delete pinned)",
+                    len(floor_eligible),
                 )
             else:
                 logger.info(
@@ -1919,22 +1997,27 @@ class EnsembleVoter:
                 )
         elif (
             caller_supplied_readings
-            and readings
+            and floor_eligible
             and regime == Regime.NORMAL
-            and 0 < len(nonzero_sources) < len(readings)
+            and 0 < len(nonzero_sources) < len(floor_eligible)
         ):
-            floor_weight = 0.05 / len(readings)  # 5% total floor spread across provided readings.
+            floor_weight = 0.05 / len(floor_eligible)  # 5% total floor; soft-delete excluded
             blended = {}
             for source in readings:
-                blended[source] = max(active_weights.get(source, 0.0), floor_weight)
+                if source in soft_delete:
+                    blended[source] = 0.0
+                else:
+                    blended[source] = max(active_weights.get(source, 0.0), floor_weight)
             total = sum(blended.values())
             if total > 0:
                 weights = {source: weight / total for source, weight in blended.items()}
                 logger.info(
-                    "Applied small analysis floor to %d/%d zero-weight provided signals",
-                    len(readings) - len(nonzero_sources),
-                    len(readings),
+                    "Applied small analysis floor to %d/%d zero-weight provided signals "
+                    "(soft-delete arms pinned at 0)",
+                    len(floor_eligible) - len(nonzero_sources),
+                    len(floor_eligible),
                 )
+            weights = self._pin_zero_baseline_weights(weights, regime.name)
 
         # Apply weights to readings
         weighted_signals = self._apply_weights_to_readings(readings, weights)
@@ -2555,13 +2638,23 @@ class EnsembleVoter:
         if n < 2:
             return weights
 
-        # Dirichlet alpha: concentration * current weight for each component
-        alpha = [max(0.1, alpha_base * w) for w in weight_values]
+        # Dirichlet alpha: concentration * current weight for each component.
+        # Soft-delete arms (static zero) get tiny alpha so samples stay ~0, then
+        # Batch DK pin zeros them hard after sampling.
+        regime_name = regime.name if hasattr(regime, "name") else str(regime)
+        soft_delete = self._static_zero_baseline_sources(regime_name)
+        alpha = []
+        for k, w in zip(weights.keys(), weight_values):
+            if k in soft_delete or float(w or 0.0) <= 0.0:
+                alpha.append(1e-9)  # near-zero mass; pin finishes the job
+            else:
+                alpha.append(max(0.1, alpha_base * w))
 
         # Sample from Dirichlet
         try:
             sampled = np.random.dirichlet(alpha)
             result = {k: float(sampled[i]) for i, k in enumerate(weights)}
+            result = self._pin_zero_baseline_weights(result, regime_name)
             logger.info("Exploration noise applied: epsilon=%.2f, regime=%s", epsilon, regime.value)
             return result
         except (ValueError, FloatingPointError) as e:
