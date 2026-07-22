@@ -19,7 +19,7 @@ import tempfile
 import yaml
 from src.paths import BASE_ALLOCATION, DATA_DIR
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
 from enum import Enum
@@ -182,6 +182,10 @@ class SmartRebalancingController:
         )
         self.deferred_until: Optional[datetime] = None
         self.last_rebalance: Optional[datetime] = None
+        # Batch DX: provenance when last_rebalance was advanced from order events
+        self.last_rebalance_clock_source: Optional[str] = None
+        self.last_rebalance_reconciled: bool = False
+        self.last_rebalance_reconciled_from: Optional[str] = None
         self.data_dir = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
         if state_path is not None:
             self.state_path = Path(state_path)
@@ -494,7 +498,142 @@ class SmartRebalancingController:
         self.cost_tracker.add_cost(cost_bps, date, symbols)
         self.last_rebalance = datetime.fromisoformat(date) if 'T' in date else datetime.strptime(date, '%Y-%m-%d')
         self.deferred_until = None
+        # Explicit record path is authoritative (not a lag reconcile)
+        self.last_rebalance_clock_source = "record_rebalance"
+        self.last_rebalance_reconciled = False
+        self.last_rebalance_reconciled_from = None
         self.save_state()
+
+    @staticmethod
+    def _parse_event_clock(value: Any) -> Optional[datetime]:
+        """Parse order-event / ISO timestamps as timezone-aware UTC."""
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            if "T" in text:
+                dt = datetime.fromisoformat(text)
+            else:
+                dt = datetime.strptime(text[:10], "%Y-%m-%d")
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    def reconcile_last_rebalance_from_event(
+        self,
+        event_ts: Any,
+        *,
+        source: str = "order_event_timestamp",
+        persist: bool = True,
+    ) -> Dict[str, Any]:
+        """Advance ``last_rebalance`` from order-event time when controller lags.
+
+        Event-sourcing practice (Batch DX / DW dual-clock): treat fill /
+        rebalance_health ``last_execution_at`` as authoritative for the
+        business clock. Does **not** invent YTD cost rows — budget tracking
+        still requires ``record_rebalance`` / explicit cost ingress.
+        """
+        event_dt = self._parse_event_clock(event_ts)
+        if event_dt is None:
+            return {
+                "reconciled": False,
+                "advanced": False,
+                "reason": "invalid_event_ts",
+                "event_ts": str(event_ts) if event_ts is not None else None,
+            }
+
+        prior = self._as_utc(self.last_rebalance)
+        # Advance when missing or strictly behind event clock (1s tolerance)
+        if prior is not None and (event_dt - prior).total_seconds() <= 1.0:
+            return {
+                "reconciled": False,
+                "advanced": False,
+                "reason": "controller_not_behind",
+                "controller_last_rebalance": prior.isoformat(),
+                "event_ts": event_dt.isoformat(),
+                "source": source,
+            }
+
+        prior_iso = prior.isoformat() if prior else None
+        self.last_rebalance = event_dt
+        self.last_rebalance_clock_source = source
+        self.last_rebalance_reconciled = True
+        self.last_rebalance_reconciled_from = prior_iso
+        if persist:
+            self.save_state()
+        return {
+            "reconciled": True,
+            "advanced": True,
+            "reason": "advanced_from_order_event",
+            "controller_last_rebalance_before": prior_iso,
+            "controller_last_rebalance": event_dt.isoformat(),
+            "event_ts": event_dt.isoformat(),
+            "source": source,
+        }
+
+    def reconcile_from_rebalance_health(
+        self,
+        rebalance_health: Optional[Dict[str, Any]] = None,
+        *,
+        health_path: Optional[str | Path] = None,
+        persist: bool = True,
+    ) -> Dict[str, Any]:
+        """Read ``rebalance_health`` next_rebalance last_execution and reconcile."""
+        payload = rebalance_health
+        if payload is None:
+            path = Path(health_path) if health_path is not None else (
+                self.data_dir / "rebalance_health.json"
+            )
+            if not path.exists():
+                return {
+                    "reconciled": False,
+                    "advanced": False,
+                    "reason": "rebalance_health_missing",
+                }
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+            except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                logger.warning("rebalance_health load for reconcile failed: %s", exc)
+                return {
+                    "reconciled": False,
+                    "advanced": False,
+                    "reason": "rebalance_health_unreadable",
+                }
+        if not isinstance(payload, dict):
+            return {
+                "reconciled": False,
+                "advanced": False,
+                "reason": "rebalance_health_invalid",
+            }
+        next_reb = payload.get("next_rebalance")
+        if not isinstance(next_reb, dict):
+            return {
+                "reconciled": False,
+                "advanced": False,
+                "reason": "next_rebalance_missing",
+            }
+        event_ts = next_reb.get("last_execution_at")
+        source = (
+            str(next_reb.get("last_execution_clock") or "order_event_timestamp")
+        )
+        return self.reconcile_last_rebalance_from_event(
+            event_ts, source=source, persist=persist
+        )
 
     def state_to_dict(self) -> Dict[str, Any]:
         """Serialize durable controller fields for disk."""
@@ -504,6 +643,9 @@ class SmartRebalancingController:
             "last_rebalance": (
                 self.last_rebalance.isoformat() if self.last_rebalance else None
             ),
+            "last_rebalance_clock_source": self.last_rebalance_clock_source,
+            "last_rebalance_reconciled": bool(self.last_rebalance_reconciled),
+            "last_rebalance_reconciled_from": self.last_rebalance_reconciled_from,
             "deferred_until": (
                 self.deferred_until.isoformat() if self.deferred_until else None
             ),
@@ -554,6 +696,12 @@ class SmartRebalancingController:
                 )
             except (TypeError, ValueError):
                 self.last_rebalance = None
+
+        src = data.get("last_rebalance_clock_source")
+        self.last_rebalance_clock_source = str(src) if src else None
+        self.last_rebalance_reconciled = bool(data.get("last_rebalance_reconciled"))
+        rf = data.get("last_rebalance_reconciled_from")
+        self.last_rebalance_reconciled_from = str(rf) if rf else None
 
         du = data.get("deferred_until")
         if du:
@@ -608,6 +756,9 @@ class SmartRebalancingController:
             'is_over_budget': self.cost_tracker.is_over_budget(),
             'is_warning': self.cost_tracker.is_warning(),
             'last_rebalance': self.last_rebalance.isoformat() if self.last_rebalance else None,
+            'last_rebalance_clock_source': self.last_rebalance_clock_source,
+            'last_rebalance_reconciled': bool(self.last_rebalance_reconciled),
+            'last_rebalance_reconciled_from': self.last_rebalance_reconciled_from,
             'deferred_until': self.deferred_until.isoformat() if self.deferred_until else None,
             'config': {
                 'drift_threshold': self.config['drift_threshold'],

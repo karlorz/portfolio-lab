@@ -122,3 +122,12 @@
 - ClaudeMd?:      no
 - WorkflowShift?: no
 - Deep-research: event-time vs processing-time dual-clock lag; last_execution_event_time gauges
+
+## [2026-07-22] retro | loop cycle: batch-dx-reconcile-controller-clock
+- Friction:       DW disclosed 51d lag; root cause was last_rebalance never advanced on fills
+- Miss:           record_execution only path; dashboard evaluate does not record
+- Improve:        reconcile_last_rebalance_from_event from rebalance_health on gate load; no invented costs
+- Generalize?:    yes (event-sourced last_* clocks; controller state vs order log)
+- ClaudeMd?:      no
+- WorkflowShift?: no
+- Deep-research: event sourcing last_rebalance from RebalanceCompleted / fill event time; venue SSOT

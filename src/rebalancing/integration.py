@@ -84,6 +84,13 @@ class SmartRebalanceGate:
         self._vpin_cache: Dict[str, float] = {}
         self._regime: Optional[str] = None
         self._vpin_engine = VPINEngine(symbols=['SPY', 'GLD', 'TLT']) if _VPIN_AVAILABLE else None
+        # Batch DX: advance controller clock from order-event rebalance_health
+        # when durable last_rebalance lags fills (record_execution may be uncalled).
+        if load_state:
+            try:
+                self.controller.reconcile_from_rebalance_health(persist=True)
+            except Exception as exc:  # noqa: BLE001 — never fail gate init
+                logger.warning("smart_rebalance event-clock reconcile skipped: %s", exc)
 
     def update_vpin(self, vpin: float):
         """Update current VPIN reading (from v2.65 or synthetic)."""
