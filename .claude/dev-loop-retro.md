@@ -176,3 +176,12 @@
 - ClaudeMd?:      no
 - WorkflowShift?: no
 - Deep-research: soft-floor weight share SLI; IC gates; ensemble health ≠ source headcount
+
+## [2026-07-22] retro | loop cycle: batch-ed-reentry-eligibility-sli
+- Friction:       Nested reentry eligible (MSM/INTL/VIXTS) vs blocked (ALT/CARA) invisible on compact health
+- Miss:           EC disclosed soft-floor mass but not multi-horizon wake eligibility
+- Improve:        Project reentry_eligible/blocked counts + sources; policy=no_force_wake; no auto-wake
+- Generalize?:    yes (hysteresis reentry disclose ≠ force; sleeping experts)
+- ClaudeMd?:      no
+- WorkflowShift?: no
+- Deep-research: multi-horizon IC reentry + hysteresis; no force-wake

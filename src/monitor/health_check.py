@@ -623,6 +623,20 @@ def refresh_signals_health_kill_fields(
     except Exception:  # noqa: BLE001
         pass
 
+    # Batch ED: re-project multi-horizon reentry eligibility (disclose only)
+    try:
+        from src.dashboard.generator import project_reentry_eligibility_onto_health
+
+        if isinstance(health, dict):
+            health = project_reentry_eligibility_onto_health(
+                health,
+                payload.get("ensemble_voting")
+                if isinstance(payload.get("ensemble_voting"), dict)
+                else None,
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
     payload["health"] = health
     # Partial rewrite must advance top-level generated_at (mtime honesty)
     from datetime import datetime, timezone

@@ -56,6 +56,7 @@ __all__ = [
     "project_smart_rebalance_budget_onto_health",
     "project_paper_return_ssot_onto_health",
     "project_voting_mass_quality_onto_health",
+    "project_reentry_eligibility_onto_health",
 ]
 
 # Legacy flat keys (pre seven-component producer) → panel component names
@@ -907,6 +908,97 @@ def project_smart_rebalance_budget_onto_health(
     ):
         health["status"] = "warning"
 
+    return health
+
+
+def project_reentry_eligibility_onto_health(
+    health: dict[str, Any] | None,
+    ensemble_voting: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Project multi-horizon reentry eligibility onto compact health (Batch ED).
+
+    Nested ``health_metrics.reentry`` already carries multi-horizon hysteresis
+    (eligible / blocked_reason / no_force_wake). Operators reading only compact
+    health missed eligible sleepers (MSM/INTL/VIXTS) vs blocked (ALT/CARA).
+
+    Disclosure only — does **not** force-wake or change routing authority.
+    """
+    if not isinstance(health, dict):
+        health = {}
+    if not isinstance(ensemble_voting, dict):
+        health.setdefault("ensemble_reentry_status", "unknown")
+        return health
+
+    eligible: list[str] = []
+    blocked: list[str] = []
+    blocked_reasons: list[str] = []
+    policy = "multi_horizon_hysteresis_no_force_wake"
+    tracked = 0
+
+    for row in ensemble_voting.get("configured_source_status") or []:
+        if not isinstance(row, dict):
+            continue
+        src = str(row.get("source") or "")
+        if not src:
+            continue
+        hm = row.get("health_metrics") if isinstance(row.get("health_metrics"), dict) else {}
+        re = hm.get("reentry") if isinstance(hm.get("reentry"), dict) else {}
+        # Prefer nested reentry block; fall back to flat flags
+        if "reentry_eligible" in re:
+            elig = bool(re.get("reentry_eligible"))
+            tracked += 1
+            if re.get("policy"):
+                policy = str(re.get("policy"))
+            if elig:
+                eligible.append(src)
+            else:
+                blocked.append(src)
+                br = re.get("reentry_blocked_reason")
+                if br:
+                    blocked_reasons.append(f"{src}:{br}")
+        elif hm.get("reentry_eligible") is not None:
+            tracked += 1
+            if bool(hm.get("reentry_eligible")):
+                eligible.append(src)
+            else:
+                blocked.append(src)
+        elif row.get("reentry_eligible") is not None:
+            tracked += 1
+            if bool(row.get("reentry_eligible")):
+                eligible.append(src)
+            else:
+                blocked.append(src)
+
+    slept = ensemble_voting.get("health_gate_slept")
+    slept_n = len(slept) if isinstance(slept, dict) else 0
+
+    if tracked == 0:
+        status = "unknown"
+    elif eligible:
+        status = "eligible_pending"
+    else:
+        status = "none_eligible"
+
+    health["ensemble_reentry_eligible_count"] = len(eligible)
+    health["ensemble_reentry_blocked_count"] = len(blocked)
+    health["ensemble_reentry_tracked_count"] = tracked
+    health["ensemble_reentry_eligible_sources"] = (
+        ",".join(sorted(eligible)) if eligible else None
+    )
+    health["ensemble_reentry_blocked_sources"] = (
+        ",".join(sorted(blocked)) if blocked else None
+    )
+    health["ensemble_reentry_blocked_sample"] = (
+        blocked_reasons[0] if blocked_reasons else None
+    )
+    health["ensemble_reentry_status"] = status
+    health["ensemble_reentry_policy"] = policy
+    health["ensemble_reentry_slept_count"] = slept_n
+    health["ensemble_reentry_badge"] = (
+        f"reentry_eligible={len(eligible)}/{tracked} "
+        f"blocked={len(blocked)} policy=no_force_wake"
+    )
+    # Never elevate status solely for eligible-pending — wake is human/natural
     return health
 
 
@@ -4421,6 +4513,21 @@ class DashboardGenerator:
             )
         except Exception as vm_exc:  # noqa: BLE001
             logger.warning("voting mass quality health project skipped: %s", vm_exc)
+
+        # Batch ED: multi-horizon reentry eligibility (disclose only, no force-wake)
+        try:
+            health = output.get("health")
+            if not isinstance(health, dict):
+                health = {}
+                output["health"] = health
+            output["health"] = project_reentry_eligibility_onto_health(
+                health,
+                output.get("ensemble_voting")
+                if isinstance(output.get("ensemble_voting"), dict)
+                else None,
+            )
+        except Exception as re_exc:  # noqa: BLE001
+            logger.warning("reentry eligibility health project skipped: %s", re_exc)
 
         # Fire external alerts on staleness state transitions (+ recovery ownership)
         try:
