@@ -64,6 +64,9 @@ _PUBLIC_DATA_CONTRACT: dict[str, tuple[str, str]] = {
     "decision_registry.json": ("monitoring", DECISION_REGISTRY_SCHEMA_VERSION),
     # Nested dual-write (H19): basename used when path is attribution/*
     "attribution/latest.json": ("attribution", "attribution-report/v1"),
+    # Batch EH: GARCH risk dual-writes (private risk_metrics + public garch_cvar)
+    "garch_cvar.json": ("risk", "garch-cvar/v1"),
+    "risk_metrics.json": ("risk", "risk-metrics/v1"),
 }
 
 _OPTIONAL_PUBLIC_DATA_FILES = (
@@ -80,6 +83,9 @@ _OPTIONAL_PUBLIC_DATA_FILES = (
     "incidents.json",
     # Nested dual-write catalog (H19) — also discovered via _discover_attribution_public_paths
     "attribution/latest.json",
+    # Batch EH: optional until first garch-risk cron after deploy
+    "garch_cvar.json",
+    "risk_metrics.json",
 )
 
 _LABS_OBJECT_PAGINATION_ROW_KEYS = {

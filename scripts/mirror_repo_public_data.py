@@ -56,6 +56,7 @@ DEFAULT_FILE_GLOBS: tuple[str, ...] = (
     "labs_validation.json",
     "dashboard.json",
     "garch_cvar.json",
+    "risk_metrics.json",  # Batch EH: private twin dual-write for WWW/index
     "unified_dashboard.json",
     "regime_gate.json",
     "tsmom.json",

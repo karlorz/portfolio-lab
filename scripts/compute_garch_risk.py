@@ -340,11 +340,18 @@ def main():
     with open(risk_metrics_path, "w") as f:
         json.dump(risk_payload, f, indent=2, default=str)
 
-    # Public dual-write: non-dotfile GARCH-CVaR for WWW / index consumers
+    # Public dual-write: garch_cvar.json + risk_metrics.json for WWW / index.
+    # Batch EH: risk_metrics was private-only (investigate residual). Mirror
+    # risk_metrics as a content twin; garch_cvar remains the enriched WWW panel.
+    # Post-sync provenance only rewrites matching twin pairs (never overwrite
+    # private risk_metrics with garch_cvar body — different schema).
+    # Deep-research: measure lag after both writes complete; content-hash
+    # equality clears sticky dual_write_lag_stale.
     try:
         public_root = Path(PUBLIC_DATA_DIR)
         public_root.mkdir(parents=True, exist_ok=True)
-        public_path = public_root / "garch_cvar.json"
+        public_garch_path = public_root / "garch_cvar.json"
+        public_risk_path = public_root / "risk_metrics.json"
         public_payload = {
             **risk_payload,
             "schema_version": "garch-cvar/v1",
@@ -361,25 +368,88 @@ def main():
             )
 
             public_payload = _stamp_generator_git_sha(public_payload)
+            # Intent stamp before public write (paths differ; hash may clear lag)
             public_payload = _attach_dual_write_provenance(
                 public_payload,
-                private_path=report_path,
-                public_path=public_path,
+                private_path=risk_metrics_path,
+                public_path=public_garch_path,
                 dual_write_attempted=True,
                 dual_write_ok=True,
                 paths_identical=False,
-                note="private SSOT is .health_report.json; public is garch_cvar.json",
+                note=(
+                    "garch_cvar public panel; private SSOT is risk_metrics.json "
+                    "(Batch EH). Lag/hash recomputed after write when possible."
+                ),
             )
         except Exception:  # noqa: BLE001 — never block dual-write
             pass
         # Atomic write: temp + rename (same FS) so readers never see partial JSON
-        tmp_path = public_path.with_suffix(".json.tmp")
+        tmp_path = public_garch_path.with_suffix(".json.tmp")
         with open(tmp_path, "w") as f:
             json.dump(public_payload, f, indent=2, default=str)
-        tmp_path.replace(public_path)
-        print(f"  Public GARCH: {public_path}")
+        tmp_path.replace(public_garch_path)
+        # Re-attach provenance post-write on public only (do not rewrite private)
+        try:
+            from src.dashboard.generator import _attach_dual_write_provenance
+
+            public_payload = _attach_dual_write_provenance(
+                public_payload,
+                private_path=risk_metrics_path,
+                public_path=public_garch_path,
+                dual_write_attempted=True,
+                dual_write_ok=True,
+                paths_identical=False,
+                note=(
+                    "post_write garch_cvar provenance (Batch EH): public mtime "
+                    "sampled after replace; private risk_metrics SSOT unchanged"
+                ),
+            )
+            tmp_path = public_garch_path.with_suffix(".json.tmp")
+            with open(tmp_path, "w") as f:
+                json.dump(public_payload, f, indent=2, default=str)
+            tmp_path.replace(public_garch_path)
+        except Exception:  # noqa: BLE001
+            pass
+        print(f"  Public GARCH: {public_garch_path}")
+
+        # risk_metrics public twin — same schema as private SSOT
+        risk_public_body = dict(risk_payload)
+        try:
+            from src.dashboard.generator import (
+                _stamp_generator_git_sha,
+                finalize_dual_write_provenance_after_sync,
+            )
+
+            risk_public_body = _stamp_generator_git_sha(risk_public_body)
+            tmp_risk = public_risk_path.with_suffix(".json.tmp")
+            with open(tmp_risk, "w") as f:
+                json.dump(risk_public_body, f, indent=2, default=str)
+            tmp_risk.replace(public_risk_path)
+            # Post-sync twin: rewrite private+public with honest lag/hash
+            finalize_dual_write_provenance_after_sync(
+                risk_public_body,
+                private_path=risk_metrics_path,
+                public_path=public_risk_path,
+                dual_write_ok=True,
+                note=(
+                    "post_sync risk_metrics dual-write (Batch EH): private DATA_DIR "
+                    "SSOT mirrored to PUBLIC_DATA_DIR for index/WWW consumers"
+                ),
+                write_json=True,
+            )
+            print(f"  Public risk_metrics: {public_risk_path}")
+        except Exception as risk_exc:  # noqa: BLE001
+            # Fallback: best-effort public copy without provenance rewrite
+            try:
+                tmp_risk = public_risk_path.with_suffix(".json.tmp")
+                with open(tmp_risk, "w") as f:
+                    json.dump(risk_public_body, f, indent=2, default=str)
+                tmp_risk.replace(public_risk_path)
+                print(f"  Public risk_metrics: {public_risk_path} (no post-sync stamp)")
+            except OSError:
+                print(f"  WARNING: public risk_metrics dual-write failed: {risk_exc}")
     except OSError as exc:
-        print(f"  WARNING: public garch_cvar dual-write failed: {exc}")
+        print(f"  WARNING: public garch_cvar/risk_metrics dual-write failed: {exc}")
 
     # Append sparse history so operators can see GARCH job cadence (keep last 720).
     history_path = DATA_DIR / "risk_metrics_history.json"
