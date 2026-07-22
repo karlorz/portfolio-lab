@@ -1593,6 +1593,15 @@ class EnsembleVoter:
                 return rewards
         return None
 
+    @staticmethod
+    def _soft_delete_source_names(regime_name: str) -> set:
+        """String names of REGIME_WEIGHTS soft-delete arms for a regime."""
+        zeros = EnsembleVoter._static_zero_baseline_sources(regime_name)
+        names: set = set()
+        for src in zeros:
+            names.add(src.value if hasattr(src, "value") else str(src))
+        return names
+
     def apply_daily_bandit_rewards(
         self,
         daily_return: float,
@@ -1603,6 +1612,7 @@ class EnsembleVoter:
         noise_floor: Optional[float] = None,
         source_rewards: Optional[Dict[str, float]] = None,
         reward_mode: Optional[str] = None,
+        include_soft_delete_arms: bool = False,
     ) -> Dict[str, Any]:
         """Apply one day of portfolio return as reward to ensemble bandit sources.
 
@@ -1621,6 +1631,11 @@ class EnsembleVoter:
         multi-arm updates proceed with per-arm credit assignment.
         Batch BR: prefer daily contribution ``source_rewards`` and pass
         ``reward_mode='daily_contribution_source_rewards'`` for honesty tags.
+
+        Batch DL: static soft-delete arms (REGIME_WEIGHTS weight 0) are excluded
+        from reward updates by default — sleeping/non-voting experts must not
+        train the posterior (Thompson sampling / sleeping-experts hygiene).
+        Pass ``include_soft_delete_arms=True`` for explicit shadow learning.
 
         Returns summary with updates count and observation total.
         """
@@ -1666,6 +1681,40 @@ class EnsembleVoter:
             else:
                 sources = [s.value for s in SignalSource]
         sources = [str(s) for s in sources]
+
+        # Batch DL: drop soft-delete / non-voting arms from reward training
+        soft_delete_excluded: List[str] = []
+        if not include_soft_delete_arms:
+            soft_names = self._soft_delete_source_names(regime_name)
+            if soft_names:
+                kept: List[str] = []
+                for s in sources:
+                    if s in soft_names:
+                        soft_delete_excluded.append(s)
+                    else:
+                        kept.append(s)
+                sources = kept
+                if per_arm is not None:
+                    per_arm = {
+                        k: v for k, v in per_arm.items() if k not in soft_names
+                    }
+                    if not per_arm:
+                        per_arm = None
+                if not sources:
+                    return {
+                        "updates": 0,
+                        "observations": int(self.bandit_observations),
+                        "reward_days": int(getattr(self, "bandit_days", 0) or 0),
+                        "days": int(getattr(self, "bandit_days", 0) or 0),
+                        "bandit_days": int(getattr(self, "bandit_days", 0) or 0),
+                        "regime": regime_name,
+                        "daily_return": reward,
+                        "noise_floor": floor,
+                        "skipped": True,
+                        "reason": "all_arms_soft_delete_or_empty",
+                        "soft_delete_excluded": soft_delete_excluded,
+                        "live_authoritative": False,
+                    }
 
         # Multi-arm identical portfolio broadcast guard (Batch BO)
         if len(sources) > 1 and per_arm is None:
@@ -1793,6 +1842,8 @@ class EnsembleVoter:
             "skipped": False,
             "live_authoritative": False,
         }
+        if soft_delete_excluded:
+            summary["soft_delete_excluded"] = soft_delete_excluded
         if per_arm is not None:
             mode = (
                 str(reward_mode)
@@ -1808,6 +1859,8 @@ class EnsembleVoter:
             summary["reward_mode"] = (
                 str(reward_mode) if reward_mode else "single_arm_or_scalar"
             )
+            if applied:
+                summary["arms_updated"] = list(applied.keys())
         return summary
 
     @staticmethod

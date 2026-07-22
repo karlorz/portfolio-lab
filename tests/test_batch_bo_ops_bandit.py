@@ -50,11 +50,11 @@ def test_bandit_skips_identical_portfolio_reward_broadcast(tmp_path):
     assert summary["reason"] == "identical_portfolio_reward_all_arms"
     assert voter.bandit_observations == 0
 
-    # Single-arm still updates
+    # Single-arm still updates (use voting arm; soft-delete MSM skipped by Batch DL)
     one = voter.apply_daily_bandit_rewards(
         0.01,
         regime_name="NORMAL",
-        sources=["multi_speed_momentum"],
+        sources=["cross_asset_rv"],
         persist=True,
     )
     assert one["skipped"] is False

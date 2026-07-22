@@ -50,10 +50,13 @@ def test_load_attribution_rejects_identical_zero_spread(tmp_path):
 
 
 def test_multi_arm_attribution_rewards_update_and_persist(tmp_path):
-    """Differentiated per-arm rewards bypass BO identical-broadcast skip."""
+    """Differentiated per-arm rewards bypass BO identical-broadcast skip.
+
+    Batch DL: soft-delete MSM is excluded from training (updates=2 not 3).
+    """
     voter = EnsembleVoter(data_path=tmp_path)
     src_rewards = {
-        "multi_speed_momentum": 0.001,
+        "multi_speed_momentum": 0.001,  # soft-delete — skipped by default
         "cross_asset_rv": -0.0005,
         "unified_overlay": 0.0002,
     }
@@ -66,14 +69,16 @@ def test_multi_arm_attribution_rewards_update_and_persist(tmp_path):
     )
     assert summary["skipped"] is False
     assert summary["reward_mode"] == "attribution_source_rewards"
-    assert summary["updates"] == 3
+    assert summary["updates"] == 2  # MSM soft-delete excluded (Batch DL)
+    assert "multi_speed_momentum" in (summary.get("soft_delete_excluded") or [])
+    assert "multi_speed_momentum" not in (summary.get("arms_updated") or [])
     assert summary["bandit_days"] == 1
     assert summary["live_authoritative"] is False
     assert summary["reward_spread"] > 0
-    assert voter.bandit_observations == 3
+    assert voter.bandit_observations == 2
     # Persist reloads
     voter2 = EnsembleVoter(data_path=tmp_path)
-    assert voter2.bandit_observations == 3
+    assert voter2.bandit_observations == 2
     assert voter2.bandit_days == 1
 
 

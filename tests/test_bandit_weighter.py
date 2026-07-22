@@ -271,7 +271,7 @@ class TestEnsembleBanditDailyRewardPersistence:
         summary = voter.apply_daily_bandit_rewards(
             0.001,
             regime_name="NORMAL",
-            sources=["multi_speed_momentum"],
+            sources=["cross_asset_rv"],
             persist=True,
         )
         assert summary["skipped"] is False
@@ -343,7 +343,7 @@ class TestBanditWarmupDaySemantics:
         summary = voter.apply_daily_bandit_rewards(
             0.001,
             regime_name="NORMAL",
-            sources=["multi_speed_momentum"],
+            sources=["cross_asset_rv"],
             persist=True,
         )
         # One calendar step
@@ -371,7 +371,7 @@ class TestBanditWarmupDaySemantics:
         voter.apply_daily_bandit_rewards(
             0.002,
             regime_name="NORMAL",
-            sources=["multi_speed_momentum"],
+            sources=["cross_asset_rv"],
             persist=False,
         )
         status = voter.get_adaptive_learning_status("NORMAL")
@@ -391,7 +391,7 @@ class TestBanditWarmupDaySemantics:
         voter.apply_daily_bandit_rewards(
             0.001,
             regime_name="NORMAL",
-            sources=["multi_speed_momentum"],
+            sources=["cross_asset_rv"],
             persist=True,
         )
         voter.apply_daily_bandit_rewards(
@@ -429,7 +429,7 @@ class TestBanditRewardNoiseFloor:
         summary = voter.apply_daily_bandit_rewards(
             -0.000207,
             regime_name="NORMAL",
-            sources=["multi_speed_momentum"],
+            sources=["cross_asset_rv"],
             persist=True,
         )
         assert summary["skipped"] is False
