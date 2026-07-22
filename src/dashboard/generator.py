@@ -2161,6 +2161,81 @@ class DashboardGenerator:
             return None
 
     @staticmethod
+    def _inactive_signal_shadow_checklist(
+        source: str,
+        metrics: Dict[str, Any] | None = None,
+        activation: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """Batch DJ: health/IC shadow for inactive_signal (e.g. intl RS neutral).
+
+        Neutral-band / conf gates keep the arm non-actionable even when multi-horizon
+        IC is reentry-eligible. Disclosure only — do not lower RS thresholds or force
+        activate without backtest (whipsaw risk).
+        """
+        m = metrics if isinstance(metrics, dict) else {}
+        act = activation if isinstance(activation, dict) else {}
+        reentry = m.get("reentry") if isinstance(m.get("reentry"), dict) else None
+        if reentry is None:
+            reentry = DashboardGenerator._evaluate_ic_reentry(
+                ic_30d=m.get("ic_30d"),
+                ic_60d=m.get("ic_60d"),
+                ic_90d=m.get("ic_90d") if m.get("ic_90d") is not None else m.get("ic"),
+            )
+        status = str(m.get("status") or "").lower()
+        try:
+            hs = float(m["health_score"]) if m.get("health_score") is not None else None
+        except (TypeError, ValueError):
+            hs = None
+        multi_ok = bool(reentry.get("reentry_eligible"))
+        # Batch DJ: inactive shadow uses IC reentry + non-toxic status (not the
+        # 0.55 soft-delete floor). Health-sleep is IC-toxic; degraded+IC-ok is fine.
+        health_ok = multi_ok and status in {"healthy", "degraded", ""}
+        health_gates_pass = bool(health_ok)
+        gaps = list(act.get("activation_gaps") or [])
+        activation_cleared = len(gaps) == 0
+        if health_gates_pass and not activation_cleared:
+            hint = (
+                "Health/IC shadow gates pass but signal inactive (RS neutral band / "
+                "conf/risk filters) — keep weight 0; do not lower activation thresholds "
+                "without backtest; wait for EFA/EEM lead or conf≥0.5."
+            )
+        elif not multi_ok:
+            blocked = (reentry or {}).get("reentry_blocked_reason") or "ic_pending"
+            hint = (
+                f"Inactive and IC reentry blocked ({blocked}) — dual hold "
+                "(activation + health); shadow-monitor only."
+            )
+        elif not health_ok:
+            hint = (
+                "Inactive with weak/toxic health — improve accuracy/status before expecting "
+                "activation to matter."
+            )
+        else:
+            hint = "Inactive signal; shadow-monitor health and activation gaps."
+        return {
+            "source": source,
+            "policy": "inactive_signal_shadow_no_force_activate",
+            "health_gates_pass": health_gates_pass,
+            "activation_cleared": bool(activation_cleared),
+            "force_activate": False,
+            "gates": {
+                "multi_horizon_ic_reentry": multi_ok,
+                "health_status_ok": health_ok,
+                "activation_gaps_empty": bool(activation_cleared),
+            },
+            "activation_gaps": gaps,
+            "reentry": reentry,
+            "reentry_eligible": multi_ok,
+            "status": status or None,
+            "health_score": hs,
+            "ic": m.get("ic"),
+            "ic_30d": m.get("ic_30d"),
+            "ic_60d": m.get("ic_60d"),
+            "ic_90d": m.get("ic_90d"),
+            "shadow_hint": hint,
+        }
+
+    @staticmethod
     def _zero_baseline_shadow_checklist(
         source: str,
         metrics: Dict[str, Any] | None = None,
@@ -2304,8 +2379,16 @@ class DashboardGenerator:
             for s, w in configured_weights.items()
             if float(w or 0.0) <= 0.0
         }
-        if not metrics and (slept_map or zero_baseline_sources):
-            # Batch CZ/DD: recovery + zero_baseline shadow need SH metrics
+        # Batch DJ: inactive intl etc. also need SH metrics for shadow checklist
+        if not metrics and (
+            slept_map
+            or zero_baseline_sources
+            or any(
+                isinstance(r, dict) and r.get("is_active") is False
+                for r in (source_breakdown or [])
+            )
+        ):
+            # Batch CZ/DD/DJ: recovery + zero_baseline + inactive_signal shadow
             metrics = DashboardGenerator._signal_health_metrics_map()
 
         rows_by_source = {
@@ -2492,6 +2575,19 @@ class DashboardGenerator:
                 entry["health_gates_pass"] = shadow.get("health_gates_pass")
                 entry["shadow_reenable_ready"] = False
                 entry["reason"] = f"{entry['reason']} | shadow: {shadow.get('shadow_hint')}"
+            # Batch DJ: inactive_signal health/IC shadow (intl RS neutral etc.)
+            if status == "inactive_signal":
+                act = entry.get("activation") if isinstance(entry.get("activation"), dict) else None
+                ishadow = DashboardGenerator._inactive_signal_shadow_checklist(
+                    source,
+                    m if isinstance(m, dict) else {},
+                    act,
+                )
+                entry["shadow"] = ishadow
+                entry["shadow_hint"] = ishadow.get("shadow_hint")
+                entry["health_gates_pass"] = ishadow.get("health_gates_pass")
+                entry["force_activate"] = False
+                entry["reason"] = f"{entry['reason']} | shadow: {ishadow.get('shadow_hint')}"
             statuses.append(entry)
 
         # Renormalize over contributors so sum(active_weight) ≈ 1 when any active
@@ -3034,6 +3130,14 @@ class DashboardGenerator:
                     # Batch DD: zero_baseline soft-delete shadow re-enable (no auto-weight)
                     "zero_baseline_shadow": zero_baseline_shadow,
                     "zero_baseline_shadow_count": len(zero_baseline_shadow),
+                    # Batch DJ: inactive_signal shadow (RS neutral but health/IC ok)
+                    "inactive_signal_shadow": [
+                        row["shadow"]
+                        for row in configured_source_status
+                        if isinstance(row, dict)
+                        and row.get("status") == "inactive_signal"
+                        and isinstance(row.get("shadow"), dict)
+                    ],
                     # Batch DG: post-fix polarity cohort readiness (regime_arb etc.)
                     "post_fix_cohorts": [
                         {
@@ -6080,6 +6184,13 @@ class DashboardGenerator:
             ]
             ensemble["zero_baseline_shadow"] = zb_shadow
             ensemble["zero_baseline_shadow_count"] = len(zb_shadow)
+            ensemble["inactive_signal_shadow"] = [
+                row["shadow"]
+                for row in (ensemble.get("configured_source_status") or [])
+                if isinstance(row, dict)
+                and row.get("status") == "inactive_signal"
+                and isinstance(row.get("shadow"), dict)
+            ]
             ensemble["post_fix_cohorts"] = [
                 {
                     "source": row.get("source"),

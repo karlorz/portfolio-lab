@@ -25,13 +25,16 @@ class SignalAggregator:
         self.regime_weights = regime_weights
 
     def active_sources_for(self, regime: Optional[Any]) -> Optional[Set[SignalSource]]:
+        """Configured sources for the regime (including zero-weight soft-delete).
+
+        Batch DJ: previously only ``weight > 0`` arms were collected, so
+        multi_speed_momentum (weight 0 all regimes) never produced snapshots
+        or health-tracker provenance. Soft-delete still contributes **zero
+        vote mass** via REGIME_WEIGHTS; collection is for shadow logging only.
+        """
         if regime is None:
             return None
-        return {
-            source
-            for source, weight in self.regime_weights.get(regime, {}).items()
-            if weight > 0
-        }
+        return set(self.regime_weights.get(regime, {}).keys())
 
     def should_skip(
         self,
@@ -41,7 +44,11 @@ class SignalAggregator:
     ) -> bool:
         if active_sources is not None and source not in active_sources:
             regime_name = regime.value if regime is not None and hasattr(regime, "value") else "?"
-            logger.debug("Skipping %s: zero weight for regime=%s", source.value, regime_name)
+            logger.debug(
+                "Skipping %s: not in configured roster for regime=%s",
+                source.value,
+                regime_name,
+            )
             return True
         return False
 
