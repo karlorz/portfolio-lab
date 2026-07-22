@@ -258,6 +258,11 @@ class TestCheckDataFreshness:
         """Batch CI: pending weekly fetch-trends must not force cron degraded."""
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        # Batch DT: hermes_cron also searches DATA_DIR for trends artifacts
+        import src.monitor.hermes_cron as hc
+
+        monkeypatch.setattr(hc, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(hc, "PUBLIC_DATA_DIR", tmp_path)
         (tmp_path / "cron_status.json").write_text(json.dumps({
             "backend": "tasker",
             "jobs": [

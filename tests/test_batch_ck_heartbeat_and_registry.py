@@ -59,7 +59,12 @@ def test_hourly_job_overdue_when_age_exceeds_period_plus_grace():
     assert hb["heartbeat_state"] == "overdue"
 
 
-def test_normalize_cron_job_attaches_heartbeat_fields():
+def test_normalize_cron_job_attaches_heartbeat_fields(tmp_path, monkeypatch):
+    # Batch DT: empty data dirs so live google_trends.json cannot soft-ok pending
+    import src.monitor.hermes_cron as hc
+
+    monkeypatch.setattr(hc, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(hc, "PUBLIC_DATA_DIR", tmp_path)
     job = normalize_cron_job(
         {
             "name": "portfolio-lab-fetch-trends",
@@ -79,7 +84,13 @@ def test_normalize_cron_job_attaches_heartbeat_fields():
     assert job["last_success_age_seconds"] is None
 
 
-def test_summarize_backend_pending_never_run_still_ok_with_heartbeat():
+def test_summarize_backend_pending_never_run_still_ok_with_heartbeat(
+    tmp_path, monkeypatch
+):
+    import src.monitor.hermes_cron as hc
+
+    monkeypatch.setattr(hc, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(hc, "PUBLIC_DATA_DIR", tmp_path)
     jobs = [
         normalize_cron_job(
             {

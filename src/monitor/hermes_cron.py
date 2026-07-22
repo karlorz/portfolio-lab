@@ -34,7 +34,16 @@ RECOVERY_MAX_ARTIFACT_AGE_HOURS = float(
 JOB_RECOVERY_ARTIFACTS: dict[str, tuple[str, ...]] = {
     "portfolio-lab-dashboard": ("health.json", "signals.json", "dashboard.json"),
     "portfolio-lab-data": ("prices.json", "prices_compact.json"),
+    # Batch DT: weekly trends may be filled by manual/ops stamp before first
+    # Sunday tasker fire — google_trends.json proves producer health.
+    "portfolio-lab-fetch-trends": ("google_trends.json",),
 }
+
+# Max age for pending_never_run → ok when artifact proves success (weekly jobs).
+# Default 8 days covers weekly schedule + weekend lag.
+PENDING_ARTIFACT_MAX_AGE_HOURS = float(
+    os.environ.get("PORTFOLIO_LAB_PENDING_ARTIFACT_MAX_AGE_HOURS", "192")
+)
 
 
 def is_health_self_job(job: Any) -> bool:
@@ -187,6 +196,84 @@ def is_sticky_cron_error_recovered(
         data_dirs=data_dirs,
         now=now,
     ) is not None
+
+
+def pending_job_artifact_evidence(
+    job: Mapping[str, Any],
+    *,
+    data_dirs: Optional[Sequence[Path]] = None,
+    now: Optional[float] = None,
+    max_age_hours: Optional[float] = None,
+) -> Optional[dict[str, Any]]:
+    """Batch DT: pending_never_run + fresh producer artifact → soft-success.
+
+    Weekly jobs can sit as tasker ``status=pending`` / ``last_run=null`` while
+    ops or an out-of-band fetch already wrote a valid cache (e.g. google_trends
+    with _meta.fetched_at). Operators then see a false "never run" while the
+    signal is live. When a mapped artifact is fresher than ``max_age_hours``
+    (default 8d for weekly), return evidence to reconcile heartbeat to ok.
+    """
+    if not isinstance(job, Mapping):
+        return None
+    status = normalize_cron_status(job.get("status", job.get("last_status")))
+    last_run = job.get("last_run") or job.get("last_run_at") or job.get("last_finished_at")
+    if status != "pending" or last_run:
+        return None
+    name = str(job.get("name") or "")
+    artifacts = JOB_RECOVERY_ARTIFACTS.get(name)
+    if not artifacts:
+        return None
+
+    max_age_h = (
+        float(max_age_hours)
+        if max_age_hours is not None
+        else float(PENDING_ARTIFACT_MAX_AGE_HOURS)
+    )
+    now_ts = float(now) if now is not None else datetime.now(timezone.utc).timestamp()
+    max_age_s = max(max_age_h, 0.0) * 3600.0
+
+    if data_dirs is not None:
+        roots = recovery_data_dirs(data_dirs, include_defaults=False)
+    else:
+        roots = recovery_data_dirs(include_defaults=True)
+
+    for root in roots:
+        for rel in artifacts:
+            path = root / rel
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            age_s = now_ts - mtime
+            if age_s < 0 or age_s > max_age_s:
+                continue
+            # Prefer _meta.fetched_at / latest_observation when present (trends)
+            meta_fetched = None
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(payload, dict):
+                    meta = payload.get("_meta")
+                    if isinstance(meta, dict):
+                        meta_fetched = meta.get("fetched_at") or meta.get(
+                            "latest_observation"
+                        )
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError, TypeError):
+                meta_fetched = None
+            return {
+                "job": name,
+                "artifact": rel,
+                "artifact_path": str(path),
+                "artifact_mtime": datetime.fromtimestamp(
+                    mtime, tz=timezone.utc
+                ).isoformat(),
+                "artifact_age_seconds": round(age_s, 1),
+                "meta_fetched_at": meta_fetched,
+                "max_age_hours": max_age_h,
+                "live_authoritative": False,
+                "reason": "producer_artifact_fresh_while_tasker_pending_never_run",
+                "policy": "Batch DT pending artifact reconcile",
+            }
+    return None
 
 
 def rollup_failed_cron_jobs(
@@ -440,6 +527,43 @@ def normalize_cron_job(
         normalized["heartbeat_grace_seconds"] = hb.get("grace_seconds")
     except Exception:  # noqa: BLE001 — never break job normalize on SLI
         pass
+
+    # Batch DT: pending_never_run + fresh producer artifact → soft ok
+    try:
+        if (
+            normalized.get("status") == "pending"
+            and not normalized.get("last_run")
+            and normalized.get("enabled", True)
+            and not normalized.get("manual_only", False)
+        ):
+            evidence = pending_job_artifact_evidence(normalized, now=now)
+            if evidence:
+                normalized["status"] = "ok"
+                normalized["pending_artifact_reconciled"] = True
+                normalized["pending_artifact_evidence"] = {
+                    "artifact": evidence.get("artifact"),
+                    "artifact_mtime": evidence.get("artifact_mtime"),
+                    "meta_fetched_at": evidence.get("meta_fetched_at"),
+                    "reason": evidence.get("reason"),
+                }
+                # Heartbeat: use artifact mtime as synthetic last success
+                mtime_iso = evidence.get("artifact_mtime")
+                if mtime_iso:
+                    normalized["last_run"] = mtime_iso
+                    normalized["last_run_source"] = "producer_artifact_mtime"
+                hb2 = schedule_aware_last_success_heartbeat(normalized, now=now)
+                normalized["last_success_age_seconds"] = hb2.get(
+                    "last_success_age_seconds"
+                )
+                normalized["heartbeat_state"] = hb2.get("heartbeat_state")
+                normalized["heartbeat_overdue"] = bool(hb2.get("overdue"))
+                normalized["heartbeat_grace_seconds"] = hb2.get("grace_seconds")
+                normalized["heartbeat_disclosure"] = (
+                    "Batch DT: pending_never_run reconciled to ok via fresh "
+                    f"artifact {evidence.get('artifact')}"
+                )
+    except Exception:  # noqa: BLE001
+        pass
     return normalized
 
 
@@ -493,6 +617,13 @@ def summarize_backend(
         and job.get("state") not in {"manual_only", "paused"}
         and job.get("status") == "pending"
         and not job.get("last_run")
+        # Batch DT: already-reconciled rows are status=ok with last_run set
+        and not job.get("pending_artifact_reconciled")
+    )
+    pending_artifact_reconciled = sum(
+        1
+        for job in jobs
+        if isinstance(job, dict) and job.get("pending_artifact_reconciled")
     )
     backend_status = status or ("degraded" if failed_jobs or active_unknown_jobs else "ok")
     summary = {
@@ -511,6 +642,8 @@ def summarize_backend(
         summary["unknown_active_jobs"] = active_unknown_jobs
     if active_pending_never_run:
         summary["pending_never_run_jobs"] = active_pending_never_run
+    if pending_artifact_reconciled:
+        summary["pending_artifact_reconciled_jobs"] = pending_artifact_reconciled
     # Batch CK: roll up schedule-aware heartbeats (do not degrade on pending_never_run)
     overdue_jobs = [
         job
