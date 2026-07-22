@@ -960,3 +960,84 @@ class TestMain:
         with open(output_path) as f:
             data = json.load(f)
         assert data["total_executions"] == 0
+
+
+class TestBatchDRRecentOrdersDailySummary:
+    """Batch DR: live order-history uses recent_orders + date field."""
+
+    def test_recent_orders_key_parsed_and_advances_schedule(self):
+        import src.monitor.rebalance_health as rh
+        from src.monitor.rebalance_health import generate
+
+        original_dir = rh.ORDERS_DIR
+        original_data_dir = rh.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                data_dir = Path(d)
+                rh.DATA_DIR = data_dir
+                rh.ORDERS_DIR = data_dir / "historical_orders"
+                rh.ORDERS_DIR.mkdir()
+                # Stale May historical files only
+                _make_order_file(
+                    rh.ORDERS_DIR,
+                    "order_history_20260512_120000_aaa",
+                    [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}],
+                )
+                # Live dual-write shape: recent_orders + May backfill timestamps
+                (data_dir / "order-history-2026-07-22.json").write_text(json.dumps({
+                    "date": "2026-07-22",
+                    "total_orders": 6,
+                    "recent_shown": 6,
+                    "recent_orders": [
+                        {
+                            "symbol": "SPY",
+                            "side": "buy",
+                            "estimated_value": 46000,
+                            "reason": "rebalance_up",
+                            "timestamp": "2026-05-11T03:20:31.447694",
+                        },
+                        {
+                            "symbol": "GLD",
+                            "side": "buy",
+                            "estimated_value": 38000,
+                            "reason": "rebalance_up",
+                            "timestamp": "2026-05-11T03:20:31.447694",
+                        },
+                    ],
+                    "statistics": {},
+                }))
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+            rh.DATA_DIR = original_data_dir
+
+        # Must use file date 2026-07-22, not embedded May timestamp
+        assert result["execution_history"][0]["date"] == "2026-07-22"
+        assert result["execution_history"][0]["source"] == "daily_order_summary"
+        assert result["next_rebalance"]["date"] == "2026-08-21"
+        assert result["next_rebalance"]["status"] != "overdue"
+        assert result["next_rebalance"]["overdue"] is False
+        assert result["canonical_order_history_source"] == "combined_order_history"
+
+    def test_parse_daily_prefers_payload_date_over_order_timestamp(self):
+        import src.monitor.rebalance_health as rh
+        from src.monitor.rebalance_health import _parse_daily_order_summary
+
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "order-history-2026-07-20.json"
+            path.write_text(json.dumps({
+                "date": "2026-07-20",
+                "total_orders": 2,
+                "recent_orders": [
+                    {
+                        "symbol": "SPY",
+                        "side": "buy",
+                        "estimated_value": 1000,
+                        "timestamp": "2026-05-11T00:00:00",
+                    }
+                ],
+            }))
+            entry = _parse_daily_order_summary(path)
+        assert entry is not None
+        assert entry["date"] == "2026-07-20"
+        assert entry["timestamp"].startswith("2026-07-20")

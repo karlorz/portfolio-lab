@@ -81,28 +81,41 @@ def _parse_order_file(path: Path) -> dict[str, Any] | None:
 
 
 def _parse_daily_order_summary(path: Path) -> dict[str, Any] | None:
-    """Parse root daily order summaries named order-history-YYYY-MM-DD.json."""
+    """Parse root daily order summaries named order-history-YYYY-MM-DD.json.
+
+    Batch DR: live SSOT uses ``recent_orders`` (not bare ``orders``). Prefer
+    file ``date`` for schedule freshness — embedded order timestamps can be
+    historical backfill stamps (e.g. 2026-05-11 rows rewritten into July files).
+    """
     try:
         payload = json.loads(path.read_text())
         if not isinstance(payload, dict):
             return None
-        orders = payload.get("orders")
+        # Live dual-write schema: recent_orders; legacy/tests: orders
+        orders = payload.get("recent_orders")
+        if not isinstance(orders, list) or len(orders) == 0:
+            orders = payload.get("orders")
         if not isinstance(orders, list) or len(orders) == 0:
             return None
 
-        timestamp = None
-        for order in orders:
-            if isinstance(order, dict) and order.get("timestamp"):
-                timestamp = str(order["timestamp"])
-                break
-        if timestamp:
-            ts = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-        elif payload.get("date"):
-            ts = datetime.fromisoformat(str(payload["date"])).replace(tzinfo=timezone.utc)
+        # Prefer payload date (filename day) over embedded order timestamps —
+        # daily summaries are the SSOT for "activity on this calendar day".
+        if payload.get("date"):
+            ts = datetime.fromisoformat(str(payload["date"])).replace(
+                tzinfo=timezone.utc
+            )
         else:
-            ts = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+            timestamp = None
+            for order in orders:
+                if isinstance(order, dict) and order.get("timestamp"):
+                    timestamp = str(order["timestamp"])
+                    break
+            if timestamp:
+                ts = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+            else:
+                ts = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
 
         dict_orders = [order for order in orders if isinstance(order, dict)]
         total_value = sum(
