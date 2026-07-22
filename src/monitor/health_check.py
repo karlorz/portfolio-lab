@@ -576,6 +576,25 @@ def refresh_signals_health_kill_fields(
     except Exception:  # noqa: BLE001
         pass
 
+    # Batch DW: re-project smart-rebalance cost budget + dual-clock lag from
+    # sticky smart_rebalance / rebalance_health so partial patches disclose
+    # over-budget (ytd 214 bps vs 50) and controller last_rebalance lag.
+    try:
+        from src.dashboard.generator import project_smart_rebalance_budget_onto_health
+
+        if isinstance(health, dict):
+            health = project_smart_rebalance_budget_onto_health(
+                health,
+                payload.get("smart_rebalance")
+                if isinstance(payload.get("smart_rebalance"), dict)
+                else None,
+                payload.get("rebalance_health")
+                if isinstance(payload.get("rebalance_health"), dict)
+                else None,
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
     payload["health"] = health
     # Partial rewrite must advance top-level generated_at (mtime honesty)
     from datetime import datetime, timezone

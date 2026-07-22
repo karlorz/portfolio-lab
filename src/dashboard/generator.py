@@ -53,6 +53,7 @@ __all__ = [
     "PUBLIC_DIR",
     "DB_PATH",
     "project_alternative_data_signal",
+    "project_smart_rebalance_budget_onto_health",
 ]
 
 # Legacy flat keys (pre seven-component producer) → panel component names
@@ -743,6 +744,168 @@ def _compact_health_summary(report: Dict) -> Dict:
                     )
 
     return summary
+
+
+def _parse_rebalance_clock(value: Any) -> datetime | None:
+    """Parse controller or order-event timestamps for dual-clock lag."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        # Support trailing Z and bare dates
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        if "T" in text:
+            dt = datetime.fromisoformat(text)
+        else:
+            dt = datetime.strptime(text[:10], "%Y-%m-%d")
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (TypeError, ValueError):
+        return None
+
+
+def project_smart_rebalance_budget_onto_health(
+    health: dict[str, Any] | None,
+    smart_rebalance: dict[str, Any] | None,
+    rebalance_health: dict[str, Any] | None = None,
+    *,
+    clock_lag_warn_days: float = 7.0,
+) -> dict[str, Any]:
+    """Project cost-budget + dual-clock lag onto compact ``signals.health``.
+
+    Nested ``smart_rebalance`` already carries ``is_over_budget`` /
+    ``ytd_cost_bps`` and controller ``last_rebalance``, while
+    ``rebalance_health.next_rebalance`` carries order-event
+    ``last_execution_at``. Operators reading only compact health missed
+    4× annual cost overruns and multi-week controller lag (Batch DW).
+
+    Soft warning only — does not change routing authority
+    (``target_allocations`` remains live SSOT).
+    """
+    if not isinstance(health, dict):
+        health = {}
+    if not isinstance(smart_rebalance, dict):
+        # Explicit clear when panel absent so sticky True cannot persist
+        health.setdefault("rebalance_budget_status", "unknown")
+        return health
+
+    status_block = (
+        smart_rebalance.get("status")
+        if isinstance(smart_rebalance.get("status"), dict)
+        else {}
+    )
+
+    def _float(key: str, *sources: Any) -> float | None:
+        for src in sources:
+            if not isinstance(src, dict):
+                continue
+            if key not in src or src.get(key) is None:
+                continue
+            try:
+                return float(src.get(key))
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    ytd_bps = _float("ytd_cost_bps", smart_rebalance, status_block)
+    remaining_pct = _float("remaining_budget_pct", smart_rebalance, status_block)
+    annual_limit_pct = _float("annual_cost_limit_pct", smart_rebalance)
+    if annual_limit_pct is None:
+        # Controller status.config uses display string "0.5%"
+        cfg = status_block.get("config") if isinstance(status_block.get("config"), dict) else {}
+        raw_lim = cfg.get("annual_cost_limit") if isinstance(cfg, dict) else None
+        if isinstance(raw_lim, str) and raw_lim.endswith("%"):
+            try:
+                annual_limit_pct = float(raw_lim[:-1].strip())
+            except ValueError:
+                annual_limit_pct = None
+        elif raw_lim is not None:
+            try:
+                # Fraction 0.005 → display 0.5
+                v = float(raw_lim)
+                annual_limit_pct = v * 100.0 if v < 0.1 else v
+            except (TypeError, ValueError):
+                annual_limit_pct = None
+    if annual_limit_pct is None:
+        annual_limit_pct = 0.5  # default matches SmartRebalancingController
+
+    is_over = status_block.get("is_over_budget")
+    if is_over is None and ytd_bps is not None and annual_limit_pct is not None:
+        # limit is percent-of-portfolio (0.5 = 0.5%); ytd_bps/100 = pct points
+        is_over = (ytd_bps / 100.0) >= float(annual_limit_pct) - 1e-9
+    is_over = bool(is_over) if is_over is not None else False
+
+    is_warn = status_block.get("is_warning")
+    if is_warn is None and ytd_bps is not None and annual_limit_pct is not None:
+        # warning threshold ~80% of annual limit (matches CostBudgetTracker default)
+        is_warn = (ytd_bps / 100.0) >= float(annual_limit_pct) * 0.8 - 1e-9
+    is_warn = bool(is_warn) if is_warn is not None else False
+
+    controller_last = status_block.get("last_rebalance") or smart_rebalance.get(
+        "last_rebalance"
+    )
+    next_reb: dict[str, Any] = {}
+    if isinstance(rebalance_health, dict):
+        nr = rebalance_health.get("next_rebalance")
+        if isinstance(nr, dict):
+            next_reb = nr
+    last_exec_at = next_reb.get("last_execution_at")
+    last_exec_clock = next_reb.get("last_execution_clock")
+
+    ctrl_dt = _parse_rebalance_clock(controller_last)
+    exec_dt = _parse_rebalance_clock(last_exec_at)
+    lag_days: float | None = None
+    lagging = False
+    if ctrl_dt is not None and exec_dt is not None:
+        lag_days = round((exec_dt - ctrl_dt).total_seconds() / 86400.0, 2)
+        # Only flag when controller lags event clock (positive lag)
+        lagging = lag_days >= float(clock_lag_warn_days)
+
+    if is_over:
+        budget_status = "over_budget"
+    elif is_warn:
+        budget_status = "warning"
+    elif ytd_bps is not None:
+        budget_status = "ok"
+    else:
+        budget_status = "unknown"
+
+    health["rebalance_ytd_cost_bps"] = (
+        round(ytd_bps, 3) if ytd_bps is not None else None
+    )
+    health["rebalance_remaining_budget_pct"] = (
+        round(remaining_pct, 4) if remaining_pct is not None else None
+    )
+    health["rebalance_annual_cost_limit_pct"] = round(float(annual_limit_pct), 4)
+    health["rebalance_is_over_budget"] = is_over
+    health["rebalance_is_warning"] = is_warn or is_over
+    health["rebalance_budget_status"] = budget_status
+    health["rebalance_controller_last_rebalance"] = (
+        str(controller_last) if controller_last else None
+    )
+    health["rebalance_last_execution_at"] = (
+        str(last_exec_at) if last_exec_at else None
+    )
+    health["rebalance_last_execution_clock"] = (
+        str(last_exec_clock) if last_exec_clock else None
+    )
+    health["rebalance_controller_clock_lag_days"] = lag_days
+    health["rebalance_controller_clock_lagging"] = lagging
+
+    # Soft elevate: over-budget or multi-day controller lag → warning
+    if (is_over or lagging) and health.get("status") in (
+        None,
+        "ok",
+        "healthy",
+        "unknown",
+    ):
+        health["status"] = "warning"
+
+    return health
 
 
 def _apply_kill_to_smart_rebalance(
@@ -4014,6 +4177,27 @@ class DashboardGenerator:
                     health["ml_features_stale"] = False
         except Exception as ml_exc:  # noqa: BLE001
             logger.warning("ml feature freshness health project skipped: %s", ml_exc)
+
+        # Batch DW: project smart-rebalance cost budget + dual-clock lag onto
+        # compact health so 4× annual overrun / controller lag are not nested-only.
+        try:
+            health = output.get("health")
+            if not isinstance(health, dict):
+                health = {}
+                output["health"] = health
+            output["health"] = project_smart_rebalance_budget_onto_health(
+                health,
+                output.get("smart_rebalance")
+                if isinstance(output.get("smart_rebalance"), dict)
+                else None,
+                output.get("rebalance_health")
+                if isinstance(output.get("rebalance_health"), dict)
+                else None,
+            )
+        except Exception as budget_exc:  # noqa: BLE001
+            logger.warning(
+                "smart rebalance budget health project skipped: %s", budget_exc
+            )
 
         # Fire external alerts on staleness state transitions (+ recovery ownership)
         try:
