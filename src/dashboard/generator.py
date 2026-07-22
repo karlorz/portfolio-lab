@@ -59,6 +59,7 @@ __all__ = [
     "project_reentry_eligibility_onto_health",
     "project_pending_artifact_cron_onto_health",
     "project_execution_timeline_onto_health",
+    "project_repo_public_mirror_lag_onto_health",
 ]
 
 # Legacy flat keys (pre seven-component producer) → panel component names
@@ -990,6 +991,88 @@ def project_execution_timeline_onto_health(
 
     health["rebalance_execution_timeline_status"] = status
     health["rebalance_execution_timeline_badge"] = badge
+    return health
+
+
+def project_repo_public_mirror_lag_onto_health(
+    health: dict[str, Any] | None,
+    lag_summary: dict[str, Any] | None,
+    *,
+    warn_threshold: int = 1,
+    critical_threshold: int = 10,
+) -> dict[str, Any]:
+    """Project repo ``public/data`` mirror lag onto compact health (Batch EJ).
+
+    Operator ``PUBLIC_DATA_DIR`` is SoT; repo ``public/data`` is a derived
+    static mirror (``make mirror-repo-public-data``). Deep-research: expose
+    ``mirror_lagging_count`` as a freshness gauge so lag cannot hide behind
+    green cron while the checkout mirror drifts (historical 28–32/32 lag).
+
+    ``lag_summary`` shape (from ``summarize_repo_public_mirror_lag``)::
+
+        {
+          "lagging_count": int,
+          "total": int,
+          "lagging_paths": list[str],  # optional, capped
+          "source": str,
+          "dest": str,
+        }
+    """
+    if not isinstance(health, dict):
+        health = {}
+    if not isinstance(lag_summary, dict):
+        health.setdefault("repo_public_mirror_lag_status", "unknown")
+        return health
+
+    try:
+        lagging = int(lag_summary.get("lagging_count") or 0)
+    except (TypeError, ValueError):
+        lagging = 0
+    try:
+        total = int(lag_summary.get("total") or 0)
+    except (TypeError, ValueError):
+        total = 0
+
+    paths = lag_summary.get("lagging_paths")
+    if not isinstance(paths, list):
+        paths = []
+    paths = [str(p) for p in paths[:12]]
+
+    health["repo_public_mirror_lagging_count"] = lagging
+    health["repo_public_mirror_total"] = total
+    health["repo_public_mirror_lagging_paths"] = paths
+    if lag_summary.get("source"):
+        health["repo_public_mirror_source"] = str(lag_summary.get("source"))
+    if lag_summary.get("dest"):
+        health["repo_public_mirror_dest"] = str(lag_summary.get("dest"))
+
+    if lagging >= int(critical_threshold):
+        status = "critical"
+        badge = f"lagging={lagging}/{total}"
+    elif lagging >= int(warn_threshold):
+        status = "lagging"
+        badge = f"lagging={lagging}/{total}"
+    elif total > 0:
+        status = "ok"
+        badge = f"lagging=0/{total}"
+    else:
+        status = "unknown"
+        badge = "no_catalog"
+
+    health["repo_public_mirror_lag_status"] = status
+    health["repo_public_mirror_lag_badge"] = badge
+    health["repo_public_mirror_lag_policy"] = (
+        "PUBLIC_DATA_DIR is SoT; repo public/data is derived static mirror "
+        "(make mirror-repo-public-data). Count is bytes-unequal or dest-missing."
+    )
+    # Soft elevate only — mirror lag is ops hygiene, not trading halt
+    if status in ("lagging", "critical") and health.get("status") in (
+        None,
+        "ok",
+        "healthy",
+        "unknown",
+    ):
+        health["status"] = "warning"
     return health
 
 
@@ -4653,6 +4736,25 @@ class DashboardGenerator:
         except Exception as tl_exc:  # noqa: BLE001
             logger.warning(
                 "execution timeline health project skipped: %s", tl_exc
+            )
+
+        # Batch EJ: repo public/data mirror lag vs operator PUBLIC_DATA_DIR SoT
+        try:
+            health = output.get("health")
+            if not isinstance(health, dict):
+                health = {}
+                output["health"] = health
+            from src.monitor.repo_public_mirror_lag import (
+                summarize_repo_public_mirror_lag,
+            )
+
+            lag_summary = summarize_repo_public_mirror_lag()
+            output["health"] = project_repo_public_mirror_lag_onto_health(
+                health, lag_summary
+            )
+        except Exception as mir_exc:  # noqa: BLE001
+            logger.warning(
+                "repo public mirror lag health project skipped: %s", mir_exc
             )
 
         # Batch EB: project five-surface paper return SSOT agreement onto compact

@@ -698,6 +698,17 @@ def refresh_signals_health_kill_fields(
     except Exception:  # noqa: BLE001
         pass
 
+    # Batch EJ: repo public/data mirror lag count (SoT = PUBLIC_DATA_DIR)
+    try:
+        from src.dashboard.generator import project_repo_public_mirror_lag_onto_health
+        from src.monitor.repo_public_mirror_lag import summarize_repo_public_mirror_lag
+
+        if isinstance(health, dict):
+            lag_summary = summarize_repo_public_mirror_lag()
+            health = project_repo_public_mirror_lag_onto_health(health, lag_summary)
+    except Exception:  # noqa: BLE001
+        pass
+
     payload["health"] = health
     # Partial rewrite must advance top-level generated_at (mtime honesty)
     from datetime import datetime, timezone
