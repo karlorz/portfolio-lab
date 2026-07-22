@@ -324,6 +324,81 @@ class SignalHealthTracker:
         
         self.log_prediction(prediction)
 
+    # Batch DG: min labeled polarity-stamped rows before trusting post-fix IC
+    # (time-series cohort; cross-section research often wants 80+ — we gate ops at 10)
+    POST_FIX_MIN_LABELED: int = 10
+    # Forward label lag: SPY close-to-close next session after prediction date
+    LABEL_LAG_SESSIONS: int = 1
+
+    def post_fix_cohort_readiness(
+        self,
+        source: str,
+        *,
+        n_polarity_stamped: int,
+        n_polarity_labeled: int,
+        ic_polarity_cohort: Optional[float] = None,
+        min_labeled: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Batch DG: min-sample + label-lag readiness for post-fix shadow IC.
+
+        Does not force-wake or auto-invert. Thin cohorts stay ``not_ready``.
+        """
+        min_n = int(
+            self.POST_FIX_MIN_LABELED if min_labeled is None else min_labeled
+        )
+        stamped = int(n_polarity_stamped or 0)
+        labeled = int(n_polarity_labeled or 0)
+        pending = max(0, stamped - labeled)
+        deficit = max(0, min_n - labeled)
+        ready = labeled >= min_n
+        lag_note = (
+            f"SPY forward label lag ≈ {self.LABEL_LAG_SESSIONS} session(s); "
+            "same-day polarity stamps stay unlabeled until next close."
+        )
+        if ready:
+            status = "cohort_ready_for_shadow_ic"
+            hint = (
+                f"Post-fix polarity cohort has ≥{min_n} labeled rows "
+                f"(n_labeled={labeled}); report ic_polarity_cohort for ops — "
+                "still no auto-invert; multi-horizon health reentry separate."
+            )
+        elif stamped == 0:
+            status = "awaiting_provenance_stamps"
+            hint = (
+                "No polarity_policy metadata yet — ensure Batch DF vote logging "
+                "is on the live path; shadow IC unavailable."
+            )
+        elif labeled == 0:
+            status = "awaiting_label_lag"
+            hint = (
+                f"{stamped} polarity-stamped row(s), 0 labeled — {lag_note} "
+                f"Need {min_n} labeled for min-sample IC gate."
+            )
+        else:
+            status = "cohort_building"
+            hint = (
+                f"Polarity cohort building: labeled={labeled}/{min_n} "
+                f"(stamped={stamped}, pending_labels={pending}, deficit={deficit}). "
+                f"{lag_note}"
+            )
+        return {
+            "source": source,
+            "status": status,
+            "ready": bool(ready),
+            "min_labeled": min_n,
+            "n_polarity_stamped": stamped,
+            "n_polarity_labeled": labeled,
+            "n_pending_labels": pending,
+            "labeled_deficit": deficit,
+            "label_lag_sessions": int(self.LABEL_LAG_SESSIONS),
+            "ic_polarity_cohort": (
+                None if ic_polarity_cohort is None else round(float(ic_polarity_cohort), 4)
+            ),
+            "auto_invert_policy": "disabled",
+            "force_wake_policy": "disabled",
+            "readiness_hint": hint,
+        }
+
     def count_provenance_rows(
         self,
         source: str,
@@ -331,10 +406,10 @@ class SignalHealthTracker:
         lookback_days: int = 90,
         metadata_substring: str = "provenance_batch",
     ) -> Dict[str, Any]:
-        """Batch DF: count prediction rows with non-empty provenance metadata.
+        """Batch DF/DG: provenance counts + post-fix cohort readiness.
 
         Used for post-fix shadow IC cohorts (e.g. polarity_policy stamped
-        after Batch DC). Returns counts only — no auto-invert / force-wake.
+        after Batch DC). No auto-invert / force-wake.
         """
         end_date = datetime.now().strftime("%Y-%m-%d")
         start_date = (
@@ -375,8 +450,7 @@ class SignalHealthTracker:
                 """,
                 (source, start_date, end_date, f"%{metadata_substring}%"),
             )
-            n_labeled = int(cursor.fetchone()[0] or 0)
-            # polarity-stamped cohort (Batch DC+)
+            n_prov_labeled = int(cursor.fetchone()[0] or 0)
             cursor.execute(
                 """
                 SELECT COUNT(*) FROM signal_predictions
@@ -387,6 +461,17 @@ class SignalHealthTracker:
                 (source, start_date, end_date),
             )
             n_polarity = int(cursor.fetchone()[0] or 0)
+            cursor.execute(
+                """
+                SELECT COUNT(*) FROM signal_predictions
+                WHERE source = ?
+                  AND date(timestamp) BETWEEN date(?) AND date(?)
+                  AND metadata LIKE '%polarity_policy%'
+                  AND actual_direction IS NOT NULL
+                """,
+                (source, start_date, end_date),
+            )
+            n_polarity_labeled = int(cursor.fetchone()[0] or 0)
             cursor.execute(
                 """
                 SELECT signal_value, actual_direction FROM signal_predictions
@@ -400,24 +485,33 @@ class SignalHealthTracker:
             )
             pairs = cursor.fetchall()
         ic_post = None
-        if len(pairs) >= 10:
+        min_n = int(self.POST_FIX_MIN_LABELED)
+        if len(pairs) >= min_n:
             try:
                 signals = [r[0] for r in pairs]
                 actuals = [r[1] for r in pairs]
                 ic_post = self._spearman_rank_correlation(signals, actuals)
             except Exception:  # noqa: BLE001
                 ic_post = None
+        readiness = self.post_fix_cohort_readiness(
+            source,
+            n_polarity_stamped=n_polarity,
+            n_polarity_labeled=n_polarity_labeled,
+            ic_polarity_cohort=None if ic_post is None else float(ic_post),
+        )
         return {
             "source": source,
             "window_days": lookback_days,
             "n_rows": n_all,
             "n_with_provenance": n_prov,
-            "n_provenance_labeled": n_labeled,
+            "n_provenance_labeled": n_prov_labeled,
             "n_polarity_stamped": n_polarity,
+            "n_polarity_labeled": n_polarity_labeled,
             "ic_polarity_cohort": None if ic_post is None else round(float(ic_post), 4),
             "provenance_coverage": (
                 round(n_prov / n_all, 4) if n_all else None
             ),
+            "cohort_readiness": readiness,
             "policy": "shadow_ic_post_fix_no_auto_invert",
         }
 

@@ -2136,26 +2136,24 @@ class DashboardGenerator:
                 "auto_invert_policy": "disabled",
                 "alignment_issue": issue,
             }
-            # Batch DF: post-fix provenance / polarity cohort coverage
+            # Batch DF/DG: post-fix provenance + min-sample cohort readiness
             try:
                 from src.signals.health_tracker import SignalHealthTracker
 
                 prov = SignalHealthTracker().count_provenance_rows(source)
                 out["provenance"] = prov
-                if (
-                    int(prov.get("n_polarity_stamped") or 0) < 10
-                    and source == "cross_asset_regime_arb"
-                ):
+                readiness = prov.get("cohort_readiness") or {}
+                out["cohort_readiness"] = readiness
+                if prov.get("ic_polarity_cohort") is not None:
+                    out["ic_post_polarity_fix"] = prov.get("ic_polarity_cohort")
+                if source == "cross_asset_regime_arb" and not readiness.get("ready"):
                     base = issue or ""
+                    hint = readiness.get("readiness_hint") or (
+                        "post_fix_cohort_thin — shadow IC until min labeled sample"
+                    )
                     out["alignment_issue"] = (
                         (base + " | ") if base else ""
-                    ) + (
-                        "post_fix_cohort_thin — polarity metadata just started; "
-                        f"n_polarity_stamped={prov.get('n_polarity_stamped', 0)}; "
-                        "shadow IC until labeled provenance sample ≥10; no auto-invert."
-                    )
-                elif prov.get("ic_polarity_cohort") is not None:
-                    out["ic_post_polarity_fix"] = prov.get("ic_polarity_cohort")
+                    ) + str(hint)
             except Exception:  # noqa: BLE001
                 pass
             return out
@@ -2420,11 +2418,17 @@ class DashboardGenerator:
                 if status == "health_sleep" and "reentry" in m:
                     entry["reentry"] = m["reentry"]
                     entry["reentry_eligible"] = bool(m.get("reentry_eligible"))
-                # Batch DB/DC: label/direction/polarity for slept arms
+                # Batch DB/DC/DG: label/direction/polarity + post-fix cohort readiness
                 if status == "health_sleep":
                     diag = DashboardGenerator._label_alignment_diagnostic(source)
                     if diag:
                         entry["label_alignment"] = diag
+                        readiness = diag.get("cohort_readiness") or {}
+                        if readiness:
+                            entry["cohort_readiness"] = readiness
+                            entry["post_fix_cohort_ready"] = bool(
+                                readiness.get("ready")
+                            )
                         if diag.get("alignment_issue"):
                             entry["reason"] = (
                                 f"{entry['reason']} | label: {diag['alignment_issue']}"
@@ -2433,11 +2437,17 @@ class DashboardGenerator:
                             if "auto_invert" in (diag.get("alignment_issue") or "").lower() or (
                                 "sign_bias" in (diag.get("alignment_issue") or "")
                                 or "polarity" in (diag.get("alignment_issue") or "")
+                                or "label_lag" in (diag.get("alignment_issue") or "")
+                                or "cohort" in (diag.get("alignment_issue") or "")
                             ):
                                 entry["recovery_hint"] = (
-                                    "Polarity/sign-bias detected — do not auto-invert; "
-                                    "Batch DC maps EQUITY_ROTATION to equity regime sign; "
-                                    "shadow-monitor IC after classifier fix before reentry."
+                                    readiness.get("readiness_hint")
+                                    if readiness and not readiness.get("ready")
+                                    else (
+                                        "Polarity/sign-bias detected — do not auto-invert; "
+                                        "Batch DC maps EQUITY_ROTATION to equity regime sign; "
+                                        "shadow-monitor IC after classifier fix before reentry."
+                                    )
                                 )
                                 entry["reason"] = (
                                     f"{entry['reason']} | recovery: {entry['recovery_hint']}"
@@ -2994,6 +3004,16 @@ class DashboardGenerator:
                     # Batch DD: zero_baseline soft-delete shadow re-enable (no auto-weight)
                     "zero_baseline_shadow": zero_baseline_shadow,
                     "zero_baseline_shadow_count": len(zero_baseline_shadow),
+                    # Batch DG: post-fix polarity cohort readiness (regime_arb etc.)
+                    "post_fix_cohorts": [
+                        {
+                            "source": row.get("source"),
+                            **(row.get("cohort_readiness") or {}),
+                        }
+                        for row in configured_source_status
+                        if isinstance(row, dict)
+                        and isinstance(row.get("cohort_readiness"), dict)
+                    ],
                 }
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("ensemble_voting", e)
@@ -6030,6 +6050,15 @@ class DashboardGenerator:
             ]
             ensemble["zero_baseline_shadow"] = zb_shadow
             ensemble["zero_baseline_shadow_count"] = len(zb_shadow)
+            ensemble["post_fix_cohorts"] = [
+                {
+                    "source": row.get("source"),
+                    **(row.get("cohort_readiness") or {}),
+                }
+                for row in (ensemble.get("configured_source_status") or [])
+                if isinstance(row, dict)
+                and isinstance(row.get("cohort_readiness"), dict)
+            ]
             ensemble.update(self._build_ensemble_source_count_metadata(
                 ensemble.get("regime", "normal"),
                 ensemble["source_breakdown"],
