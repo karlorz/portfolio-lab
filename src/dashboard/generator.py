@@ -2357,6 +2357,7 @@ class DashboardGenerator:
         health_gate_slept: Dict[str, str] | None = None,
         regime_gated: Dict[str, str] | None = None,
         health_metrics: Dict[str, Dict[str, Any]] | None = None,
+        health_gate_soft_floor: Dict[str, str] | None = None,
     ) -> List[Dict[str, Any]]:
         """Explain configured source state, including missing stale configured sources."""
         configured_weights = DashboardGenerator._get_configured_ensemble_source_weights(regime)
@@ -2371,6 +2372,11 @@ class DashboardGenerator:
         regime_map = {
             str(k): str(v)
             for k, v in (regime_gated or {}).items()
+            if k is not None
+        }
+        soft_floor_map = {
+            str(k): str(v)
+            for k, v in (health_gate_soft_floor or {}).items()
             if k is not None
         }
         metrics = health_metrics if health_metrics is not None else {}
@@ -2439,8 +2445,16 @@ class DashboardGenerator:
                     contributing = bool(np.isfinite(row_weight) and row_weight > 0)
                     effective_weight = row_weight if contributing else 0.0
                     if contributing:
-                        status = "active"
-                        reason = "Collected and contributing to the ensemble vote."
+                        # Batch DU: soft-floor unhealthy/degraded still vote — disclose
+                        if source in soft_floor_map:
+                            status = "active_soft_floor"
+                            reason = (
+                                "Contributing under health soft-floor (not hard-slept): "
+                                f"{soft_floor_map[source]}"
+                            )
+                        else:
+                            status = "active"
+                            reason = "Collected and contributing to the ensemble vote."
                     elif sleep_reason:
                         # Batch CW: CN health-gate sleep is not a generic zero_weight
                         status = "health_sleep"
@@ -2533,6 +2547,8 @@ class DashboardGenerator:
             }
             if sleep_reason:
                 entry["health_sleep_reason"] = sleep_reason
+            if source in soft_floor_map:
+                entry["health_soft_floor_reason"] = soft_floor_map[source]
             if regime_reason:
                 entry["regime_gate_reason"] = regime_reason
             # Batch DB: international activation checklist on inactive rows
@@ -3152,6 +3168,11 @@ class DashboardGenerator:
                 regime_map = getattr(ensemble_result, "regime_gated", None) or {}
                 if not isinstance(regime_map, dict):
                     regime_map = {}
+                soft_floor_map = getattr(
+                    ensemble_result, "health_gate_soft_floor", None
+                ) or {}
+                if not isinstance(soft_floor_map, dict):
+                    soft_floor_map = {}
                 sh_metrics = DashboardGenerator._signal_health_metrics_map()
                 configured_source_status = self._build_configured_source_status(
                     ensemble_result.regime,
@@ -3159,6 +3180,7 @@ class DashboardGenerator:
                     health_gate_slept=sleep_map,
                     regime_gated=regime_map,
                     health_metrics=sh_metrics,
+                    health_gate_soft_floor=soft_floor_map,
                 )
                 source_counts = self._build_ensemble_source_count_metadata(
                     ensemble_result.regime,
@@ -3211,6 +3233,9 @@ class DashboardGenerator:
                         getattr(ensemble_result, "health_gate_freeze", False)
                     ),
                     "health_gate_slept_count": len(sleep_map),
+                    # Batch DU: soft-floor (unhealthy still voting with IC≥min)
+                    "health_gate_soft_floor": soft_floor_map,
+                    "health_gate_soft_floor_count": len(soft_floor_map),
                     # Batch CX: regime-gate OFF disclosure
                     "regime_gated": regime_map,
                     "regime_gated_count": len(regime_map),

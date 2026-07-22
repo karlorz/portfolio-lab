@@ -183,6 +183,8 @@ class EnsembleVote:
     health_gate_freeze: bool = False
     # Batch CX: regime-gate map (source → reason) — intentional OFF regimes
     regime_gated: Optional[Dict[str, str]] = None
+    # Batch DU: unhealthy/degraded soft-floor arms still contributing (disclosure)
+    health_gate_soft_floor: Optional[Dict[str, str]] = None
 
 
 # Regime-dependent weights (6 active signals, renormalized per regime)
@@ -2517,6 +2519,8 @@ class EnsembleVoter:
         - Batch CN: status == degraded **and** IC < 0 → multiplier 0
           (negative-IC degraded arms are fail-closed; soft floor only for
           degraded/healthy with non-negative IC — hybrid 2025–2026 SRE policy)
+        - Batch DU: unhealthy + IC < UNHEALTHY_MIN_IC (0.08) hard-zero —
+          weak non-neg IC is not enough evidence to keep vote mass
         - otherwise soft floor max(0.2, health_score) for graceful degrade
         - if all arms hard-gated: freeze adaptive blend (all-zero mass, do not
           reinflate toxic arms via renorm)
@@ -2525,6 +2529,8 @@ class EnsembleVoter:
         self._health_gate_slept: list[str] = []
         # Batch CW: source → reason (and optional diagnostics) for disclosure
         self._health_gate_sleep_reasons: Dict[str, str] = {}
+        # Batch DU: unhealthy/degraded arms still voting under soft floor
+        self._health_gate_soft_floor: Dict[str, str] = {}
         try:
             from src.signals.health_tracker import SignalHealthTracker, SignalHealthStatus
             health_tracker = SignalHealthTracker()
@@ -2533,9 +2539,16 @@ class EnsembleVoter:
             if not health_scores:
                 return weights
 
+            # Batch DU: quant IC ~0.02–0.05 is "ok"; below ~0.08 with unhealthy
+            # quality score is noise — hard-sleep (see deep-research IC gates).
+            unhealthy_min_ic = float(
+                os.environ.get("ENSEMBLE_UNHEALTHY_MIN_IC", "0.08")
+            )
+
             adjusted_weights = {}
             slept: list[str] = []
             sleep_reasons: Dict[str, str] = {}
+            soft_floor: Dict[str, str] = {}
             for source_enum, base_weight in weights.items():
                 source_str = source_enum.value
                 if source_str in health_scores:
@@ -2548,11 +2561,11 @@ class EnsembleVoter:
                     except (TypeError, ValueError):
                         ic_val = None
 
-                    # Batch CY hybrid (evolves BH/CN):
+                    # Batch CY hybrid (evolves BH/CN) + Batch DU min-IC for unhealthy:
                     # - hard sleep toxic arms: IC < 0 (any non-healthy status), or
                     #   unhealthy with unknown IC (fail-closed without IC evidence)
-                    # - soft floor max(0.2, hs) when quality is poor but IC ≥ 0
-                    #   (borderline "unhealthy" with non-neg IC is not toxic drag)
+                    # - hard sleep unhealthy with weak IC < UNHEALTHY_MIN_IC
+                    # - soft floor max(0.2, hs) when quality is poor but IC ≥ min
                     hard_zero = False
                     sleep_reason = None
                     if ic_val is not None and ic_val < 0.0:
@@ -2566,7 +2579,12 @@ class EnsembleVoter:
                         if ic_val is None:
                             hard_zero = True
                             sleep_reason = "unhealthy_ic_unknown"
-                        # else: unhealthy + IC>=0 → soft floor below
+                        elif ic_val < unhealthy_min_ic:
+                            hard_zero = True
+                            sleep_reason = (
+                                f"unhealthy_weak_ic({ic_val:.3f}<{unhealthy_min_ic:.2f})"
+                            )
+                        # else: unhealthy + IC≥min → soft floor below
                     elif (
                         status == SignalHealthStatus.DEGRADED.value
                         and ic_val is not None
@@ -2591,6 +2609,17 @@ class EnsembleVoter:
                         )
                     else:
                         multiplier = max(0.2, min(1.0, hs))
+                        if status == SignalHealthStatus.UNHEALTHY.value:
+                            soft_floor[source_str] = (
+                                f"unhealthy_soft_floor(score={hs:.2f},ic={ic_val})"
+                            )
+                        elif (
+                            status == SignalHealthStatus.DEGRADED.value
+                            and hs < 0.55
+                        ):
+                            soft_floor[source_str] = (
+                                f"degraded_soft_floor(score={hs:.2f},ic={ic_val})"
+                            )
                         if hs < 0.5 or status == SignalHealthStatus.UNHEALTHY.value:
                             logger.info(
                                 "Health-adjusted %s: weight %.2f%% → %.2f%% "
@@ -2608,6 +2637,7 @@ class EnsembleVoter:
 
             self._health_gate_slept = slept
             self._health_gate_sleep_reasons = sleep_reasons
+            self._health_gate_soft_floor = soft_floor
             total = sum(adjusted_weights.values())
             if total > 0:
                 weights = {k: v / total for k, v in adjusted_weights.items()}
@@ -3300,11 +3330,14 @@ class EnsembleVoter:
 
         sleep_reasons = dict(getattr(self, "_health_gate_sleep_reasons", None) or {})
         regime_gated = dict(getattr(self, "_regime_gated", None) or {})
+        soft_floor = dict(getattr(self, "_health_gate_soft_floor", None) or {})
         adaptive_learning = dict(self.get_adaptive_learning_status(regime.name) or {})
         # Batch DN: disclose final per-signal weight cap application
         cap_info = getattr(self, "_last_per_signal_cap", None)
         if isinstance(cap_info, dict) and cap_info:
             adaptive_learning["per_signal_weight_cap"] = cap_info
+        if soft_floor:
+            adaptive_learning["health_gate_soft_floor"] = soft_floor
         return EnsembleVote(
             timestamp=str(datetime.now()),
             regime=regime,
@@ -3325,6 +3358,7 @@ class EnsembleVoter:
             health_gate_slept=sleep_reasons or None,
             health_gate_freeze=bool(getattr(self, "_health_gate_freeze", False)),
             regime_gated=regime_gated or None,
+            health_gate_soft_floor=soft_floor or None,
         )
 
     def _persist_vote(self, vote: EnsembleVote, weighted_consensus: float) -> None:
