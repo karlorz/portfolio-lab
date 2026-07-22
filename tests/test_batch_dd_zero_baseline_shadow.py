@@ -32,8 +32,13 @@ def test_msm_shadow_health_pass_but_not_portfolio_ready() -> None:
     assert "net_negative" in shadow["soft_delete_reason"] or "soft-delete" in shadow[
         "soft_delete_reason"
     ].lower()
-    assert "do not auto-reenable" in shadow["shadow_hint"].lower() or "soft-deleted" in (
-        shadow["shadow_hint"].lower()
+    # Batch DH: ADR evidence may replace generic hint with net-negative ΔSharpe
+    hint = shadow["shadow_hint"].lower()
+    assert (
+        "do not auto-reenable" in hint
+        or "soft-delete" in hint
+        or "net-negative" in hint
+        or "adr" in hint
     )
 
 

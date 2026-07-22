@@ -2195,8 +2195,25 @@ class DashboardGenerator:
         # Prefer healthy for promotion review; degraded+IC ok for shadow only
         health_preferred = status == "healthy" and (hs is None or hs >= min_hs)
         multi_ok = bool(reentry.get("reentry_eligible"))
-        # Portfolio gate always requires explicit ADR — health alone never enough
+        # Batch DH: portfolio gate from walk-forward ADR evidence (never auto-weight)
+        adr: Dict[str, Any] | None = None
         portfolio_ok = False
+        if source == "multi_speed_momentum":
+            try:
+                from src.backtest.multi_speed_momentum_backtest import (
+                    evaluate_msm_soft_delete_adr,
+                )
+
+                adr = evaluate_msm_soft_delete_adr()
+                portfolio_ok = bool(adr.get("portfolio_gates_pass"))
+            except Exception:  # noqa: BLE001
+                adr = {
+                    "adr_status": "evaluation_error",
+                    "portfolio_gates_pass": False,
+                    "auto_reenable": False,
+                    "hint": "ADR evaluation failed — keep soft-delete.",
+                }
+                portfolio_ok = False
         gates = {
             "multi_horizon_ic_reentry": multi_ok,
             "health_status_ok": health_ok,
@@ -2207,10 +2224,20 @@ class DashboardGenerator:
         health_gates_pass = bool(
             multi_ok and health_ok and (hs is None or hs >= min_hs)
         )
-        if health_gates_pass and not portfolio_ok:
+        # shadow_reenable_ready still False always — human REGIME_WEIGHTS ADR only
+        if health_gates_pass and portfolio_ok:
             hint = (
-                "Health/IC shadow gates pass — still soft-deleted until "
-                "walk-forward net Sharpe ADR clears; do not auto-reenable weight."
+                "Health/IC + walk-forward ADR evidence pass — still requires "
+                "human REGIME_WEIGHTS promote; do not auto-reenable weight."
+            )
+        elif health_gates_pass and not portfolio_ok:
+            adr_hint = (adr or {}).get("hint") if isinstance(adr, dict) else None
+            hint = (
+                adr_hint
+                or (
+                    "Health/IC shadow gates pass — still soft-deleted until "
+                    "walk-forward net Sharpe ADR clears; do not auto-reenable weight."
+                )
             )
         elif multi_ok and not health_ok:
             hint = (
@@ -2226,13 +2253,13 @@ class DashboardGenerator:
         else:
             hint = "Shadow-monitor zero_baseline arm; re-enable only after ADR."
 
-        return {
+        out: Dict[str, Any] = {
             "source": source,
             "policy": "soft_delete_shadow_no_auto_reenable",
             "soft_delete_reason": soft,
             "health_gates_pass": health_gates_pass,
             "portfolio_gates_pass": portfolio_ok,
-            "shadow_reenable_ready": False,  # hard: requires portfolio ADR
+            "shadow_reenable_ready": False,  # hard: human promote only
             "gates": gates,
             "reentry": reentry,
             "reentry_eligible": bool(reentry.get("reentry_eligible")),
@@ -2244,6 +2271,9 @@ class DashboardGenerator:
             "ic_90d": m.get("ic_90d"),
             "shadow_hint": hint,
         }
+        if isinstance(adr, dict):
+            out["adr"] = adr
+        return out
 
     @staticmethod
     def _build_configured_source_status(
