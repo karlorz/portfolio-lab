@@ -288,9 +288,16 @@ def generate() -> dict[str, Any]:
         else:
             delayed += 1
 
-    # Recent executions (last 10 of raw parse order) — UI timeline; schedule
-    # clock still uses canonical_history (deduped by event day).
-    recent = history[-10:] if len(history) > 10 else history
+    # Batch EG: UI timeline + total_executions use event-day canonical rows.
+    # Raw daily snapshot rewrites (same fills, new write_day) inflated the
+    # operator-facing list (live: 10× identical 2026-07-11 rows; total=96).
+    # Schedule already used canonical_history (Batch DS); timeline now matches.
+    # Keep raw_history_entries / snapshot_rewrite_files for forensics only.
+    recent = (
+        canonical_history[-10:]
+        if len(canonical_history) > 10
+        else canonical_history
+    )
     execution_times = [
         {
             "date": e["date"],
@@ -305,7 +312,10 @@ def generate() -> dict[str, Any]:
                 else {}
             ),
             **(
-                {"snapshot_rewrite": True, "snapshot_rewrite_lag_days": e["snapshot_rewrite_lag_days"]}
+                {
+                    "snapshot_rewrite": True,
+                    "snapshot_rewrite_lag_days": e["snapshot_rewrite_lag_days"],
+                }
                 if e.get("snapshot_rewrite")
                 else {}
             ),
@@ -347,14 +357,17 @@ def generate() -> dict[str, Any]:
             ),
         },
         "execution_history": execution_times,
-        # total_executions = raw parsed entries (compat with existing tests/UI);
-        # canonical_execution_days = deduped by event date for schedule clock.
-        "total_executions": len(history),
+        # Batch EG: operator total = unique event days (matches timeline).
+        "total_executions": len(canonical_history),
         "canonical_execution_days": len(canonical_history),
+        "raw_history_entries": len(history),
         "canonical_order_history_source": _canonical_source_label(history),
         "snapshot_rewrite_files": snapshot_rewrites,
         "snapshot_rewrite_policy": (
             "schedule_uses_order_event_timestamp; file date is write day only"
+        ),
+        "execution_timeline_policy": (
+            "canonical_event_day; raw rewrites forensic only"
         ),
         "market_data_consistency": _generate_market_data_consistency(),
         "alpaca_feed_entitlement": _generate_alpaca_feed_entitlement(),

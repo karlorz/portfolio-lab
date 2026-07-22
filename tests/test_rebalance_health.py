@@ -211,8 +211,10 @@ class TestGenerateExtended:
                 result = generate()
         finally:
             rh.ORDERS_DIR = original_dir
-        # Same-day entries deduped → only 2 compliance-interval pairs, 1 checkable
-        assert result["total_executions"] == 3  # History has all 3
+        # Batch EG: total_executions = unique event days; raw kept separately
+        assert result["total_executions"] == 2
+        assert result["canonical_execution_days"] == 2
+        assert result.get("raw_history_entries", 0) == 3
         # Compliance should count 1 interval (April 1 → May 1)
         assert result["schedule_compliance"]["total"] == 1
 
@@ -593,17 +595,18 @@ class TestGenerateEdge:
         assert result["schedule_compliance"]["compliance_pct"] == 0.0
 
     def test_more_than_ten_executions(self):
-        """With 12 executions, recent should show only the last 10."""
+        """With 12 unique event days, recent timeline shows only the last 10."""
         import src.monitor.rebalance_health as rh
         original_dir = rh.ORDERS_DIR
         try:
             with tempfile.TemporaryDirectory() as d:
                 rh.ORDERS_DIR = Path(d)
                 orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
-                # Create 12 order files spaced 30 days apart
+                # 12 distinct calendar days (YYYYMMDD) so event-day dedupe keeps all
+                base = datetime(2025, 1, 15, tzinfo=timezone.utc)
                 for i in range(12):
-                    day = 1 + i * 31  # ~monthly spacing
-                    date_str = f"2026{day:03d}"
+                    dt = base + timedelta(days=i * 30)
+                    date_str = dt.strftime("%Y%m%d")
                     _make_order_file(
                         Path(d),
                         f"order_history_{date_str}_120000_{i:03d}",
@@ -612,20 +615,24 @@ class TestGenerateEdge:
                 result = generate()
         finally:
             rh.ORDERS_DIR = original_dir
+        # Batch EG: operator total = unique event days; raw may equal when no rewrites
         assert result["total_executions"] == 12
+        assert result["canonical_execution_days"] == 12
+        assert result.get("raw_history_entries", 12) == 12
         assert len(result["execution_history"]) == 10  # Only last 10
 
     def test_exactly_ten_executions(self):
-        """With exactly 10 executions, recent should show all 10."""
+        """With exactly 10 unique event days, timeline shows all 10."""
         import src.monitor.rebalance_health as rh
         original_dir = rh.ORDERS_DIR
         try:
             with tempfile.TemporaryDirectory() as d:
                 rh.ORDERS_DIR = Path(d)
                 orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+                base = datetime(2025, 2, 1, tzinfo=timezone.utc)
                 for i in range(10):
-                    day = 1 + i * 31
-                    date_str = f"2026{day:03d}"
+                    dt = base + timedelta(days=i * 30)
+                    date_str = dt.strftime("%Y%m%d")
                     _make_order_file(
                         Path(d),
                         f"order_history_{date_str}_120000_{i:03d}",
@@ -635,6 +642,8 @@ class TestGenerateEdge:
         finally:
             rh.ORDERS_DIR = original_dir
         assert result["total_executions"] == 10
+        assert result["canonical_execution_days"] == 10
+        assert result.get("raw_history_entries", 10) == 10
         assert len(result["execution_history"]) == 10  # All 10
 
     def test_compliance_25_days_boundary(self):
@@ -788,7 +797,10 @@ class TestGenerateEdge:
                 result = generate()
         finally:
             rh.ORDERS_DIR = original_dir
-        assert result["total_executions"] == 4  # All 4 in history
+        # Batch EG: unique event days (Apr 1 + May 1); 3 same-day files → raw=4
+        assert result["total_executions"] == 2
+        assert result["canonical_execution_days"] == 2
+        assert result.get("raw_history_entries", 0) == 4
         # 1 compliance pair (Apr 1 → May 1), deduped from 3 same-day entries
         assert result["schedule_compliance"]["total"] == 1
 

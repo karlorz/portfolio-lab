@@ -58,6 +58,7 @@ __all__ = [
     "project_voting_mass_quality_onto_health",
     "project_reentry_eligibility_onto_health",
     "project_pending_artifact_cron_onto_health",
+    "project_execution_timeline_onto_health",
 ]
 
 # Legacy flat keys (pre seven-component producer) → panel component names
@@ -911,6 +912,84 @@ def project_smart_rebalance_budget_onto_health(
     ):
         health["status"] = "warning"
 
+    return health
+
+
+def project_execution_timeline_onto_health(
+    health: dict[str, Any] | None,
+    rebalance_health: dict[str, Any] | None,
+    *,
+    rewrite_inflate_ratio: float = 2.0,
+    rewrite_inflate_min_raw: int = 5,
+) -> dict[str, Any]:
+    """Project event-day execution timeline honesty onto compact health (Batch EG).
+
+    Daily ``order-history-YYYY-MM-DD.json`` rewrites re-emit the same fills with
+    a new write day. Raw parse counts (``raw_history_entries`` / legacy inflated
+    ``total_executions``) mislead operators when UI total ≫ unique event days.
+    Unique count SLI uses event-day canonical history; rewrite ratio is forensic.
+    """
+    if not isinstance(health, dict):
+        health = {}
+    if not isinstance(rebalance_health, dict):
+        health.setdefault("rebalance_execution_timeline_status", "unknown")
+        return health
+
+    def _int(key: str) -> int | None:
+        raw = rebalance_health.get(key)
+        if raw is None:
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+
+    unique_days = _int("canonical_execution_days")
+    if unique_days is None:
+        unique_days = _int("total_executions")
+    raw_entries = _int("raw_history_entries")
+    if raw_entries is None:
+        # Pre-EG payloads: total_executions was raw; prefer explicit raw when set
+        raw_entries = _int("total_executions")
+    rewrite_files = _int("snapshot_rewrite_files") or 0
+
+    health["rebalance_unique_execution_days"] = unique_days
+    health["rebalance_raw_history_entries"] = raw_entries
+    health["rebalance_snapshot_rewrite_files"] = rewrite_files
+    health["rebalance_execution_timeline_policy"] = rebalance_health.get(
+        "execution_timeline_policy"
+    ) or rebalance_health.get("snapshot_rewrite_policy")
+
+    inflated = False
+    if (
+        unique_days is not None
+        and raw_entries is not None
+        and unique_days > 0
+        and raw_entries >= int(rewrite_inflate_min_raw)
+        and raw_entries >= unique_days * float(rewrite_inflate_ratio)
+    ):
+        inflated = True
+    elif rewrite_files >= int(rewrite_inflate_min_raw) and (
+        unique_days is not None and rewrite_files > unique_days
+    ):
+        inflated = True
+
+    if inflated:
+        status = "rewrite_inflated"
+        badge = (
+            f"unique={unique_days} raw={raw_entries} rewrites={rewrite_files}"
+        )
+    elif unique_days is not None:
+        status = "ok"
+        badge = f"unique={unique_days}"
+        if raw_entries is not None and raw_entries != unique_days:
+            badge = f"unique={unique_days} raw={raw_entries}"
+    else:
+        status = "unknown"
+        badge = "no_execution_history"
+
+    health["rebalance_execution_timeline_status"] = status
+    health["rebalance_execution_timeline_badge"] = badge
     return health
 
 
@@ -4557,6 +4636,23 @@ class DashboardGenerator:
         except Exception as budget_exc:  # noqa: BLE001
             logger.warning(
                 "smart rebalance budget health project skipped: %s", budget_exc
+            )
+
+        # Batch EG: unique event-day timeline vs raw snapshot-rewrite inflation
+        try:
+            health = output.get("health")
+            if not isinstance(health, dict):
+                health = {}
+                output["health"] = health
+            output["health"] = project_execution_timeline_onto_health(
+                health,
+                output.get("rebalance_health")
+                if isinstance(output.get("rebalance_health"), dict)
+                else None,
+            )
+        except Exception as tl_exc:  # noqa: BLE001
+            logger.warning(
+                "execution timeline health project skipped: %s", tl_exc
             )
 
         # Batch EB: project five-surface paper return SSOT agreement onto compact

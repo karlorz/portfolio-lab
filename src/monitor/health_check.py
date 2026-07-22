@@ -595,6 +595,20 @@ def refresh_signals_health_kill_fields(
     except Exception:  # noqa: BLE001
         pass
 
+    # Batch EG: unique event-day execution timeline vs raw rewrite inflation
+    try:
+        from src.dashboard.generator import project_execution_timeline_onto_health
+
+        if isinstance(health, dict):
+            health = project_execution_timeline_onto_health(
+                health,
+                payload.get("rebalance_health")
+                if isinstance(payload.get("rebalance_health"), dict)
+                else None,
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
     # Batch EB: re-project paper return five-surface SSOT agreement from DATA_DIR
     # so partial patches disclose history/snapshot drift vs daily_pnl write SSOT.
     try:
