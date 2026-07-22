@@ -1841,6 +1841,16 @@ class DashboardGenerator:
     INTL_EFA_THRESHOLD_PP: float = 5.0
     INTL_EEM_THRESHOLD_PP: float = 8.0
 
+    # Batch DD: intentional zero-baseline soft-delete rationale (not fetch failure).
+    # Re-enable is human/ADR only — never auto-restore weight from health alone.
+    ZERO_BASELINE_SOFT_DELETE: Dict[str, str] = {
+        "multi_speed_momentum": (
+            "net_negative_sharpe_backtest(-0.012); weight redistributed to "
+            "ALT_DATA / INTL_MOM — soft-delete, not missing."
+        ),
+    }
+    SHADOW_REENABLE_MIN_HEALTH: float = 0.55
+
     @staticmethod
     def _international_activation_disclosure(
         explanation: str | None = None,
@@ -2044,6 +2054,91 @@ class DashboardGenerator:
             return None
 
     @staticmethod
+    def _zero_baseline_shadow_checklist(
+        source: str,
+        metrics: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """Batch DD: shadow re-enable gates for intentional zero-weight arms.
+
+        Soft-delete keeps the arm on the roster at weight 0. Health/IC may
+        recover while economic soft-delete (e.g. net-negative Sharpe) still
+        requires ADR/backtest before live weight. Never auto-reenable.
+        """
+        m = metrics if isinstance(metrics, dict) else {}
+        soft = DashboardGenerator.ZERO_BASELINE_SOFT_DELETE.get(
+            source,
+            "configured baseline weight 0 (soft-delete / intentional skip).",
+        )
+        reentry = m.get("reentry") if isinstance(m.get("reentry"), dict) else None
+        if reentry is None:
+            reentry = DashboardGenerator._evaluate_ic_reentry(
+                ic_30d=m.get("ic_30d"),
+                ic_60d=m.get("ic_60d"),
+                ic_90d=m.get("ic_90d") if m.get("ic_90d") is not None else m.get("ic"),
+            )
+        status = str(m.get("status") or "").lower()
+        try:
+            hs = float(m["health_score"]) if m.get("health_score") is not None else None
+        except (TypeError, ValueError):
+            hs = None
+        min_hs = float(DashboardGenerator.SHADOW_REENABLE_MIN_HEALTH)
+        health_ok = status in {"healthy", "degraded"} and (
+            hs is None or hs >= min_hs
+        )
+        # Prefer healthy for promotion review; degraded+IC ok for shadow only
+        health_preferred = status == "healthy" and (hs is None or hs >= min_hs)
+        multi_ok = bool(reentry.get("reentry_eligible"))
+        # Portfolio gate always requires explicit ADR — health alone never enough
+        portfolio_ok = False
+        gates = {
+            "multi_horizon_ic_reentry": multi_ok,
+            "health_status_ok": health_ok,
+            "health_preferred_healthy": health_preferred,
+            "min_health_score": hs is None or hs >= min_hs,
+            "soft_delete_adr_cleared": portfolio_ok,
+        }
+        health_gates_pass = bool(
+            multi_ok and health_ok and (hs is None or hs >= min_hs)
+        )
+        if health_gates_pass and not portfolio_ok:
+            hint = (
+                "Health/IC shadow gates pass — still soft-deleted until "
+                "walk-forward net Sharpe ADR clears; do not auto-reenable weight."
+            )
+        elif multi_ok and not health_ok:
+            hint = (
+                "Multi-horizon IC clear but health status/score weak — "
+                "keep zero_baseline; improve accuracy before promotion review."
+            )
+        elif not multi_ok:
+            blocked = (reentry or {}).get("reentry_blocked_reason") or "ic_pending"
+            hint = (
+                f"Shadow re-enable blocked on IC ({blocked}); "
+                "keep weight 0 and shadow-monitor only."
+            )
+        else:
+            hint = "Shadow-monitor zero_baseline arm; re-enable only after ADR."
+
+        return {
+            "source": source,
+            "policy": "soft_delete_shadow_no_auto_reenable",
+            "soft_delete_reason": soft,
+            "health_gates_pass": health_gates_pass,
+            "portfolio_gates_pass": portfolio_ok,
+            "shadow_reenable_ready": False,  # hard: requires portfolio ADR
+            "gates": gates,
+            "reentry": reentry,
+            "reentry_eligible": bool(reentry.get("reentry_eligible")),
+            "status": status or None,
+            "health_score": hs,
+            "ic": m.get("ic"),
+            "ic_30d": m.get("ic_30d"),
+            "ic_60d": m.get("ic_60d"),
+            "ic_90d": m.get("ic_90d"),
+            "shadow_hint": hint,
+        }
+
+    @staticmethod
     def _build_configured_source_status(
         regime: Any,
         source_breakdown: List[Dict[str, Any]],
@@ -2067,8 +2162,13 @@ class DashboardGenerator:
             if k is not None
         }
         metrics = health_metrics if health_metrics is not None else {}
-        if not metrics and slept_map:
-            # Load only when sleep disclosure needs recovery context (Batch CZ)
+        zero_baseline_sources = {
+            str(s)
+            for s, w in configured_weights.items()
+            if float(w or 0.0) <= 0.0
+        }
+        if not metrics and (slept_map or zero_baseline_sources):
+            # Batch CZ/DD: recovery + zero_baseline shadow need SH metrics
             metrics = DashboardGenerator._signal_health_metrics_map()
 
         rows_by_source = {
@@ -2146,10 +2246,13 @@ class DashboardGenerator:
                 # zero_baseline, not "missing" (SRE: zero-weight arm ≠ failure).
                 if cfg_w <= 0.0:
                     status = "zero_baseline"
+                    soft = DashboardGenerator.ZERO_BASELINE_SOFT_DELETE.get(source)
                     reason = (
                         "Configured baseline weight is 0 for this regime; "
                         "collector intentionally skips (not a fetch failure)."
                     )
+                    if soft:
+                        reason = f"{reason} Soft-delete: {soft}"
                 else:
                     status = "missing"
                     reason = (
@@ -2196,7 +2299,7 @@ class DashboardGenerator:
             # Batch CZ: attach SH recovery metrics for slept / degraded inactive arms
             m = metrics.get(source) if isinstance(metrics, dict) else None
             if isinstance(m, dict) and (
-                status in {"health_sleep", "inactive_signal"}
+                status in {"health_sleep", "inactive_signal", "zero_baseline"}
                 or (status == "active" and (m.get("health_score") or 1) < 0.55)
             ):
                 entry["health_metrics"] = m
@@ -2230,6 +2333,16 @@ class DashboardGenerator:
                                 entry["reason"] = (
                                     f"{entry['reason']} | recovery: {entry['recovery_hint']}"
                                 )
+            # Batch DD: zero_baseline shadow re-enable checklist (never auto-weight)
+            if status == "zero_baseline":
+                shadow = DashboardGenerator._zero_baseline_shadow_checklist(
+                    source, m if isinstance(m, dict) else {}
+                )
+                entry["shadow"] = shadow
+                entry["shadow_hint"] = shadow.get("shadow_hint")
+                entry["health_gates_pass"] = shadow.get("health_gates_pass")
+                entry["shadow_reenable_ready"] = False
+                entry["reason"] = f"{entry['reason']} | shadow: {shadow.get('shadow_hint')}"
             statuses.append(entry)
 
         # Renormalize over contributors so sum(active_weight) ≈ 1 when any active
@@ -2698,11 +2811,7 @@ class DashboardGenerator:
                 regime_map = getattr(ensemble_result, "regime_gated", None) or {}
                 if not isinstance(regime_map, dict):
                     regime_map = {}
-                sh_metrics = (
-                    DashboardGenerator._signal_health_metrics_map()
-                    if sleep_map
-                    else {}
-                )
+                sh_metrics = DashboardGenerator._signal_health_metrics_map()
                 configured_source_status = self._build_configured_source_status(
                     ensemble_result.regime,
                     source_breakdown,
@@ -2718,6 +2827,13 @@ class DashboardGenerator:
                 weight_rollup = self._ensemble_active_weights_rollup(
                     configured_source_status
                 )
+                zero_baseline_shadow = [
+                    row["shadow"]
+                    for row in configured_source_status
+                    if isinstance(row, dict)
+                    and row.get("status") == "zero_baseline"
+                    and isinstance(row.get("shadow"), dict)
+                ]
                 ensemble_signal = {
                     "regime": ensemble_result.regime.value,
                     "regime_confidence": ensemble_result.regime_confidence,
@@ -2766,6 +2882,9 @@ class DashboardGenerator:
                         }
                         for name in sorted(sleep_map.keys())
                     ],
+                    # Batch DD: zero_baseline soft-delete shadow re-enable (no auto-weight)
+                    "zero_baseline_shadow": zero_baseline_shadow,
+                    "zero_baseline_shadow_count": len(zero_baseline_shadow),
                 }
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("ensemble_voting", e)
@@ -5767,9 +5886,7 @@ class DashboardGenerator:
             regime_map = ensemble.get("regime_gated") or {}
             if not isinstance(regime_map, dict):
                 regime_map = {}
-            sh_metrics = (
-                DashboardGenerator._signal_health_metrics_map() if sleep_map else {}
-            )
+            sh_metrics = DashboardGenerator._signal_health_metrics_map()
             ensemble["configured_source_status"] = self._build_configured_source_status(
                 ensemble.get("regime", "normal"),
                 ensemble["source_breakdown"],
@@ -5795,6 +5912,15 @@ class DashboardGenerator:
                     }
                     for name in sorted(sleep_map.keys())
                 ]
+            zb_shadow = [
+                row["shadow"]
+                for row in (ensemble.get("configured_source_status") or [])
+                if isinstance(row, dict)
+                and row.get("status") == "zero_baseline"
+                and isinstance(row.get("shadow"), dict)
+            ]
+            ensemble["zero_baseline_shadow"] = zb_shadow
+            ensemble["zero_baseline_shadow_count"] = len(zb_shadow)
             ensemble.update(self._build_ensemble_source_count_metadata(
                 ensemble.get("regime", "normal"),
                 ensemble["source_breakdown"],
