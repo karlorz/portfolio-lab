@@ -1597,11 +1597,118 @@ class DashboardGenerator:
             return "unavailable", f"Google Trends status unavailable: {e}"
 
     @staticmethod
+    def _signal_health_metrics_map() -> Dict[str, Dict[str, Any]]:
+        """Batch CZ: compact SH metrics for sleep/recovery disclosure (best-effort)."""
+        try:
+            from src.signals.health_tracker import SignalHealthTracker
+
+            scores = SignalHealthTracker().calculate_all_health_scores()
+        except Exception:  # noqa: BLE001 — never block signals gen on SH metrics
+            return {}
+        out: Dict[str, Dict[str, Any]] = {}
+        if not isinstance(scores, dict):
+            return out
+        for name, health in scores.items():
+            if health is None:
+                continue
+            try:
+                ic_raw = getattr(health, "ic", None)
+                try:
+                    ic_val = float(ic_raw) if ic_raw is not None else None
+                except (TypeError, ValueError):
+                    ic_val = None
+                acc30 = getattr(health, "accuracy_30d", None)
+                acc60 = getattr(health, "accuracy_60d", None)
+                try:
+                    acc30_f = float(acc30) if acc30 is not None else None
+                except (TypeError, ValueError):
+                    acc30_f = None
+                try:
+                    acc60_f = float(acc60) if acc60 is not None else None
+                except (TypeError, ValueError):
+                    acc60_f = None
+                hs = getattr(health, "health_score", None)
+                try:
+                    hs_f = float(hs) if hs is not None else None
+                except (TypeError, ValueError):
+                    hs_f = None
+                hl = getattr(health, "ic_half_life_days", None)
+                try:
+                    hl_f = float(hl) if hl is not None else None
+                except (TypeError, ValueError):
+                    hl_f = None
+                status = str(getattr(health, "status", "") or "")
+                collapse = bool(getattr(health, "window_collapse_90_60", False))
+                hint = DashboardGenerator._health_recovery_hint(
+                    status=status,
+                    ic=ic_val,
+                    acc30=acc30_f,
+                    acc60=acc60_f,
+                    health_score=hs_f,
+                    half_life=hl_f,
+                )
+                out[str(name)] = {
+                    "status": status,
+                    "health_score": None if hs_f is None else round(hs_f, 4),
+                    "ic": None if ic_val is None else round(ic_val, 4),
+                    "accuracy_30d": None if acc30_f is None else round(acc30_f, 4),
+                    "accuracy_60d": None if acc60_f is None else round(acc60_f, 4),
+                    "ic_half_life_days": hl_f,
+                    "window_collapse_90_60": collapse,
+                    "recovery_hint": hint,
+                }
+            except Exception:  # noqa: BLE001
+                continue
+        return out
+
+    @staticmethod
+    def _health_recovery_hint(
+        *,
+        status: str,
+        ic: float | None,
+        acc30: float | None,
+        acc60: float | None,
+        health_score: float | None,
+        half_life: float | None,
+    ) -> str:
+        """Operator-facing recovery guidance for slept/degraded arms (Batch CZ)."""
+        st = (status or "").lower()
+        if ic is not None and ic < -0.15:
+            return (
+                "Deeply negative IC — investigate label/feature alignment; "
+                "keep slept until rolling IC > 0 with multi-horizon confirmation."
+            )
+        if ic is not None and ic < 0:
+            if acc30 is not None and acc60 is not None and acc30 + 0.05 < acc60:
+                return (
+                    "Negative IC with recent accuracy decay vs 60d — wait for "
+                    "label resolve + IC reentry (IC>0); do not force-wake."
+                )
+            return (
+                "Negative IC (toxic drag gate) — sleep until IC recovers > 0; "
+                "shadow-monitor predictions while slept."
+            )
+        if st == "unhealthy":
+            return (
+                "Quality unhealthy — soft-floor if IC≥0 (Batch CY); improve "
+                "accuracy/health_score before expecting full weight."
+            )
+        if half_life is not None and half_life < 20:
+            return (
+                f"Short IC half-life (~{half_life:.0f}d) — edge decays fast; "
+                "prefer recent windows and re-check before promotion."
+            )
+        if health_score is not None and health_score < 0.55:
+            return "Borderline health_score — monitor 30d accuracy before promoting weight."
+        return "Monitor multi-horizon IC and accuracy; reenter only after confirmed recovery."
+
+    @staticmethod
     def _build_configured_source_status(
         regime: Any,
         source_breakdown: List[Dict[str, Any]],
         health_gate_slept: Dict[str, str] | None = None,
         regime_gated: Dict[str, str] | None = None,
+        health_metrics: Dict[str, Dict[str, Any]] | None = None,
     ) -> List[Dict[str, Any]]:
         """Explain configured source state, including missing stale configured sources."""
         configured_weights = DashboardGenerator._get_configured_ensemble_source_weights(regime)
@@ -1618,6 +1725,10 @@ class DashboardGenerator:
             for k, v in (regime_gated or {}).items()
             if k is not None
         }
+        metrics = health_metrics if health_metrics is not None else {}
+        if not metrics and slept_map:
+            # Load only when sleep disclosure needs recovery context (Batch CZ)
+            metrics = DashboardGenerator._signal_health_metrics_map()
 
         rows_by_source = {
             str(row.get("source", "")): row
@@ -1709,6 +1820,17 @@ class DashboardGenerator:
                 entry["health_sleep_reason"] = sleep_reason
             if regime_reason:
                 entry["regime_gate_reason"] = regime_reason
+            # Batch CZ: attach SH recovery metrics for slept / degraded inactive arms
+            m = metrics.get(source) if isinstance(metrics, dict) else None
+            if isinstance(m, dict) and (
+                status in {"health_sleep", "inactive_signal"}
+                or (status == "active" and (m.get("health_score") or 1) < 0.55)
+            ):
+                entry["health_metrics"] = m
+                if status == "health_sleep" and m.get("recovery_hint"):
+                    entry["recovery_hint"] = m["recovery_hint"]
+                    # Append concise recovery cue to reason for compact UIs
+                    entry["reason"] = f"{reason} | recovery: {m['recovery_hint']}"
             statuses.append(entry)
 
         # Renormalize over contributors so sum(active_weight) ≈ 1 when any active
@@ -2177,11 +2299,17 @@ class DashboardGenerator:
                 regime_map = getattr(ensemble_result, "regime_gated", None) or {}
                 if not isinstance(regime_map, dict):
                     regime_map = {}
+                sh_metrics = (
+                    DashboardGenerator._signal_health_metrics_map()
+                    if sleep_map
+                    else {}
+                )
                 configured_source_status = self._build_configured_source_status(
                     ensemble_result.regime,
                     source_breakdown,
                     health_gate_slept=sleep_map,
                     regime_gated=regime_map,
+                    health_metrics=sh_metrics,
                 )
                 source_counts = self._build_ensemble_source_count_metadata(
                     ensemble_result.regime,
@@ -2219,6 +2347,15 @@ class DashboardGenerator:
                     # Batch CX: regime-gate OFF disclosure
                     "regime_gated": regime_map,
                     "regime_gated_count": len(regime_map),
+                    # Batch CZ: recovery checklist for slept arms
+                    "health_gate_recovery": [
+                        {
+                            "source": name,
+                            "sleep_reason": sleep_map.get(name),
+                            **(sh_metrics.get(name) or {}),
+                        }
+                        for name in sorted(sleep_map.keys())
+                    ],
                 }
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("ensemble_voting", e)
@@ -5213,19 +5350,32 @@ class DashboardGenerator:
                     ensemble["weight_entropy"] = round(weight_entropy, 4)
                     ensemble["n_eff"] = round(float(np.exp(weight_entropy)), 2)
 
-            # Batch CW/CX: preserve gate maps through staleness rebuild
+            # Batch CW/CX/CZ: preserve gate maps + recovery metrics through staleness rebuild
             sleep_map = ensemble.get("health_gate_slept") or {}
             if not isinstance(sleep_map, dict):
                 sleep_map = {}
             regime_map = ensemble.get("regime_gated") or {}
             if not isinstance(regime_map, dict):
                 regime_map = {}
+            sh_metrics = (
+                DashboardGenerator._signal_health_metrics_map() if sleep_map else {}
+            )
             ensemble["configured_source_status"] = self._build_configured_source_status(
                 ensemble.get("regime", "normal"),
                 ensemble["source_breakdown"],
                 health_gate_slept=sleep_map,
                 regime_gated=regime_map,
+                health_metrics=sh_metrics,
             )
+            if sleep_map:
+                ensemble["health_gate_recovery"] = [
+                    {
+                        "source": name,
+                        "sleep_reason": sleep_map.get(name),
+                        **(sh_metrics.get(name) or {}),
+                    }
+                    for name in sorted(sleep_map.keys())
+                ]
             ensemble.update(self._build_ensemble_source_count_metadata(
                 ensemble.get("regime", "normal"),
                 ensemble["source_breakdown"],
