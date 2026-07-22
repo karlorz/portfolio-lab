@@ -185,3 +185,12 @@
 - ClaudeMd?:      no
 - WorkflowShift?: no
 - Deep-research: multi-horizon IC reentry + hysteresis; no force-wake
+
+## [2026-07-22] retro | loop cycle: batch-ee-pending-artifact-health-sli
+- Friction:       Raw cron_status fetch-trends pending while google_trends.json fresh; compact only had counts
+- Miss:           DT soft-ok lived on normalize path but not compact health dual-signal keys
+- Improve:        Project artifact_reconciled vs true pending_never_run onto health; no false warn
+- Generalize?:    yes (dual-signal scheduler + artifact freshness SLI)
+- ClaudeMd?:      no
+- WorkflowShift?: no
+- Deep-research: dual-signal cron pending + artifact freshness; SRE false-positive reduction

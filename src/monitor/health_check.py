@@ -637,6 +637,24 @@ def refresh_signals_health_kill_fields(
     except Exception:  # noqa: BLE001
         pass
 
+    # Batch EE: dual-signal pending vs artifact-fresh cron reconcile on compact
+    try:
+        from src.dashboard.generator import project_pending_artifact_cron_onto_health
+        from src.monitor.hermes_cron import load_local_cron_jobs
+
+        if isinstance(health, dict):
+            root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+            jobs_from_report = report.get("cron_jobs") if isinstance(report, dict) else None
+            if isinstance(jobs_from_report, list) and jobs_from_report:
+                health = project_pending_artifact_cron_onto_health(
+                    health, jobs_from_report
+                )
+            else:
+                local_jobs, _backend = load_local_cron_jobs(root / "cron_status.json")
+                health = project_pending_artifact_cron_onto_health(health, local_jobs)
+    except Exception:  # noqa: BLE001
+        pass
+
     payload["health"] = health
     # Partial rewrite must advance top-level generated_at (mtime honesty)
     from datetime import datetime, timezone

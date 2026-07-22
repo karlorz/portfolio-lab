@@ -57,6 +57,7 @@ __all__ = [
     "project_paper_return_ssot_onto_health",
     "project_voting_mass_quality_onto_health",
     "project_reentry_eligibility_onto_health",
+    "project_pending_artifact_cron_onto_health",
 ]
 
 # Legacy flat keys (pre seven-component producer) → panel component names
@@ -663,6 +664,8 @@ def _compact_health_summary(report: Dict) -> Dict:
 
         summary["cron_job_count"] = len(cron_jobs)
         summary["failed_cron_jobs"] = len(rollup_failed_cron_jobs(cron_jobs))
+        # Batch EE: dual-signal pending vs artifact-fresh reconcile on compact
+        summary = project_pending_artifact_cron_onto_health(summary, cron_jobs)
 
     data_freshness = report.get("data_freshness")
     if isinstance(data_freshness, dict):
@@ -908,6 +911,78 @@ def project_smart_rebalance_budget_onto_health(
     ):
         health["status"] = "warning"
 
+    return health
+
+
+def project_pending_artifact_cron_onto_health(
+    health: dict[str, Any] | None,
+    cron_jobs: list | None,
+) -> dict[str, Any]:
+    """Project dual-signal pending/artifact reconcile onto compact health.
+
+    Raw ``cron_status.json`` may still show ``status=pending`` for weekly
+    tasker jobs (e.g. portfolio-lab-fetch-trends) while Batch DT already
+    soft-oks via fresh producer artifact (google_trends.json). Compact health
+    previously only had job counts — operators saw false "never run" noise.
+
+    Does not elevate status for true pending_never_run alone (weekly schedule
+    is expected). Disclosure only.
+    """
+    if not isinstance(health, dict):
+        health = {}
+    if not isinstance(cron_jobs, list):
+        health.setdefault("cron_pending_artifact_status", "unknown")
+        return health
+
+    reconciled: list[str] = []
+    true_pending: list[str] = []
+    samples: list[str] = []
+
+    for job in cron_jobs:
+        if not isinstance(job, dict):
+            continue
+        if not job.get("enabled", True) or job.get("manual_only"):
+            continue
+        if job.get("state") in {"manual_only", "paused"}:
+            continue
+        name = str(job.get("name") or job.get("id") or "")
+        if job.get("pending_artifact_reconciled"):
+            reconciled.append(name or "unknown")
+            ev = job.get("pending_artifact_evidence")
+            if isinstance(ev, dict) and ev.get("artifact"):
+                samples.append(f"{name}:{ev.get('artifact')}")
+            elif job.get("heartbeat_disclosure"):
+                samples.append(str(job.get("heartbeat_disclosure"))[:120])
+        elif (
+            str(job.get("status") or "").lower() == "pending"
+            and not job.get("last_run")
+        ):
+            true_pending.append(name or "unknown")
+
+    n_rec = len(reconciled)
+    n_pend = len(true_pending)
+    if n_rec == 0 and n_pend == 0:
+        status = "none"
+    elif n_rec > 0 and n_pend == 0:
+        status = "reconciled"
+    elif n_rec == 0 and n_pend > 0:
+        status = "pending_never_run"
+    else:
+        status = "mixed"
+
+    health["cron_pending_artifact_reconciled_jobs"] = n_rec
+    health["cron_pending_never_run_jobs"] = n_pend
+    health["cron_pending_artifact_reconciled_names"] = (
+        ",".join(reconciled[:8]) if reconciled else None
+    )
+    health["cron_pending_never_run_names"] = (
+        ",".join(true_pending[:8]) if true_pending else None
+    )
+    health["cron_pending_artifact_sample"] = samples[0] if samples else None
+    health["cron_pending_artifact_status"] = status
+    health["cron_pending_artifact_badge"] = (
+        f"artifact_ok={n_rec} pending_never_run={n_pend}"
+    )
     return health
 
 
