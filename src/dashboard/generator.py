@@ -55,6 +55,7 @@ __all__ = [
     "project_alternative_data_signal",
     "project_smart_rebalance_budget_onto_health",
     "project_paper_return_ssot_onto_health",
+    "project_voting_mass_quality_onto_health",
 ]
 
 # Legacy flat keys (pre seven-component producer) → panel component names
@@ -904,6 +905,127 @@ def project_smart_rebalance_budget_onto_health(
         "healthy",
         "unknown",
     ):
+        health["status"] = "warning"
+
+    return health
+
+
+def project_voting_mass_quality_onto_health(
+    health: dict[str, Any] | None,
+    ensemble_voting: dict[str, Any] | None,
+    *,
+    soft_floor_mass_warn: float = 0.50,
+) -> dict[str, Any]:
+    """Project voting-mass quality (soft-floor vs healthy) onto compact health.
+
+    Source-count badges (e.g. 1/9 healthy) can greenwash when the only healthy
+    source is zero_baseline non-voting and 100% of ``active_weights`` sit on
+    soft_floor (Batch EC live shape). Portfolio SLI = soft-floor mass share
+    of contributing vote weight.
+    """
+    if not isinstance(health, dict):
+        health = {}
+    if not isinstance(ensemble_voting, dict):
+        health.setdefault("ensemble_voting_quality_status", "unknown")
+        return health
+
+    aw = ensemble_voting.get("active_weights")
+    if not isinstance(aw, dict) or not aw:
+        # Fall back to configured_source_status active_weight
+        aw = {}
+        for row in ensemble_voting.get("configured_source_status") or []:
+            if not isinstance(row, dict) or not row.get("contributing"):
+                continue
+            try:
+                w = float(row.get("active_weight") or 0)
+            except (TypeError, ValueError):
+                w = 0.0
+            if w > 0:
+                aw[str(row.get("source"))] = w
+
+    soft_map = ensemble_voting.get("health_gate_soft_floor")
+    if not isinstance(soft_map, dict):
+        soft_map = {}
+    soft_keys = {str(k) for k in soft_map.keys()}
+
+    # Also treat status active_soft_floor as soft-floor mass
+    status_by_source: dict[str, str] = {}
+    health_status_by_source: dict[str, str] = {}
+    for row in ensemble_voting.get("configured_source_status") or []:
+        if not isinstance(row, dict):
+            continue
+        src = str(row.get("source") or "")
+        if not src:
+            continue
+        status_by_source[src] = str(row.get("status") or "")
+        hm = row.get("health_metrics")
+        if isinstance(hm, dict) and hm.get("status"):
+            health_status_by_source[src] = str(hm.get("status")).lower()
+        if status_by_source[src] == "active_soft_floor":
+            soft_keys.add(src)
+
+    total = 0.0
+    soft_mass = 0.0
+    healthy_mass = 0.0
+    soft_count = 0
+    healthy_contrib = 0
+    for src, w_raw in aw.items():
+        try:
+            w = float(w_raw)
+        except (TypeError, ValueError):
+            continue
+        if w <= 0:
+            continue
+        total += w
+        src_s = str(src)
+        if src_s in soft_keys or status_by_source.get(src_s) == "active_soft_floor":
+            soft_mass += w
+            soft_count += 1
+        elif health_status_by_source.get(src_s) == "healthy":
+            healthy_mass += w
+            healthy_contrib += 1
+        elif status_by_source.get(src_s) in ("active", "active_ok", ""):
+            # No health metrics: treat non-soft contributing as non-soft mass
+            if src_s not in soft_keys:
+                healthy_mass += w
+                healthy_contrib += 1
+
+    soft_share = round(soft_mass / total, 5) if total > 0 else 0.0
+    healthy_share = round(healthy_mass / total, 5) if total > 0 else 0.0
+
+    if total <= 0:
+        quality = "no_vote_mass"
+    elif soft_share >= 0.999:
+        quality = "soft_floor_dominant"
+    elif soft_share >= float(soft_floor_mass_warn):
+        quality = "soft_floor_heavy"
+    elif healthy_share >= 0.5:
+        quality = "ok"
+    else:
+        quality = "mixed"
+
+    slept = ensemble_voting.get("health_gate_slept")
+    slept_n = len(slept) if isinstance(slept, dict) else 0
+    contrib_n = ensemble_voting.get("contributing_source_count")
+    try:
+        contrib_n_i = int(contrib_n) if contrib_n is not None else len(aw)
+    except (TypeError, ValueError):
+        contrib_n_i = len(aw)
+
+    health["ensemble_voting_soft_floor_mass"] = soft_share
+    health["ensemble_voting_soft_floor_count"] = soft_count
+    health["ensemble_voting_healthy_mass"] = healthy_share
+    health["ensemble_voting_healthy_contributors"] = healthy_contrib
+    health["ensemble_voting_contributing_count"] = contrib_n_i
+    health["ensemble_voting_slept_count"] = slept_n
+    health["ensemble_voting_quality_status"] = quality
+    health["ensemble_voting_quality_badge"] = (
+        f"soft_floor={soft_share:.0%}/vote healthy_contrib={healthy_contrib}"
+    )
+
+    if quality in ("soft_floor_dominant", "soft_floor_heavy") and health.get(
+        "status"
+    ) in (None, "ok", "healthy", "unknown"):
         health["status"] = "warning"
 
     return health
@@ -4283,6 +4405,22 @@ class DashboardGenerator:
             output["health"] = project_paper_return_ssot_onto_health(health, cmp)
         except Exception as ssot_exc:  # noqa: BLE001
             logger.warning("paper return SSOT health project skipped: %s", ssot_exc)
+
+        # Batch EC: voting-mass quality (soft-floor share) — source-count badges
+        # alone miss 100% soft-floor vote mass when healthy sources are zero-baseline.
+        try:
+            health = output.get("health")
+            if not isinstance(health, dict):
+                health = {}
+                output["health"] = health
+            output["health"] = project_voting_mass_quality_onto_health(
+                health,
+                output.get("ensemble_voting")
+                if isinstance(output.get("ensemble_voting"), dict)
+                else None,
+            )
+        except Exception as vm_exc:  # noqa: BLE001
+            logger.warning("voting mass quality health project skipped: %s", vm_exc)
 
         # Fire external alerts on staleness state transitions (+ recovery ownership)
         try:

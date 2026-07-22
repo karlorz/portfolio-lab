@@ -167,3 +167,12 @@
 - ClaudeMd?:      no
 - WorkflowShift?: no
 - Deep-research: NAV/session return SSOT; previous-day base; MTM single feed
+
+## [2026-07-22] retro | loop cycle: batch-ec-voting-mass-quality-sli
+- Friction:       1/9 healthy badge while 100% vote mass is soft_floor (MSM healthy but zero_baseline)
+- Miss:           Source-count SLI ≠ voting-mass quality; operators misread badge as vote health
+- Improve:        Project soft_floor_mass / healthy_mass / quality_status onto compact health
+- Generalize?:    yes (count metrics vs mass-weighted portfolio SLIs; soft floor as graduated state)
+- ClaudeMd?:      no
+- WorkflowShift?: no
+- Deep-research: soft-floor weight share SLI; IC gates; ensemble health ≠ source headcount
