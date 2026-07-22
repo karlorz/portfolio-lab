@@ -136,6 +136,14 @@ def resolve_mirror_paths(
     return source_root / rel, dest_root / rel
 
 
+# Health documents that carry nested repo_public_mirror_lag* SLIs and must be
+# restamped after a soft-mirror so sticky false-critical does not freeze.
+HEALTH_LAG_RESTAMP_FILES: tuple[str, ...] = (
+    "health.json",
+    "health_ops.json",
+)
+
+
 def mirror_repo_public_data(
     *,
     source_root: Path,
@@ -143,8 +151,16 @@ def mirror_repo_public_data(
     files: Sequence[str] = DEFAULT_FILE_GLOBS,
     dry_run: bool = False,
     force: bool = False,
+    restamp_health_lag: bool = True,
 ) -> MirrorReport:
-    """Copy ``files`` from source_root → dest_root when content differs."""
+    """Copy ``files`` from source_root → dest_root when content differs.
+
+    Batch FX (EN/EY): after a successful copy pass, re-probe live lag and
+    restamp nested ``repo_public_mirror_lag*`` fields on health docs at both
+    source (operator SoT) and dest (repo mirror). Soft-mirror alone copies
+    sticky critical stamps byte-for-byte and freezes false-critical until the
+    next health :30.
+    """
     report = MirrorReport(
         source=str(source_root),
         dest=str(dest_root),
@@ -184,6 +200,50 @@ def mirror_repo_public_data(
             report.copied.append(rel)
         except OSError as exc:
             report.errors.append(f"write failed {dst}: {exc}")
+
+    # End-pipeline nested lag finalize (Batch FX EN/EY) — skip dry-run.
+    if restamp_health_lag and not dry_run:
+        try:
+            from src.monitor.repo_public_mirror_lag import (
+                restamp_mirror_lag_on_health_documents,
+                summarize_repo_public_mirror_lag,
+            )
+
+            lag_summary = summarize_repo_public_mirror_lag(
+                source_root=source_root, dest_root=dest_root
+            )
+            restamp_paths: list[Path] = []
+            for rel in HEALTH_LAG_RESTAMP_FILES:
+                for root in (source_root, dest_root):
+                    candidate = root / rel
+                    if candidate.is_file():
+                        restamp_paths.append(candidate)
+            # Also restamp private monitor SSOT when distinct from PUBLIC tree
+            # (data/health.json freezes lag stamps between health :30 jobs).
+            try:
+                from src.paths import DATA_DIR as _DATA_DIR
+
+                private_health = Path(_DATA_DIR) / "health.json"
+                if private_health.is_file():
+                    restamp_paths.append(private_health)
+            except Exception:  # noqa: BLE001
+                pass
+            # Deduplicate by resolve when src==dest (dev shells)
+            seen: set[str] = set()
+            unique_paths: list[Path] = []
+            for p in restamp_paths:
+                key = str(p.resolve())
+                if key in seen:
+                    continue
+                seen.add(key)
+                unique_paths.append(p)
+            if unique_paths:
+                restamp_mirror_lag_on_health_documents(
+                    paths=unique_paths,
+                    lag_summary=lag_summary,
+                )
+        except Exception as exc:  # noqa: BLE001 — never fail soft-mirror on restamp
+            report.errors.append(f"health lag restamp skipped: {exc}")
 
     return report
 

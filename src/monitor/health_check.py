@@ -1738,29 +1738,17 @@ def attach_shared_freshness_slis_to_ops_report(
         from src.monitor.repo_public_mirror_lag import summarize_repo_public_mirror_lag
 
         lag_summary = summarize_repo_public_mirror_lag()
-        projected: dict[str, Any] = {}
-        projected = project_repo_public_mirror_lag_onto_health(projected, lag_summary)
-        # Top-level keys for health_ops consumers (match compact naming)
-        for key in (
-            "repo_public_mirror_lagging_count",
-            "repo_public_mirror_total",
-            "repo_public_mirror_lagging_paths",
-            "repo_public_mirror_lag_status",
-            "repo_public_mirror_lag_badge",
-            "repo_public_mirror_lag_policy",
-            "repo_public_mirror_source",
-            "repo_public_mirror_dest",
-        ):
-            if key in projected:
-                report[key] = projected[key]
+        # Batch FX / EP: project onto the real report so soft-elevate of
+        # top-level status=ok → warning under lagging/critical is not a dead path.
+        report = project_repo_public_mirror_lag_onto_health(report, lag_summary)
         report["repo_public_mirror_lag"] = {
-            "lagging_count": projected.get("repo_public_mirror_lagging_count"),
-            "total": projected.get("repo_public_mirror_total"),
-            "status": projected.get("repo_public_mirror_lag_status"),
-            "badge": projected.get("repo_public_mirror_lag_badge"),
-            "paths": projected.get("repo_public_mirror_lagging_paths"),
-            "source": projected.get("repo_public_mirror_source"),
-            "dest": projected.get("repo_public_mirror_dest"),
+            "lagging_count": report.get("repo_public_mirror_lagging_count"),
+            "total": report.get("repo_public_mirror_total"),
+            "status": report.get("repo_public_mirror_lag_status"),
+            "badge": report.get("repo_public_mirror_lag_badge"),
+            "paths": report.get("repo_public_mirror_lagging_paths"),
+            "source": report.get("repo_public_mirror_source"),
+            "dest": report.get("repo_public_mirror_dest"),
         }
     except Exception as exc:  # noqa: BLE001
         logger.warning("ops report mirror lag SLI skipped: %s", exc)
