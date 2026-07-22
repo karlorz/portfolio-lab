@@ -270,6 +270,38 @@ class SignalHealthTracker:
         
             conn.commit()
     
+    # Batch DB: deadband for continuous → discrete direction.
+    # Legacy 0.2 was strict `>` and collides with arms clipped to ±0.2
+    # (cross_asset_regime_arb): every row became predicted_direction=0 and
+    # accuracy collapsed to the 0.5 neutral default — fake health vs true IC.
+    DIRECTION_DEADBAND: float = 0.05
+
+    @staticmethod
+    def direction_from_signal_value(
+        signal_value: float,
+        deadband: float | None = None,
+    ) -> int:
+        """Map continuous signal in [-1, 1] to predicted direction {-1, 0, 1}.
+
+        Uses inclusive bounds at ±deadband so clipped extremes (e.g. ±0.2)
+        still count as directional. Default deadband 0.05 matches weak but
+        non-zero ensemble readings common after soft-floor / conviction scale.
+        """
+        db = (
+            float(SignalHealthTracker.DIRECTION_DEADBAND)
+            if deadband is None
+            else float(deadband)
+        )
+        try:
+            v = float(signal_value)
+        except (TypeError, ValueError):
+            return 0
+        if v >= db:
+            return 1
+        if v <= -db:
+            return -1
+        return 0
+
     def log_prediction_simple(
         self,
         source: str,
@@ -279,14 +311,8 @@ class SignalHealthTracker:
         metadata: Optional[Dict] = None
     ):
         """Convenience method for logging predictions."""
-        # Determine predicted direction
-        if signal_value > 0.2:
-            predicted = 1
-        elif signal_value < -0.2:
-            predicted = -1
-        else:
-            predicted = 0
-        
+        predicted = self.direction_from_signal_value(signal_value)
+
         prediction = SignalPrediction(
             timestamp=timestamp or datetime.now().isoformat(),
             source=source,
@@ -297,6 +323,66 @@ class SignalHealthTracker:
         )
         
         self.log_prediction(prediction)
+
+    def repair_neutral_predicted_directions(
+        self,
+        source: Optional[str] = None,
+        deadband: float | None = None,
+    ) -> int:
+        """Batch DB: reclassify rows with |signal| ≥ deadband but direction 0.
+
+        Idempotent UPDATE — does not touch already-directional rows.
+        Returns number of rows repaired.
+        """
+        db = (
+            float(self.DIRECTION_DEADBAND)
+            if deadband is None
+            else float(deadband)
+        )
+        with sqlite_connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            if source:
+                cursor.execute(
+                    """
+                    UPDATE signal_predictions
+                    SET predicted_direction = CASE
+                        WHEN signal_value >= ? THEN 1
+                        WHEN signal_value <= ? THEN -1
+                        ELSE predicted_direction
+                    END
+                    WHERE source = ?
+                      AND predicted_direction = 0
+                      AND signal_value IS NOT NULL
+                      AND (signal_value >= ? OR signal_value <= ?)
+                    """,
+                    (db, -db, source, db, -db),
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE signal_predictions
+                    SET predicted_direction = CASE
+                        WHEN signal_value >= ? THEN 1
+                        WHEN signal_value <= ? THEN -1
+                        ELSE predicted_direction
+                    END
+                    WHERE predicted_direction = 0
+                      AND signal_value IS NOT NULL
+                      AND (signal_value >= ? OR signal_value <= ?)
+                    """,
+                    (db, -db, db, -db),
+                )
+            n = int(cursor.rowcount or 0)
+            conn.commit()
+        if n:
+            logger.info(
+                "Batch DB: repaired %d neutral predicted_direction rows "
+                "(deadband=%.3f, source=%s)",
+                n,
+                db,
+                source or "ALL",
+            )
+        return n
     
     def update_actual_directions(self, returns_data: Dict[str, float], date: str):
         """
@@ -1197,7 +1283,9 @@ def backfill_predictions(
                         source="hmm",
                         signal_value=signal_value,
                         confidence=0.7 if regime in ['bull', 'bear'] else 0.5,
-                        predicted_direction=1 if signal_value > 0.2 else (-1 if signal_value < -0.2 else 0),
+                        predicted_direction=SignalHealthTracker.direction_from_signal_value(
+                            signal_value
+                        ),
                         metadata={"regime": regime, "vix": vix}
                     )
                 

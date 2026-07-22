@@ -1836,6 +1836,148 @@ class DashboardGenerator:
             return "Borderline health_score — monitor 30d accuracy before promoting weight."
         return "Monitor multi-horizon IC and accuracy; reenter only after confirmed recovery."
 
+    # Batch DB: international RS activation thresholds (fractional outperformance)
+    # Match InternationalMomentumGenerator.EFA_THRESHOLD / EEM_THRESHOLD.
+    INTL_EFA_THRESHOLD_PP: float = 5.0
+    INTL_EEM_THRESHOLD_PP: float = 8.0
+
+    @staticmethod
+    def _international_activation_disclosure(
+        explanation: str | None = None,
+        value: float | None = None,
+        confidence: float | None = None,
+    ) -> Dict[str, Any]:
+        """Structured inactive gaps for international_momentum (Batch DB).
+
+        Neutral band is intentional when EFA/SPY and EEM/SPY are inside
+        activation thresholds (5pp / 8pp). Ops need gap-to-threshold, not
+        only free-text explanation.
+        """
+        import re
+
+        expl = str(explanation or "")
+        efa_pp: float | None = None
+        eem_pp: float | None = None
+        m_efa = re.search(r"EFA/SPY\s*=\s*([+-]?\d+(?:\.\d+)?)\s*pp", expl, re.I)
+        m_eem = re.search(r"EEM/SPY\s*=\s*([+-]?\d+(?:\.\d+)?)\s*pp", expl, re.I)
+        if m_efa:
+            try:
+                efa_pp = float(m_efa.group(1))
+            except ValueError:
+                efa_pp = None
+        if m_eem:
+            try:
+                eem_pp = float(m_eem.group(1))
+            except ValueError:
+                eem_pp = None
+
+        efa_thr = float(DashboardGenerator.INTL_EFA_THRESHOLD_PP)
+        eem_thr = float(DashboardGenerator.INTL_EEM_THRESHOLD_PP)
+        gaps: list[str] = []
+        conf_f: float | None
+        try:
+            conf_f = float(confidence) if confidence is not None else None
+        except (TypeError, ValueError):
+            conf_f = None
+        try:
+            val_f = float(value) if value is not None else None
+        except (TypeError, ValueError):
+            val_f = None
+
+        if "neutral" in expl.lower() or (val_f is not None and abs(val_f) < 1e-12):
+            gaps.append("signal_type_neutral")
+        if conf_f is not None and conf_f < 0.5:
+            gaps.append("confidence_below_0.5")
+        if efa_pp is not None and efa_pp <= efa_thr:
+            gaps.append(
+                f"efa_rs_below_threshold({efa_pp:+.2f}pp need >+{efa_thr:.0f}pp)"
+            )
+        if eem_pp is not None and eem_pp <= eem_thr:
+            gaps.append(
+                f"eem_rs_below_threshold({eem_pp:+.2f}pp need >+{eem_thr:.0f}pp)"
+            )
+        if "vix_filter=true" in expl.lower():
+            gaps.append("vix_filter_active")
+        if not gaps and "inactive" not in expl.lower():
+            gaps.append("inactive_unspecified")
+
+        efa_gap = None if efa_pp is None else round(efa_thr - efa_pp, 2)
+        eem_gap = None if eem_pp is None else round(eem_thr - eem_pp, 2)
+        policy = (
+            "neutral_band_hold — RS inside activation thresholds; "
+            "not a fetch failure (ensemble weight stays 0 until lead)."
+        )
+        return {
+            "policy": policy,
+            "efa_vs_spy_pp": efa_pp,
+            "eem_vs_spy_pp": eem_pp,
+            "efa_threshold_pp": efa_thr,
+            "eem_threshold_pp": eem_thr,
+            "efa_gap_to_threshold_pp": efa_gap,
+            "eem_gap_to_threshold_pp": eem_gap,
+            "activation_gaps": gaps,
+            "activation_hint": (
+                "International RS neutral band: wait for EFA>+5pp or EEM>+8pp "
+                "vs SPY (6m relative) with conf≥0.5 and risk controls passed; "
+                "do not lower thresholds without backtest (whipsaw risk)."
+            ),
+        }
+
+    @staticmethod
+    def _label_alignment_diagnostic(source: str) -> Dict[str, Any] | None:
+        """Batch DB: predict-direction vs |signal| deadband honesty for slept arms."""
+        try:
+            from src.signals.health_tracker import SignalHealthTracker
+            from src.paths import MARKET_DB
+            import sqlite3
+
+            deadband = float(SignalHealthTracker.DIRECTION_DEADBAND)
+            with sqlite3.connect(str(MARKET_DB)) as conn:
+                row = conn.execute(
+                    """
+                    SELECT
+                      COUNT(*) AS n,
+                      SUM(CASE WHEN predicted_direction = 0 THEN 1 ELSE 0 END) AS pred0,
+                      SUM(CASE WHEN ABS(signal_value) >= ? AND predicted_direction = 0
+                               THEN 1 ELSE 0 END) AS mislabeled_neutral,
+                      SUM(CASE WHEN ABS(signal_value) >= ? THEN 1 ELSE 0 END) AS abs_ge_db,
+                      AVG(ABS(signal_value)) AS mean_abs
+                    FROM signal_predictions
+                    WHERE source = ?
+                      AND signal_value IS NOT NULL
+                      AND date(timestamp) >= date('now', '-90 day')
+                    """,
+                    (deadband, deadband, source),
+                ).fetchone()
+            if not row or not row[0]:
+                return None
+            n, pred0, mislab, abs_ge, mean_abs = row
+            n = int(n or 0)
+            pred0 = int(pred0 or 0)
+            mislab = int(mislab or 0)
+            abs_ge = int(abs_ge or 0)
+            rate_pred0 = (pred0 / n) if n else None
+            issue = None
+            if n and rate_pred0 is not None and rate_pred0 > 0.9 and abs_ge > 0:
+                issue = (
+                    "direction_deadband_collapse — almost all predicted_direction=0 "
+                    f"while |signal| often ≥ {deadband:g}; accuracy health is uninformative; "
+                    "prefer multi-horizon IC; repair via repair_neutral_predicted_directions."
+                )
+            return {
+                "source": source,
+                "window_days": 90,
+                "n_rows": n,
+                "predicted_zero_rate": None if rate_pred0 is None else round(rate_pred0, 4),
+                "mislabeled_neutral_rows": mislab,
+                "abs_signal_ge_deadband": abs_ge,
+                "mean_abs_signal": None if mean_abs is None else round(float(mean_abs), 4),
+                "direction_deadband": deadband,
+                "alignment_issue": issue,
+            }
+        except Exception:  # noqa: BLE001
+            return None
+
     @staticmethod
     def _build_configured_source_status(
         regime: Any,
@@ -1907,6 +2049,28 @@ class DashboardGenerator:
                         if expl
                         else "Signal inactive (not actionable this cycle)."
                     )
+                    # Batch DB: structured RS activation gaps for international
+                    if source == "international_momentum":
+                        try:
+                            conf_raw = row.get("confidence")
+                        except Exception:  # noqa: BLE001
+                            conf_raw = None
+                        try:
+                            val_raw = row.get("value")
+                        except Exception:  # noqa: BLE001
+                            val_raw = None
+                        act = DashboardGenerator._international_activation_disclosure(
+                            explanation=expl,
+                            value=val_raw,
+                            confidence=conf_raw,
+                        )
+                        # stash on row via reason append after entry built — use local
+                        row["_activation_disclosure"] = act
+                        gaps = act.get("activation_gaps") or []
+                        if gaps:
+                            reason = (
+                                f"{reason} | activation: {', '.join(gaps[:3])}"
+                            )
                 else:
                     status = "zero_weight"
                     reason = "Collected but assigned zero effective weight."
@@ -1954,6 +2118,16 @@ class DashboardGenerator:
                 entry["health_sleep_reason"] = sleep_reason
             if regime_reason:
                 entry["regime_gate_reason"] = regime_reason
+            # Batch DB: international activation checklist on inactive rows
+            if (
+                status == "inactive_signal"
+                and source == "international_momentum"
+                and isinstance(row, dict)
+                and isinstance(row.get("_activation_disclosure"), dict)
+            ):
+                entry["activation"] = row["_activation_disclosure"]
+                if entry["activation"].get("activation_hint"):
+                    entry["activation_hint"] = entry["activation"]["activation_hint"]
             # Batch CZ: attach SH recovery metrics for slept / degraded inactive arms
             m = metrics.get(source) if isinstance(metrics, dict) else None
             if isinstance(m, dict) and (
@@ -1969,6 +2143,15 @@ class DashboardGenerator:
                 if status == "health_sleep" and "reentry" in m:
                     entry["reentry"] = m["reentry"]
                     entry["reentry_eligible"] = bool(m.get("reentry_eligible"))
+                # Batch DB: label/direction alignment for slept arms
+                if status == "health_sleep":
+                    diag = DashboardGenerator._label_alignment_diagnostic(source)
+                    if diag:
+                        entry["label_alignment"] = diag
+                        if diag.get("alignment_issue"):
+                            entry["reason"] = (
+                                f"{entry['reason']} | label: {diag['alignment_issue']}"
+                            )
             statuses.append(entry)
 
         # Renormalize over contributors so sum(active_weight) ≈ 1 when any active
@@ -2485,12 +2668,23 @@ class DashboardGenerator:
                     # Batch CX: regime-gate OFF disclosure
                     "regime_gated": regime_map,
                     "regime_gated_count": len(regime_map),
-                    # Batch CZ: recovery checklist for slept arms
+                    # Batch CZ/DA/DB: recovery checklist + label alignment
                     "health_gate_recovery": [
                         {
                             "source": name,
                             "sleep_reason": sleep_map.get(name),
                             **(sh_metrics.get(name) or {}),
+                            **(
+                                {
+                                    "label_alignment": la,
+                                }
+                                if (
+                                    la := DashboardGenerator._label_alignment_diagnostic(
+                                        name
+                                    )
+                                )
+                                else {}
+                            ),
                         }
                         for name in sorted(sleep_map.keys())
                     ],
@@ -5511,6 +5705,15 @@ class DashboardGenerator:
                         "source": name,
                         "sleep_reason": sleep_map.get(name),
                         **(sh_metrics.get(name) or {}),
+                        **(
+                            {"label_alignment": la}
+                            if (
+                                la := DashboardGenerator._label_alignment_diagnostic(
+                                    name
+                                )
+                            )
+                            else {}
+                        ),
                     }
                     for name in sorted(sleep_map.keys())
                 ]
