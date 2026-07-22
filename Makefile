@@ -475,18 +475,28 @@ wiki-sync:
 #   - scripts/compute_garch_risk.py → garch-risk (public garch_cvar.json dual-write)
 #   - src/research/wiki_sync.py, graduation SSOT → wiki-sync
 #   - src/monitor/health_check.py → health
+#
+# LAST-WRITER CONTRACT (signals.json generator_git_sha):
+#   Full `make dashboard` stamps generator_git_sha_status=full_generate.
+#   Health kill-refresh and bounded alt-data partials intentionally clear the
+#   live sha (partial_patch) and preserve last_full_generator_git_sha.
+#   ops-regen therefore runs health BEFORE dashboard so the full generate is
+#   the last writer of signals.json after a controlled regen. Standalone
+#   health/alt-data crons may still leave partial_patch when they run later —
+#   that is documented honesty, not a bug.
 .PHONY: ops-regen
 ops-regen:
 	@echo "=== Ops regen (post-merge operator surfaces): $$(date) ==="
 	@$(MAKE) --no-print-directory garch-risk
-	@$(MAKE) --no-print-directory dashboard
 	@$(MAKE) --no-print-directory wiki-sync
 	@$(MAKE) --no-print-directory health
+	@# Full dashboard LAST so signals.json retains full_generate tip stamp
+	@$(MAKE) --no-print-directory dashboard
 	@# Batch BX: soft-gate repo public/data mirror (never block ops-regen)
 	@$(MAKE) --no-print-directory mirror-repo-public-data || \
 		echo "WARN: mirror-repo-public-data soft-failed (repo public lag; non-blocking)"
 	@echo "=== Ops regen complete: $$(date) ==="
-	@echo "Verify: PUBLIC_DATA_DIR signals.json generator_git_sha matches git rev-parse --short HEAD"
+	@echo "Verify: PUBLIC_DATA_DIR signals.json generator_git_sha matches git rev-parse --short HEAD (full_generate last writer)"
 	@echo "Verify: PUBLIC_DATA_DIR/garch_cvar.json exists; garch_active honest vs coverage_pass"
 	@echo "Verify: make mirror-repo-public-data-lag → exit 0 (repo public/data vs live)"
 

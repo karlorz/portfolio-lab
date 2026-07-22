@@ -6223,14 +6223,14 @@ class DashboardGenerator:
             sizer = VIXYHedgeSizer()
             status = sizer.status()
 
-            hedge_data = {
+            hedge_data = _stamp_generator_git_sha({
                 **status,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "canonical_controller": "hedge_selector",
                 "runtime_role": "diagnostic_cost_evidence",
                 "live_authoritative": False,
                 "routed": False,
-            }
+            })
 
             out_path = PUBLIC_DIR / "vixy_hedge.json"
             save_results_json(hedge_data, output_path=str(out_path))
@@ -6348,6 +6348,7 @@ class DashboardGenerator:
                 },
                 "generated_at": datetime.now(timezone.utc).isoformat(),
             }
+            bl_data = _stamp_generator_git_sha(bl_data)
 
             out_path = PUBLIC_DIR / "black_litterman.json"
             save_results_json(bl_data, output_path=str(out_path))
@@ -6380,12 +6381,12 @@ class DashboardGenerator:
                 if source not in canonical_sources
             }
 
-            turnover_data = {
+            turnover_data = _stamp_generator_git_sha({
                 "schema_version": "turnover-validator/v1",
                 "signals": production_signals,
                 "synthetic_baselines": synthetic_baselines,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
-            }
+            })
 
             out_path = PUBLIC_DIR / "turnover_validator.json"
             save_results_json(turnover_data, output_path=str(out_path))
@@ -6653,6 +6654,7 @@ class DashboardGenerator:
             except (ImportError, Exception) as e:
                 logger.debug("Regime Sharpe matrix computation skipped: %s", e)
 
+            gate_data = _stamp_generator_git_sha(gate_data)
             out_path = PUBLIC_DIR / "regime_gate.json"
             save_results_json(gate_data, output_path=str(out_path))
             return out_path
@@ -7314,7 +7316,7 @@ class DashboardGenerator:
                     "adjustment": signal.adjustment,
                 })
 
-            tsmom_data = {
+            tsmom_data = _stamp_generator_git_sha({
                 "composite_signal": float(np.mean([s.signal for s in signals])) if signals else 0.0,
                 "speed_breakdown": speed_breakdown,
                 "position_recommendation": "long" if np.mean([s.signal for s in signals]) > 0.1 else ("short" if np.mean([s.signal for s in signals]) < -0.1 else "neutral") if signals else "neutral",
@@ -7324,7 +7326,7 @@ class DashboardGenerator:
                 "health_score": 0.55,
                 "is_gated_off": self._is_msm_gated(),
                 "generated_at": datetime.now(timezone.utc).isoformat(),
-            }
+            })
 
             out_path = PUBLIC_DIR / "tsmom.json"
             save_results_json(tsmom_data, output_path=str(out_path))
@@ -7370,6 +7372,7 @@ class DashboardGenerator:
                 "weight_in_ensemble": 0.0 if is_gated else 0.13,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
             }
+            rv_data = _stamp_generator_git_sha(rv_data)
 
             out_path = PUBLIC_DIR / "cross_asset_rv.json"
             save_results_json(rv_data, output_path=str(out_path))
