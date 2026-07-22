@@ -2212,6 +2212,10 @@ class EnsembleVoter:
                 )
             weights = self._pin_zero_baseline_weights(weights, regime.name)
 
+        # Batch DO: analysis-floor / equal-weight fallback renorm can breach the
+        # 50% per-signal cap — re-apply after those paths (and pin soft-delete).
+        weights = self._cap_per_signal_weights(weights, regime.name)
+
         # Apply weights to readings
         weighted_signals = self._apply_weights_to_readings(readings, weights)
 

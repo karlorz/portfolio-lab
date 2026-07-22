@@ -855,9 +855,13 @@ class TestWeightUpdateEdgeCases:
         attribution = {"timestamp": "now"}
         adapted = adaptive_weights.update_weights(attribution, "normal")
         assert adapted == adaptive_weights.base_weights
-        # multipliers should all be 1.0
-        for mult in adaptive_weights.multipliers.values():
-            assert mult == 1.0
+        # Multipliers: 1.0 for positive baseline; 0.0 for soft-delete (Batch DO)
+        for source, mult in adaptive_weights.multipliers.items():
+            base = float(adaptive_weights.base_weights.get(source, 0) or 0)
+            if base <= 0:
+                assert mult == 0.0, f"zero-baseline {source} mult {mult}"
+            else:
+                assert mult == 1.0
 
     def test_sources_is_none(self, adaptive_weights):
         """sources=None should be treated same as empty dict."""

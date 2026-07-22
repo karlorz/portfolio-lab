@@ -165,7 +165,17 @@ class AdaptiveEnsembleWeights:
         if not sources:
             logger.info("No attribution data available, using base weights unchanged")
             self.adjusted_weights = dict(self.base_weights)
-            self.multipliers = {k: 1.0 for k in self.base_weights}
+            # Batch DO: zero-baseline arms disclose multiplier 0 even on no-data path
+            respect_zero = bool(self.config.get("respect_zero_baseline", True))
+            self.multipliers = {}
+            self.zero_baseline_exclusions = []
+            for k, base_w in self.base_weights.items():
+                if respect_zero and float(base_w or 0.0) <= 0.0:
+                    self.multipliers[k] = 0.0
+                    self.zero_baseline_exclusions.append(k)
+                else:
+                    self.multipliers[k] = 1.0
+            self.zero_baseline_exclusions = sorted(self.zero_baseline_exclusions)
             # Empty base + empty sources must not clobber a healthy on-disk state
             self._save_state(force_empty=not bool(self.base_weights))
             return self.adjusted_weights
@@ -300,6 +310,13 @@ class AdaptiveEnsembleWeights:
                                 )
                             else:
                                 normalized[k] = 0.0
+
+        # Batch DO: soft-delete / zero-baseline arms must not advertise a
+        # non-zero "boost" multiplier when adjusted mass is hard-zeroed.
+        # Operators misread MSM ×1.73 as active when weight stays 0.
+        for source_name in zero_baseline:
+            multipliers[source_name] = 0.0
+            normalized[source_name] = 0.0
 
         self.adjusted_weights = normalized
         self.multipliers = multipliers
