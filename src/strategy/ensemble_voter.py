@@ -1094,6 +1094,142 @@ class EnsembleVoter:
             pinned = {k: float(v or 0.0) / total for k, v in pinned.items()}
         return pinned
 
+    # Batch DN: documented max per-signal cap (vault query + OnlineICWeighter default).
+    # Health-gate renorm after mass dropout previously left CAR at ~85% with n_eff~1.8.
+    DEFAULT_PER_SIGNAL_WEIGHT_CAP = 0.50
+
+    @staticmethod
+    def _apply_per_signal_weight_cap(
+        weights: Dict,
+        *,
+        max_weight: float = DEFAULT_PER_SIGNAL_WEIGHT_CAP,
+        soft_delete: Optional[set] = None,
+    ) -> Dict:
+        """Clip each arm to ``max_weight`` then water-fill redistrib excess.
+
+        Soft-delete / zero arms stay at 0. When only one positive arm remains,
+        concentration is unavoidable — leave at 1.0 (cap cannot diversify).
+        """
+        if not weights:
+            return weights
+        try:
+            cap = float(max_weight)
+        except (TypeError, ValueError):
+            cap = EnsembleVoter.DEFAULT_PER_SIGNAL_WEIGHT_CAP
+        if cap <= 0.0 or cap >= 1.0:
+            return weights
+
+        soft = soft_delete or set()
+        out = {k: max(0.0, float(v or 0.0)) for k, v in weights.items()}
+        for src in soft:
+            if src in out:
+                out[src] = 0.0
+
+        total0 = sum(out.values())
+        if total0 <= 0:
+            return out
+        # Normalize first so mass is a probability simplex
+        out = {k: v / total0 for k, v in out.items()}
+
+        max_iter = 16
+        for _ in range(max_iter):
+            positive = [k for k, v in out.items() if v > 1e-12 and k not in soft]
+            if len(positive) <= 1:
+                break
+            over = [k for k in positive if out[k] > cap + 1e-12]
+            if not over:
+                break
+            excess = 0.0
+            for k in over:
+                excess += out[k] - cap
+                out[k] = cap
+            under = [k for k in positive if out[k] < cap - 1e-12]
+            if not under:
+                # Everyone at/above cap — equal-share residual among positive
+                # (feasible only if n*cap >= 1)
+                n = len(positive)
+                if n * cap + 1e-12 < 1.0:
+                    # Impossible to satisfy: keep equal 1/n (may exceed cap)
+                    share = 1.0 / n
+                    for k in positive:
+                        out[k] = share
+                break
+            under_sum = sum(out[k] for k in under)
+            if under_sum <= 0:
+                # Degenerate under-set: distribute excess equally among under
+                share = excess / len(under)
+                for k in under:
+                    out[k] = min(cap, out[k] + share)
+            else:
+                scale = (under_sum + excess) / under_sum
+                for k in under:
+                    out[k] = min(cap, out[k] * scale)
+
+        # Final soft-delete pin + renorm of non-soft mass
+        for src in soft:
+            if src in out:
+                out[src] = 0.0
+        total = sum(out.values())
+        if total > 0 and abs(total - 1.0) > 1e-9:
+            out = {k: v / total for k, v in out.items()}
+        return out
+
+    def _cap_per_signal_weights(
+        self,
+        weights: Dict,
+        regime_name: str,
+        *,
+        max_weight: Optional[float] = None,
+    ) -> Dict:
+        """Instance wrapper: apply cap, pin soft-delete, record disclosure."""
+        env_cap = os.environ.get("ENSEMBLE_PER_SIGNAL_WEIGHT_CAP", "").strip()
+        if env_cap:
+            try:
+                cap = float(env_cap)
+            except (TypeError, ValueError):
+                cap = (
+                    float(max_weight)
+                    if max_weight is not None
+                    else self.DEFAULT_PER_SIGNAL_WEIGHT_CAP
+                )
+        else:
+            cap = (
+                float(max_weight)
+                if max_weight is not None
+                else self.DEFAULT_PER_SIGNAL_WEIGHT_CAP
+            )
+        soft = self._static_zero_baseline_sources(regime_name)
+        before = {k: float(v or 0.0) for k, v in weights.items()}
+        capped = self._apply_per_signal_weight_cap(
+            weights, max_weight=cap, soft_delete=soft
+        )
+        capped = self._pin_zero_baseline_weights(capped, regime_name)
+        max_before = max(before.values()) if before else 0.0
+        max_after = max((float(v or 0.0) for v in capped.values()), default=0.0)
+        breached = [
+            (k.value if hasattr(k, "value") else str(k))
+            for k, v in before.items()
+            if float(v or 0.0) > cap + 1e-12
+        ]
+        self._last_per_signal_cap = {
+            "cap": cap,
+            "applied": bool(breached) or max_before > cap + 1e-12,
+            "breached_before": breached,
+            "max_weight_before": round(max_before, 5),
+            "max_weight_after": round(max_after, 5),
+            "policy": "clip_renorm_iterative_soft_delete_pinned",
+        }
+        if breached:
+            logger.info(
+                "Per-signal weight cap %.0f%% applied (Batch DN): max %.1f%% → %.1f%%; "
+                "breached=%s",
+                cap * 100,
+                max_before * 100,
+                max_after * 100,
+                ",".join(breached),
+            )
+        return capped
+
     def get_blended_weights(self, regime_name: str) -> dict:
         """Get regime weights blended between static REGIME_WEIGHTS and bandit.
 
@@ -1999,6 +2135,8 @@ class EnsembleVoter:
         weights = self._apply_ic_weights(weights, regime)
         weights = self._pin_zero_baseline_weights(weights, regime.name)
         weights = self._apply_health_weights(weights)
+        # Batch DN: health renorm concentrates mass — enforce documented 50% cap
+        weights = self._cap_per_signal_weights(weights, regime.name)
         weights = self._apply_correlation_penalty(weights)
         if os.environ.get("ENSEMBLE_DISABLE_REGIME_WEIGHTS", "").lower() not in ("1", "true"):
             weights = self._apply_regime_weights(weights, regime)
@@ -2011,6 +2149,8 @@ class EnsembleVoter:
         weights = self._pin_zero_baseline_weights(weights, regime.name)
         weights = self._apply_turnover_validation(weights, readings, regime)
         weights = self._pin_zero_baseline_weights(weights, regime.name)
+        # Final cap after any reinflation-capable stages
+        weights = self._cap_per_signal_weights(weights, regime.name)
 
         # Soft-delete static zeros — exclude from analysis equal-weight floors
         soft_delete = self._static_zero_baseline_sources(regime.name)
@@ -3107,6 +3247,11 @@ class EnsembleVoter:
 
         sleep_reasons = dict(getattr(self, "_health_gate_sleep_reasons", None) or {})
         regime_gated = dict(getattr(self, "_regime_gated", None) or {})
+        adaptive_learning = dict(self.get_adaptive_learning_status(regime.name) or {})
+        # Batch DN: disclose final per-signal weight cap application
+        cap_info = getattr(self, "_last_per_signal_cap", None)
+        if isinstance(cap_info, dict) and cap_info:
+            adaptive_learning["per_signal_weight_cap"] = cap_info
         return EnsembleVote(
             timestamp=str(datetime.now()),
             regime=regime,
@@ -3123,7 +3268,7 @@ class EnsembleVoter:
             source_votes=weighted_signals,
             n_eff=round(n_eff, 2),
             weight_entropy=round(weight_entropy, 4),
-            adaptive_learning=self.get_adaptive_learning_status(regime.name),
+            adaptive_learning=adaptive_learning,
             health_gate_slept=sleep_reasons or None,
             health_gate_freeze=bool(getattr(self, "_health_gate_freeze", False)),
             regime_gated=regime_gated or None,

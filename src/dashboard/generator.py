@@ -2407,64 +2407,93 @@ class DashboardGenerator:
             effective_weight = 0.0
             sleep_reason = slept_map.get(source)
             regime_reason = regime_map.get(source)
+            # Batch DM: soft-delete (configured baseline 0) never contributes vote
+            # mass in disclosure — even if source_breakdown leaked positive weight
+            # from a pre-pin bandit path. Collect/provenance still allowed (DJ).
+            soft_delete = cfg_w <= 0.0
+
             if row is not None:
                 try:
                     row_weight = float(row.get("weight", 0.0))
                 except (TypeError, ValueError):
                     row_weight = 0.0
-                contributing = bool(np.isfinite(row_weight) and row_weight > 0)
-                effective_weight = row_weight if contributing else 0.0
-                if contributing:
-                    status = "active"
-                    reason = "Collected and contributing to the ensemble vote."
-                elif sleep_reason:
-                    # Batch CW: CN health-gate sleep is not a generic zero_weight
-                    status = "health_sleep"
-                    reason = f"Health-gated sleep: {sleep_reason}"
-                elif regime_reason:
-                    # Batch CX: intentional regime OFF (e.g. unified_overlay in NORMAL)
-                    status = "regime_gate"
-                    reason = f"Regime-gated off: {regime_reason}"
-                elif row is not None and row.get("is_active") is False:
-                    # Batch CY: snapshot inactive (neutral/low conf) ≠ pipeline zero
-                    status = "inactive_signal"
-                    expl = str(row.get("inactive_explanation") or row.get("explanation") or "")
+                if soft_delete:
+                    # Pin: ignore leaked vote weight for soft-delete arms
+                    contributing = False
+                    effective_weight = 0.0
+                    status = "zero_baseline"
+                    soft = DashboardGenerator.ZERO_BASELINE_SOFT_DELETE.get(source)
                     reason = (
-                        f"Signal inactive (not actionable): {expl}"
-                        if expl
-                        else "Signal inactive (not actionable this cycle)."
+                        "Configured baseline weight is 0 (soft-delete); "
+                        "collected for provenance/shadow only — not contributing "
+                        "to the ensemble vote (Batch DM disclosure pin)."
                     )
-                    # Batch DB: structured RS activation gaps for international
-                    if source == "international_momentum":
-                        try:
-                            conf_raw = row.get("confidence")
-                        except Exception:  # noqa: BLE001
-                            conf_raw = None
-                        try:
-                            val_raw = row.get("value")
-                        except Exception:  # noqa: BLE001
-                            val_raw = None
-                        act = DashboardGenerator._international_activation_disclosure(
-                            explanation=expl,
-                            value=val_raw,
-                            confidence=conf_raw,
+                    if soft:
+                        reason = f"{reason} Soft-delete: {soft}"
+                    if abs(row_weight) > 1e-12:
+                        reason = (
+                            f"{reason} Note: raw vote weight {row_weight:.5f} "
+                            "ignored (vote-mass pin / sleeping-expert policy)."
                         )
-                        # stash on row via reason append after entry built — use local
-                        row["_activation_disclosure"] = act
-                        gaps = act.get("activation_gaps") or []
-                        if gaps:
-                            reason = (
-                                f"{reason} | activation: {', '.join(gaps[:3])}"
-                            )
                 else:
-                    status = "zero_weight"
-                    reason = "Collected but assigned zero effective weight."
+                    contributing = bool(np.isfinite(row_weight) and row_weight > 0)
+                    effective_weight = row_weight if contributing else 0.0
+                    if contributing:
+                        status = "active"
+                        reason = "Collected and contributing to the ensemble vote."
+                    elif sleep_reason:
+                        # Batch CW: CN health-gate sleep is not a generic zero_weight
+                        status = "health_sleep"
+                        reason = f"Health-gated sleep: {sleep_reason}"
+                    elif regime_reason:
+                        # Batch CX: intentional regime OFF (e.g. unified_overlay in NORMAL)
+                        status = "regime_gate"
+                        reason = f"Regime-gated off: {regime_reason}"
+                    elif row is not None and row.get("is_active") is False:
+                        # Batch CY: snapshot inactive (neutral/low conf) ≠ pipeline zero
+                        status = "inactive_signal"
+                        expl = str(
+                            row.get("inactive_explanation")
+                            or row.get("explanation")
+                            or ""
+                        )
+                        reason = (
+                            f"Signal inactive (not actionable): {expl}"
+                            if expl
+                            else "Signal inactive (not actionable this cycle)."
+                        )
+                        # Batch DB: structured RS activation gaps for international
+                        if source == "international_momentum":
+                            try:
+                                conf_raw = row.get("confidence")
+                            except Exception:  # noqa: BLE001
+                                conf_raw = None
+                            try:
+                                val_raw = row.get("value")
+                            except Exception:  # noqa: BLE001
+                                val_raw = None
+                            act = DashboardGenerator._international_activation_disclosure(
+                                explanation=expl,
+                                value=val_raw,
+                                confidence=conf_raw,
+                            )
+                            # stash on row via reason append after entry built — use local
+                            row["_activation_disclosure"] = act
+                            gaps = act.get("activation_gaps") or []
+                            if gaps:
+                                reason = (
+                                    f"{reason} | activation: {', '.join(gaps[:3])}"
+                                )
+                    else:
+                        status = "zero_weight"
+                        reason = "Collected but assigned zero effective weight."
             else:
                 contributing = False
+                effective_weight = 0.0
                 # Batch CU: intentional zero-baseline (e.g. multi_speed_momentum
                 # weight 0.0 all regimes) is skipped by collector — disclose as
                 # zero_baseline, not "missing" (SRE: zero-weight arm ≠ failure).
-                if cfg_w <= 0.0:
+                if soft_delete:
                     status = "zero_baseline"
                     soft = DashboardGenerator.ZERO_BASELINE_SOFT_DELETE.get(source)
                     reason = (
