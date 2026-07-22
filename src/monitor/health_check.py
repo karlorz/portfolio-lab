@@ -546,6 +546,36 @@ def refresh_signals_health_kill_fields(
     except Exception:  # noqa: BLE001
         pass
 
+    # Batch DV: re-project ML feature staleness from sticky ml_signals
+    try:
+        ml = payload.get("ml_signals")
+        if isinstance(ml, dict) and isinstance(health, dict):
+            fresh = str(ml.get("feature_freshness_status") or "unknown")
+            age = ml.get("feature_staleness_days")
+            try:
+                age_i = int(age) if age is not None else None
+            except (TypeError, ValueError):
+                age_i = None
+            health["ml_feature_freshness_status"] = fresh
+            health["ml_feature_staleness_days"] = age_i
+            health["ml_feature_as_of"] = ml.get("feature_as_of")
+            health["ml_prediction_source_mode"] = ml.get("prediction_source_mode")
+            health["ml_available"] = bool(ml.get("available"))
+            er = (
+                ml.get("execution_role")
+                if isinstance(ml.get("execution_role"), dict)
+                else {}
+            )
+            health["ml_live_authoritative"] = bool(er.get("live_authoritative"))
+            if fresh == "stale" and bool(ml.get("available")):
+                health["ml_features_stale"] = True
+                if health.get("status") in (None, "ok", "healthy", "unknown"):
+                    health["status"] = "warning"
+            else:
+                health["ml_features_stale"] = False
+    except Exception:  # noqa: BLE001
+        pass
+
     payload["health"] = health
     # Partial rewrite must advance top-level generated_at (mtime honesty)
     from datetime import datetime, timezone
