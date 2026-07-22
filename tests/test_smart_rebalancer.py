@@ -418,7 +418,8 @@ class TestShouldRebalance:
 
     def test_defer_budget(self):
         ctrl = SmartRebalancingController()
-        # Exhaust budget
+        # Exhaust budget (disable single-trade cap so synthetic 60 bps counts)
+        ctrl.cost_tracker.max_single_trade_cost_bps = None
         ctrl.cost_tracker.add_cost(60, "2026-05-01", ["SPY"])
         p = _drifted_portfolio(0.15)
         m = _make_market(vpin=0.30)
@@ -428,6 +429,7 @@ class TestShouldRebalance:
 
     def test_emergency_overrides_budget(self):
         ctrl = SmartRebalancingController()
+        ctrl.cost_tracker.max_single_trade_cost_bps = None
         ctrl.cost_tracker.add_cost(60, "2026-05-01", ["SPY"])
         p = _drifted_portfolio(0.30)  # Emergency drift
         m = _make_market(vpin=0.30)
@@ -817,6 +819,8 @@ class TestDataclassFields:
             'warning_threshold_pct',
             'ytd_costs',
             'ytd_year',  # Batch DY: calendar year for YTD view
+            'max_single_trade_cost_bps',  # Batch DZ: single-trade outlier cap
+            'quarantined_costs',  # Batch DZ: audit trail for outliers
         }
         assert fields['annual_limit_pct'].type is float
         assert fields['annual_limit_pct'].default == 0.005
@@ -1450,11 +1454,12 @@ class TestGetStatusEdgeCases:
 
     def test_status_cost_pct_format(self):
         ctrl = SmartRebalancingController()
-        ctrl.record_rebalance(25.0, "2026-05-14", ["SPY", "GLD"])
+        # Under single-trade cap (15) so row stays in YTD budget sum
+        ctrl.record_rebalance(12.5, "2026-05-14", ["SPY", "GLD"])
         status = ctrl.get_status()
-        # 25 bps = 0.25% of total value
-        assert status['ytd_cost_pct'] == 0.25
-        assert status['remaining_budget_pct'] == 0.25  # 0.5 - 0.25 = 0.25
+        # 12.5 bps = 0.125% of total value
+        assert status['ytd_cost_pct'] == 0.125
+        assert status['remaining_budget_pct'] == 0.375  # 0.5 - 0.125
 
 
 # ---------------------------------------------------------------------------
@@ -1669,6 +1674,7 @@ class TestShouldRebalanceEdgeCases:
     def test_defer_budget_has_non_zero_cost_in_result(self):
         """Defer_budget sets estimated_cost_bps=0."""
         ctrl = SmartRebalancingController()
+        ctrl.cost_tracker.max_single_trade_cost_bps = None
         ctrl.cost_tracker.add_cost(60, "2026-05-01", ["SPY"])
         p = _drifted_portfolio(0.15)
         m = _make_market(vpin=0.30)
@@ -1727,6 +1733,7 @@ class TestShouldRebalanceEdgeCases:
     def test_should_rebalance_high_urgency_but_over_budget_defers(self):
         """High urgency but over budget should defer unless EMERGENCY."""
         ctrl = SmartRebalancingController()
+        ctrl.cost_tracker.max_single_trade_cost_bps = None
         ctrl.cost_tracker.add_cost(60, "2026-05-01", ["SPY"])
         p = _drifted_portfolio(0.17)  # HIGH urgency (not EMERGENCY)
         m = _make_market(vpin=0.30)

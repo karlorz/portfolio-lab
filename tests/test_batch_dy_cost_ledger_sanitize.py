@@ -75,6 +75,7 @@ def test_load_state_auto_sanitizes_and_persists(tmp_path: Path) -> None:
             {"cost_bps": 0.0, "date": "2026-05-21", "symbols": ["SPY"]},
             {"cost_bps": 5.0, "date": "2026-05-21", "symbols": ["SPY", "GLD"]},
             {"cost_bps": 5.0, "date": "2026-05-21", "symbols": ["SPY", "GLD"]},
+            # 100 bps: Batch DZ controller cap (15) quarantines — not in YTD sum
             {"cost_bps": 100.0, "date": "2026-05-21", "symbols": ["SPY"]},
         ],
         "last_rebalance": "2026-07-11T00:20:02+00:00",
@@ -84,13 +85,14 @@ def test_load_state_auto_sanitizes_and_persists(tmp_path: Path) -> None:
     ctrl = SmartRebalancingController(
         state_path=state_path, data_dir=tmp_path, load_state=True
     )
-    # 12 + 5 + 100 = 117 (dupes and zero removed)
-    assert abs(ctrl.cost_tracker.ytd_total_bps - 117.0) < 1e-9
+    # 12 + 5 = 17 (dupes/zero removed; 100 quarantined by safety cap)
+    assert abs(ctrl.cost_tracker.ytd_total_bps - 17.0) < 1e-9
     status = ctrl.get_status()
     assert status.get("ledger_sanitized") is True
-    assert status.get("ytd_cost_entries") == 3
+    assert status.get("ytd_cost_entries") == 2
+    assert status.get("ytd_outlier_quarantined_count") == 1
     raw = json.loads(state_path.read_text(encoding="utf-8"))
-    assert len(raw["ytd_costs"]) == 3
+    assert len(raw["ytd_costs"]) == 2
     assert raw.get("ledger_sanitized") is True
 
 

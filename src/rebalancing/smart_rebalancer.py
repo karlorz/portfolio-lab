@@ -87,6 +87,11 @@ class CostBudgetTracker:
     ytd_costs: List[Dict] = field(default_factory=list)
     # Calendar year for YTD view (Batch DY); None → datetime.now().year
     ytd_year: Optional[int] = None
+    # Batch DZ: single-trade cap; None = disabled (unit tests / raw tracker).
+    # Controller wires safety.max_single_trade_cost_bps (default 15).
+    max_single_trade_cost_bps: Optional[float] = None
+    # Outliers kept for audit but excluded from YTD budget sum
+    quarantined_costs: List[Dict] = field(default_factory=list)
 
     @staticmethod
     def _entry_year(date_val: Any) -> Optional[int]:
@@ -148,12 +153,40 @@ class CostBudgetTracker:
     def remaining_budget_pct(self) -> float:
         return max(0, self.annual_limit_pct - self.ytd_total_pct)
 
+    def _is_outlier_bps(self, bps: float) -> bool:
+        cap = self.max_single_trade_cost_bps
+        if cap is None:
+            return False
+        try:
+            return float(bps) > float(cap) + 1e-12
+        except (TypeError, ValueError):
+            return False
+
+    def _quarantine_key(self, bps: float, day: str, syms: Any) -> Tuple:
+        return (round(float(bps), 4), day, self._symbols_key(syms))
+
+    def _already_quarantined(self, key: Tuple) -> bool:
+        for existing in self.quarantined_costs:
+            if not isinstance(existing, dict):
+                continue
+            try:
+                ek = self._quarantine_key(
+                    float(existing.get("cost_bps", 0) or 0),
+                    self._entry_day_key(existing.get("date")),
+                    existing.get("symbols"),
+                )
+            except (TypeError, ValueError):
+                continue
+            if ek == key:
+                return True
+        return False
+
     def add_cost(self, cost_bps: float, date: str, symbols: List[str]):
-        """Append a cost row with composite-key idempotency (Batch DY).
+        """Append a cost row with composite-key idempotency (Batch DY/DZ).
 
         Exact duplicate of (rounded cost_bps, calendar day, sorted symbols)
         is skipped so re-runs / double record_rebalance do not inflate YTD.
-        Zero-cost rows are still stored only when non-duplicate (rare audit).
+        Rows above max_single_trade_cost_bps are quarantined (audit only).
         """
         try:
             bps = float(cost_bps)
@@ -162,6 +195,20 @@ class CostBudgetTracker:
         day = self._entry_day_key(date)
         syms = list(symbols or [])
         key = (round(bps, 4), day, self._symbols_key(syms))
+
+        if self._is_outlier_bps(bps):
+            if not self._already_quarantined(key):
+                self.quarantined_costs.append(
+                    {
+                        "cost_bps": bps,
+                        "date": date,
+                        "symbols": syms,
+                        "reason": "above_max_single_trade_cost_bps",
+                        "cap_bps": self.max_single_trade_cost_bps,
+                    }
+                )
+            return
+
         for existing in self.ytd_costs:
             if not isinstance(existing, dict):
                 continue
@@ -188,10 +235,11 @@ class CostBudgetTracker:
         drop_prior_years_from_storage: bool = False,
         drop_zero_cost: bool = True,
     ) -> Dict[str, Any]:
-        """Dedupe exact cost rows + optional year hygiene (Batch DY).
+        """Dedupe, zero-drop, and quarantine single-trade outliers (DY/DZ).
 
         Composite key: (cost_bps rounded 4dp, calendar day, sorted symbols).
-        Does not invent costs — only collapses exact dups and zero noise.
+        Outliers above max_single_trade_cost_bps move to quarantined_costs
+        (audit trail) and are excluded from ytd_total_bps.
         """
         year = int(as_of_year) if as_of_year is not None else self._active_year()
         before = list(self.ytd_costs)
@@ -199,8 +247,12 @@ class CostBudgetTracker:
         dropped_zero = 0
         dropped_duplicate = 0
         dropped_prior_year = 0
+        quarantined_outlier = 0
+        quarantined_bps = 0.0
         seen: set = set()
         cleaned: List[Dict] = []
+        # Preserve prior quarantines; re-scan may re-add from ytd_costs
+        prior_q = list(self.quarantined_costs)
 
         for entry in before:
             if not isinstance(entry, dict):
@@ -221,6 +273,21 @@ class CostBudgetTracker:
                 continue
 
             key = (round(bps, 4), day, self._symbols_key(syms))
+            if self._is_outlier_bps(bps):
+                if not self._already_quarantined(key):
+                    self.quarantined_costs.append(
+                        {
+                            "cost_bps": bps,
+                            "date": entry.get("date") if entry.get("date") is not None else day,
+                            "symbols": syms,
+                            "reason": "above_max_single_trade_cost_bps",
+                            "cap_bps": self.max_single_trade_cost_bps,
+                        }
+                    )
+                quarantined_outlier += 1
+                quarantined_bps += bps
+                continue
+
             if key in seen:
                 dropped_duplicate += 1
                 continue
@@ -233,13 +300,36 @@ class CostBudgetTracker:
                 }
             )
 
+        # Dedupe quarantine list itself (same composite key)
+        q_seen: set = set()
+        q_clean: List[Dict] = []
+        for entry in self.quarantined_costs:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                bps = float(entry.get("cost_bps", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            qk = self._quarantine_key(
+                bps,
+                self._entry_day_key(entry.get("date")),
+                entry.get("symbols"),
+            )
+            if qk in q_seen:
+                continue
+            q_seen.add(qk)
+            q_clean.append(entry)
+        self.quarantined_costs = q_clean
+
         self.ytd_costs = cleaned
         after_count = len(cleaned)
         changed = (
             dropped_zero > 0
             or dropped_duplicate > 0
             or dropped_prior_year > 0
+            or quarantined_outlier > 0
             or after_count != before_count
+            or len(self.quarantined_costs) != len(prior_q)
         )
         return {
             "changed": changed,
@@ -249,6 +339,10 @@ class CostBudgetTracker:
             "dropped_zero": dropped_zero,
             "dropped_duplicate": dropped_duplicate,
             "dropped_prior_year": dropped_prior_year,
+            "quarantined_outlier": quarantined_outlier,
+            "quarantined_bps": round(quarantined_bps, 4),
+            "quarantined_total": len(self.quarantined_costs),
+            "max_single_trade_cost_bps": self.max_single_trade_cost_bps,
             "as_of_year": year,
             "ytd_total_bps": self.ytd_total_bps,
         }
@@ -324,9 +418,16 @@ class SmartRebalancingController:
         load_state: bool = True,
     ):
         self.config = self._load_config(config_path)
+        safety = self.config.get("safety") if isinstance(self.config.get("safety"), dict) else {}
+        max_single = safety.get("max_single_trade_cost_bps", 15)
+        try:
+            max_single_f = float(max_single) if max_single is not None else 15.0
+        except (TypeError, ValueError):
+            max_single_f = 15.0
         self.cost_tracker = CostBudgetTracker(
             annual_limit_pct=self.config['cost_budget']['annual_limit'],
             warning_threshold_pct=self.config['cost_budget']['warning_threshold'],
+            max_single_trade_cost_bps=max_single_f,
         )
         self.deferred_until: Optional[datetime] = None
         self.last_rebalance: Optional[datetime] = None
@@ -799,6 +900,8 @@ class SmartRebalancingController:
             "last_rebalance_reconciled_from": self.last_rebalance_reconciled_from,
             "ledger_sanitized": bool(self.ledger_sanitized),
             "ledger_sanitize_report": self.ledger_sanitize_report,
+            "quarantined_costs": list(self.cost_tracker.quarantined_costs),
+            "max_single_trade_cost_bps": self.cost_tracker.max_single_trade_cost_bps,
             "deferred_until": (
                 self.deferred_until.isoformat() if self.deferred_until else None
             ),
@@ -839,6 +942,30 @@ class SmartRebalancingController:
                     continue
             self.cost_tracker.ytd_costs = cleaned
 
+        # Batch DZ: restore prior quarantine audit trail
+        q_costs = data.get("quarantined_costs")
+        if isinstance(q_costs, list):
+            q_cleaned = []
+            for entry in q_costs:
+                if not isinstance(entry, dict):
+                    continue
+                try:
+                    q_cleaned.append(
+                        {
+                            "cost_bps": float(entry.get("cost_bps", 0)),
+                            "date": str(entry.get("date", "")),
+                            "symbols": list(entry.get("symbols") or []),
+                            "reason": str(
+                                entry.get("reason")
+                                or "above_max_single_trade_cost_bps"
+                            ),
+                            "cap_bps": entry.get("cap_bps"),
+                        }
+                    )
+                except (TypeError, ValueError):
+                    continue
+            self.cost_tracker.quarantined_costs = q_cleaned
+
         lr = data.get("last_rebalance")
         if lr:
             try:
@@ -866,7 +993,7 @@ class SmartRebalancingController:
             except (TypeError, ValueError):
                 self.deferred_until = None
 
-        # Batch DY: collapse exact-dup / zero-cost pollution on load; persist if changed
+        # Batch DY/DZ: dedupe + quarantine outliers on load; persist if changed
         try:
             report = self.cost_tracker.sanitize_ledger()
             if report.get("changed"):
@@ -926,6 +1053,16 @@ class SmartRebalancingController:
             'ytd_cost_entries': len(self.cost_tracker._costs_in_year()),
             'ledger_sanitized': bool(self.ledger_sanitized),
             'ledger_sanitize_report': self.ledger_sanitize_report,
+            'max_single_trade_cost_bps': self.cost_tracker.max_single_trade_cost_bps,
+            'ytd_outlier_quarantined_count': len(self.cost_tracker.quarantined_costs),
+            'ytd_outlier_quarantined_bps': round(
+                sum(
+                    float(c.get("cost_bps", 0) or 0)
+                    for c in self.cost_tracker.quarantined_costs
+                    if isinstance(c, dict)
+                ),
+                4,
+            ),
             'last_rebalance': self.last_rebalance.isoformat() if self.last_rebalance else None,
             'last_rebalance_clock_source': self.last_rebalance_clock_source,
             'last_rebalance_reconciled': bool(self.last_rebalance_reconciled),
@@ -936,6 +1073,7 @@ class SmartRebalancingController:
                 'vpin_threshold': self.config['vpin']['threshold'],
                 'optimal_window': f"{self.config['timing']['optimal_start']}:00-{self.config['timing']['optimal_end']}:00 ET",
                 'annual_cost_limit': f"{self.config['cost_budget']['annual_limit'] * 100:.1f}%",
+                'max_single_trade_cost_bps': self.cost_tracker.max_single_trade_cost_bps,
             },
         }
 

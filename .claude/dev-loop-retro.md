@@ -140,3 +140,12 @@
 - ClaudeMd?:      no
 - WorkflowShift?: no
 - Deep-research: TCA append-only ledger + composite dedupe; fiscal YTD views not mutable wipe
+
+## [2026-07-22] retro | loop cycle: batch-dz-cost-outlier-cap
+- Friction:       After DY, ytd still 163 bps; 100 bps SPY row alone blew annual 50 bps budget
+- Miss:           safety.max_single_trade_cost_bps=15 existed but never applied to ledger
+- Improve:        Quarantine rows > cap from YTD sum; keep audit trail; wire cap from config
+- Generalize?:    yes (TCA single-trade cost caps; outliers ≠ budget burn)
+- ClaudeMd?:      no
+- WorkflowShift?: no
+- Deep-research: max single-trade cost cap 15–50 bps; isolate outliers from budget metrics
