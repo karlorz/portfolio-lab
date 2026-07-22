@@ -576,6 +576,35 @@ def refresh_signals_health_kill_fields(
     except Exception:  # noqa: BLE001
         pass
 
+    # Batch EI: rebalance_health is a sibling panel file, not sticky on
+    # signals.json. Partial health patches never embed it → EG timeline SLI
+    # stayed unknown and DW dual-clock lag stayed silent. Load DATA_DIR
+    # (then PUBLIC) so compact health always discloses rewrite inflation.
+    rebalance_health_panel = (
+        payload.get("rebalance_health")
+        if isinstance(payload.get("rebalance_health"), dict)
+        else None
+    )
+    if rebalance_health_panel is None:
+        try:
+            root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+            candidates = [
+                root / "rebalance_health.json",
+                Path(root_public) / "rebalance_health.json",
+            ]
+            for path in candidates:
+                if not path.is_file():
+                    continue
+                try:
+                    loaded = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+                if isinstance(loaded, dict):
+                    rebalance_health_panel = loaded
+                    break
+        except Exception:  # noqa: BLE001
+            rebalance_health_panel = None
+
     # Batch DW: re-project smart-rebalance cost budget + dual-clock lag from
     # sticky smart_rebalance / rebalance_health so partial patches disclose
     # over-budget (ytd 214 bps vs 50) and controller last_rebalance lag.
@@ -588,24 +617,24 @@ def refresh_signals_health_kill_fields(
                 payload.get("smart_rebalance")
                 if isinstance(payload.get("smart_rebalance"), dict)
                 else None,
-                payload.get("rebalance_health")
-                if isinstance(payload.get("rebalance_health"), dict)
-                else None,
+                rebalance_health_panel,
             )
     except Exception:  # noqa: BLE001
         pass
 
-    # Batch EG: unique event-day execution timeline vs raw rewrite inflation
+    # Batch EG/EI: unique event-day execution timeline vs raw rewrite inflation
     try:
         from src.dashboard.generator import project_execution_timeline_onto_health
 
         if isinstance(health, dict):
             health = project_execution_timeline_onto_health(
                 health,
-                payload.get("rebalance_health")
-                if isinstance(payload.get("rebalance_health"), dict)
-                else None,
+                rebalance_health_panel,
             )
+            if rebalance_health_panel is not None:
+                health["rebalance_health_source"] = "disk_or_sticky"
+            else:
+                health.setdefault("rebalance_health_source", "missing")
     except Exception:  # noqa: BLE001
         pass
 
