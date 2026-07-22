@@ -852,7 +852,12 @@ class GraduationChecklist:
                 from src.dashboard.health_report import signal_health_status_contribution
 
                 contrib = signal_health_status_contribution(sh)
-                if contrib in {"degraded", "critical", "warning"}:
+                # Batch EL: align with graduation CB producer — only hard
+                # quality outages (degraded/critical, e.g. 0/N healthy)
+                # block the health_checks criterion. Soft ``warning``
+                # (partial healthy sleeves) must not permanently fail
+                # graduation while ops green streak climbs.
+                if contrib in {"degraded", "critical"}:
                     sh_blocked = True
             except Exception:  # noqa: BLE001
                 # Fall back to summary counts when contribution helper unavailable

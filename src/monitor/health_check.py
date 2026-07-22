@@ -1273,10 +1273,12 @@ def update_graduation_circuit_breaker_state(
     this file the gate stays failed forever even when health looks healthy.
 
     - Healthy + broker closed → consecutive_ok += 1 (capped at 30)
-    - Batch CB: when ``signal_health`` is provided and contribution is
-      degraded/critical (e.g. SH healthy==0 of N tracked), **hold** the streak
-      (do not climb) so CB cannot greenwash a 0/N signal fleet while ops-only
-      status is ok. Reset-to-zero still applies for broker open / ops red.
+    - Batch CB / EL: when ``signal_health`` is provided and contribution is
+      **degraded or critical** (e.g. SH healthy==0 of N tracked), **hold** the
+      streak (do not climb) so CB cannot greenwash a 0/N signal fleet while
+      ops-only status is ok. Soft ``warning`` contribution (partial healthy
+      sleeves) does **not** freeze climb — it only demotes dashboard
+      system_status. Reset-to-zero still applies for broker open / ops red.
     - Otherwise (ops/broker fail) → consecutive_ok reset to 0
     """
     root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
@@ -1302,8 +1304,13 @@ def update_graduation_circuit_breaker_state(
             sh_contrib = signal_health_status_contribution(
                 signal_health if isinstance(signal_health, dict) else None
             )
-            if sh_contrib in {"degraded", "critical", "warning"}:
-                # 0/N healthy or majority unhealthy → freeze climb
+            # Batch EL: freeze climb only on hard quality outages
+            # (0/N healthy → degraded/critical). Soft ``warning`` (e.g. 1/9
+            # healthy + majority degraded, or majority unhealthy with ≥1
+            # healthy) demotes dashboard system_status but must not freeze
+            # graduation consecutive_ok forever — that starves the
+            # circuit_breaker_confidence gate while ops stays green.
+            if sh_contrib in {"degraded", "critical"}:
                 sh_blocked = True
         except Exception:  # noqa: BLE001 — never fail CB on SH import
             sh_contrib = None
@@ -1762,10 +1769,17 @@ def run_health_check() -> dict:
         "scope": "operational_readiness",
     }
     if isinstance(grad_cb, dict):
+        # Batch EL: surface SH block reason so operators see why streak freezes
+        # without opening private .circuit_breaker.json.
         report["graduation_circuit_breaker"] = {
             "consecutive_ok": grad_cb.get("consecutive_ok"),
             "status": grad_cb.get("status"),
             "updated_at": grad_cb.get("updated_at"),
+            "signal_health_blocked": bool(grad_cb.get("signal_health_blocked")),
+            "signal_health_contribution": grad_cb.get(
+                "signal_health_contribution"
+            ),
+            "system_status": grad_cb.get("system_status"),
         }
         # Batch BP: refresh graduation dual surfaces when CB streak changes so
         # public graduation.json does not lag SSOT until next dashboard :15.

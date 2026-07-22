@@ -977,6 +977,60 @@ class TestGraduationCircuitBreakerProducer:
         assert resume["consecutive_ok"] == 2
         assert resume.get("signal_health_blocked") is not True
 
+    def test_signal_health_warning_does_not_freeze_streak(self, tmp_path):
+        """Batch EL: SH contribution warning (1/N healthy) must not freeze CB.
+
+        Live fleet often has healthy=1, degraded=6, unhealthy=2 → contribution
+        ``warning``. Freezing consecutive_ok on warning left graduation CB at
+        0 forever despite ops status ok and broker closed.
+        """
+        from src.monitor.health_check import update_graduation_circuit_breaker_state
+
+        seed = update_graduation_circuit_breaker_state(
+            system_status="ok",
+            broker_circuit={"state": "closed", "fail_count": 0},
+            data_dir=tmp_path,
+        )
+        assert seed["consecutive_ok"] == 1
+
+        sh_warn = {
+            "status": "degraded",
+            "summary": {
+                "healthy": 1,
+                "degraded": 6,
+                "unhealthy": 2,
+                "total_tracked": 9,
+            },
+        }
+        climbed = update_graduation_circuit_breaker_state(
+            system_status="ok",
+            broker_circuit={"state": "closed", "fail_count": 0},
+            data_dir=tmp_path,
+            signal_health=sh_warn,
+        )
+        assert climbed["consecutive_ok"] == 2
+        assert climbed.get("signal_health_blocked") is not True
+        assert climbed["status"] == "green"
+
+        # 0/N still freezes (degraded contribution)
+        sh_zero = {
+            "status": "degraded",
+            "summary": {
+                "healthy": 0,
+                "degraded": 7,
+                "unhealthy": 2,
+                "total_tracked": 9,
+            },
+        }
+        blocked = update_graduation_circuit_breaker_state(
+            system_status="ok",
+            broker_circuit={"state": "closed", "fail_count": 0},
+            data_dir=tmp_path,
+            signal_health=sh_zero,
+        )
+        assert blocked["consecutive_ok"] == 2  # hold, not climb
+        assert blocked.get("signal_health_blocked") is True
+        assert blocked["status"] == "yellow"
 
     def test_absent_signal_health_preserves_legacy_ops_only_climb(self, tmp_path):
         """When SH not passed, keep pre-CB ops+broker behavior (backward compat)."""
