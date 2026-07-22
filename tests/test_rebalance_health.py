@@ -963,9 +963,10 @@ class TestMain:
 
 
 class TestBatchDRRecentOrdersDailySummary:
-    """Batch DR: live order-history uses recent_orders + date field."""
+    """Batch DR/DS: live order-history uses recent_orders; schedule uses event clock."""
 
-    def test_recent_orders_key_parsed_and_advances_schedule(self):
+    def test_recent_orders_key_parsed_uses_event_clock_not_write_day(self):
+        """Batch DS: write_day=2026-07-22 with May fills must not advance schedule."""
         import src.monitor.rebalance_health as rh
         from src.monitor.rebalance_health import generate
 
@@ -977,13 +978,12 @@ class TestBatchDRRecentOrdersDailySummary:
                 rh.DATA_DIR = data_dir
                 rh.ORDERS_DIR = data_dir / "historical_orders"
                 rh.ORDERS_DIR.mkdir()
-                # Stale May historical files only
                 _make_order_file(
                     rh.ORDERS_DIR,
                     "order_history_20260512_120000_aaa",
                     [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}],
                 )
-                # Live dual-write shape: recent_orders + May backfill timestamps
+                # Snapshot rewrite: file date today, fills are May (orders.jsonl tail)
                 (data_dir / "order-history-2026-07-22.json").write_text(json.dumps({
                     "date": "2026-07-22",
                     "total_orders": 6,
@@ -1011,16 +1011,20 @@ class TestBatchDRRecentOrdersDailySummary:
             rh.ORDERS_DIR = original_dir
             rh.DATA_DIR = original_data_dir
 
-        # Must use file date 2026-07-22, not embedded May timestamp
-        assert result["execution_history"][0]["date"] == "2026-07-22"
-        assert result["execution_history"][0]["source"] == "daily_order_summary"
-        assert result["next_rebalance"]["date"] == "2026-08-21"
-        assert result["next_rebalance"]["status"] != "overdue"
-        assert result["next_rebalance"]["overdue"] is False
+        # Event clock = 2026-05-12 hist or 2026-05-11 daily max → not write day
+        assert result["execution_history"][0]["date"] != "2026-07-22" or (
+            result["execution_history"][0].get("clock_source") == "order_event_timestamp"
+            and result["execution_history"][0]["date"] == "2026-05-11"
+        )
+        # Prefer newest event among hist May-12 and daily May-11 → May-12
+        last_exec = result["next_rebalance"]["last_execution_at"]
+        assert last_exec is not None
+        assert last_exec.startswith("2026-05-1")
+        assert result["next_rebalance"]["date"].startswith("2026-06-1")
         assert result["canonical_order_history_source"] == "combined_order_history"
+        assert result.get("snapshot_rewrite_files", 0) >= 1
 
-    def test_parse_daily_prefers_payload_date_over_order_timestamp(self):
-        import src.monitor.rebalance_health as rh
+    def test_parse_daily_uses_max_order_event_not_payload_date(self):
         from src.monitor.rebalance_health import _parse_daily_order_summary
 
         with tempfile.TemporaryDirectory() as d:
@@ -1034,10 +1038,20 @@ class TestBatchDRRecentOrdersDailySummary:
                         "side": "buy",
                         "estimated_value": 1000,
                         "timestamp": "2026-05-11T00:00:00",
-                    }
+                    },
+                    {
+                        "symbol": "GLD",
+                        "side": "buy",
+                        "estimated_value": 1000,
+                        "timestamp": "2026-07-11T00:20:02",
+                    },
                 ],
             }))
             entry = _parse_daily_order_summary(path)
         assert entry is not None
-        assert entry["date"] == "2026-07-20"
-        assert entry["timestamp"].startswith("2026-07-20")
+        assert entry["date"] == "2026-07-11"
+        assert entry["timestamp"].startswith("2026-07-11")
+        assert entry["clock_source"] == "order_event_timestamp"
+        assert entry["summary_file_date"] == "2026-07-20"
+        assert entry.get("snapshot_rewrite") is True
+        assert entry.get("snapshot_rewrite_lag_days") == 9

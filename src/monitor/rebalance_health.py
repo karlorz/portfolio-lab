@@ -80,12 +80,34 @@ def _parse_order_file(path: Path) -> dict[str, Any] | None:
         return None
 
 
+def _parse_order_event_timestamps(orders: list) -> list[datetime]:
+    """Collect timezone-aware event timestamps from order dicts."""
+    out: list[datetime] = []
+    for order in orders:
+        if not isinstance(order, dict) or not order.get("timestamp"):
+            continue
+        try:
+            ts = datetime.fromisoformat(
+                str(order["timestamp"]).replace("Z", "+00:00")
+            )
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            out.append(ts)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def _parse_daily_order_summary(path: Path) -> dict[str, Any] | None:
     """Parse root daily order summaries named order-history-YYYY-MM-DD.json.
 
-    Batch DR: live SSOT uses ``recent_orders`` (not bare ``orders``). Prefer
-    file ``date`` for schedule freshness — embedded order timestamps can be
-    historical backfill stamps (e.g. 2026-05-11 rows rewritten into July files).
+    Batch DR: accept ``recent_orders`` (live) or ``orders`` (legacy).
+
+    Batch DS: **schedule last-execution uses max order event timestamp**, not
+    payload/file ``date``. wiki-sync rewrites order-history-TODAY.json daily
+    with the full orders.jsonl tail (same May/July fills, date=today) — using
+    file date invents false daily executions. Keep ``summary_file_date`` for
+    forensics; ``timestamp`` / ``date`` for schedule = last real fill event.
     """
     try:
         payload = json.loads(path.read_text())
@@ -98,26 +120,27 @@ def _parse_daily_order_summary(path: Path) -> dict[str, Any] | None:
         if not isinstance(orders, list) or len(orders) == 0:
             return None
 
-        # Prefer payload date (filename day) over embedded order timestamps —
-        # daily summaries are the SSOT for "activity on this calendar day".
+        dict_orders = [order for order in orders if isinstance(order, dict)]
+        event_ts = _parse_order_event_timestamps(dict_orders)
+        summary_file_date = None
         if payload.get("date"):
-            ts = datetime.fromisoformat(str(payload["date"])).replace(
+            try:
+                summary_file_date = str(payload["date"])[:10]
+            except (TypeError, ValueError):
+                summary_file_date = None
+
+        if event_ts:
+            ts = max(event_ts)
+            clock_source = "order_event_timestamp"
+        elif summary_file_date:
+            ts = datetime.fromisoformat(summary_file_date).replace(
                 tzinfo=timezone.utc
             )
+            clock_source = "summary_file_date"
         else:
-            timestamp = None
-            for order in orders:
-                if isinstance(order, dict) and order.get("timestamp"):
-                    timestamp = str(order["timestamp"])
-                    break
-            if timestamp:
-                ts = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-                if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=timezone.utc)
-            else:
-                ts = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+            ts = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+            clock_source = "file_mtime"
 
-        dict_orders = [order for order in orders if isinstance(order, dict)]
         total_value = sum(
             order.get("estimated_value", order.get("value", order.get("fill_value", 0)))
             for order in dict_orders
@@ -126,7 +149,7 @@ def _parse_daily_order_summary(path: Path) -> dict[str, Any] | None:
         sell_count = sum(1 for order in dict_orders if order.get("side") == "sell")
         symbols = sorted(set(order.get("symbol", "?") for order in dict_orders))
 
-        return {
+        entry = {
             "timestamp": ts.isoformat(),
             "date": ts.strftime("%Y-%m-%d"),
             "time": ts.strftime("%H:%M"),
@@ -136,8 +159,23 @@ def _parse_daily_order_summary(path: Path) -> dict[str, Any] | None:
             "sell_count": sell_count,
             "total_value": round(total_value, 2),
             "symbols": symbols,
-            "reasons": sorted(set(order.get("reason", "rebalance") for order in dict_orders)),
+            "reasons": sorted(
+                set(order.get("reason", "rebalance") for order in dict_orders)
+            ),
+            "clock_source": clock_source,
+            "last_order_event_at": max(event_ts).isoformat() if event_ts else None,
+            "summary_file_date": summary_file_date,
         }
+        # Batch DS: detect snapshot rewrite (file date >> last event)
+        if summary_file_date and event_ts:
+            file_day = datetime.fromisoformat(summary_file_date).replace(
+                tzinfo=timezone.utc
+            )
+            lag_days = (file_day.date() - max(event_ts).date()).days
+            if lag_days > 1:
+                entry["snapshot_rewrite_lag_days"] = lag_days
+                entry["snapshot_rewrite"] = True
+        return entry
     except (FileNotFoundError, json.JSONDecodeError, ValueError, TypeError, OSError):
         logger.exception("Failed to parse daily order summary: %s", path)
         return None
@@ -250,14 +288,39 @@ def generate() -> dict[str, Any]:
         else:
             delayed += 1
 
-    # Recent executions (last 10)
+    # Recent executions (last 10 of raw parse order) — UI timeline; schedule
+    # clock still uses canonical_history (deduped by event day).
     recent = history[-10:] if len(history) > 10 else history
     execution_times = [
-        {"date": e["date"], "time": e["time"], "orders": e["orders"],
-         "total_value": e["total_value"], "symbols": e["symbols"],
-         "source": e.get("source", "unknown")}
+        {
+            "date": e["date"],
+            "time": e["time"],
+            "orders": e["orders"],
+            "total_value": e["total_value"],
+            "symbols": e["symbols"],
+            "source": e.get("source", "unknown"),
+            **(
+                {"clock_source": e["clock_source"]}
+                if e.get("clock_source")
+                else {}
+            ),
+            **(
+                {"snapshot_rewrite": True, "snapshot_rewrite_lag_days": e["snapshot_rewrite_lag_days"]}
+                if e.get("snapshot_rewrite")
+                else {}
+            ),
+            **(
+                {"summary_file_date": e["summary_file_date"]}
+                if e.get("summary_file_date")
+                else {}
+            ),
+        }
         for e in reversed(recent)  # Most recent first
     ]
+
+    snapshot_rewrites = sum(
+        1 for e in history if e.get("snapshot_rewrite")
+    )
 
     return {
         "generated": now.isoformat(),
@@ -268,6 +331,12 @@ def generate() -> dict[str, Any]:
             "status": next_status,
             "status_reason": next_status_reason,
             "overdue": next_status == "overdue",
+            "last_execution_at": last_ts.isoformat() if last_ts else None,
+            "last_execution_clock": (
+                canonical_history[-1].get("clock_source")
+                if canonical_history
+                else None
+            ),
         },
         "schedule_compliance": {
             "on_time": on_time,
@@ -278,8 +347,15 @@ def generate() -> dict[str, Any]:
             ),
         },
         "execution_history": execution_times,
+        # total_executions = raw parsed entries (compat with existing tests/UI);
+        # canonical_execution_days = deduped by event date for schedule clock.
         "total_executions": len(history),
+        "canonical_execution_days": len(canonical_history),
         "canonical_order_history_source": _canonical_source_label(history),
+        "snapshot_rewrite_files": snapshot_rewrites,
+        "snapshot_rewrite_policy": (
+            "schedule_uses_order_event_timestamp; file date is write day only"
+        ),
         "market_data_consistency": _generate_market_data_consistency(),
         "alpaca_feed_entitlement": _generate_alpaca_feed_entitlement(),
     }

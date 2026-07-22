@@ -432,12 +432,33 @@ Based on recent regime patterns:
         # Recent orders only
         recent = orders[-20:]  # Last 20 orders
 
-        timestamp = datetime.now().strftime("%Y-%m-%d")
-        # Write to app-level DATA_DIR, not wiki vault
-        page_path = DATA_DIR / f"order-history-{timestamp}.json"
+        # Batch DS: file date is write day; also stamp last real fill event so
+        # rebalance_health does not treat daily log snapshots as new executions.
+        write_day = datetime.now().strftime("%Y-%m-%d")
+        last_event = None
+        for o in orders:
+            ts = o.get("timestamp")
+            if not ts:
+                continue
+            try:
+                t = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                continue
+            if last_event is None or t > last_event:
+                last_event = t
+        last_event_at = last_event.isoformat() if last_event else None
+        last_event_day = (
+            last_event.strftime("%Y-%m-%d") if last_event else write_day
+        )
+
+        page_path = DATA_DIR / f"order-history-{write_day}.json"
 
         summary = {
-            "date": timestamp,
+            "date": write_day,
+            "write_day": write_day,
+            "last_order_event_at": last_event_at,
+            "last_order_event_day": last_event_day,
+            "snapshot_kind": "orders_jsonl_tail",
             "total_orders": len(orders),
             "recent_shown": len(recent),
             "recent_orders": recent,
@@ -446,6 +467,11 @@ Based on recent regime patterns:
                 "total_sell_orders": sum(1 for o in orders if o.get('side') == 'sell'),
                 "total_volume": sum(o.get('fill_value', 0) for o in orders),
             },
+            "provenance_note": (
+                "Daily file is a rolling snapshot of orders.jsonl; schedule "
+                "freshness must use last_order_event_at / order timestamps, "
+                "not write_day alone (Batch DS)."
+            ),
         }
 
         save_results_json(summary, output_path=str(page_path))
