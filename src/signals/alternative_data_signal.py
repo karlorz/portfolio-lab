@@ -311,9 +311,10 @@ class AlternativeDataSignalGenerator:
 
         # vol_ratio > 1.0 = elevated vol = risk-off
         # vol_ratio < 1.0 = low vol = risk-on
-        # Scale: typical vol ratio ranges from 0.3 to 3.0
+        # Batch DI: tanh soft-scale (was hard clip raw*0.6) so calm markets
+        # don't pin component near +0.6–1.0 and dominate composite long-bias.
         raw_value = 1.0 - (vol_ratio - 1.0)  # inverse: low vol → positive
-        value = max(-1.0, min(1.0, raw_value * 0.6))
+        value = float(math.tanh(raw_value * 0.6))
 
         confidence = min(1.0, max(0.4, 1.0 - abs(vol_ratio - 1.0) * 0.3))
 
@@ -325,6 +326,7 @@ class AlternativeDataSignalGenerator:
                 "short_vol_21d": round(short_vol * 100, 2),
                 "long_vol_252d": round(long_vol * 100, 2),
                 "vol_ratio": round(vol_ratio, 4),
+                "scale": "tanh_0.6",
             },
         )
 
@@ -623,10 +625,18 @@ class AlternativeDataSignalGenerator:
                 explanation="Alternative data signal unavailable",
             )
         composite_score = signal.raw_data.get("composite_score", 0.0) if signal.raw_data else 0.0
-        value = float(np.clip(composite_score, -1, 1)) if composite_score else 0.0
-        if value == 0.0:
+        try:
+            composite_f = float(composite_score) if composite_score is not None else 0.0
+        except (TypeError, ValueError):
+            composite_f = 0.0
+        # Batch DI: soft-scale composite for ensemble health IC (tanh) so mild
+        # risk-on doesn't log as hard-saturated near 1.0. Rank order preserved
+        # vs raw composite; reduces deadband pile-up with other long-biased arms.
+        if composite_f != 0.0:
+            value = float(math.tanh(composite_f / 0.5))
+        else:
             regime_map = {"bull": 0.4, "bear": -0.4, "neutral": 0.0, "crisis": -0.7}
-            value = regime_map.get(signal.regime, 0.0)
+            value = float(regime_map.get(signal.regime, 0.0))
         return SignalSnapshot(
             source="alternative_data",
             timestamp=signal.timestamp,
@@ -635,10 +645,16 @@ class AlternativeDataSignalGenerator:
             asset_signals={"SPY": value},
             regime_fit="all",
             is_active=True,
-            explanation=f"Alt Data: regime={signal.regime}, composite={composite_score:.4f}, "
-                        f"prob={signal.probability:.2f}, conf={signal.confidence:.2f}",
-            metadata={"regime": signal.regime, "probability": signal.probability,
-                      "raw_data": signal.raw_data},
+            explanation=f"Alt Data: regime={signal.regime}, composite={composite_f:.4f}, "
+                        f"soft={value:.4f}, prob={signal.probability:.2f}, conf={signal.confidence:.2f}",
+            metadata={
+                "regime": signal.regime,
+                "probability": signal.probability,
+                "raw_data": signal.raw_data,
+                "composite_raw": composite_f,
+                "value_scale": "tanh_0.5",
+                "soft_delete_policy": "health_gate_no_force_wake",
+            },
         )
 
     # ---- Main pipeline ----

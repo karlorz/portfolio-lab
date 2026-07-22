@@ -399,6 +399,69 @@ class SignalHealthTracker:
             "readiness_hint": hint,
         }
 
+    def post_fix_provenance_readiness(
+        self,
+        source: str,
+        *,
+        n_provenance_stamped: int,
+        n_provenance_labeled: int,
+        min_labeled: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Batch DI: general provenance_batch cohort (alt_data etc., not polarity).
+
+        Same min-sample + label-lag gates as polarity cohort; no auto-invert.
+        """
+        min_n = int(
+            self.POST_FIX_MIN_LABELED if min_labeled is None else min_labeled
+        )
+        stamped = int(n_provenance_stamped or 0)
+        labeled = int(n_provenance_labeled or 0)
+        pending = max(0, stamped - labeled)
+        deficit = max(0, min_n - labeled)
+        ready = labeled >= min_n
+        lag_note = (
+            f"SPY forward label lag ≈ {self.LABEL_LAG_SESSIONS} session(s)."
+        )
+        if ready:
+            status = "cohort_ready_for_shadow_ic"
+            hint = (
+                f"Provenance cohort ≥{min_n} labeled (n={labeled}) — "
+                "shadow IC reportable; multi-horizon reentry still separate."
+            )
+        elif stamped == 0:
+            status = "awaiting_provenance_stamps"
+            hint = (
+                "No provenance_batch metadata yet — Batch DF vote logging required."
+            )
+        elif labeled == 0:
+            status = "awaiting_label_lag"
+            hint = (
+                f"{stamped} provenance-stamped row(s), 0 labeled — {lag_note} "
+                f"Need {min_n} labeled for min-sample gate."
+            )
+        else:
+            status = "cohort_building"
+            hint = (
+                f"Provenance cohort building: labeled={labeled}/{min_n} "
+                f"(stamped={stamped}, pending={pending}, deficit={deficit}). "
+                f"{lag_note}"
+            )
+        return {
+            "source": source,
+            "status": status,
+            "ready": bool(ready),
+            "min_labeled": min_n,
+            "n_provenance_stamped": stamped,
+            "n_provenance_labeled": labeled,
+            "n_pending_labels": pending,
+            "labeled_deficit": deficit,
+            "label_lag_sessions": int(self.LABEL_LAG_SESSIONS),
+            "auto_invert_policy": "disabled",
+            "force_wake_policy": "disabled",
+            "readiness_hint": hint,
+            "cohort_kind": "provenance_batch",
+        }
+
     def count_provenance_rows(
         self,
         source: str,
@@ -499,6 +562,14 @@ class SignalHealthTracker:
             n_polarity_labeled=n_polarity_labeled,
             ic_polarity_cohort=None if ic_post is None else float(ic_post),
         )
+        # Batch DI: general provenance cohort when polarity not applicable (e.g. alt_data)
+        prov_readiness = self.post_fix_provenance_readiness(
+            source,
+            n_provenance_stamped=n_prov,
+            n_provenance_labeled=n_prov_labeled,
+        )
+        # Prefer polarity readiness when any polarity stamps exist; else provenance
+        primary = readiness if n_polarity > 0 else prov_readiness
         return {
             "source": source,
             "window_days": lookback_days,
@@ -511,7 +582,9 @@ class SignalHealthTracker:
             "provenance_coverage": (
                 round(n_prov / n_all, 4) if n_all else None
             ),
-            "cohort_readiness": readiness,
+            "cohort_readiness": primary,
+            "polarity_cohort_readiness": readiness,
+            "provenance_cohort_readiness": prov_readiness,
             "policy": "shadow_ic_post_fix_no_auto_invert",
         }
 
@@ -711,21 +784,47 @@ class SignalHealthTracker:
             if n:
                 dates_resolved += 1
 
+        # Batch DI: if newest-first resolved nothing (label lag on calendar tail),
+        # dual-pass drain oldest unresolved dates so backlog mid-window still moves.
+        dual_pass = False
+        dual_summary: Dict[str, Any] = {}
+        if (
+            not oldest_first
+            and dates_resolved == 0
+            and len(skipped) == len(dates)
+            and len(dates) > 0
+        ):
+            dual_pass = True
+            dual_summary = self.resolve_pending_labels(
+                max_days=max_days, oldest_first=True
+            )
+            # avoid infinite recursion: dual call uses oldest_first=True
+            predictions_updated += int(dual_summary.get("predictions_updated") or 0)
+            dates_resolved += int(dual_summary.get("dates_resolved") or 0)
+            skipped.extend(dual_summary.get("skipped_no_spy_return") or [])
+
         summary = {
-            "dates_considered": len(dates),
+            "dates_considered": len(dates) + (
+                int(dual_summary.get("dates_considered") or 0) if dual_pass else 0
+            ),
             "dates_resolved": dates_resolved,
             "predictions_updated": predictions_updated,
             "skipped_no_spy_return": skipped,
             "max_days": max_days,
             "oldest_first": bool(oldest_first),
+            "dual_pass_oldest": dual_pass,
+            "label_lag_note": (
+                "SPY next-session required; newest dates often skip until market close"
+            ),
         }
         logger.info(
-            "resolve_pending_labels: considered=%s resolved_dates=%s predictions=%s skipped=%s oldest_first=%s",
+            "resolve_pending_labels: considered=%s resolved_dates=%s predictions=%s skipped=%s oldest_first=%s dual=%s",
             summary["dates_considered"],
             summary["dates_resolved"],
             summary["predictions_updated"],
             len(skipped),
             oldest_first,
+            dual_pass,
         )
         return summary
     
