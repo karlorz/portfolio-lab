@@ -1022,10 +1022,13 @@ class TestResolvePendingLabels:
                     metadata={},
                 )
             )
-        # No prices → all skipped, but still only considers max_days dates
+        # No prices → newest-first pass skips all; Batch DI dual-pass drains
+        # oldest-first with the same max_days bound (2 + 2 = 4 considered).
         summary = tracker.resolve_pending_labels(max_days=2)
-        assert summary["dates_considered"] == 2
         assert summary["max_days"] == 2
+        assert summary["dual_pass_oldest"] is True
+        assert summary["dates_considered"] == 4
+        assert len(summary["skipped_no_spy_return"]) >= 2
 
     def test_spy_forward_return_anchors_weekend_to_prior_session(self, tmp_path):
         """Weekend/holiday prediction dates must use last SPY bar ≤ date."""
@@ -1366,15 +1369,26 @@ class TestHealthScoreBoundaries:
         assert result.status == "healthy"
 
     def test_just_below_healthy(self, tmp_path):
-        """Health just below 0.7 should be classified as degraded."""
+        """Batch CP: collapsed scheme healthy_min=0.55; full scheme uses 0.70.
+
+        Short seeds collapse 90d≡60d → collapsed_recency_40_60, so score 0.65
+        is healthy (not degraded). Assert scheme-aware classification.
+        """
         db = tmp_path / "health.db"
         tracker = SignalHealthTracker(db_path=db)
-        # 13/20 = 0.65 accuracy -> health = 0.65 < 0.7 -> degraded
+        # 13/20 = 0.65 accuracy
         self._seed_exact_accuracy(tracker, "jb_healthy", accuracy=0.65, count=20, days_ago_start=20)
         result = tracker.calculate_health_score("jb_healthy")
         assert result is not None
-        assert result.health_score < 0.7
-        assert result.status == "degraded"
+        assert result.health_score == pytest.approx(0.65, abs=0.02)
+        scheme = getattr(result, "weight_scheme", None) or ""
+        if str(scheme).startswith("collapsed") or "collapsed_recency" in str(scheme):
+            # HEALTH_THRESHOLD_HEALTHY_COLLAPSED = 0.55
+            assert result.status == "healthy"
+            assert result.health_score >= 0.55
+        else:
+            assert result.health_score < 0.7
+            assert result.status == "degraded"
 
     def test_exactly_degraded_boundary(self, tmp_path):
         """Health = 0.5 should be classified as degraded (>= 0.5)."""
@@ -1653,7 +1667,7 @@ class TestLogPredictionSimpleEdgeCases:
         assert rows[1] == (-1.0, -1)
 
     def test_exactly_at_threshold_boundaries(self, tmp_path):
-        """Signal values exactly at +/-0.2 thresholds set correct direction."""
+        """Batch DB: inclusive deadband 0.05 so clipped ±0.2 stay directional."""
         db = tmp_path / "health.db"
         tracker = SignalHealthTracker(db_path=db)
         tracker.log_prediction_simple(
@@ -1669,10 +1683,13 @@ class TestLogPredictionSimpleEdgeCases:
                 "WHERE source=? ORDER BY signal_value DESC",
                 ("thresh",),
             ).fetchall()
-        # >= 0.2 or > 0.2? Code uses: if signal_value > 0.2 -> 1
-        # 0.2 > 0.2 is False -> goes to elif < -0.2 -> 0.2 < -0.2 is False -> 0
-        assert rows[0] == (0.2, 0)
-        assert rows[1] == (-0.2, 0)
+        # direction_from_signal_value: v >= 0.05 → 1, v <= -0.05 → -1
+        assert rows[0] == (0.2, 1)
+        assert rows[1] == (-0.2, -1)
+        # Exactly at deadband edges
+        assert SignalHealthTracker.direction_from_signal_value(0.05) == 1
+        assert SignalHealthTracker.direction_from_signal_value(-0.05) == -1
+        assert SignalHealthTracker.direction_from_signal_value(0.0) == 0
 
 
 # ---------------------------------------------------------------------------

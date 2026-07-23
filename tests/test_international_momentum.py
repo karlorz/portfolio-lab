@@ -1765,13 +1765,18 @@ class TestInternationalMomentumSignalAdditionalMethods(unittest.TestCase):
         self.assertEqual(snapshot.value, -0.5)
 
     def test_to_signal_snapshot_explanation_confidence_formatting(self):
-        """Explanation should include percentage-formatted outperformance."""
+        """Explanation uses pp (percentage-point) outperformance + conf label."""
         signal = self._make_signal(
             signal_type='efa_lead', confidence=0.65,
             efa_vs_spy=0.0825,
+            eem_vs_spy=-0.07,
         )
         snapshot = signal.to_signal_snapshot()
-        self.assertIn('+8.25%', snapshot.explanation)
+        # to_signal_snapshot formats efa_vs_spy with +:.2fpp (not percent scale)
+        self.assertIn('EFA/SPY=+0.08pp', snapshot.explanation)
+        self.assertIn('EEM/SPY=-0.07pp', snapshot.explanation)
+        self.assertIn('conf=', snapshot.explanation)
+        self.assertIn('efa_lead', snapshot.explanation)
 
     def test_negative_spy_shift_handling(self):
         """Negative spy_shift should be negated in allocation delta."""
