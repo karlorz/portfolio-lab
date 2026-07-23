@@ -6249,8 +6249,37 @@ class DashboardGenerator:
 
         health_data = _stamp_generator_git_sha(health_data)
         out_path = PUBLIC_DIR / "health.json"
-        save_results_json(health_data, output_path=str(out_path))
-        
+        # Batch IE: serialize-once multi-dest for dashboard health.json
+        # (public + repo soft-mirror @ 0o644). Never fan-out to private
+        # DATA_DIR/health.json — that file is the monitor schema SSOT
+        # (operational_readiness) and must not be overwritten by the
+        # dashboard payload. Mirrors Batch IC public health merge contract.
+        wrote = False
+        try:
+            from src.monitor.signal_authority import write_json_multi_dest
+
+            result = write_json_multi_dest(
+                health_data,
+                public_path=out_path,
+                private_path=None,
+                soft_mirror_repo=True,
+                repo_filename="health.json",
+            )
+            wrote = bool(result.wrote_public or result.wrote_repo)
+            if result.skipped_reason:
+                logger.warning(
+                    "dashboard health multi-dest partial skip: %s",
+                    result.skipped_reason,
+                )
+        except Exception as multi_exc:  # noqa: BLE001 — fall back below
+            logger.warning(
+                "dashboard health multi-dest failed (%s); falling back to save_results_json",
+                multi_exc,
+            )
+            wrote = False
+        if not wrote:
+            save_results_json(health_data, output_path=str(out_path))
+
         return out_path
     
     def _generate_sector_momentum_signals(self, vix_level: Optional[float] = None) -> Optional[Dict]:
