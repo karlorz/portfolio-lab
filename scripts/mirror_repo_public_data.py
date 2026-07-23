@@ -66,6 +66,12 @@ DEFAULT_FILE_GLOBS: tuple[str, ...] = (
     "vixy_hedge.json",
     "vix_term_structure.json",
     "prices_compact.json",
+    # Batch HV: market-data + tasker ops artifacts written by fetch-data /
+    # tasker store under PUBLIC_DATA_DIR. Omitting them left residual live
+    # byte-diff (prices/yields/tasker) while catalog lag stamped 0/33.
+    "prices.json",
+    "yields.json",
+    "tasker_status.json",
     "attribution/latest.json",
     "explainability/explainability_latest.json",
 )

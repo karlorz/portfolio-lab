@@ -226,3 +226,131 @@ def test_is_ephemeral_restamp_path_detects_plab_pytest() -> None:
     assert is_ephemeral_restamp_path("/tmp/plab-pytest-public.xyz/data/health.json")
     assert is_ephemeral_restamp_path("/tmp/plab-pytest-public.xyz")
     assert not is_ephemeral_restamp_path("/root/projects/portfolio-lab/data/health.json")
+
+
+def test_summarize_lag_falls_back_from_ephemeral_public_data_dir(
+    tmp_path, monkeypatch
+) -> None:
+    """Case DK (Batch HW): ephemeral PUBLIC_DATA_DIR must not become lag source.
+
+    make test rebinds PUBLIC_DATA_DIR to /tmp/plab-pytest-public.* while dest
+    stays repo public/data. summarize() must prefer live WWW SoT so health
+    stamps never embed fixture paths.
+    """
+    from src.monitor import repo_public_mirror_lag as mlag
+    from src.paths import PROJECT_ROOT
+
+    fixture = tmp_path / "plab-pytest-public.hw" / "data"
+    fixture.mkdir(parents=True)
+    # Minimal fixture file so lag_report has something if fallback fails.
+    (fixture / "signals.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(mlag, "PUBLIC_DATA_DIR", fixture)
+    # Force live tree to a controlled tmp that looks non-ephemeral.
+    live = tmp_path / "var" / "www" / "portfolio-lab" / "data"
+    live.mkdir(parents=True)
+    (live / "signals.json").write_text(
+        json.dumps({"target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}}),
+        encoding="utf-8",
+    )
+    repo_dest = Path(PROJECT_ROOT) / "public" / "data"
+    monkeypatch.setattr(
+        mlag, "_resolve_live_public_data_dir", lambda: live
+    )
+    # dest defaults to DEFAULT_PUBLIC_DATA_DIR — override to tmp repo-like path
+    dest = tmp_path / "repo" / "public" / "data"
+    dest.mkdir(parents=True)
+    (dest / "signals.json").write_text("{}", encoding="utf-8")
+
+    summary = mlag.summarize_repo_public_mirror_lag(dest_root=dest)
+    assert "plab-pytest" not in str(summary.get("source") or "")
+    assert summary.get("source") == str(live)
+    assert summary.get("ok") is True
+
+
+def test_project_lag_refuses_ephemeral_source_stamp() -> None:
+    """Case DL: project_repo_public_mirror_lag_onto_health drops ephemeral source."""
+    from src.dashboard.generator import project_repo_public_mirror_lag_onto_health
+
+    health = {
+        "status": "ok",
+        "repo_public_mirror_source": "/var/www/portfolio-lab/data",
+    }
+    lag_summary = {
+        "lagging_count": 2,
+        "total": 36,
+        "lagging_paths": ["index.json", "alerts.json"],
+        "source": "/tmp/plab-pytest-public.NwaYIb/data",
+        "dest": "/root/projects/portfolio-lab/public/data",
+    }
+    out = project_repo_public_mirror_lag_onto_health(health, lag_summary)
+    assert out["repo_public_mirror_lagging_count"] == 2
+    # Prior honest source retained; ephemeral not written.
+    assert out.get("repo_public_mirror_source") == "/var/www/portfolio-lab/data"
+    assert "plab-pytest" not in str(out.get("repo_public_mirror_source") or "")
+    assert out.get("repo_public_mirror_dest") == (
+        "/root/projects/portfolio-lab/public/data"
+    )
+
+
+def test_run_health_check_skips_production_health_under_pytest(
+    tmp_path, monkeypatch
+) -> None:
+    """Case DM: under pytest, production HEALTH_PATH is not rewritten."""
+    from src.monitor import health_check as hc
+    from src.paths import PROJECT_ROOT
+
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_batch_hw.py::test_dm")
+    monkeypatch.delenv("PORTFOLIO_LAB_ALLOW_LIVE_PUBLIC", raising=False)
+
+    sentinel = Path(PROJECT_ROOT) / "data" / ".batch_hw_health_ssot_sentinel.json"
+    before = {
+        "status": "warning",
+        "timestamp": "2026-07-23T00:00:00+00:00",
+        "repo_public_mirror_source": "/var/www/portfolio-lab/data",
+        "checks": {"kill_switch": {"enabled": False, "status": "ok"}},
+    }
+    sentinel.write_text(json.dumps(before, indent=2) + "\n", encoding="utf-8")
+    before_bytes = sentinel.read_bytes()
+
+    monkeypatch.setattr(hc, "HEALTH_PATH", sentinel)
+    # Minimal stubs so run_health_check does not need full market stack.
+    monkeypatch.setattr(
+        hc,
+        "_check_data_freshness",
+        lambda: {
+            "prices": {"status": "ok"},
+            "signals": {"status": "ok"},
+            "cron": {"status": "ok", "total_jobs": 0, "failed_jobs": 0},
+        },
+    )
+    monkeypatch.setattr(
+        hc, "_check_circuit_breaker", lambda: {"status": "ok", "state": "closed"}
+    )
+    monkeypatch.setattr(
+        hc,
+        "_check_kill_switch",
+        lambda: {"status": "ok", "enabled": False, "level": None},
+    )
+    monkeypatch.setattr(
+        hc,
+        "_check_open_incidents",
+        lambda: {"status": "ok", "open_count": 0, "incidents": []},
+    )
+    monkeypatch.setattr(
+        hc,
+        "_check_fred_md_cache",
+        lambda: {"status": "empty", "row_count": 0},
+    )
+    monkeypatch.setattr(hc, "_compute_system_status", lambda *a, **k: "ok")
+    monkeypatch.setattr(
+        hc, "update_graduation_circuit_breaker_state", lambda **k: None
+    )
+    monkeypatch.setattr(hc, "attach_shared_freshness_slis_to_ops_report", lambda r, **k: r)
+    monkeypatch.setattr(hc, "publish_ops_health_surfaces", lambda r: None)
+    monkeypatch.setattr(hc, "publish_health_alerts_json", lambda r: None)
+
+    report = hc.run_health_check()
+    assert report.get("status") == "ok"
+    assert sentinel.read_bytes() == before_bytes
+    sentinel.unlink(missing_ok=True)

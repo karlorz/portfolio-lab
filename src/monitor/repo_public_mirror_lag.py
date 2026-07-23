@@ -53,6 +53,16 @@ def load_mirror_script_module():
     return mod
 
 
+def _resolve_live_public_data_dir() -> Path:
+    """Operator live WWW data tree (never pytest isolation)."""
+    try:
+        from src.paths import DEFAULT_LIVE_PUBLIC_DATA_DIR
+
+        return Path(DEFAULT_LIVE_PUBLIC_DATA_DIR)
+    except Exception:  # noqa: BLE001
+        return Path("/var/www/portfolio-lab/data")
+
+
 def summarize_repo_public_mirror_lag(
     *,
     source_root: Path | str | None = None,
@@ -70,6 +80,11 @@ def summarize_repo_public_mirror_lag(
           "dest": str,
           "ok": bool,
         }
+
+    Batch HW: when ``PUBLIC_DATA_DIR`` is rebound to a pytest isolation tree
+    (``/tmp/plab-pytest-public.*``) but the dest is the production repo
+    soft-mirror, fall back to the live WWW tree so lag stamps never embed
+    fixture paths into operator health SSOT.
     """
     src = Path(source_root) if source_root is not None else Path(PUBLIC_DATA_DIR)
     dest = (
@@ -77,6 +92,21 @@ def summarize_repo_public_mirror_lag(
         if dest_root is not None
         else Path(DEFAULT_PUBLIC_DATA_DIR)
     )
+    # Refuse ephemeral SoT when probing against production dest (or when
+    # caller did not override source and live WWW tree exists).
+    if is_ephemeral_restamp_path(src):
+        live = _resolve_live_public_data_dir()
+        dest_is_prod = (not is_ephemeral_restamp_path(dest)) and (
+            "public/data" in str(dest).replace("\\", "/")
+            or str(dest).replace("\\", "/").endswith("/public/data")
+        )
+        if live.is_dir() and (source_root is None or dest_is_prod):
+            logger.warning(
+                "repo public mirror lag: ephemeral source %s → live %s",
+                src,
+                live,
+            )
+            src = live
     # When PUBLIC_DATA_DIR already points at the repo mirror (dev shells),
     # comparing src==dest is always zero lag — still report honest zeros.
     try:

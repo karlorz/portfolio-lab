@@ -2188,28 +2188,109 @@ def run_health_check() -> dict:
 
     # Always persist full checks (including kill_switch / open_incidents) so
     # on-disk data/health.json matches live run_health_check() output.
-    HEALTH_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # Batch HW: under pytest, never rewrite production DATA_DIR/health.json
+    # when HEALTH_PATH still resolves to live SSOT (conftest isolates PUBLIC
+    # only). Same guard as multi-dest SSOT write protection.
+    skip_private_health_write = False
     try:
-        with open(HEALTH_PATH, "w") as f:
-            json.dump(report, f, indent=2)
-            f.flush()
-        # Post-write integrity: re-read and confirm kill dimension survived.
+        from src.monitor.signal_authority import (
+            _should_skip_production_ssot_write,
+            is_ephemeral_write_path,
+        )
+
+        skip_private_health_write = bool(
+            _should_skip_production_ssot_write(HEALTH_PATH)
+        )
+        # Also refuse when lag/source probe is ephemeral and HEALTH_PATH is
+        # production — prevents fixture lag stamps even outside pytest if a
+        # misbound PUBLIC_DATA_DIR is active (belt-and-suspenders).
+        if not skip_private_health_write:
+            from src.monitor.repo_public_mirror_lag import is_ephemeral_restamp_path
+
+            lag_src = str(report.get("repo_public_mirror_source") or "")
+            if (
+                lag_src
+                and is_ephemeral_restamp_path(lag_src)
+                and not is_ephemeral_write_path(HEALTH_PATH)
+            ):
+                # Re-probe with live defaults before writing production SSOT.
+                try:
+                    from src.monitor.repo_public_mirror_lag import (
+                        summarize_repo_public_mirror_lag,
+                    )
+                    from src.dashboard.generator import (
+                        project_repo_public_mirror_lag_onto_health,
+                    )
+
+                    honest = summarize_repo_public_mirror_lag()
+                    if not is_ephemeral_restamp_path(honest.get("source")):
+                        report = project_repo_public_mirror_lag_onto_health(
+                            report, honest
+                        )
+                        report["repo_public_mirror_lag"] = {
+                            "lagging_count": report.get(
+                                "repo_public_mirror_lagging_count"
+                            ),
+                            "total": report.get("repo_public_mirror_total"),
+                            "status": report.get("repo_public_mirror_lag_status"),
+                            "badge": report.get("repo_public_mirror_lag_badge"),
+                            "paths": report.get("repo_public_mirror_lagging_paths"),
+                            "source": report.get("repo_public_mirror_source"),
+                            "dest": report.get("repo_public_mirror_dest"),
+                        }
+                    else:
+                        skip_private_health_write = True
+                        logger.error(
+                            "Refusing production health write: lag source still "
+                            "ephemeral after re-probe (%s)",
+                            honest.get("source"),
+                        )
+                except Exception as heal_exc:  # noqa: BLE001
+                    skip_private_health_write = True
+                    logger.error(
+                        "Refusing production health write: ephemeral lag source "
+                        "and re-probe failed (%s)",
+                        heal_exc,
+                    )
+    except Exception:  # noqa: BLE001 — never block health when guard import fails
+        skip_private_health_write = False
+
+    if skip_private_health_write:
+        logger.warning(
+            "Health check: skipped production SSOT write at %s (pytest/ephemeral guard)",
+            HEALTH_PATH,
+        )
+    else:
+        HEALTH_PATH.parent.mkdir(parents=True, exist_ok=True)
         try:
-            on_disk = json.loads(HEALTH_PATH.read_text(encoding="utf-8"))
-            disk_checks = on_disk.get("checks") if isinstance(on_disk, dict) else None
-            if not isinstance(disk_checks, dict) or "kill_switch" not in disk_checks:
-                logger.error(
-                    "Health check write missing kill_switch checks at %s", HEALTH_PATH
+            with open(HEALTH_PATH, "w") as f:
+                json.dump(report, f, indent=2)
+                f.flush()
+            # Post-write integrity: re-read and confirm kill dimension survived.
+            try:
+                on_disk = json.loads(HEALTH_PATH.read_text(encoding="utf-8"))
+                disk_checks = (
+                    on_disk.get("checks") if isinstance(on_disk, dict) else None
                 )
-            elif kill_switch.get("enabled") and not disk_checks.get("kill_switch", {}).get("enabled"):
-                logger.error(
-                    "Health check write lost kill_switch.enabled at %s", HEALTH_PATH
-                )
-        except (OSError, json.JSONDecodeError) as verify_exc:
-            logger.error("Health check post-write verify failed: %s", verify_exc)
-        logger.info("Health check: %s (written to %s)", system_status, HEALTH_PATH)
-    except OSError as e:
-        logger.error("Failed to write health check: %s", e)
+                if not isinstance(disk_checks, dict) or "kill_switch" not in disk_checks:
+                    logger.error(
+                        "Health check write missing kill_switch checks at %s",
+                        HEALTH_PATH,
+                    )
+                elif kill_switch.get("enabled") and not disk_checks.get(
+                    "kill_switch", {}
+                ).get("enabled"):
+                    logger.error(
+                        "Health check write lost kill_switch.enabled at %s",
+                        HEALTH_PATH,
+                    )
+            except (OSError, json.JSONDecodeError) as verify_exc:
+                logger.error("Health check post-write verify failed: %s", verify_exc)
+            logger.info(
+                "Health check: %s (written to %s)", system_status, HEALTH_PATH
+            )
+        except OSError as e:
+            logger.error("Failed to write health check: %s", e)
 
     # Dual-path: also publish to PUBLIC_DATA_DIR so operator WWW is not stuck on
     # a stale dashboard health.json timestamp for kill authority.

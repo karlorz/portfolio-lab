@@ -1090,10 +1090,31 @@ def project_repo_public_mirror_lag_onto_health(
     health["repo_public_mirror_lagging_count"] = lagging
     health["repo_public_mirror_total"] = total
     health["repo_public_mirror_lagging_paths"] = paths
-    if lag_summary.get("source"):
-        health["repo_public_mirror_source"] = str(lag_summary.get("source"))
-    if lag_summary.get("dest"):
-        health["repo_public_mirror_dest"] = str(lag_summary.get("dest"))
+    # Batch HW: never stamp pytest isolation paths onto health SLI source/dest
+    # (private data/health.json pollution → false-green lag under make test).
+    raw_source = lag_summary.get("source")
+    raw_dest = lag_summary.get("dest")
+    try:
+        from src.monitor.repo_public_mirror_lag import is_ephemeral_restamp_path
+    except Exception:  # noqa: BLE001
+        is_ephemeral_restamp_path = None  # type: ignore[assignment]
+    if raw_source:
+        src_s = str(raw_source)
+        if is_ephemeral_restamp_path is None or not is_ephemeral_restamp_path(src_s):
+            health["repo_public_mirror_source"] = src_s
+        else:
+            # Keep prior honest source if present; else omit ephemeral stamp.
+            if is_ephemeral_restamp_path(
+                health.get("repo_public_mirror_source")
+            ):
+                health.pop("repo_public_mirror_source", None)
+    if raw_dest:
+        dst_s = str(raw_dest)
+        if is_ephemeral_restamp_path is None or not is_ephemeral_restamp_path(dst_s):
+            health["repo_public_mirror_dest"] = dst_s
+        else:
+            if is_ephemeral_restamp_path(health.get("repo_public_mirror_dest")):
+                health.pop("repo_public_mirror_dest", None)
 
     if lagging >= int(critical_threshold):
         status = "critical"
