@@ -25,7 +25,7 @@ Every script sources `cron_guard.sh` which provides 4-layer defense:
 |--------|----------------|---------------|----------|----------|
 | `portfolio-lab-health-monitor.sh` | `make health` | 60s | 60s | `0,30 * * * *` |
 | `portfolio-lab-data-pipeline.sh` | `make data` | 300s | 5 min | `5 * * * *` |
-| `portfolio-lab-dashboard.sh` | `make dashboard` | 120s | 2 min | `15 * * * *` |
+| `portfolio-lab-dashboard.sh` | `make dashboard` | 180s | 3 min | `15 * * * *` |
 | `portfolio-lab-strategy-eval.sh` | `make eval` | 600s | 10 min | `20 */2 * * *` |
 | `portfolio-lab-research-agent.sh` | `make research` | 300s | 5 min | `25 */2 * * *` |
 | `portfolio-lab-wiki-sync.sh` | `make wiki-sync` | 120s | 2 min | `35 */2 * * *` |

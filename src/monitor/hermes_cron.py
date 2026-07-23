@@ -564,6 +564,61 @@ def normalize_cron_job(
                 )
     except Exception:  # noqa: BLE001
         pass
+
+    # Batch IU DT1: wall-clock timeout / sticky error + fresher producer
+    # artifact → soft-ok for scheduler SLO (false-timeout after successful
+    # partial publish, e.g. dashboard killed at outer 120s while signals
+    # already dual-written). Widen grace to the observed run duration so
+    # artifacts written early in a long run still count (data: prices at
+    # :05 then hang on post-steps until outer kill at :10).
+    try:
+        if normalized.get("status") == "error":
+            grace_s: Optional[float] = None
+            dur = normalized.get("duration_seconds")
+            try:
+                if dur is not None:
+                    grace_s = float(dur) + float(RECOVERY_MTIME_GRACE_SECONDS)
+            except (TypeError, ValueError):
+                grace_s = None
+            if grace_s is None:
+                try:
+                    from src.cron_compat import CRON_EXPECTED_DURATIONS
+
+                    expected = CRON_EXPECTED_DURATIONS.get(name)
+                    if expected is not None:
+                        grace_s = float(expected) + float(RECOVERY_MTIME_GRACE_SECONDS)
+                except Exception:  # noqa: BLE001
+                    grace_s = None
+            recovery = cron_job_artifact_recovery_evidence(
+                normalized, now=now, grace_seconds=grace_s
+            )
+            if recovery:
+                normalized["status"] = "ok"
+                normalized["timeout_artifact_reconciled"] = True
+                normalized["timeout_artifact_evidence"] = {
+                    "artifact": recovery.get("artifact"),
+                    "artifact_mtime": recovery.get("artifact_mtime"),
+                    "reason": recovery.get("reason"),
+                    "policy": "Batch IU DT1 timeout/soft-ok via fresh producer artifact",
+                }
+                # Prefer artifact mtime as last_success for heartbeat honesty
+                mtime_iso = recovery.get("artifact_mtime")
+                if mtime_iso:
+                    normalized["last_run"] = mtime_iso
+                    normalized["last_run_source"] = "producer_artifact_mtime_timeout_soft_ok"
+                hb3 = schedule_aware_last_success_heartbeat(normalized, now=now)
+                normalized["last_success_age_seconds"] = hb3.get(
+                    "last_success_age_seconds"
+                )
+                normalized["heartbeat_state"] = hb3.get("heartbeat_state")
+                normalized["heartbeat_overdue"] = bool(hb3.get("overdue"))
+                normalized["heartbeat_grace_seconds"] = hb3.get("grace_seconds")
+                normalized["heartbeat_disclosure"] = (
+                    "Batch IU DT1: sticky timeout/error reconciled to ok via fresh "
+                    f"artifact {recovery.get('artifact')}"
+                )
+    except Exception:  # noqa: BLE001
+        pass
     return normalized
 
 

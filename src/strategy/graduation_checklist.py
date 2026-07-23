@@ -299,6 +299,87 @@ class GraduationChecklist:
         conflict_path = root / ".graduation_conflict.json"
         save_results_json(tombstone, output_path=str(conflict_path))
 
+    def clear_kill_gated_promote_markers(
+        self,
+        *,
+        data_dir: Optional[Path] = None,
+    ) -> dict[str, Any]:
+        """Batch IU DQ1: clear ``promote_blocked_kill`` markers when kill is healed.
+
+        Kill-gated tombstones (``.graduation_conflict.json`` /
+        ``.promote_to_live`` with ``action=promote_blocked_kill``) must not
+        stick after kill authority is clear. Checklist-not-ready tombstones
+        are left alone — only kill-gated actions clear-on-heal.
+
+        Safe to call from health/dashboard paths every cycle (idempotent).
+        Does **not** invent promote_to_live candidacy.
+        """
+        root = Path(data_dir) if data_dir is not None else DATA_DIR
+        out: Dict[str, Any] = {
+            "cleared": False,
+            "kill_clear": False,
+            "removed": [],
+        }
+
+        kill_blocked = False
+        try:
+            from src.dashboard.kill_authority import (
+                is_kill_execution_blocked,
+                load_kill_switch_payload,
+            )
+
+            kill_payload = load_kill_switch_payload(root)
+            kill_blocked = bool(is_kill_execution_blocked(kill_payload))
+        except ImportError:
+            kill_file = root / "kill_switch.json"
+            if kill_file.exists():
+                try:
+                    payload = json.loads(kill_file.read_text(encoding="utf-8"))
+                    kill_blocked = bool(
+                        isinstance(payload, dict) and payload.get("enabled")
+                    )
+                except (OSError, json.JSONDecodeError, TypeError):
+                    kill_blocked = True  # fail-closed: do not clear
+
+        if kill_blocked:
+            out["kill_clear"] = False
+            out["reason"] = "kill_still_active"
+            return out
+        out["kill_clear"] = True
+
+        def _is_kill_gated(path: Path) -> bool:
+            if not path.exists():
+                return False
+            try:
+                body = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, TypeError, UnicodeDecodeError):
+                return False
+            if not isinstance(body, dict):
+                return False
+            action = str(body.get("action") or "")
+            reason = str(body.get("reason") or "")
+            return action == "promote_blocked_kill" or (
+                body.get("graduation_conflict") is True and reason == "kill_authority"
+            )
+
+        for rel in (".graduation_conflict.json", ".promote_to_live"):
+            path = root / rel
+            if not _is_kill_gated(path):
+                continue
+            try:
+                path.unlink()
+                out["removed"].append(rel)
+                out["cleared"] = True
+            except OSError as exc:
+                logger.warning("Failed to clear kill-gated marker %s: %s", path, exc)
+
+        if out["cleared"]:
+            logger.info(
+                "Cleared kill-gated promote markers after kill heal: %s",
+                out["removed"],
+            )
+        return out
+
     def write_promote_to_live_if_ready(
         self,
         results: Optional[Dict[str, CheckResult]] = None,
@@ -317,6 +398,9 @@ class GraduationChecklist:
         When blocked (kill or checklist fail), any existing ``action:
         promote_to_live`` candidacy is tombstoned so operators never see a
         live promote claim under halt / not-ready.
+
+        Batch IU DQ1: when kill is clear, kill-gated tombstones are cleared
+        even if checklist is not ready (no false promote_blocked_kill stickiness).
         """
         root = Path(data_dir) if data_dir is not None else DATA_DIR
         if results is None:
@@ -384,21 +468,33 @@ class GraduationChecklist:
                     logger.warning("Kill switch unreadable — fail-closed, skip promote write")
                     return None
 
+        # Kill clear-on-heal (DQ1): drop sticky promote_blocked_kill even when
+        # checklist is not ready. Do not invent candidacy.
+        self.clear_kill_gated_promote_markers(data_dir=root)
+
         ready = self.is_graduation_ready(results)
         if not ready and not force:
             # Fail-closed: tombstone stale promote markers that disagree with checklist
             stale = root / ".promote_to_live"
             if stale.exists():
-                self._tombstone_stale_promote(
-                    root,
-                    action="promote_blocked_checklist",
-                    reason="checklist_not_ready",
-                    readiness_score=self.readiness_score(results),
-                )
-                logger.info(
-                    "Checklist not ready — tombstoned stale promote candidacy "
-                    "(action=promote_blocked_checklist)"
-                )
+                try:
+                    prior = json.loads(stale.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError, TypeError, UnicodeDecodeError):
+                    prior = {}
+                # Only tombstone true candidacy — not residual kill-gated markers
+                # (already cleared above) or already-checklist-blocked markers.
+                action = prior.get("action") if isinstance(prior, dict) else None
+                if action == "promote_to_live":
+                    self._tombstone_stale_promote(
+                        root,
+                        action="promote_blocked_checklist",
+                        reason="checklist_not_ready",
+                        readiness_score=self.readiness_score(results),
+                    )
+                    logger.info(
+                        "Checklist not ready — tombstoned stale promote candidacy "
+                        "(action=promote_blocked_checklist)"
+                    )
             return None
 
         metrics = {

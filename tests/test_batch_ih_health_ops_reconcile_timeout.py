@@ -200,7 +200,7 @@ def test_run_health_check_rereads_disk_kill_before_persist(
 
 
 def test_dashboard_timeout_budget_at_least_180() -> None:
-    """DF3: Makefile + tasker + cron_compat dashboard timeout ≥180s."""
+    """DF3 + IU DT2: Makefile + tasker + cron_compat + shell guard ≥180s."""
     root = Path(__file__).resolve().parents[1]
     makefile = (root / "Makefile").read_text(encoding="utf-8")
     # dashboard target: timeout N ... generator
@@ -228,6 +228,14 @@ def test_dashboard_timeout_budget_at_least_180() -> None:
     )
     assert m2 is not None
     assert int(m2.group(1)) >= 180, f"cron_compat timeout {m2.group(1)} < 180"
+
+    # Batch IU DT2: shell cron path must match (was stuck at 120 after DF3)
+    shell = (root / "scripts" / "cron" / "portfolio-lab-dashboard.sh").read_text(
+        encoding="utf-8"
+    )
+    m3 = re.search(r'cron_guard_start\s+"pf-dashboard"\s+(\d+)', shell)
+    assert m3 is not None, "cron_guard_start pf-dashboard missing from shell"
+    assert int(m3.group(1)) >= 180, f"shell dashboard guard {m3.group(1)} < 180"
 
 
 def test_alt_data_freshness_hours_not_hardcoded_12(

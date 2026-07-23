@@ -2670,6 +2670,22 @@ def run_health_check() -> dict:
     except Exception as exc:  # noqa: BLE001 — never fail health job on alerts
         logger.warning("Health alerts.json publish failed: %s", exc)
 
+    # Batch IU DO2 / DQ1: health cadence must clear kill-gated promote markers
+    # when kill is healed (dashboard may timeout and skip write_promote path).
+    try:
+        from src.strategy.graduation_checklist import GraduationChecklist
+
+        clear_result = GraduationChecklist().clear_kill_gated_promote_markers(
+            data_dir=Path(DATA_DIR)
+        )
+        if clear_result.get("cleared"):
+            logger.info(
+                "Health clear-on-heal removed kill-gated promote markers: %s",
+                clear_result.get("removed"),
+            )
+    except Exception as clear_exc:  # noqa: BLE001 — never fail health on promote heal
+        logger.warning("Kill-gated promote clear-on-heal skipped: %s", clear_exc)
+
     return report
 
 
