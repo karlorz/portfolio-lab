@@ -35,6 +35,56 @@ def _is_test_isolation_path(path: Path | str | None) -> bool:
         return False
     return "plab-pytest" in str(path)
 
+
+# Repo-private operator SSOT (not monkeypatchable via DATA_DIR rebind in tests).
+# src/monitor/incident_manager.py → parents[2] = project root.
+_OPERATOR_PRIVATE_DATA = Path(__file__).resolve().parents[2] / "data"
+_OPERATOR_WWW_DATA = Path("/var/www/portfolio-lab/data")
+
+
+def _pytest_blocks_live_incident_write(path: Path | str | None) -> bool:
+    """Refuse live incident/kill SSOT writes while a pytest test is running.
+
+    Batch JG TI1: H16 isolates PUBLIC_DATA_DIR, but private DATA_DIR stays live
+    unless each test rebinds IncidentManager paths. Under ``PYTEST_CURRENT_TEST``,
+    default managers must not open/resolve/arm kill on the **operator** tree.
+
+    Compare against fixed project/www paths only — never the import-time
+    ``DATA_DIR`` alias, which tests monkeypatch to tmp and would false-block
+    hermetic managers.
+
+    Opt-in: ``PORTFOLIO_LAB_ALLOW_LIVE_INCIDENTS=1`` (explicit live-path tests only).
+    """
+    if path is None:
+        return False
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        return False
+    if os.environ.get("PORTFOLIO_LAB_ALLOW_LIVE_INCIDENTS", "0") == "1":
+        return False
+    try:
+        target = Path(path).resolve()
+    except OSError:
+        return False
+    live_files: set[Path] = set()
+    for root in (_OPERATOR_PRIVATE_DATA, _OPERATOR_WWW_DATA):
+        try:
+            live_files.add((root / "incidents.json").resolve())
+            live_files.add((root / "incidents.jsonl").resolve())
+            live_files.add((root / "kill_switch.json").resolve())
+        except OSError:
+            continue
+    # Also block live DATA_DIR only when it still points at the real operator tree
+    # (not a test monkeypatch to tmp).
+    try:
+        data_dir_resolved = Path(DATA_DIR).resolve()
+        if data_dir_resolved == _OPERATOR_PRIVATE_DATA.resolve():
+            live_files.add((data_dir_resolved / "incidents.json").resolve())
+            live_files.add((data_dir_resolved / "incidents.jsonl").resolve())
+            live_files.add((data_dir_resolved / "kill_switch.json").resolve())
+    except OSError:
+        pass
+    return target in live_files
+
 _KILL_SWITCH_LEVEL_RANK = {
     "none": 0,
     "warning": 1,
@@ -241,6 +291,20 @@ class IncidentManager:
           channels (e.g. evaluator_error replacing signal_staleness).
         - After public write, refresh index digests so sha/size stay honest.
         """
+        if _pytest_blocks_live_incident_write(self.summary_path):
+            logger.error(
+                "TI1: refusing live incidents.json write under pytest (%s); "
+                "set PORTFOLIO_LAB_ALLOW_LIVE_INCIDENTS=1 to override",
+                self.summary_path,
+            )
+            return {
+                "schema_version": "incident-lifecycle/v1",
+                "generated_at": _iso(_utc_now()),
+                "open_count": 0,
+                "incidents": [],
+                "metrics": {},
+                "open_set_ssot": "blocked_live_under_pytest",
+            }
         incidents = sorted(
             self.open_incidents(),
             key=lambda incident: (incident.created_at, incident.incident_id),
@@ -273,9 +337,9 @@ class IncidentManager:
         # isolation paths (plab-pytest-public.*). Tests that dual-write both
         # sides under tmp still work (private also under tmp / isolation).
         #
-        # Rebound to live WWW only when private summary is the real project
-        # DATA_DIR incidents path — never when private is a pytest tmp tree
-        # (would clobber operator public with test open-set).
+        # Batch JG TI1: under pytest, never rebound dual-write to live WWW when
+        # private is live DATA_DIR — that was the pollution amplifier. Skip dual
+        # entirely (private write already blocked by TI1 if summary is live).
         private_is_live_ssot = False
         try:
             private_is_live_ssot = (
@@ -285,41 +349,53 @@ class IncidentManager:
         except OSError:
             private_is_live_ssot = False
 
+        under_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+        allow_live_inc = os.environ.get("PORTFOLIO_LAB_ALLOW_LIVE_INCIDENTS", "0") == "1"
+
         if (
             not paths_identical
             and _is_test_isolation_path(public_summary)
             and private_is_live_ssot
         ):
             skip_dual_for_isolation = True
-            live_candidate = Path("/var/www/portfolio-lab/data") / "incidents.json"
-            try:
-                if live_candidate.parent.is_dir() and not _is_test_isolation_path(
-                    live_candidate
-                ):
-                    public_summary = live_candidate
-                    skip_dual_for_isolation = False
-                    try:
-                        paths_identical = (
-                            public_summary.resolve() == self.summary_path.resolve()
+            if under_pytest and not allow_live_inc:
+                paths_identical = True  # TI1: no live WWW dual-write under suite
+                logger.warning(
+                    "Incidents dual-write skipped under pytest (TI1): isolation "
+                    "PUBLIC (%s) vs live private (%s)",
+                    PUBLIC_DATA_DIR,
+                    self.summary_path,
+                )
+            else:
+                live_candidate = Path("/var/www/portfolio-lab/data") / "incidents.json"
+                try:
+                    if live_candidate.parent.is_dir() and not _is_test_isolation_path(
+                        live_candidate
+                    ):
+                        public_summary = live_candidate
+                        skip_dual_for_isolation = False
+                        try:
+                            paths_identical = (
+                                public_summary.resolve() == self.summary_path.resolve()
+                            )
+                        except OSError:
+                            paths_identical = False
+                        logger.warning(
+                            "Incidents dual-write: rebound pytest PUBLIC_DATA_DIR to "
+                            "live operator tree %s (private is live DATA_DIR SSOT)",
+                            public_summary,
                         )
-                    except OSError:
-                        paths_identical = False
-                    logger.warning(
-                        "Incidents dual-write: rebound pytest PUBLIC_DATA_DIR to "
-                        "live operator tree %s (private is live DATA_DIR SSOT)",
-                        public_summary,
-                    )
-                else:
-                    paths_identical = True  # skip dual; stamp local-only
-                    logger.warning(
-                        "Incidents dual-write skipped: PUBLIC_DATA_DIR is test "
-                        "isolation (%s) while private summary is live (%s)",
-                        PUBLIC_DATA_DIR,
-                        self.summary_path,
-                    )
-            except OSError:
-                paths_identical = True
-                skip_dual_for_isolation = True
+                    else:
+                        paths_identical = True  # skip dual; stamp local-only
+                        logger.warning(
+                            "Incidents dual-write skipped: PUBLIC_DATA_DIR is test "
+                            "isolation (%s) while private summary is live (%s)",
+                            PUBLIC_DATA_DIR,
+                            self.summary_path,
+                        )
+                except OSError:
+                    paths_identical = True
+                    skip_dual_for_isolation = True
         elif (
             not paths_identical
             and _is_test_isolation_path(public_summary)
@@ -543,6 +619,12 @@ class IncidentManager:
         level = incident.kill_switch_level
         if level is None:
             return
+        if _pytest_blocks_live_incident_write(self.kill_switch_path):
+            logger.error(
+                "TI1: refusing live kill_switch.json write under pytest (%s)",
+                self.kill_switch_path,
+            )
+            return
         if not self._should_write_incident_kill_switch(level):
             return
 
@@ -603,6 +685,12 @@ class IncidentManager:
         return True
 
     def _clear_matching_incident_kill_switch(self, incident: Incident) -> None:
+        if _pytest_blocks_live_incident_write(self.kill_switch_path):
+            logger.error(
+                "TI1: refusing live kill_switch clear under pytest (%s)",
+                self.kill_switch_path,
+            )
+            return
         try:
             payload = json.loads(self.kill_switch_path.read_text(encoding="utf-8"))
         except FileNotFoundError:
@@ -663,6 +751,12 @@ class IncidentManager:
         return events
 
     def _append_event(self, event: str, incident: Incident) -> None:
+        if _pytest_blocks_live_incident_write(self.log_path):
+            logger.error(
+                "TI1: refusing live incidents.jsonl append under pytest (%s)",
+                self.log_path,
+            )
+            return
         payload = {
             "event": event,
             "event_timestamp": incident.updated_at,

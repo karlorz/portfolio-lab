@@ -255,9 +255,13 @@ def generate_sector_signals(
         
         # Format output
         top_sectors = momentum_scores[:5]
-        
+
+        # Batch JG DS3: dual-stamp generated_at + timestamp (same ISO). Staleness
+        # preferred field is generated_at; older consumers still read timestamp.
+        now_iso = datetime.now(timezone.utc).isoformat()
         return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": now_iso,
+            "generated_at": now_iso,
             "status": "active",
             "vix": vix,  # None when unknown — never coerce to 0
             "vix_source": "provided" if vix is not None else "unavailable",

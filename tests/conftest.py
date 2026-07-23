@@ -558,6 +558,50 @@ def _isolate_evaluator_data_dir(request, tmp_path, monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _isolate_incident_manager_singleton(request, tmp_path_factory, monkeypatch):
+    """Batch JG TI1: rebind default IncidentManager away from live DATA_DIR.
+
+    Complements refuse-on-write guards in incident_manager. Opt out:
+      @pytest.mark.allow_live_incidents
+      PORTFOLIO_LAB_ALLOW_LIVE_INCIDENTS=1
+    """
+    if request.node.get_closest_marker("allow_live_incidents"):
+        yield
+        return
+    if os.environ.get("PORTFOLIO_LAB_ALLOW_LIVE_INCIDENTS", "0") == "1":
+        yield
+        return
+    root = tmp_path_factory.mktemp("incidents-isolate")
+    try:
+        import src.monitor.alerting as alerting
+    except Exception:
+        yield
+        return
+    # Drop any process-local manager so get_incident_manager() rebuilds hermetic.
+    monkeypatch.setattr(alerting, "_incident_manager", None, raising=False)
+    try:
+        from src.monitor.incident_manager import IncidentManager
+
+        hermetic = IncidentManager(
+            log_path=root / "incidents.jsonl",
+            summary_path=root / "incidents.json",
+            kill_switch_path=root / "kill_switch.json",
+            escalation_enabled=False,
+        )
+        monkeypatch.setattr(alerting, "_incident_manager", hermetic, raising=False)
+    except Exception:
+        pass
+    yield
+    # Ensure next test does not inherit hermetic manager identity
+    try:
+        import src.monitor.alerting as alerting
+
+        monkeypatch.setattr(alerting, "_incident_manager", None, raising=False)
+    except Exception:
+        pass
+
+
 # Dual-write modules that import PUBLIC_DATA_DIR at module level — rebind each
 # test so late imports and already-loaded producers never write live WWW/repo.
 _PUBLIC_DUAL_WRITE_MODULES = (
@@ -692,6 +736,11 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers",
         "heavy: tests requiring heavy ML libraries (torch, xgboost, sklearn, hmmlearn)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "allow_live_incidents: allow IncidentManager writes to live DATA_DIR "
+        "incident/kill SSOT under pytest (Batch JG TI1 opt-out)",
     )
     config.addinivalue_line(
         "markers",

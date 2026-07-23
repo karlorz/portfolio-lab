@@ -4261,6 +4261,14 @@ class DashboardGenerator:
             # Disclose which VIX SSOT fed the high-vol gate when term structure
             # rescued a missing market.db row.
             if isinstance(sector_momentum_signal, dict):
+                # Batch JG DS3: ensure preferred staleness field is present even
+                # if an older producer only emitted timestamp.
+                ts = sector_momentum_signal.get("timestamp") or sector_momentum_signal.get(
+                    "generated_at"
+                )
+                if ts:
+                    sector_momentum_signal.setdefault("generated_at", ts)
+                    sector_momentum_signal.setdefault("timestamp", ts)
                 if sector_vix is not None and vix_level is None:
                     sector_momentum_signal["vix"] = sector_vix
                     sector_momentum_signal["vix_source"] = "vix_term_structure"
