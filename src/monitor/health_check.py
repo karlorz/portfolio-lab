@@ -47,6 +47,7 @@ __all__ = [
     "load_ops_monitor_report",
     "apply_ops_monitor_to_dashboard_health",
     "reconcile_monitor_health_with_disk_ssot",
+    "project_disk_kill_open_to_all_surfaces",
     "update_graduation_circuit_breaker_state",
     "attach_shared_freshness_slis_to_ops_report",
     "load_graduation_cb_ssot",
@@ -152,6 +153,79 @@ def load_ops_monitor_report(
     return best
 
 
+def _patch_monitor_report_kill_open(
+    payload: dict[str, Any],
+    disk_kill: dict[str, Any],
+    disk_open: dict[str, Any],
+    *,
+    force: bool = False,
+) -> bool:
+    """Mutate monitor-schema payload kill/open from disk. Return True if changed."""
+    if not isinstance(payload, dict) or not _is_monitor_health_report(payload):
+        return False
+    checks = payload.get("checks")
+    if not isinstance(checks, dict):
+        checks = {}
+        payload["checks"] = checks
+
+    prev_open = checks.get("open_incidents") if isinstance(checks.get("open_incidents"), dict) else {}
+    prev_kill = checks.get("kill_switch") if isinstance(checks.get("kill_switch"), dict) else {}
+
+    prev_open_n = int(prev_open.get("open_count") or 0)
+    disk_open_n = int(disk_open.get("open_count") or 0)
+    prev_enabled = bool(prev_kill.get("enabled"))
+    disk_enabled = bool(disk_kill.get("enabled"))
+    prev_kill_status = str(prev_kill.get("status") or "ok").lower()
+    disk_kill_status = str(disk_kill.get("status") or "ok").lower()
+    prev_open_status = str(prev_open.get("status") or "ok").lower()
+    disk_open_status = str(disk_open.get("status") or "ok").lower()
+
+    if (
+        not force
+        and prev_open_n == disk_open_n
+        and prev_enabled == disk_enabled
+        and prev_kill_status == disk_kill_status
+        and prev_open_status == disk_open_status
+    ):
+        return False
+
+    checks["kill_switch"] = disk_kill
+    checks["open_incidents"] = disk_open
+
+    circuit = checks.get("circuit_breaker") if isinstance(checks.get("circuit_breaker"), dict) else {}
+    freshness = checks.get("data_freshness") if isinstance(checks.get("data_freshness"), dict) else {}
+    rollup_checks = {
+        **{k: v for k, v in freshness.items() if isinstance(v, dict) and "status" in v},
+        "kill_switch": disk_kill,
+        "open_incidents": disk_open,
+    }
+    for name, check in checks.items():
+        if name in {"data_freshness", "kill_switch", "open_incidents", "circuit_breaker"}:
+            continue
+        if isinstance(check, dict) and "status" in check:
+            rollup_checks[name] = check
+    payload["status"] = _compute_system_status(rollup_checks, circuit)
+    payload["ssot_reconciled_at"] = datetime.now(timezone.utc).isoformat()
+    payload["ssot_reconcile_source"] = "disk_incidents_kill"
+    return True
+
+
+def _atomic_write_json_path(path: Path, payload: dict[str, Any]) -> None:
+    """Write JSON at 0o644 (prefer signal_authority atomic helper)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(payload, indent=2) + "\n"
+    try:
+        from src.monitor.signal_authority import _atomic_write_text
+
+        _atomic_write_text(path, text, mode=0o644)
+    except Exception:
+        path.write_text(text, encoding="utf-8")
+        try:
+            os.chmod(path, 0o644)
+        except OSError:
+            pass
+
+
 def reconcile_monitor_health_with_disk_ssot(
     *,
     data_dir: Path | None = None,
@@ -182,89 +256,12 @@ def reconcile_monitor_health_with_disk_ssot(
     if not isinstance(payload, dict) or not _is_monitor_health_report(payload):
         return False
 
-    try:
-        from src.dashboard.kill_authority import (
-            load_kill_switch_payload,
-            load_open_incidents_summary,
-            project_kill_switch_fields,
-        )
-    except ImportError:
-        disk_kill = {
-            "status": "ok",
-            "enabled": False,
-            "level": None,
-            "reason": None,
-            "source": None,
-            "message": None,
-            "timestamp": None,
-            "incident_id": None,
-            "mode": None,
-            "channel": None,
-        }
-        disk_open = {"status": "ok", "open_count": 0, "incidents": []}
-    else:
-        disk_kill = project_kill_switch_fields(load_kill_switch_payload(root))
-        disk_open = load_open_incidents_summary(root)
-
-    checks = payload.get("checks")
-    if not isinstance(checks, dict):
-        checks = {}
-        payload["checks"] = checks
-
-    prev_open = checks.get("open_incidents") if isinstance(checks.get("open_incidents"), dict) else {}
-    prev_kill = checks.get("kill_switch") if isinstance(checks.get("kill_switch"), dict) else {}
-
-    prev_open_n = int(prev_open.get("open_count") or 0)
-    disk_open_n = int(disk_open.get("open_count") or 0)
-    prev_enabled = bool(prev_kill.get("enabled"))
-    disk_enabled = bool(disk_kill.get("enabled"))
-    prev_kill_status = str(prev_kill.get("status") or "ok").lower()
-    disk_kill_status = str(disk_kill.get("status") or "ok").lower()
-    prev_open_status = str(prev_open.get("status") or "ok").lower()
-    disk_open_status = str(disk_open.get("status") or "ok").lower()
-
-    # No-op when already aligned (avoid restamp thrash).
-    if (
-        prev_open_n == disk_open_n
-        and prev_enabled == disk_enabled
-        and prev_kill_status == disk_kill_status
-        and prev_open_status == disk_open_status
-    ):
+    disk_kill, disk_open = _disk_kill_and_open_incidents(root)
+    if not _patch_monitor_report_kill_open(payload, disk_kill, disk_open):
         return False
 
-    checks["kill_switch"] = disk_kill
-    checks["open_incidents"] = disk_open
-
-    # Recompute top-level status from disk kill/open + remaining dims.
-    circuit = checks.get("circuit_breaker") if isinstance(checks.get("circuit_breaker"), dict) else {}
-    freshness = checks.get("data_freshness") if isinstance(checks.get("data_freshness"), dict) else {}
-    rollup_checks = {
-        **{k: v for k, v in freshness.items() if isinstance(v, dict) and "status" in v},
-        "kill_switch": disk_kill,
-        "open_incidents": disk_open,
-    }
-    # Include any other top-level check dims (except nested data_freshness blob).
-    for name, check in checks.items():
-        if name in {"data_freshness", "kill_switch", "open_incidents", "circuit_breaker"}:
-            continue
-        if isinstance(check, dict) and "status" in check:
-            rollup_checks[name] = check
-    payload["status"] = _compute_system_status(rollup_checks, circuit)
-    payload["ssot_reconciled_at"] = datetime.now(timezone.utc).isoformat()
-    payload["ssot_reconcile_source"] = "disk_incidents_kill"
-
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # Prefer atomic 0o644 multi-dest helper when available so reconcile never
-        # re-darkens Caddy if path is under a public tree.
-        try:
-            from src.monitor.signal_authority import _atomic_write_text
-
-            _atomic_write_text(
-                path, json.dumps(payload, indent=2) + "\n", mode=0o644
-            )
-        except Exception:
-            path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        _atomic_write_json_path(path, payload)
     except OSError as exc:
         logger.warning("Failed to reconcile monitor health SSOT at %s: %s", path, exc)
         return False
@@ -272,10 +269,190 @@ def reconcile_monitor_health_with_disk_ssot(
         "Reconciled monitor health kill/open SSOT at %s (status=%s enabled=%s open=%s)",
         path,
         payload.get("status"),
-        disk_enabled,
-        disk_open_n,
+        bool(disk_kill.get("enabled")),
+        int(disk_open.get("open_count") or 0),
     )
     return True
+
+
+def project_disk_kill_open_to_all_surfaces(
+    *,
+    data_dir: Path | None = None,
+    public_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Write-through: re-project kill/open from disk onto mon/ops/public surfaces.
+
+    Batch IM DN / IN DN3: incident arm/clear and lag restamp must not leave
+    sticky kill.enabled on health/health_ops while kill_switch.json disagrees.
+    Best-effort; never raises into the incident lifecycle path.
+
+    Surfaces:
+    - private monitor ``data/health.json`` (checks.kill_switch / open_incidents)
+    - private + public ``health_ops.json`` (monitor schema)
+    - public dashboard ``health.json`` (top-level kill_switch / open_incidents)
+    - repo soft-mirror of public health + health_ops when multi-dest available
+    """
+    result: dict[str, Any] = {
+        "monitor": False,
+        "ops": False,
+        "public": False,
+        "errors": [],
+    }
+    root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+    pub_root = Path(public_dir) if public_dir is not None else Path(PUBLIC_DATA_DIR)
+    disk_kill, disk_open = _disk_kill_and_open_incidents(root)
+    disk_enabled = bool(disk_kill.get("enabled"))
+    disk_open_n = int(disk_open.get("open_count") or 0)
+
+    # 1) Private monitor health.json
+    mon_path = root / "health.json"
+    if mon_path.exists():
+        try:
+            if reconcile_monitor_health_with_disk_ssot(
+                data_dir=root, health_path=mon_path
+            ):
+                result["monitor"] = True
+            else:
+                # Already aligned counts as success for write-through callers
+                result["monitor"] = True
+        except Exception as exc:  # noqa: BLE001
+            result["errors"].append(f"monitor:{exc}")
+            logger.warning("project_disk kill fan-out monitor failed: %s", exc)
+
+    # 2) health_ops.json (public + private twin) — patch body then multi-dest
+    ops_candidates = [
+        pub_root / "health_ops.json",
+        root / "health_ops.json",
+    ]
+    ops_payload: dict[str, Any] | None = None
+    for candidate in ops_candidates:
+        if not candidate.exists():
+            continue
+        try:
+            doc = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError, TypeError):
+            continue
+        if isinstance(doc, dict) and _is_monitor_health_report(doc):
+            ops_payload = doc
+            break
+    if ops_payload is not None:
+        try:
+            _patch_monitor_report_kill_open(
+                ops_payload, disk_kill, disk_open, force=True
+            )
+            ops_public = pub_root / "health_ops.json"
+            ops_private = root / "health_ops.json"
+            wrote = False
+            try:
+                from src.monitor.signal_authority import write_json_multi_dest
+
+                wr = write_json_multi_dest(
+                    ops_payload,
+                    public_path=ops_public,
+                    private_path=ops_private,
+                    soft_mirror_repo=True,
+                    repo_filename="health_ops.json",
+                )
+                wrote = bool(wr.wrote_public or wr.wrote_private or wr.wrote_repo)
+            except Exception as multi_exc:  # noqa: BLE001
+                logger.warning(
+                    "project_disk ops multi-dest failed (%s); fallback", multi_exc
+                )
+            if not wrote:
+                for dest in (ops_public, ops_private):
+                    try:
+                        _atomic_write_json_path(dest, ops_payload)
+                        wrote = True
+                    except OSError:
+                        pass
+            result["ops"] = wrote
+        except Exception as exc:  # noqa: BLE001
+            result["errors"].append(f"ops:{exc}")
+            logger.warning("project_disk kill fan-out ops failed: %s", exc)
+
+    # 3) Public dashboard health.json top-level kill/open
+    public_health = pub_root / "health.json"
+    if public_health.exists():
+        try:
+            payload = json.loads(public_health.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError, TypeError) as exc:
+            result["errors"].append(f"public_read:{exc}")
+            payload = None
+        if isinstance(payload, dict) and not _is_monitor_health_report(payload):
+            try:
+                prev_kill = (
+                    payload.get("kill_switch")
+                    if isinstance(payload.get("kill_switch"), dict)
+                    else {}
+                )
+                prev_open = (
+                    payload.get("open_incidents")
+                    if isinstance(payload.get("open_incidents"), dict)
+                    else {}
+                )
+                prev_enabled = bool(prev_kill.get("enabled"))
+                prev_open_n = int(prev_open.get("open_count") or 0)
+                if prev_enabled != disk_enabled or prev_open_n != disk_open_n:
+                    payload["kill_switch"] = disk_kill
+                    payload["open_incidents"] = disk_open
+                    # Soft-demote system_status only when disk is fully clear
+                    # and payload still carried sticky kill/open.
+                    if not disk_enabled and disk_open_n == 0:
+                        if prev_enabled or prev_open_n > 0:
+                            cur = str(payload.get("system_status") or "healthy")
+                            if cur in {"warning", "degraded", "critical"}:
+                                # Do not force healthy over other SLOs; leave
+                                # as-is unless only kill drove warning.
+                                payload["system_status"] = "healthy"
+                    else:
+                        try:
+                            from src.dashboard.kill_authority import (
+                                elevate_system_status_for_kill,
+                            )
+
+                            payload["system_status"] = elevate_system_status_for_kill(
+                                payload.get("system_status"), disk_kill, disk_open
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
+                    payload["ssot_reconciled_at"] = datetime.now(timezone.utc).isoformat()
+                    payload["ssot_reconcile_source"] = "disk_incidents_kill"
+                    wrote = False
+                    try:
+                        from src.monitor.signal_authority import write_json_multi_dest
+
+                        wr = write_json_multi_dest(
+                            payload,
+                            public_path=public_health,
+                            private_path=None,
+                            soft_mirror_repo=True,
+                            repo_filename="health.json",
+                        )
+                        wrote = bool(wr.wrote_public or wr.wrote_repo)
+                    except Exception as multi_exc:  # noqa: BLE001
+                        logger.warning(
+                            "project_disk public multi-dest failed (%s); fallback",
+                            multi_exc,
+                        )
+                    if not wrote:
+                        _atomic_write_json_path(public_health, payload)
+                        wrote = True
+                    result["public"] = wrote
+                else:
+                    result["public"] = True
+            except Exception as exc:  # noqa: BLE001
+                result["errors"].append(f"public:{exc}")
+                logger.warning("project_disk kill fan-out public failed: %s", exc)
+
+    logger.info(
+        "project_disk_kill_open_to_all_surfaces enabled=%s open=%s mon=%s ops=%s pub=%s",
+        disk_enabled,
+        disk_open_n,
+        result["monitor"],
+        result["ops"],
+        result["public"],
+    )
+    return result
 
 
 def _disk_kill_ssot_is_clear(data_dir: Path | None) -> bool:

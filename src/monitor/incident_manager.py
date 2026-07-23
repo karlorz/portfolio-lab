@@ -182,7 +182,22 @@ class IncidentManager:
             self._write_incident_kill_switch(incident)
 
         self.write_summary()
+        # Batch IM DN: write-through kill/open onto mon/ops/public so operators
+        # never wait for :00/:30 health cron after arm or clear.
+        self._project_disk_kill_open_surfaces()
         return incident
+
+    def _project_disk_kill_open_surfaces(self) -> None:
+        """Best-effort fan-out of kill_switch.json + incidents onto health surfaces."""
+        try:
+            from src.monitor.health_check import project_disk_kill_open_to_all_surfaces
+
+            # Prefer the directory that holds this manager's kill/summary SSOT
+            # (tmp_path in tests; DATA_DIR in production).
+            data_dir = self.kill_switch_path.parent
+            project_disk_kill_open_to_all_surfaces(data_dir=data_dir)
+        except Exception as exc:  # noqa: BLE001 — never block lifecycle
+            logger.warning("Kill/open surface fan-out skipped: %s", exc)
 
     def open_incidents(self) -> list[Incident]:
         return [

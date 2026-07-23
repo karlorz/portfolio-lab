@@ -184,6 +184,28 @@ def _post_webhook(
         return False
 
 
+# Batch IM DP: signals that are advisory_shadow / non-routed must not sole-drive
+# WARN→kill escalation. alternative_data is the primary thrash source in lab.
+_DEFAULT_ADVISORY_STALE_SIGNALS = frozenset({"alternative_data"})
+
+
+def _is_advisory_stale_signal(name: str, signal_roles: Optional[Dict] = None) -> bool:
+    """True when a stale signal is advisory-only and must not sole-page kill."""
+    key = str(name)
+    if signal_roles and isinstance(signal_roles, dict):
+        role = str(signal_roles.get(key) or "").lower()
+        if role in {
+            "advisory_shadow",
+            "advisory_non_routed",
+            "advisory_sleeve",
+            "advisory",
+        }:
+            return True
+        if role in {"execution_routed", "required", "authoritative"}:
+            return False
+    return key in _DEFAULT_ADVISORY_STALE_SIGNALS
+
+
 def classify_signal_staleness(
     staleness_data: Dict,
 ) -> Optional[tuple[AlertLevel, str, Dict]]:
@@ -198,6 +220,8 @@ def classify_signal_staleness(
           all-fresh PASS even when ``stale_signals`` is empty.
         - When both stale and unavailable, prioritise stale in the message
           but keep unavailable in details.
+        - Batch IM DP: sole stale advisory_shadow (e.g. alternative_data) is
+          PASS — advisory cannot sole-escalate kill. Required stale still WARN.
     """
     stale_raw = staleness_data.get("stale_signals") or []
     stale_signals = [str(x) for x in stale_raw] if isinstance(stale_raw, list) else []
@@ -208,6 +232,9 @@ def classify_signal_staleness(
     unavailable_count = len(unavailable_signals)
     healthy_count = int(staleness_data.get("healthy_count") or 0)
     total_count = int(staleness_data.get("total_count") or 0)
+    signal_roles = staleness_data.get("signal_roles")
+    if not isinstance(signal_roles, dict):
+        signal_roles = {}
 
     if total_count == 0:
         return None
@@ -231,7 +258,30 @@ def classify_signal_staleness(
             "not treated as producer-stale for kill escalation"
         )
 
-    if not stale_signals and unavailable_count == 0:
+    # Split actionable vs advisory stale before level decision (Batch IM DP).
+    advisory_stale = [
+        s for s in stale_signals if _is_advisory_stale_signal(s, signal_roles)
+    ]
+    actionable_stale = [
+        s for s in stale_signals if not _is_advisory_stale_signal(s, signal_roles)
+    ]
+    if advisory_stale:
+        details["advisory_stale"] = advisory_stale
+    if actionable_stale != stale_signals:
+        details["actionable_stale"] = actionable_stale
+
+    if not actionable_stale and unavailable_count == 0:
+        if advisory_stale:
+            details["policy"] = "advisory_shadow_stale_only_pass"
+            return (
+                AlertLevel.PASS,
+                (
+                    f"All required signals fresh "
+                    f"({len(advisory_stale)} advisory-only stale skipped: "
+                    f"{', '.join(advisory_stale[:4])})"
+                ),
+                details,
+            )
         if projection_lag_signals:
             return (
                 AlertLevel.PASS,
@@ -247,7 +297,7 @@ def classify_signal_staleness(
             details,
         )
 
-    if not stale_signals and unavailable_count > 0:
+    if not actionable_stale and unavailable_count > 0:
         # Intentional lab gaps (ML-off research, FRED key absent) must not block
         # all-fresh PASS / sticky warning kill. Prefer ownership annotation when
         # present; otherwise treat full unavailable list as actionable.
@@ -270,13 +320,23 @@ def classify_signal_staleness(
             details["intentional_lab_gap_count"] = intentional_count
 
         if not actionable_unavailable:
-            details["policy"] = "intentional_lab_gaps_only_pass"
+            details["policy"] = (
+                "advisory_or_intentional_only_pass"
+                if advisory_stale
+                else "intentional_lab_gaps_only_pass"
+            )
             return (
                 AlertLevel.PASS,
                 (
                     f"All required signals fresh "
-                    f"({intentional_count} intentional lab gaps skipped)"
-                    if intentional_count
+                    f"({intentional_count} intentional lab gaps skipped"
+                    + (
+                        f"; {len(advisory_stale)} advisory-only stale"
+                        if advisory_stale
+                        else ""
+                    )
+                    + ")"
+                    if intentional_count or advisory_stale
                     else f"All {total_count} signals fresh"
                 ),
                 details,
@@ -296,20 +356,25 @@ def classify_signal_staleness(
             details,
         )
 
-    if healthy_count > 0:
-        extra = ""
-        if unavailable_count:
-            extra = f"; {unavailable_count} unavailable"
+    # Actionable stale remains → WARN/HALT using actionable list only.
+    # HALT when no healthy signals remain (pipeline down for required set),
+    # even if some of the stale list is advisory-only noise.
+    if healthy_count == 0 and actionable_stale:
         return (
-            AlertLevel.WARN,
-            f"{len(stale_signals)}/{total_count} signals stale: "
-            f"{', '.join(stale_signals)}{extra}",
+            AlertLevel.HALT,
+            f"ALL {total_count} signals stale — pipeline may be down",
             details,
         )
 
+    extra = ""
+    if unavailable_count:
+        extra = f"; {unavailable_count} unavailable"
+    if advisory_stale:
+        extra += f"; {len(advisory_stale)} advisory-only stale skipped"
     return (
-        AlertLevel.HALT,
-        f"ALL {total_count} signals stale — pipeline may be down",
+        AlertLevel.WARN,
+        f"{len(actionable_stale)}/{total_count} signals stale: "
+        f"{', '.join(actionable_stale)}{extra}",
         details,
     )
 

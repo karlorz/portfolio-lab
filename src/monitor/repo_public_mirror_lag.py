@@ -400,6 +400,49 @@ def restamp_mirror_lag_on_health_documents(
             nested_upd["mirror_lag_restamped_at"] = restamped_at
             nested_upd["mirror_lag_restamp_policy"] = restamp_policy
             updated["health"] = nested_upd
+        # Batch IN DN3: re-project kill/open from disk before write so lag
+        # restamp cannot freeze sticky kill.enabled while kill_switch.json is
+        # clear (or the reverse arm lag). Nested signals.health kill keys are
+        # left to refresh_signals_health_kill_fields / multi-dest writers.
+        try:
+            from src.monitor.health_check import (
+                _disk_kill_and_open_incidents,
+                _is_monitor_health_report,
+                _patch_monitor_report_kill_open,
+            )
+
+            disk_kill, disk_open = _disk_kill_and_open_incidents()
+            if _is_monitor_health_report(updated):
+                _patch_monitor_report_kill_open(
+                    updated, disk_kill, disk_open, force=True
+                )
+            else:
+                # Dashboard schema: top-level kill_switch / open_incidents
+                prev_kill = (
+                    updated.get("kill_switch")
+                    if isinstance(updated.get("kill_switch"), dict)
+                    else {}
+                )
+                prev_open = (
+                    updated.get("open_incidents")
+                    if isinstance(updated.get("open_incidents"), dict)
+                    else {}
+                )
+                if (
+                    bool(prev_kill.get("enabled")) != bool(disk_kill.get("enabled"))
+                    or int(prev_open.get("open_count") or 0)
+                    != int(disk_open.get("open_count") or 0)
+                    or "kill_switch" in updated
+                    or "open_incidents" in updated
+                ):
+                    updated["kill_switch"] = disk_kill
+                    updated["open_incidents"] = disk_open
+                    updated["ssot_reconcile_source"] = "disk_incidents_kill_restamp"
+        except Exception as exc:  # noqa: BLE001 — never block lag restamp
+            logger.warning(
+                "restamp kill/open disk re-project skipped for %s: %s", path, exc
+            )
+
         try:
             _atomic_write_json_doc(path, updated)
             result["restamped"].append(str(path.name))
