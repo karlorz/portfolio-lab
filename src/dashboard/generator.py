@@ -6016,7 +6016,34 @@ class DashboardGenerator:
         })
         
         out_path = PUBLIC_DIR / "alerts.json"
-        save_results_json(output, output_path=str(out_path))
+        private_alerts = Path(DATA_DIR) / "alerts.json"
+
+        def _write_alerts_multi(payload: dict) -> None:
+            """Serialize-once public + private + repo soft-mirror (Batch HN).
+
+            repo_path left None so auto soft-mirror uses repo_filename and skips
+            under pytest (avoids clobbering checkout public/data during tests).
+            """
+            try:
+                from src.monitor.signal_authority import write_json_multi_dest
+
+                write_json_multi_dest(
+                    payload,
+                    public_path=out_path,
+                    private_path=private_alerts
+                    if private_alerts.parent.is_dir() or private_alerts.exists()
+                    else None,
+                    soft_mirror_repo=True,
+                    repo_filename="alerts.json",
+                )
+            except Exception as exc:  # noqa: BLE001 — fall back to legacy single dest
+                logger.warning(
+                    "alerts multi-dest write failed (%s); falling back to save_results_json",
+                    exc,
+                )
+                save_results_json(payload, output_path=str(out_path))
+
+        _write_alerts_multi(output)
 
         # Post-write integrity: on-disk kill row must match data/kill_switch.json identity.
         # Concurrent/stale writers previously left LIVE/position_limit rows without incident_id.
@@ -6062,10 +6089,7 @@ class DashboardGenerator:
                         "count": len(rebuilt),
                         "generated_at": datetime.now(timezone.utc).isoformat(),
                     })
-                    out_path.write_text(
-                        json.dumps(output, indent=2, sort_keys=False) + "\n",
-                        encoding="utf-8",
-                    )
+                    _write_alerts_multi(output)
             except (OSError, json.JSONDecodeError, TypeError) as verify_exc:
                 logger.error("alerts.json post-write kill verify failed: %s", verify_exc)
         

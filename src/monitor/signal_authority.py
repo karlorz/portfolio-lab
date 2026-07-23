@@ -124,13 +124,18 @@ def merge_signals_patch(
 
 def default_repo_signals_path() -> Path:
     """Repo checkout soft-mirror path for signals.json (not live PUBLIC_DATA_DIR)."""
-    # Prefer project-local public/data under CWD / known root
+    return default_repo_public_data_path("signals.json")
+
+
+def default_repo_public_data_path(filename: str) -> Path:
+    """Repo checkout soft-mirror path under public/data (not live PUBLIC_DATA_DIR)."""
+    name = str(filename or "").lstrip("/")
     try:
         from src.paths import PROJECT_ROOT
 
-        return Path(PROJECT_ROOT) / "public" / "data" / "signals.json"
+        return Path(PROJECT_ROOT) / "public" / "data" / name
     except Exception:  # noqa: BLE001
-        return Path("public/data/signals.json")
+        return Path("public/data") / name
 
 
 def _atomic_write_text(path: Path, text: str, *, mode: int = 0o644) -> None:
@@ -268,3 +273,84 @@ def try_write_signals_multi_dest(
             exc,
         )
         return MultiDestWriteResult(skipped_reason=str(exc))
+
+
+def serialize_json_payload(payload: Mapping[str, Any] | Any) -> str:
+    """Canonical JSON body for non-authority multi-dest fan-out (alerts, etc.)."""
+    try:
+        from src.backtest.metrics import _json_serializer as _default
+    except Exception:  # noqa: BLE001
+        _default = str  # type: ignore[assignment]
+    if isinstance(payload, Mapping):
+        body: Any = dict(payload)
+    else:
+        body = payload
+    return json.dumps(body, indent=2, default=_default) + "\n"
+
+
+def write_json_multi_dest(
+    payload: Mapping[str, Any] | Any,
+    *,
+    public_path: Path | str | None = None,
+    private_path: Path | str | None = None,
+    repo_path: Path | str | None = None,
+    soft_mirror_repo: bool = True,
+    repo_filename: str | None = None,
+) -> MultiDestWriteResult:
+    """Serialize once and fan-out same bytes (no authority gate).
+
+    Batch HN: alerts.json and other operator JSON need the same 0o644 multi-dest
+    contract as signals so health dual-write cannot leave repo public/data stale
+    or sticky 0600 under Caddy.
+    """
+    text = serialize_json_payload(payload)
+    result = MultiDestWriteResult()
+
+    pub = Path(public_path) if public_path is not None else None
+    priv = Path(private_path) if private_path is not None else None
+    auto_repo = soft_mirror_repo and repo_path is None
+    if auto_repo and os.environ.get("PYTEST_CURRENT_TEST"):
+        auto_repo = False
+    if repo_path is not None:
+        repo = Path(repo_path)
+    elif auto_repo:
+        fname = repo_filename
+        if fname is None and pub is not None:
+            fname = pub.name
+        repo = default_repo_public_data_path(fname or "artifact.json")
+    else:
+        repo = None
+
+    if pub is not None:
+        _atomic_write_text(pub, text)
+        result.wrote_public = True
+        result.public_path = str(pub)
+
+    if priv is not None:
+        try:
+            if pub is None or priv.resolve() != pub.resolve():
+                _atomic_write_text(priv, text)
+                result.wrote_private = True
+                result.private_path = str(priv)
+        except OSError as exc:
+            logger.warning("private multi-dest write failed: %s", exc)
+            result.skipped_reason = f"private:{exc}"
+
+    if soft_mirror_repo and repo is not None:
+        try:
+            if pub is not None and repo.resolve() == pub.resolve():
+                result.wrote_repo = False
+            elif priv is not None and repo.resolve() == priv.resolve():
+                result.wrote_repo = False
+            else:
+                _atomic_write_text(repo, text)
+                result.wrote_repo = True
+                result.repo_path = str(repo)
+        except OSError as exc:
+            logger.warning("repo soft-mirror multi-dest write failed: %s", exc)
+            if result.skipped_reason:
+                result.skipped_reason += f";repo:{exc}"
+            else:
+                result.skipped_reason = f"repo:{exc}"
+
+    return result

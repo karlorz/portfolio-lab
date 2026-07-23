@@ -890,17 +890,35 @@ def publish_health_alerts_json(report: dict[str, Any] | None = None) -> Path | N
     except Exception:  # noqa: BLE001
         pass
     try:
+        from src.monitor.signal_authority import write_json_multi_dest
+
         public.mkdir(parents=True, exist_ok=True)
-        # Dual-write private copy for forensics
+        # Batch HN: serialize-once multi-dest (public + private + repo soft-mirror)
+        # with 0o644. Prior dual path.write_text left repo public/data stale
+        # (alerts 0/1/1) while health refreshed private+www only.
+        # Leave repo_path=None so write_json_multi_dest auto soft-mirrors via
+        # repo_filename, and skips auto under pytest (no checkout clobber).
         data_alerts = Path(DATA_DIR) / "alerts.json"
-        for path in (out_path, data_alerts):
-            try:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(json.dumps(output, indent=2) + "\n", encoding="utf-8")
-            except OSError as exc:
-                logger.warning("Failed to write alerts at %s: %s", path, exc)
-        logger.info("Health job wrote alerts.json (%d alerts) at %s", len(alerts), out_path)
-        return out_path
+        result = write_json_multi_dest(
+            output,
+            public_path=out_path,
+            private_path=data_alerts if data_alerts.parent.is_dir() or data_alerts.exists() else None,
+            soft_mirror_repo=True,
+            repo_filename="alerts.json",
+        )
+        if result.wrote_public:
+            logger.info(
+                "Health job wrote alerts.json (%d alerts) at %s (private=%s repo=%s)",
+                len(alerts),
+                out_path,
+                result.wrote_private,
+                result.wrote_repo,
+            )
+        if result.skipped_reason:
+            logger.warning(
+                "alerts.json multi-dest partial skip: %s", result.skipped_reason
+            )
+        return out_path if result.wrote_public else None
     except OSError as exc:
         logger.warning("alerts.json publish failed: %s", exc)
         return None

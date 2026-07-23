@@ -203,3 +203,21 @@
 - ClaudeMd?:      no
 - WorkflowShift?: no
 - Deep-research: TCA cost capture on fill/execution event; OMS event-driven
+
+## [2026-07-22] retro | loop cycle: batch-fx-soft-mirror-lag-restamp
+- Friction:       Sticky lag=11 critical on health_ops through dashboard soft-mirror while live 0/33
+- Miss:           Soft-mirror copied nested SLI stamps; attach_shared projected onto empty dict (status elevate dead)
+- Improve:        End-pipeline restamp health docs from live probe; project onto real report; consumer max(live,stamp)
+- Generalize?:    yes (mirror copy ≠ metric restamp; nested SLI needs recompute after equalize)
+- ClaudeMd?:      no
+- WorkflowShift?: no
+- Deep-research: gauge/mirror restamp staleness; soft-elevate only; private SSOT in restamp set
+
+## [2026-07-23] retro | loop cycle: batch-hn-alerts-multi-dest
+- Friction:       Live alerts priv/www equal while repo public/data lagged (0/1/1); health dual path.write_text
+- Miss:           Explicit repo_path under pytest would clobber checkout; auto soft-mirror gate needed
+- Improve:        write_json_multi_dest + health/generator call with repo_filename; pytest auto-skip
+- Generalize?:    yes (non-authority multi-dest = serialize-once + 0o644; auto repo under pytest off)
+- ClaudeMd?:      no
+- WorkflowShift?: no
+- Deep-research: multi-dest alerts hold; fchmod chokepoint already in HM
