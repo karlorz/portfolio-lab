@@ -11,7 +11,7 @@ import pytest
 
 
 def test_apply_health_weights_hard_zeros_unhealthy():
-    """Batch CY: unhealthy + IC unknown hard-zeros; unhealthy + IC>=0 soft-floors."""
+    """Batch DU: unknown IC hard-zeros; unhealthy + IC>=min soft-floors."""
     from src.strategy.ensemble_voter import EnsembleVoter
     from src.signals.signal_source import SignalSource
 
@@ -22,9 +22,9 @@ def test_apply_health_weights_hard_zeros_unhealthy():
     unhealthy_unknown = SimpleNamespace(
         health_score=0.43, status="unhealthy", ic=None
     )
-    # non-neg IC → soft floor (Batch CY)
+    # IC >= ENSEMBLE_UNHEALTHY_MIN_IC (0.08) → soft floor (Batch DU; not weak 0.05)
     unhealthy_pos_ic = SimpleNamespace(
-        health_score=0.43, status="unhealthy", ic=0.05
+        health_score=0.43, status="unhealthy", ic=0.12
     )
     degraded = SimpleNamespace(health_score=0.55, status="degraded", ic=0.0)
 

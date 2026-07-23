@@ -135,8 +135,11 @@ class TestSignalReading:
 
     def test_all_fields_present(self):
         """SignalReading should have all expected dataclass fields."""
-        expected = {'source', 'timestamp', 'value', 'confidence', 'weight',
-                    'regime_fit', 'asset_signals', 'explanation'}
+        # Batch CV/DF: is_active + metadata for inactive disclosure / provenance
+        expected = {
+            'source', 'timestamp', 'value', 'confidence', 'weight',
+            'regime_fit', 'asset_signals', 'explanation', 'is_active', 'metadata',
+        }
         actual = {f.name for f in fields(SignalReading)}
         assert actual == expected, f"Missing fields: {expected - actual}"
 
@@ -171,11 +174,14 @@ class TestEnsembleVote:
 
     def test_all_fields_present(self):
         """EnsembleVote should have all expected dataclass fields."""
+        # Batch CW/CX/DU: health_gate_* + regime_gated disclosure surfaces
         expected = {
             'timestamp', 'regime', 'regime_confidence', 'num_sources',
             'weighted_consensus', 'agreement_ratio', 'equity_bias', 'duration_bias',
             'gold_bias', 'action', 'confidence', 'reasoning', 'source_votes', 'n_eff', 'weight_entropy',
             'regime_multipliers', 'adaptive_learning',
+            'health_gate_slept', 'health_gate_freeze', 'regime_gated',
+            'health_gate_soft_floor',
         }
         actual = {f.name for f in fields(EnsembleVote)}
         assert actual == expected, f"Missing fields: {expected - actual}"
@@ -2057,9 +2063,9 @@ class TestSignalReadingFieldValidation:
     """Detailed field validation for SignalReading dataclass."""
 
     def test_field_count(self):
-        """SignalReading should have exactly 8 fields."""
+        """SignalReading should have exactly 10 fields (Batch CV/DF)."""
         flds = fields(SignalReading)
-        assert len(flds) == 8
+        assert len(flds) == 10
 
     def test_all_field_types(self):
         """Verify type annotations for all SignalReading fields."""
@@ -2125,7 +2131,8 @@ class TestEnsembleVoteFieldValidation:
 
     def test_field_count(self):
         flds = fields(EnsembleVote)
-        assert len(flds) == 17
+        # 17 core + health_gate_slept/freeze + regime_gated + soft_floor (Batch CW/CX/DU)
+        assert len(flds) == 21
 
     def test_all_field_types(self):
         """Verify specific type annotations for EnsembleVote fields."""
@@ -2154,7 +2161,16 @@ class TestEnsembleVoteFieldValidation:
     def test_no_fields_have_defaults(self):
         """All EnsembleVote fields are required except diagnostic fields."""
         import dataclasses
-        exempt = {"n_eff", "weight_entropy", "regime_multipliers", "adaptive_learning"}
+        exempt = {
+            "n_eff",
+            "weight_entropy",
+            "regime_multipliers",
+            "adaptive_learning",
+            "health_gate_slept",
+            "health_gate_freeze",
+            "regime_gated",
+            "health_gate_soft_floor",
+        }
         for f in fields(EnsembleVote):
             if f.name in exempt:
                 continue
@@ -2823,7 +2839,7 @@ class TestApplyHealthWeightsEdgeCases:
         assert "vix_term_structure" in voter._health_gate_slept
 
     def test_unhealthy_positive_ic_soft_floor(self, tmp_path):
-        """Batch CY: unhealthy with non-negative IC uses soft floor (not hard sleep)."""
+        """Batch DU: unhealthy + IC >= ENSEMBLE_UNHEALTHY_MIN_IC soft-floors."""
         voter = _make_voter(tmp_path)
         weights = {
             SignalSource.MULTI_SPEED_MOM: 0.5,
@@ -2838,7 +2854,8 @@ class TestApplyHealthWeightsEdgeCases:
             bad = MagicMock()
             bad.health_score = 0.43
             bad.status = "unhealthy"
-            bad.ic = 0.05
+            # Weak IC 0.05 hard-sleeps under DU (min 0.08); use strong IC for soft floor
+            bad.ic = 0.12
             mock_instance.calculate_all_health_scores.return_value = {
                 'multi_speed_momentum': good,
                 'vix_term_structure': bad,

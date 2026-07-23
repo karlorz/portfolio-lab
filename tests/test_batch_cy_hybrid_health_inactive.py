@@ -11,13 +11,19 @@ from src.strategy.ensemble_voter import EnsembleVoter, SignalReading
 
 
 def test_unhealthy_nonneg_ic_soft_floors_live_vix_shape() -> None:
+    """Batch DU: live-shape VIX IC 0.059 is weak (<0.08) → hard sleep; strong IC soft-floors."""
     voter = EnsembleVoter.__new__(EnsembleVoter)
     scores = {
         "cross_asset_rv": SimpleNamespace(
             health_score=0.57, status="healthy", ic=0.15
         ),
+        # Live residual IC ~0.059 is below ENSEMBLE_UNHEALTHY_MIN_IC → hard sleep
         "vix_term_structure": SimpleNamespace(
             health_score=0.4648, status="unhealthy", ic=0.059
+        ),
+        # Strong IC unhealthy still soft-floors (DU)
+        "google_trends": SimpleNamespace(
+            health_score=0.40, status="unhealthy", ic=0.15
         ),
         "alternative_data": SimpleNamespace(
             health_score=0.51, status="degraded", ic=-0.07
@@ -27,17 +33,20 @@ def test_unhealthy_nonneg_ic_soft_floors_live_vix_shape() -> None:
     mock.calculate_all_health_scores.return_value = scores
     base = {
         SignalSource.CROSS_ASSET_RV: 0.4,
-        SignalSource.VIX_TERM_STRUCTURE: 0.3,
-        SignalSource.ALTERNATIVE_DATA: 0.3,
+        SignalSource.VIX_TERM_STRUCTURE: 0.2,
+        SignalSource.GOOGLE_TRENDS: 0.2,
+        SignalSource.ALTERNATIVE_DATA: 0.2,
     }
     with patch(
         "src.signals.health_tracker.SignalHealthTracker", return_value=mock
     ):
         out = voter._apply_health_weights(base)
-    assert out[SignalSource.VIX_TERM_STRUCTURE] > 0.0
+    assert out[SignalSource.VIX_TERM_STRUCTURE] == 0.0
+    assert "vix_term_structure" in voter._health_gate_slept
+    assert out[SignalSource.GOOGLE_TRENDS] > 0.0
+    assert "google_trends" not in voter._health_gate_slept
     assert out[SignalSource.ALTERNATIVE_DATA] == 0.0
     assert "alternative_data" in voter._health_gate_slept
-    assert "vix_term_structure" not in voter._health_gate_slept
 
 
 def test_inactive_signal_status_from_breakdown() -> None:
