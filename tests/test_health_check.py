@@ -27,22 +27,37 @@ class TestCheckDataFreshness:
 
     def test_missing_prices(self, tmp_path, monkeypatch):
         """Missing prices.json should report missing status."""
-        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        public = tmp_path / "public"
+        private = tmp_path / "private"
+        public.mkdir()
+        private.mkdir()
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", public)
+        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", private)
         freshness = _check_data_freshness()
         assert freshness["prices"]["status"] == "missing"
 
     def test_fresh_prices(self, tmp_path, monkeypatch):
         """Recently modified prices.json should report ok."""
-        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
-        (tmp_path / "prices.json").write_text("{}")
+        public = tmp_path / "public"
+        private = tmp_path / "private"
+        public.mkdir()
+        private.mkdir()
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", public)
+        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", private)
+        (public / "prices.json").write_text("{}")
         freshness = _check_data_freshness()
         assert freshness["prices"]["status"] == "ok"
         assert freshness["prices"]["age_hours"] < 1
 
     def test_stale_prices(self, tmp_path, monkeypatch):
         """Old prices.json should report stale."""
-        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
-        prices_file = tmp_path / "prices.json"
+        public = tmp_path / "public"
+        private = tmp_path / "private"
+        public.mkdir()
+        private.mkdir()
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", public)
+        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", private)
+        prices_file = public / "prices.json"
         prices_file.write_text("{}")
         # Set mtime to 48 hours ago
         old_time = time.time() - 48 * 3600
@@ -54,8 +69,64 @@ class TestCheckDataFreshness:
     def test_missing_signals(self, tmp_path, monkeypatch):
         """Missing signals.json should report missing."""
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path / "private")
+        (tmp_path / "private").mkdir()
         freshness = _check_data_freshness()
         assert freshness["signals"]["status"] == "missing"
+
+    def test_signals_private_twin_ok_when_public_missing(self, tmp_path, monkeypatch):
+        """Batch HX: private multi-dest twin prevents false signals:missing."""
+        public = tmp_path / "public"
+        private = tmp_path / "private"
+        public.mkdir()
+        private.mkdir()
+        (private / "signals.json").write_text(
+            json.dumps({"target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}})
+        )
+        monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", public)
+        monkeypatch.setattr("src.monitor.health_check.DATA_DIR", private)
+        # Outside pytest path would use live fallback; force production-like
+        # candidate walk by clearing PYTEST only for the helper's private twin.
+        freshness = _check_data_freshness()
+        assert freshness["signals"]["status"] == "ok"
+        assert freshness["signals"]["age_hours"] is not None
+        assert "signals.json" in str(freshness["signals"].get("path") or "")
+
+    def test_signals_ephemeral_public_falls_back_outside_pytest(
+        self, tmp_path, monkeypatch
+    ):
+        """Batch HX: outside pytest, ephemeral PUBLIC_DATA_DIR is not probed."""
+        from src.monitor import health_check as hc
+
+        ephemeral = tmp_path / "plab-pytest-public.hx" / "data"
+        ephemeral.mkdir(parents=True)
+        # No signals in ephemeral — live-like root has TA
+        live = tmp_path / "var" / "www" / "portfolio-lab" / "data"
+        live.mkdir(parents=True)
+        (live / "signals.json").write_text(
+            json.dumps({"target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}})
+        )
+        (live / "prices.json").write_text("{}")
+        private = tmp_path / "private"
+        private.mkdir()
+
+        monkeypatch.setattr(hc, "PUBLIC_DATA_DIR", ephemeral)
+        monkeypatch.setattr(hc, "DATA_DIR", private)
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        import src.paths as paths_mod
+
+        monkeypatch.setattr(paths_mod, "DEFAULT_LIVE_PUBLIC_DATA_DIR", live)
+        # Treat only plab isolation as ephemeral so pytest-of-root live fixture
+        # is still a valid first-root probe (production live WWW is non-tmp).
+        monkeypatch.setattr(
+            "src.monitor.signal_authority.is_ephemeral_write_path",
+            lambda p: "plab-pytest" in str(p or ""),
+        )
+
+        freshness = hc._check_data_freshness()
+        assert freshness["signals"]["status"] == "ok"
+        assert "plab-pytest" not in str(freshness["signals"].get("path") or "")
+        assert freshness["prices"]["status"] == "ok"
 
     def test_hermes_cron_error_degrades_cron_check(self, tmp_path, monkeypatch):
         """Hermes scheduler errors should be included in health cron checks."""

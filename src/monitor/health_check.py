@@ -1355,36 +1355,101 @@ def _backend_summary_excluding_health_self(
     return adjusted
 
 
+def _resolve_freshness_public_root() -> Path:
+    """Operator public SoT for freshness probes (Batch HX).
+
+    Under pytest, honor the hermetic ``PUBLIC_DATA_DIR`` isolation tree.
+    Outside pytest, never probe an ephemeral plab-pytest path — fall back to
+    the live WWW tree so private ``data/health.json`` cannot stamp
+    ``signals: missing`` while live authority JSON is present.
+    """
+    root = Path(PUBLIC_DATA_DIR)
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return root
+    try:
+        from src.monitor.signal_authority import is_ephemeral_write_path
+        from src.paths import DEFAULT_LIVE_PUBLIC_DATA_DIR
+
+        if is_ephemeral_write_path(root):
+            live = Path(DEFAULT_LIVE_PUBLIC_DATA_DIR)
+            if live.is_dir():
+                logger.warning(
+                    "freshness public root ephemeral %s → live %s", root, live
+                )
+                return live
+    except Exception:  # noqa: BLE001 — keep PUBLIC_DATA_DIR on import/path failure
+        pass
+    return root
+
+
+def _freshness_artifact_check(
+    *,
+    basenames: tuple[str, ...],
+    roots: list[Path],
+    stale_hours: float,
+) -> dict[str, Any]:
+    """Return freshness status for the first existing basename under roots.
+
+    Batch HX: prefer public SoT, then private DATA_DIR twin (signals multi-dest
+    writes both; prices may lag private). Never report missing when a non-
+    ephemeral twin holds the live authority artifact.
+    """
+    now = datetime.now(timezone.utc)
+    for idx, root in enumerate(roots):
+        if root is None:
+            continue
+        try:
+            from src.monitor.signal_authority import is_ephemeral_write_path
+
+            # Outside pytest, skip *secondary* ephemeral roots (e.g. leftover
+            # plab isolation). Always probe the first (resolved public SoT)
+            # root even if the test harness placed it under /tmp — production
+            # live WWW is non-ephemeral; first root is already healed by
+            # _resolve_freshness_public_root.
+            if (
+                idx > 0
+                and not os.environ.get("PYTEST_CURRENT_TEST")
+                and is_ephemeral_write_path(root)
+            ):
+                continue
+        except Exception:  # noqa: BLE001
+            pass
+        for name in basenames:
+            path = Path(root) / name
+            if not path.is_file():
+                continue
+            mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+            age_hours = (now - mtime).total_seconds() / 3600
+            return {
+                "status": "ok" if age_hours < float(stale_hours) else "stale",
+                "age_hours": round(age_hours, 1),
+                "last_updated": mtime.isoformat(),
+                "path": str(path),
+            }
+    return {"status": "missing", "age_hours": None, "last_updated": None}
+
+
 def _check_data_freshness() -> dict:
     """Check how fresh the price data and signal data are."""
     checks = {}
-    now = datetime.now(timezone.utc)
+    public_root = _resolve_freshness_public_root()
+    private_root = Path(DATA_DIR)
 
-    # Price data freshness
-    prices_path = PUBLIC_DATA_DIR / "prices.json"
-    if prices_path.exists():
-        mtime = datetime.fromtimestamp(prices_path.stat().st_mtime, tz=timezone.utc)
-        age_hours = (now - mtime).total_seconds() / 3600
-        checks["prices"] = {
-            "status": "ok" if age_hours < 24 else "stale",
-            "age_hours": round(age_hours, 1),
-            "last_updated": mtime.isoformat(),
-        }
-    else:
-        checks["prices"] = {"status": "missing", "age_hours": None, "last_updated": None}
+    # Price data freshness (public SoT first; private twin optional fallback)
+    checks["prices"] = _freshness_artifact_check(
+        basenames=("prices.json",),
+        roots=[public_root, private_root],
+        stale_hours=24.0,
+    )
 
-    # Signal data freshness
-    signals_path = PUBLIC_DATA_DIR / "signals.json"
-    if signals_path.exists():
-        mtime = datetime.fromtimestamp(signals_path.stat().st_mtime, tz=timezone.utc)
-        age_hours = (now - mtime).total_seconds() / 3600
-        checks["signals"] = {
-            "status": "ok" if age_hours < 4 else "stale",
-            "age_hours": round(age_hours, 1),
-            "last_updated": mtime.isoformat(),
-        }
-    else:
-        checks["signals"] = {"status": "missing", "age_hours": None, "last_updated": None}
+    # Signal data freshness — live authority artifact. Prefer public twin, then
+    # private DATA_DIR/signals.json (multi-dest SSOT). Avoid false missing when
+    # only the private twin is visible to the health process.
+    checks["signals"] = _freshness_artifact_check(
+        basenames=("signals.json",),
+        roots=[public_root, private_root],
+        stale_hours=4.0,
+    )
 
     # Cron status
     cron_path = DATA_DIR / "cron_status.json"
