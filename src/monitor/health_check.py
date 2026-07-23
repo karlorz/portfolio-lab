@@ -1088,7 +1088,41 @@ def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
             )
         except Exception:  # noqa: BLE001
             pass
-        ops_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        # Batch IC: serialize-once multi-dest (public + private ops twin + repo
+        # soft-mirror) with atomic 0o644. Private twin is DATA_DIR/health_ops.json
+        # (not monitor health.json — different schema).
+        private_ops = Path(DATA_DIR) / "health_ops.json"
+        wrote_ops = False
+        try:
+            from src.monitor.signal_authority import write_json_multi_dest
+
+            result = write_json_multi_dest(
+                report,
+                public_path=ops_path,
+                private_path=private_ops,
+                soft_mirror_repo=True,
+                repo_filename="health_ops.json",
+            )
+            wrote_ops = bool(
+                result.wrote_public or result.wrote_private or result.wrote_repo
+            )
+            if result.skipped_reason:
+                logger.warning(
+                    "health_ops multi-dest partial skip: %s", result.skipped_reason
+                )
+        except Exception as multi_exc:  # noqa: BLE001
+            logger.warning(
+                "health_ops multi-dest failed (%s); fallback write_text", multi_exc
+            )
+            wrote_ops = False
+        if not wrote_ops:
+            ops_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+            try:
+                import os
+
+                os.chmod(ops_path, 0o644)
+            except OSError:
+                pass
         logger.info("Ops health written to %s", ops_path)
     except OSError as exc:
         logger.warning("Failed to write ops health at %s: %s", ops_path, exc)
@@ -1158,7 +1192,43 @@ def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
             except Exception:  # noqa: BLE001 — never block health merge on provenance
                 pass
             try:
-                public_health.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+                # Batch IC: public dashboard health + repo soft-mirror only.
+                # Never fan-out to private DATA_DIR/health.json (monitor schema).
+                wrote_health = False
+                try:
+                    from src.monitor.signal_authority import write_json_multi_dest
+
+                    h_result = write_json_multi_dest(
+                        payload,
+                        public_path=public_health,
+                        private_path=None,
+                        soft_mirror_repo=True,
+                        repo_filename="health.json",
+                    )
+                    wrote_health = bool(
+                        h_result.wrote_public or h_result.wrote_repo
+                    )
+                    if h_result.skipped_reason:
+                        logger.warning(
+                            "public health merge multi-dest partial skip: %s",
+                            h_result.skipped_reason,
+                        )
+                except Exception as multi_exc:  # noqa: BLE001
+                    logger.warning(
+                        "public health merge multi-dest failed (%s); fallback",
+                        multi_exc,
+                    )
+                    wrote_health = False
+                if not wrote_health:
+                    public_health.write_text(
+                        json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+                    )
+                    try:
+                        import os
+
+                        os.chmod(public_health, 0o644)
+                    except OSError:
+                        pass
                 logger.info("Merged ops kill authority into %s", public_health)
             except OSError as exc:
                 logger.warning("Failed to merge ops health into %s: %s", public_health, exc)
@@ -1176,9 +1246,26 @@ def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
                         note=f"public health.json merge write failed: {exc}",
                     )
                     # Best-effort re-write health_ops with dual_write_ok=false
-                    ops_path.write_text(
-                        json.dumps(report_fail, indent=2), encoding="utf-8"
-                    )
+                    try:
+                        from src.monitor.signal_authority import write_json_multi_dest
+
+                        write_json_multi_dest(
+                            report_fail,
+                            public_path=ops_path,
+                            private_path=Path(DATA_DIR) / "health_ops.json",
+                            soft_mirror_repo=True,
+                            repo_filename="health_ops.json",
+                        )
+                    except Exception:  # noqa: BLE001
+                        ops_path.write_text(
+                            json.dumps(report_fail, indent=2) + "\n", encoding="utf-8"
+                        )
+                        try:
+                            import os
+
+                            os.chmod(ops_path, 0o644)
+                        except OSError:
+                            pass
                 except Exception:  # noqa: BLE001
                     pass
 
