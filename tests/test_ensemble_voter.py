@@ -488,12 +488,25 @@ class TestEnsembleVoter:
         assert -1.0 <= vote.weighted_consensus <= 1.0
 
     def test_compute_vote_single_reading(self, tmp_path):
-        """Single reading should still produce valid vote."""
+        """Single reading should still produce valid vote.
+
+        Batch DK/HS: MULTI_SPEED_MOM is soft-delete (REGIME_WEIGHTS 0) — use an
+        awake arm so the vote path has non-zero mass.
+        """
         voter = _make_voter(tmp_path)
         readings = {
-            SignalSource.MULTI_SPEED_MOM: _make_reading(value=0.5, source=SignalSource.MULTI_SPEED_MOM),
+            SignalSource.CROSS_ASSET_RV: _make_reading(
+                value=0.5, source=SignalSource.CROSS_ASSET_RV
+            ),
         }
-        vote = voter.compute_vote(readings=readings, regime=Regime.NORMAL, regime_confidence=0.7)
+        with patch.object(
+            voter,
+            "_apply_health_weights",
+            side_effect=lambda w: w,
+        ):
+            vote = voter.compute_vote(
+                readings=readings, regime=Regime.NORMAL, regime_confidence=0.7
+            )
         assert vote.num_sources == 1
         assert vote.weighted_consensus != 0
 
@@ -2604,35 +2617,44 @@ class TestVoteComputationEdgeCases:
         assert vote.action in ('neutral', 'increase_equity', 'decrease_equity', 'risk_off')
 
     def test_compute_vote_value_at_exactly_positive_one(self, tmp_path):
+        """Batch HS: use awake arm (not MSM soft-delete) + bypass live health gate."""
         voter = _make_voter(tmp_path)
         readings = {
-            SignalSource.MULTI_SPEED_MOM: _make_reading(
-                value=1.0, source=SignalSource.MULTI_SPEED_MOM,
+            SignalSource.CROSS_ASSET_RV: _make_reading(
+                value=1.0, source=SignalSource.CROSS_ASSET_RV,
                 asset_signals={'SPY': 1.0, 'TLT': -0.5, 'GLD': 0.3},
             ),
         }
-        vote = voter.compute_vote(readings=readings, regime=Regime.NORMAL, regime_confidence=0.8)
+        with patch.object(voter, "_apply_health_weights", side_effect=lambda w: w):
+            vote = voter.compute_vote(
+                readings=readings, regime=Regime.NORMAL, regime_confidence=0.8
+            )
         assert vote.weighted_consensus == pytest.approx(1.0)
         assert vote.equity_bias == pytest.approx(1.0)
 
     def test_compute_vote_value_at_exactly_negative_one(self, tmp_path):
+        """Batch HS: awake arm + health bypass so soft-delete/health cannot mute ±1."""
         voter = _make_voter(tmp_path)
         readings = {
-            SignalSource.MULTI_SPEED_MOM: _make_reading(
-                value=-1.0, source=SignalSource.MULTI_SPEED_MOM,
+            SignalSource.CROSS_ASSET_RV: _make_reading(
+                value=-1.0, source=SignalSource.CROSS_ASSET_RV,
                 asset_signals={'SPY': -1.0, 'TLT': 0.5, 'GLD': 0.0},
             ),
         }
-        vote = voter.compute_vote(readings=readings, regime=Regime.NORMAL, regime_confidence=0.8)
+        with patch.object(voter, "_apply_health_weights", side_effect=lambda w: w):
+            vote = voter.compute_vote(
+                readings=readings, regime=Regime.NORMAL, regime_confidence=0.8
+            )
         assert vote.weighted_consensus == pytest.approx(-1.0)
         assert vote.equity_bias == pytest.approx(-1.0)
 
     def test_compute_vote_conflicting_assets(self, tmp_path):
         """Different asset_signals per source should produce blended biases."""
         voter = _make_voter(tmp_path)
+        # Both arms must be non-soft-delete under REGIME_WEIGHTS normal.
         readings = {
-            SignalSource.MULTI_SPEED_MOM: _make_reading(
-                value=0.3, source=SignalSource.MULTI_SPEED_MOM,
+            SignalSource.ALTERNATIVE_DATA: _make_reading(
+                value=0.3, source=SignalSource.ALTERNATIVE_DATA,
                 asset_signals={'SPY': 0.6, 'TLT': -0.4, 'GLD': 0.2},
             ),
             SignalSource.CROSS_ASSET_RV: _make_reading(
@@ -2640,10 +2662,13 @@ class TestVoteComputationEdgeCases:
                 asset_signals={'SPY': -0.3, 'TLT': 0.5, 'GLD': -0.1},
             ),
         }
-        vote = voter.compute_vote(readings=readings, regime=Regime.NORMAL, regime_confidence=0.7)
-        # Equity bias should be a blend: (0.6 * w1 + (-0.3) * w2) / (w1 + w2)
-        assert vote.equity_bias != 0.6  # Not just MSM's value
-        assert vote.equity_bias != -0.3  # Not just RV's value
+        with patch.object(voter, "_apply_health_weights", side_effect=lambda w: w):
+            vote = voter.compute_vote(
+                readings=readings, regime=Regime.NORMAL, regime_confidence=0.7
+            )
+        # Equity bias should be a blend: not either source alone
+        assert vote.equity_bias != 0.6
+        assert vote.equity_bias != -0.3
 
     def test_compute_vote_empty_readings_with_regime_gate(self, tmp_path):
         """Empty readings should produce neutral vote even with regime gating."""
