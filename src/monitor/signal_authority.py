@@ -138,6 +138,69 @@ def default_repo_public_data_path(filename: str) -> Path:
         return Path("public/data") / name
 
 
+def is_ephemeral_write_path(path: Path | str | None) -> bool:
+    """True when *path* lives under pytest / plab isolation temp trees."""
+    if path is None:
+        return False
+    text = str(path).replace("\\", "/")
+    if not text:
+        return False
+    if "plab-pytest" in text:
+        return True
+    if "/pytest-of-" in text:
+        return True
+    if "/tmp/pytest-" in text or text.startswith("/tmp/pytest-"):
+        return True
+    if "/var/folders/" in text and "pytest" in text:
+        return True
+    return False
+
+
+def is_production_ssot_path(path: Path | str | None) -> bool:
+    """True when *path* resolves under live lab private/public data trees.
+
+    Tests isolate PUBLIC_DATA_DIR to ``/tmp/plab-pytest-public.*`` but often
+    leave ``DATA_DIR`` / repo ``public/data`` pointing at production. Multi-dest
+    fan-out must not rewrite those SSOT paths while ``PYTEST_CURRENT_TEST`` is
+    set (Batch HP private alerts/health pollution).
+    """
+    if path is None:
+        return False
+    if is_ephemeral_write_path(path):
+        return False
+    try:
+        resolved = Path(path).expanduser().resolve()
+    except OSError:
+        resolved = Path(path).expanduser()
+    text = str(resolved).replace("\\", "/")
+    try:
+        from src.paths import PROJECT_ROOT
+
+        project = str(Path(PROJECT_ROOT).resolve()).replace("\\", "/")
+    except Exception:  # noqa: BLE001
+        project = "/root/projects/portfolio-lab"
+    production_prefixes = (
+        f"{project}/data",
+        f"{project}/public/data",
+        "/var/www/portfolio-lab/data",
+    )
+    return any(
+        text == prefix or text.startswith(prefix + "/")
+        for prefix in production_prefixes
+    )
+
+
+def _should_skip_production_ssot_write(path: Path | str | None) -> bool:
+    """Skip production SSOT writes under pytest unless explicitly allowed."""
+    if path is None:
+        return False
+    if os.environ.get("PORTFOLIO_LAB_ALLOW_LIVE_PUBLIC", "0") == "1":
+        return False
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        return False
+    return is_production_ssot_path(path)
+
+
 def _atomic_write_text(path: Path, text: str, *, mode: int = 0o644) -> None:
     """Atomic replace with explicit mode (mkstemp defaults to 0o600).
 
@@ -226,16 +289,35 @@ def write_signals_multi_dest(
     )
 
     if pub is not None:
-        _atomic_write_text(pub, text)
-        result.wrote_public = True
-        result.public_path = str(pub)
+        if _should_skip_production_ssot_write(pub):
+            logger.warning(
+                "signals multi-dest skipped production public under pytest: %s",
+                pub,
+            )
+            result.skipped_reason = f"public:pytest-ssot-guard:{pub}"
+        else:
+            _atomic_write_text(pub, text)
+            result.wrote_public = True
+            result.public_path = str(pub)
 
     if priv is not None:
         try:
             if pub is None or priv.resolve() != pub.resolve():
-                _atomic_write_text(priv, text)
-                result.wrote_private = True
-                result.private_path = str(priv)
+                if _should_skip_production_ssot_write(priv):
+                    logger.warning(
+                        "signals multi-dest skipped production private under pytest: %s",
+                        priv,
+                    )
+                    reason = f"private:pytest-ssot-guard:{priv}"
+                    result.skipped_reason = (
+                        f"{result.skipped_reason};{reason}"
+                        if result.skipped_reason
+                        else reason
+                    )
+                else:
+                    _atomic_write_text(priv, text)
+                    result.wrote_private = True
+                    result.private_path = str(priv)
         except OSError as exc:
             logger.warning("private signals twin write failed: %s", exc)
             result.skipped_reason = f"private:{exc}"
@@ -246,6 +328,17 @@ def write_signals_multi_dest(
                 result.wrote_repo = False
             elif priv is not None and repo.resolve() == priv.resolve():
                 result.wrote_repo = False
+            elif _should_skip_production_ssot_write(repo):
+                logger.warning(
+                    "signals multi-dest skipped production repo soft-mirror under pytest: %s",
+                    repo,
+                )
+                reason = f"repo:pytest-ssot-guard:{repo}"
+                result.skipped_reason = (
+                    f"{result.skipped_reason};{reason}"
+                    if result.skipped_reason
+                    else reason
+                )
             else:
                 _atomic_write_text(repo, text)
                 result.wrote_repo = True
@@ -322,16 +415,35 @@ def write_json_multi_dest(
         repo = None
 
     if pub is not None:
-        _atomic_write_text(pub, text)
-        result.wrote_public = True
-        result.public_path = str(pub)
+        if _should_skip_production_ssot_write(pub):
+            logger.warning(
+                "json multi-dest skipped production public under pytest: %s",
+                pub,
+            )
+            result.skipped_reason = f"public:pytest-ssot-guard:{pub}"
+        else:
+            _atomic_write_text(pub, text)
+            result.wrote_public = True
+            result.public_path = str(pub)
 
     if priv is not None:
         try:
             if pub is None or priv.resolve() != pub.resolve():
-                _atomic_write_text(priv, text)
-                result.wrote_private = True
-                result.private_path = str(priv)
+                if _should_skip_production_ssot_write(priv):
+                    logger.warning(
+                        "json multi-dest skipped production private under pytest: %s",
+                        priv,
+                    )
+                    reason = f"private:pytest-ssot-guard:{priv}"
+                    result.skipped_reason = (
+                        f"{result.skipped_reason};{reason}"
+                        if result.skipped_reason
+                        else reason
+                    )
+                else:
+                    _atomic_write_text(priv, text)
+                    result.wrote_private = True
+                    result.private_path = str(priv)
         except OSError as exc:
             logger.warning("private multi-dest write failed: %s", exc)
             result.skipped_reason = f"private:{exc}"
@@ -342,6 +454,17 @@ def write_json_multi_dest(
                 result.wrote_repo = False
             elif priv is not None and repo.resolve() == priv.resolve():
                 result.wrote_repo = False
+            elif _should_skip_production_ssot_write(repo):
+                logger.warning(
+                    "json multi-dest skipped production repo soft-mirror under pytest: %s",
+                    repo,
+                )
+                reason = f"repo:pytest-ssot-guard:{repo}"
+                result.skipped_reason = (
+                    f"{result.skipped_reason};{reason}"
+                    if result.skipped_reason
+                    else reason
+                )
             else:
                 _atomic_write_text(repo, text)
                 result.wrote_repo = True

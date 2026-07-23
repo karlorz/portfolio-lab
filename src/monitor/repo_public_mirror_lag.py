@@ -154,15 +154,19 @@ def apply_lag_summary_to_health_doc(
 def is_ephemeral_restamp_path(path: Path | str) -> bool:
     """True when *path* is a pytest/tmp fixture tree (must not restamp prod SSOT).
 
-    Soft-mirror tests and unit fixtures live under ``/tmp/pytest-of-*`` or
-    ``/tmp/pytest-*``. Writing production ``data/health.json`` from those
-    runs poisons private lag SLIs with fixture stamp values (Batch HM DA).
+    Soft-mirror tests and unit fixtures live under ``/tmp/pytest-of-*``,
+    ``/tmp/pytest-*``, or portfolio-lab's Makefile isolation
+    ``/tmp/plab-pytest-public.*`` (conftest H16). Writing production
+    ``data/health.json`` from those runs poisons private lag SLIs with
+    fixture stamp values (Batch HM DA / HP).
     """
     text = str(path or "")
     if not text:
         return False
     # Normalize for substring checks (also catch resolved /private/tmp links)
     lowered = text.replace("\\", "/")
+    if "plab-pytest" in lowered:
+        return True
     if "/pytest-of-" in lowered:
         return True
     if "/tmp/pytest-" in lowered or lowered.startswith("/tmp/pytest-"):
@@ -209,6 +213,14 @@ def restamp_mirror_lag_on_health_documents(
     if not paths:
         return result
 
+    # Batch HP: lag_summary.source/dest from plab-pytest isolation must never
+    # be stamped onto production health docs (false-green 0/1 + polluted source).
+    lag_src = str((lag_summary or {}).get("source") or source_root or "")
+    lag_dst = str((lag_summary or {}).get("dest") or dest_root or "")
+    lag_probe_ephemeral = is_ephemeral_restamp_path(lag_src) or is_ephemeral_restamp_path(
+        lag_dst
+    )
+
     # Batch HM: when any restamp path is ephemeral (pytest tmp), never touch
     # non-ephemeral production health docs in the same batch (private DATA_DIR
     # SSOT pollution). Allow pure-fixture batches (all ephemeral) for unit tests.
@@ -242,6 +254,18 @@ def restamp_mirror_lag_on_health_documents(
             result["skipped"].append(f"{path}:mixed-batch-path-guard")
             logger.warning(
                 "restamp skipped non-ephemeral path in mixed fixture batch: %s",
+                path,
+            )
+            continue
+        # Ephemeral lag probe (PUBLIC_DATA_DIR=/tmp/plab-pytest-*) must not
+        # stamp production private/www health even outside a mixed path batch.
+        if lag_probe_ephemeral and not ephemeral:
+            result["skipped"].append(f"{path}:ephemeral-lag-source-guard")
+            logger.warning(
+                "restamp skipped production path with ephemeral lag probe "
+                "(source=%s dest=%s): %s",
+                lag_src,
+                lag_dst,
                 path,
             )
             continue
