@@ -7,9 +7,15 @@ from pathlib import Path
 
 def test_generate_signals_json_source_dual_writes_private():
     src = Path("src/dashboard/generator.py").read_text(encoding="utf-8")
-    assert "Batch CO" in src
+    # Batch CO dual-write evolved to Batch HK serialize-once multi-dest
+    # (write_signals_multi_dest); keep source-contract checks current.
     assert 'private_path = Path(DATA_DIR) / "signals.json"' in src
-    assert "Dual-wrote private signals.json" in src or "private signals.json dual-write" in src
+    assert "write_signals_multi_dest" in src
+    assert (
+        "Dual-wrote private signals.json" in src
+        or "private signals.json dual-write" in src
+        or "Multi-dest private signals.json" in src
+    )
 
 
 def test_live_private_signals_exists_after_cn_reemit():

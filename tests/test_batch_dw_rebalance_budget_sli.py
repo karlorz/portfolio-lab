@@ -88,6 +88,7 @@ def test_partial_health_refresh_reprojects_budget_sli(
     public.mkdir()
     private.mkdir()
     signals = {
+        "target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
         "generated_at": "2026-07-22T05:00:00+00:00",
         "generator_git_sha": "deadbeef",
         "generator_git_sha_status": "full_generate",

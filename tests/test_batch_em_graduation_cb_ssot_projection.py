@@ -156,6 +156,7 @@ def test_partial_signals_health_patch_projects_cb(tmp_path, monkeypatch) -> None
     private.mkdir()
     _write_ssot(private, consecutive_ok=4, status="green")
     signals = {
+        "target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
         "health": {
             "status": "ok",
             "graduation_circuit_breaker_consecutive_ok": 0,
@@ -163,6 +164,7 @@ def test_partial_signals_health_patch_projects_cb(tmp_path, monkeypatch) -> None
         }
     }
     (public / "signals.json").write_text(json.dumps(signals), encoding="utf-8")
+    (private / "signals.json").write_text(json.dumps(signals), encoding="utf-8")
     (private / "kill_switch.json").write_text(
         json.dumps({"enabled": False}), encoding="utf-8"
     )

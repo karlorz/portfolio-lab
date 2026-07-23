@@ -745,25 +745,75 @@ def refresh_signals_health_kill_fields(
     # After honesty stamp, concentration lag flag is definitive for this path
     if isinstance(payload.get("health"), dict):
         payload["health"]["ensemble_may_lag_full_generate"] = True
+
+    root_data = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+    private = root_data / "signals.json"
+
+    # Authority gate (Batch GF dual-write): never publish hollow signals.
+    # Prefer recovering target_allocations from the private twin when public
+    # was partially wiped; still refuse when neither dest has live TA.
     try:
-        text = json.dumps(payload, indent=2)
-        signals_path.write_text(text, encoding="utf-8")
-        logger.info("Refreshed signals.health kill fields at %s", signals_path)
-        # Batch CO/CR: dual-write private twin when present (soft-mirror lag fix)
-        try:
-            root_data = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
-            private = root_data / "signals.json"
-            if private.resolve() != signals_path.resolve() and (
-                private.exists() or private.parent.is_dir()
+        from src.monitor.signal_authority import (
+            AuthorityValidationError,
+            validate_authority_payload,
+            write_signals_multi_dest,
+        )
+    except ImportError as exc:
+        logger.warning("signal_authority unavailable; skip kill refresh write: %s", exc)
+        return
+
+    try:
+        validate_authority_payload(payload)
+    except AuthorityValidationError:
+        recovered = False
+        if private.is_file():
+            try:
+                priv_blob = json.loads(private.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+                priv_blob = None
+            if isinstance(priv_blob, dict) and isinstance(
+                priv_blob.get("target_allocations"), dict
             ):
-                private.write_text(text, encoding="utf-8")
-                logger.info(
-                    "Refreshed private signals.health twin at %s", private
-                )
-        except OSError as private_exc:
-            logger.warning(
-                "private signals.health twin write skipped: %s", private_exc
+                payload["target_allocations"] = priv_blob["target_allocations"]
+                try:
+                    validate_authority_payload(payload)
+                    recovered = True
+                    logger.warning(
+                        "signals kill refresh recovered target_allocations "
+                        "from private twin %s",
+                        private,
+                    )
+                except AuthorityValidationError:
+                    recovered = False
+        if not recovered:
+            logger.error(
+                "Refusing signals.health kill refresh: missing live authority "
+                "target_allocations on public %s (private twin also unusable)",
+                signals_path,
             )
+            return
+
+    try:
+        # Fan-out private twin when DATA_DIR is a real directory (or file already
+        # exists). write_signals_multi_dest skips same-path resolve itself.
+        private_dest = private if (private.exists() or private.parent.is_dir()) else None
+        result = write_signals_multi_dest(
+            payload,
+            public_path=signals_path,
+            private_path=private_dest,
+            soft_mirror_repo=True,
+        )
+        if result.wrote_public:
+            logger.info("Refreshed signals.health kill fields at %s", signals_path)
+        if result.wrote_private:
+            logger.info("Refreshed private signals.health twin at %s", private)
+        if result.skipped_reason:
+            logger.warning(
+                "signals multi-dest kill refresh partial skip: %s",
+                result.skipped_reason,
+            )
+    except AuthorityValidationError as exc:
+        logger.error("Refusing signals.health kill refresh (authority gate): %s", exc)
     except OSError as exc:
         logger.warning("Failed to write signals health kill refresh: %s", exc)
 

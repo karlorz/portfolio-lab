@@ -102,8 +102,12 @@ def test_partial_health_patch_projects_mirror_lag(tmp_path, monkeypatch) -> None
         json.dumps({"generator_git_sha": "old", "v": 1}), encoding="utf-8"
     )
 
-    signals = {"health": {"status": "ok"}}
+    signals = {
+        "target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
+        "health": {"status": "ok"},
+    }
     (public / "signals.json").write_text(json.dumps(signals), encoding="utf-8")
+    (private / "signals.json").write_text(json.dumps(signals), encoding="utf-8")
     (private / "kill_switch.json").write_text(
         json.dumps({"enabled": False}), encoding="utf-8"
     )

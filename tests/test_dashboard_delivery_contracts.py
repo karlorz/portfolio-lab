@@ -40,6 +40,15 @@ def test_compact_health_summary_drops_unbounded_sections_and_counts_statuses():
         # portfolio-lab-health self-errors are excluded from failed rollup so
         # sticky tasker mirrors of prior health exits cannot inflate counts.
         "failed_cron_jobs": 0,
+        # Batch EE: dual-signal pending vs artifact-fresh keys always projected
+        # when cron_jobs is present (zeros / none when no pending rows).
+        "cron_pending_artifact_reconciled_jobs": 0,
+        "cron_pending_never_run_jobs": 0,
+        "cron_pending_artifact_reconciled_names": None,
+        "cron_pending_never_run_names": None,
+        "cron_pending_artifact_sample": None,
+        "cron_pending_artifact_status": "none",
+        "cron_pending_artifact_badge": "artifact_ok=0 pending_never_run=0",
         "stale_data_count": 2,
         "scheduler_status": "degraded",
         "data_pipeline_slo_status": "critical",

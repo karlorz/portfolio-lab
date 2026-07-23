@@ -510,14 +510,13 @@ class TestSignalStalenessNormalization:
                 }
             )
         )
-        (public_dir / "signals.json").write_text(
-            json.dumps(
-                {
-                    "generated_at": "2026-07-12T00:00:00+00:00",
-                    "alternative_data": {"timestamp": "2026-07-12T00:00:00+00:00"},
-                }
-            )
-        )
+        signals_body = {
+            "target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
+            "generated_at": "2026-07-12T00:00:00+00:00",
+            "alternative_data": {"timestamp": "2026-07-12T00:00:00+00:00"},
+        }
+        (public_dir / "signals.json").write_text(json.dumps(signals_body))
+        (data_dir / "signals.json").write_text(json.dumps(signals_body))
 
         assert refresh_public_alternative_data_projection(
             data_dir=data_dir, public_dir=public_dir
@@ -3132,6 +3131,9 @@ class TestSignalsJSONEdgeCases:
                 return value.astimezone(tz)
 
         gen = DashboardGenerator.__new__(DashboardGenerator)
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        champion = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
 
         def add_nested_timestamp(output, context):
             nested_ts = datetime.fromisoformat(output["generated_at"]) + timedelta(seconds=1)
@@ -3140,16 +3142,29 @@ class TestSignalsJSONEdgeCases:
             return enriched
 
         with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
-            with patch("src.dashboard.generator.datetime", FakeDateTime):
-                with patch.object(gen, "_load_signal_generation_context", return_value={}):
-                    with patch.object(gen, "_build_base_signal_sections", return_value={}):
-                        with patch.object(gen, "_build_optional_signal_sections", side_effect=add_nested_timestamp):
-                            with patch.object(gen, "_apply_signal_postprocessors", side_effect=lambda output, context: output):
-                                with patch(
-                                    "src.monitor.decision_registry.record_dashboard_cycle_decision",
-                                    side_effect=lambda *args, **kwargs: None,
+            with patch("src.dashboard.generator.DATA_DIR", data_dir):
+                with patch("src.dashboard.generator.datetime", FakeDateTime):
+                    with patch.object(gen, "_load_signal_generation_context", return_value={}):
+                        with patch.object(
+                            gen,
+                            "_build_base_signal_sections",
+                            return_value={"target_allocations": champion},
+                        ):
+                            with patch.object(
+                                gen,
+                                "_build_optional_signal_sections",
+                                side_effect=add_nested_timestamp,
+                            ):
+                                with patch.object(
+                                    gen,
+                                    "_apply_signal_postprocessors",
+                                    side_effect=lambda output, context: output,
                                 ):
-                                    path = gen.generate_signals_json()
+                                    with patch(
+                                        "src.monitor.decision_registry.record_dashboard_cycle_decision",
+                                        side_effect=lambda *args, **kwargs: None,
+                                    ):
+                                        path = gen.generate_signals_json()
 
         data = json.loads(path.read_text(encoding="utf-8"))
         top_level = datetime.fromisoformat(data["generated_at"])
@@ -3160,6 +3175,7 @@ class TestSignalsJSONEdgeCases:
             nested = nested.replace(tzinfo=timezone.utc)
         assert top_level >= nested
         assert data["timestamp"] == data["generated_at"]
+        assert data["target_allocations"] == champion
 
     def test_generate_regime_gate_json_deduplicates_active_signal_identifiers(
         self,

@@ -25,6 +25,7 @@ __all__ = [
     "restamp_mirror_lag_on_health_documents",
     "resolve_mirror_lag_for_consumer",
     "apply_lag_summary_to_health_doc",
+    "is_ephemeral_restamp_path",
 ]
 
 _MIRROR_MOD_NAME = "portfolio_lab_mirror_repo_public_data"
@@ -149,6 +150,27 @@ def apply_lag_summary_to_health_doc(
     return projected
 
 
+def is_ephemeral_restamp_path(path: Path | str) -> bool:
+    """True when *path* is a pytest/tmp fixture tree (must not restamp prod SSOT).
+
+    Soft-mirror tests and unit fixtures live under ``/tmp/pytest-of-*`` or
+    ``/tmp/pytest-*``. Writing production ``data/health.json`` from those
+    runs poisons private lag SLIs with fixture stamp values (Batch HM DA).
+    """
+    text = str(path or "")
+    if not text:
+        return False
+    # Normalize for substring checks (also catch resolved /private/tmp links)
+    lowered = text.replace("\\", "/")
+    if "/pytest-of-" in lowered:
+        return True
+    if "/tmp/pytest-" in lowered or lowered.startswith("/tmp/pytest-"):
+        return True
+    if "/var/folders/" in lowered and "pytest" in lowered:
+        return True
+    return False
+
+
 def restamp_mirror_lag_on_health_documents(
     *,
     paths: list[Path | str] | None = None,
@@ -168,6 +190,7 @@ def restamp_mirror_lag_on_health_documents(
         }
     """
     import json
+    import os
     from datetime import datetime, timezone
 
     result: dict[str, Any] = {
@@ -186,6 +209,13 @@ def restamp_mirror_lag_on_health_documents(
     if not paths:
         return result
 
+    # Batch HM: when any restamp path is ephemeral (pytest tmp), never touch
+    # non-ephemeral production health docs in the same batch (private DATA_DIR
+    # SSOT pollution). Allow pure-fixture batches (all ephemeral) for unit tests.
+    resolved_paths = [Path(raw) for raw in paths]
+    any_ephemeral = any(is_ephemeral_restamp_path(p) for p in resolved_paths)
+    under_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
     # One stamp for the whole batch so twin restamps stay byte-equal when
     # source/dest docs were equal before restamp (avoid re-introducing lag).
     restamped_at = datetime.now(timezone.utc).isoformat()
@@ -194,11 +224,28 @@ def restamp_mirror_lag_on_health_documents(
         "(Batch FX; sticky false-critical fix)"
     )
 
-    for raw in paths:
-        path = Path(raw)
+    for path in resolved_paths:
         if not path.is_file():
             result["skipped"].append(str(path.name))
             continue
+
+        ephemeral = is_ephemeral_restamp_path(path)
+        # Guard: pytest fixture trees must not restamp production SSOT, and a
+        # mixed batch that includes pytest paths must skip non-ephemeral paths.
+        if under_pytest and not ephemeral:
+            result["skipped"].append(f"{path}:pytest-path-guard")
+            logger.warning(
+                "restamp skipped production path under pytest: %s", path
+            )
+            continue
+        if any_ephemeral and not ephemeral:
+            result["skipped"].append(f"{path}:mixed-batch-path-guard")
+            logger.warning(
+                "restamp skipped non-ephemeral path in mixed fixture batch: %s",
+                path,
+            )
+            continue
+
         try:
             doc = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:

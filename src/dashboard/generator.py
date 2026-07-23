@@ -209,16 +209,19 @@ def refresh_public_alternative_data_projection(
     data_dir: Path | None = None,
     public_dir: Path | None = None,
 ) -> bool:
-    """Bounded refresh: rewrite alternative_data section in public signals.json.
+    """Bounded refresh: rewrite alternative_data on multi-dest signals.json.
 
     Called after producer save so operators do not wait for the next full
-    dashboard cron when only alt-data was updated. Returns True when the
-    public artifact was updated.
+    dashboard cron when only alt-data was updated. Fan-out is single-payload
+    same-bytes to PUBLIC + private DATA_DIR + repo soft-mirror (authority gate
+    requires target_allocations). Returns True when the public artifact was
+    updated.
     """
     root = Path(data_dir) if data_dir is not None else DATA_DIR
     public = Path(public_dir) if public_dir is not None else PUBLIC_DIR
     producer = root / "signals" / "alternative_data_latest.json"
     signals_path = public / "signals.json"
+    private_path = root / "signals.json"
     if not producer.exists() or not signals_path.exists():
         return False
     try:
@@ -228,6 +231,38 @@ def refresh_public_alternative_data_projection(
         logger.warning("Alt-data projection refresh skipped (read failed): %s", exc)
         return False
     if not isinstance(signals, dict) or not isinstance(alt_raw, dict):
+        return False
+
+    # Recover authority from private twin if public was hollow mid-window.
+    try:
+        from src.monitor.signal_authority import (
+            AuthorityValidationError,
+            validate_authority_payload,
+            write_signals_multi_dest,
+        )
+
+        try:
+            validate_authority_payload(signals)
+        except AuthorityValidationError:
+            if private_path.is_file():
+                try:
+                    priv = json.loads(private_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+                    priv = None
+                if isinstance(priv, dict) and isinstance(
+                    priv.get("target_allocations"), dict
+                ):
+                    signals["target_allocations"] = priv["target_allocations"]
+            try:
+                validate_authority_payload(signals)
+            except AuthorityValidationError as exc:
+                logger.error(
+                    "Alt-data projection refused (no live authority TA): %s",
+                    exc,
+                )
+                return False
+    except ImportError as exc:
+        logger.warning("signal_authority unavailable for alt-data refresh: %s", exc)
         return False
 
     projected = project_alternative_data_signal(alt_raw)
@@ -247,14 +282,28 @@ def refresh_public_alternative_data_projection(
     signals["content_patch_source"] = "bounded_alt_data_refresh"
     _apply_partial_patch_git_sha_honesty(signals, patch_source="bounded_alt_data_refresh")
     try:
-        save_results_json(signals, output_path=str(signals_path))
+        result = write_signals_multi_dest(
+            signals,
+            public_path=signals_path,
+            private_path=private_path,
+            soft_mirror_repo=True,
+        )
+    except AuthorityValidationError as exc:
+        logger.error("Alt-data projection authority gate refused write: %s", exc)
+        return False
     except (OSError, TypeError, ValueError) as exc:
         logger.warning("Alt-data projection refresh write failed: %s", exc)
         return False
+    if not result.wrote_public:
+        logger.warning("Alt-data projection refresh wrote no public dest")
+        return False
     logger.info(
-        "Refreshed public alternative_data projection at %s (producer_ts=%s)",
+        "Refreshed public alternative_data projection at %s (producer_ts=%s; "
+        "private=%s repo=%s)",
         signals_path,
         projected.get("timestamp"),
+        result.wrote_private,
+        result.wrote_repo,
     )
     return True
 
@@ -4901,23 +4950,56 @@ class DashboardGenerator:
             logger.warning("Decision registry record skipped: %s", e)
 
         out_path = PUBLIC_DIR / "signals.json"
-        save_results_json(output, output_path=str(out_path), validator=validate_all_signals)
+        private_path = Path(DATA_DIR) / "signals.json"
 
-        # Batch CO: dual-write private DATA_DIR for SSOT / mirror lag honesty.
-        # Live authority remains PUBLIC_DIR; private is the producer-side twin
-        # so soft-mirror and ops health never see source_present=false forever.
+        # Validate once (same callback as legacy save_results_json).
         try:
-            private_path = Path(DATA_DIR) / "signals.json"
-            if private_path.resolve() != out_path.resolve():
-                private_path.parent.mkdir(parents=True, exist_ok=True)
-                save_results_json(
-                    output,
-                    output_path=str(private_path),
-                    validator=validate_all_signals,
+            output = validate_all_signals(output)
+        except Exception as e:  # noqa: BLE001 — match save_results_json soft-fail
+            logger.warning("Validation callback failed: %s", e)
+
+        # Batch HK: serialize-once multi-dest (public + private + repo soft-mirror)
+        # with authority gate + 0o644 mode. Stops Dual-wrote dual open('w') path
+        # that re-sticky 0600 and content-drifts under concurrent partials.
+        try:
+            from src.monitor.signal_authority import (
+                AuthorityValidationError,
+                default_repo_signals_path,
+                write_signals_multi_dest,
+            )
+
+            # Explicit repo_path so soft-mirror is not skipped under pytest
+            # (auto soft-mirror is gated off when PYTEST_CURRENT_TEST is set).
+            result = write_signals_multi_dest(
+                output,
+                public_path=out_path,
+                private_path=private_path,
+                repo_path=default_repo_signals_path(),
+                soft_mirror_repo=True,
+            )
+            if result.wrote_public:
+                logger.info("Generated signals.json → %s", out_path)
+            if result.wrote_private:
+                logger.info("Multi-dest private signals.json → %s", private_path)
+            if result.wrote_repo:
+                logger.info("Multi-dest repo soft-mirror signals.json → %s", result.repo_path)
+            if result.skipped_reason:
+                logger.warning(
+                    "signals full-generate multi-dest partial skip: %s",
+                    result.skipped_reason,
                 )
-                logger.info("Dual-wrote private signals.json → %s", private_path)
-        except (OSError, TypeError, ValueError) as exc:
-            logger.warning("Private signals.json dual-write skipped: %s", exc)
+        except AuthorityValidationError as exc:
+            logger.error(
+                "Refusing full generate signals write (authority gate): %s",
+                exc,
+            )
+        except (OSError, TypeError, ValueError, ImportError) as exc:
+            logger.warning(
+                "signals multi-dest full generate failed (%s); falling back to "
+                "legacy public save_results_json only",
+                exc,
+            )
+            save_results_json(output, output_path=str(out_path))
 
         return out_path
 

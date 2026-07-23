@@ -197,3 +197,74 @@ def test_soft_mirror_restamps_health_docs_after_copy(tmp_path, monkeypatch) -> N
     src_ops = json.loads((src / "health_ops.json").read_text(encoding="utf-8"))
     assert src_ops["repo_public_mirror_lagging_count"] == 0
     assert src_ops["repo_public_mirror_lag_status"] == "ok"
+
+
+def test_is_ephemeral_restamp_path_detects_pytest_trees() -> None:
+    from src.monitor.repo_public_mirror_lag import is_ephemeral_restamp_path
+
+    assert is_ephemeral_restamp_path("/tmp/pytest-of-root/pytest-1/health.json")
+    assert is_ephemeral_restamp_path("/tmp/pytest-99/data/health.json")
+    assert not is_ephemeral_restamp_path("/root/projects/portfolio-lab/data/health.json")
+    assert not is_ephemeral_restamp_path("/var/www/portfolio-lab/data/health.json")
+
+
+def test_restamp_skips_production_when_mixed_with_pytest(tmp_path, monkeypatch) -> None:
+    """Batch HM DA: fixture restamp must not poison production private health SSOT."""
+    from src.monitor.repo_public_mirror_lag import restamp_mirror_lag_on_health_documents
+
+    fixture_ops = tmp_path / "health_ops.json"
+    # Simulate production private path that must not be rewritten in mixed batch
+    prod = tmp_path / "prod_data"
+    prod.mkdir()
+    prod_health = prod / "health.json"
+    sticky_fixture = {
+        "status": "ok",
+        "repo_public_mirror_lagging_count": 11,
+        "repo_public_mirror_lag_status": "critical",
+        "repo_public_mirror_lag": {"lagging_count": 11, "total": 33, "status": "critical"},
+    }
+    clean_prod = {
+        "status": "ok",
+        "repo_public_mirror_lagging_count": 0,
+        "repo_public_mirror_lag_status": "ok",
+        "repo_public_mirror_lag": {"lagging_count": 0, "total": 33, "status": "ok"},
+        "marker": "prod-ssot",
+    }
+    fixture_ops.write_text(json.dumps(sticky_fixture), encoding="utf-8")
+    prod_health.write_text(json.dumps(clean_prod), encoding="utf-8")
+    before = prod_health.read_text(encoding="utf-8")
+
+    # Force fixture path classification via monkeypatch of is_ephemeral
+    import src.monitor.repo_public_mirror_lag as mlag
+
+    real_is_ephemeral = mlag.is_ephemeral_restamp_path
+
+    def _classify(path):
+        p = str(path)
+        if "prod_data" in p:
+            return False
+        if str(tmp_path) in p:
+            return True
+        return real_is_ephemeral(path)
+
+    monkeypatch.setattr(mlag, "is_ephemeral_restamp_path", _classify)
+
+    live = {
+        "lagging_count": 0,
+        "total": 33,
+        "lagging_paths": [],
+        "source": "/var/www/x",
+        "dest": str(tmp_path),
+        "ok": True,
+    }
+    result = restamp_mirror_lag_on_health_documents(
+        paths=[fixture_ops, prod_health],
+        lag_summary=live,
+    )
+    assert any("health_ops" in p for p in result["restamped"])
+    assert any("path-guard" in s or "prod" in s for s in result["skipped"]) or (
+        prod_health.read_text(encoding="utf-8") == before
+    )
+    # Production SSOT must remain untouched
+    assert prod_health.read_text(encoding="utf-8") == before
+    assert json.loads(before)["marker"] == "prod-ssot"

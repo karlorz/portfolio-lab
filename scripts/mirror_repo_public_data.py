@@ -220,12 +220,21 @@ def mirror_repo_public_data(
                         restamp_paths.append(candidate)
             # Also restamp private monitor SSOT when distinct from PUBLIC tree
             # (data/health.json freezes lag stamps between health :30 jobs).
+            # Batch HM: never append production DATA_DIR when source/dest are
+            # pytest ephemeral trees (soft-mirror unit tests would poison SSOT).
             try:
                 from src.paths import DATA_DIR as _DATA_DIR
+                from src.monitor.repo_public_mirror_lag import (
+                    is_ephemeral_restamp_path,
+                )
 
                 private_health = Path(_DATA_DIR) / "health.json"
-                if private_health.is_file():
-                    restamp_paths.append(private_health)
+                roots_ephemeral = is_ephemeral_restamp_path(
+                    source_root
+                ) or is_ephemeral_restamp_path(dest_root)
+                if private_health.is_file() and not roots_ephemeral:
+                    if not is_ephemeral_restamp_path(private_health):
+                        restamp_paths.append(private_health)
             except Exception:  # noqa: BLE001
                 pass
             # Deduplicate by resolve when src==dest (dev shells)

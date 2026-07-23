@@ -22,6 +22,7 @@ def test_partial_patch_loads_rebalance_health_from_disk(tmp_path, monkeypatch):
 
     # No sticky rebalance_health on signals — matches live partial-patch shape
     signals = {
+        "target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
         "ensemble_voting": {
             "active_weights": {"cross_asset_rv": 0.5, "google_trends": 0.5},
             "max_active_weight": 0.5,
@@ -89,8 +90,12 @@ def test_partial_patch_timeline_unknown_when_panel_missing(tmp_path, monkeypatch
     public.mkdir()
     private.mkdir()
 
-    signals = {"health": {"status": "ok"}}
+    signals = {
+        "target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
+        "health": {"status": "ok"},
+    }
     (public / "signals.json").write_text(json.dumps(signals), encoding="utf-8")
+    (private / "signals.json").write_text(json.dumps(signals), encoding="utf-8")
     (private / "kill_switch.json").write_text(
         json.dumps({"enabled": False}), encoding="utf-8"
     )
