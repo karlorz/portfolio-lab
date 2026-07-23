@@ -407,7 +407,127 @@ def apply_ops_monitor_to_dashboard_health(
                 )
         except Exception:  # noqa: BLE001 — never block ops merge on SH fold
             pass
+
+    # Batch HO: project repo_public_mirror_lag* onto dashboard health so SPA
+    # consumers share the same SLI as health_ops / signals.health (was split-
+    # brain: ops_health_status only). Prefer max(live probe, ops stamp).
+    try:
+        _project_mirror_lag_onto_dashboard_health(
+            health_data,
+            report,
+            data_dir=data_dir,
+            public_dir=public_dir,
+        )
+    except Exception as exc:  # noqa: BLE001 — never block ops merge on lag SLI
+        logger.warning("dashboard mirror lag projection failed: %s", exc)
+
     return health_data
+
+
+def _project_mirror_lag_onto_dashboard_health(
+    health_data: dict[str, Any],
+    ops_report: dict[str, Any],
+    *,
+    data_dir: Path | None = None,
+    public_dir: Path | None = None,
+) -> None:
+    """Stamp repo_public_mirror_lag* on dashboard health (Batch HO DD/DE).
+
+    Uses ``resolve_mirror_lag_for_consumer(max(live, stamp))`` when a live
+    probe is available; falls back to ops-report stamp alone when the probe
+    cannot run. Soft-elevates ``system_status`` for lagging/critical (ops
+    hygiene only — not a trading halt).
+    """
+    from src.dashboard.generator import project_repo_public_mirror_lag_onto_health
+    from src.monitor.repo_public_mirror_lag import (
+        resolve_mirror_lag_for_consumer,
+        summarize_repo_public_mirror_lag,
+    )
+
+    stamp: dict[str, Any] = {
+        "lagging_count": ops_report.get("repo_public_mirror_lagging_count"),
+        "total": ops_report.get("repo_public_mirror_total"),
+        "lagging_paths": ops_report.get("repo_public_mirror_lagging_paths"),
+        "status": ops_report.get("repo_public_mirror_lag_status"),
+    }
+    nested = ops_report.get("repo_public_mirror_lag")
+    if isinstance(nested, dict):
+        if stamp.get("lagging_count") is None:
+            stamp["lagging_count"] = nested.get("lagging_count")
+        if stamp.get("total") is None:
+            stamp["total"] = nested.get("total")
+        if not stamp.get("lagging_paths"):
+            stamp["lagging_paths"] = nested.get("paths") or nested.get(
+                "lagging_paths"
+            )
+
+    live: dict[str, Any] | None = None
+    try:
+        dest = Path(public_dir) if public_dir is not None else None
+        live = summarize_repo_public_mirror_lag(
+            dest_root=dest if dest is not None else None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("live mirror lag probe failed during dashboard merge: %s", exc)
+        live = None
+
+    if isinstance(live, dict) and live.get("ok", True) is not False:
+        resolved = resolve_mirror_lag_for_consumer(stamp=stamp, live=live)
+        lag_summary = {
+            "lagging_count": resolved["lagging_count"],
+            "total": resolved["total"],
+            "lagging_paths": resolved["lagging_paths"],
+            "source": live.get("source") or ops_report.get("repo_public_mirror_source"),
+            "dest": live.get("dest") or ops_report.get("repo_public_mirror_dest"),
+            "ok": True,
+        }
+        project_repo_public_mirror_lag_onto_health(health_data, lag_summary)
+        health_data["repo_public_mirror_lag"] = {
+            "lagging_count": health_data.get("repo_public_mirror_lagging_count"),
+            "total": health_data.get("repo_public_mirror_total"),
+            "status": health_data.get("repo_public_mirror_lag_status"),
+            "badge": health_data.get("repo_public_mirror_lag_badge"),
+            "paths": health_data.get("repo_public_mirror_lagging_paths"),
+            "source": health_data.get("repo_public_mirror_source"),
+            "dest": health_data.get("repo_public_mirror_dest"),
+        }
+        health_data["mirror_lag_source_of_truth"] = resolved.get("source_of_truth")
+        health_data["mirror_lag_live_lagging_count"] = resolved.get(
+            "live_lagging_count"
+        )
+        health_data["mirror_lag_stamp_lagging_count"] = resolved.get(
+            "stamp_lagging_count"
+        )
+    else:
+        # No live probe — project stamp fields only when present on ops report
+        if stamp.get("lagging_count") is None and stamp.get("total") is None:
+            return
+        lag_summary = {
+            "lagging_count": stamp.get("lagging_count") or 0,
+            "total": stamp.get("total") or 0,
+            "lagging_paths": stamp.get("lagging_paths") or [],
+            "source": ops_report.get("repo_public_mirror_source"),
+            "dest": ops_report.get("repo_public_mirror_dest"),
+        }
+        project_repo_public_mirror_lag_onto_health(health_data, lag_summary)
+        health_data["repo_public_mirror_lag"] = {
+            "lagging_count": health_data.get("repo_public_mirror_lagging_count"),
+            "total": health_data.get("repo_public_mirror_total"),
+            "status": health_data.get("repo_public_mirror_lag_status"),
+            "badge": health_data.get("repo_public_mirror_lag_badge"),
+            "paths": health_data.get("repo_public_mirror_lagging_paths"),
+            "source": health_data.get("repo_public_mirror_source"),
+            "dest": health_data.get("repo_public_mirror_dest"),
+        }
+        health_data["mirror_lag_source_of_truth"] = "stamp"
+        health_data["mirror_lag_stamp_lagging_count"] = lag_summary["lagging_count"]
+
+    # Soft-elevate dashboard system_status when lag is lagging/critical
+    lag_status = str(health_data.get("repo_public_mirror_lag_status") or "")
+    if lag_status in ("lagging", "critical") and "system_status" in health_data:
+        cur = str(health_data.get("system_status") or "healthy").lower()
+        if cur in ("healthy", "ok", "unknown", ""):
+            health_data["system_status"] = "warning"
 
 
 def refresh_signals_health_kill_fields(

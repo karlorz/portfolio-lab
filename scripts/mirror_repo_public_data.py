@@ -138,9 +138,11 @@ def resolve_mirror_paths(
 
 # Health documents that carry nested repo_public_mirror_lag* SLIs and must be
 # restamped after a soft-mirror so sticky false-critical does not freeze.
+# Batch HO: signals.json nests the SLI under health (compact operator surface).
 HEALTH_LAG_RESTAMP_FILES: tuple[str, ...] = (
     "health.json",
     "health_ops.json",
+    "signals.json",
 )
 
 
@@ -222,19 +224,23 @@ def mirror_repo_public_data(
             # (data/health.json freezes lag stamps between health :30 jobs).
             # Batch HM: never append production DATA_DIR when source/dest are
             # pytest ephemeral trees (soft-mirror unit tests would poison SSOT).
+            # Batch HO: also restamp private data/signals.json nested health SLI.
             try:
                 from src.paths import DATA_DIR as _DATA_DIR
                 from src.monitor.repo_public_mirror_lag import (
                     is_ephemeral_restamp_path,
                 )
 
-                private_health = Path(_DATA_DIR) / "health.json"
                 roots_ephemeral = is_ephemeral_restamp_path(
                     source_root
                 ) or is_ephemeral_restamp_path(dest_root)
-                if private_health.is_file() and not roots_ephemeral:
-                    if not is_ephemeral_restamp_path(private_health):
-                        restamp_paths.append(private_health)
+                if not roots_ephemeral:
+                    for basename in ("health.json", "signals.json"):
+                        private_doc = Path(_DATA_DIR) / basename
+                        if private_doc.is_file() and not is_ephemeral_restamp_path(
+                            private_doc
+                        ):
+                            restamp_paths.append(private_doc)
             except Exception:  # noqa: BLE001
                 pass
             # Deduplicate by resolve when src==dest (dev shells)

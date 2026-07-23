@@ -10,6 +10,7 @@ compact health projection without shelling out to ``make``.
 from __future__ import annotations
 
 import importlib.util
+import json
 import logging
 import sys
 from pathlib import Path
@@ -189,7 +190,6 @@ def restamp_mirror_lag_on_health_documents(
           "lag_summary": dict,
         }
     """
-    import json
     import os
     from datetime import datetime, timezone
 
@@ -255,33 +255,102 @@ def restamp_mirror_lag_on_health_documents(
             result["skipped"].append(str(path.name))
             continue
 
-        # Skip docs that never carried the SLI (avoid inventing keys on unrelated JSON)
-        has_sli = any(
-            k in doc
-            for k in (
-                "repo_public_mirror_lagging_count",
-                "repo_public_mirror_lag_status",
-                "repo_public_mirror_lag",
-            )
+        # Batch HO: signals.json carries lag under nested ``health`` (compact
+        # surface for operators) while health.json / health_ops.json keep the
+        # SLI at top-level. Detect both; never invent keys on unrelated JSON.
+        nested_health = doc.get("health") if isinstance(doc.get("health"), dict) else None
+        sli_keys = (
+            "repo_public_mirror_lagging_count",
+            "repo_public_mirror_lag_status",
+            "repo_public_mirror_lag",
         )
-        if not has_sli:
+        top_has_sli = any(k in doc for k in sli_keys)
+        nested_has_sli = bool(
+            nested_health is not None and any(k in nested_health for k in sli_keys)
+        )
+        if not top_has_sli and not nested_has_sli:
             result["skipped"].append(str(path.name))
+            continue
+
+        # Nested-only path (signals.json): restamp health block in place so
+        # target_allocations and other authority keys stay byte-stable.
+        if nested_has_sli and not top_has_sli:
+            updated_nested = apply_lag_summary_to_health_doc(
+                nested_health, lag_summary
+            )
+            updated_nested["mirror_lag_restamped_at"] = restamped_at
+            updated_nested["mirror_lag_restamp_policy"] = restamp_policy
+            doc["health"] = updated_nested
+            try:
+                _atomic_write_json_doc(path, doc)
+                result["restamped"].append(str(path.name))
+            except OSError as exc:
+                result["errors"].append(f"{path.name}: write {exc}")
             continue
 
         updated = apply_lag_summary_to_health_doc(doc, lag_summary)
         updated["mirror_lag_restamped_at"] = restamped_at
         updated["mirror_lag_restamp_policy"] = restamp_policy
-        try:
-            tmp = path.with_suffix(path.suffix + ".tmp")
-            tmp.write_text(
-                json.dumps(updated, indent=2) + "\n", encoding="utf-8"
+        # When both top-level and nested health carry the SLI, keep nested
+        # honest too (signals dual-shape edge case).
+        if nested_has_sli and isinstance(updated.get("health"), dict):
+            nested_upd = apply_lag_summary_to_health_doc(
+                updated["health"], lag_summary
             )
-            tmp.replace(path)
+            nested_upd["mirror_lag_restamped_at"] = restamped_at
+            nested_upd["mirror_lag_restamp_policy"] = restamp_policy
+            updated["health"] = nested_upd
+        try:
+            _atomic_write_json_doc(path, updated)
             result["restamped"].append(str(path.name))
         except OSError as exc:
             result["errors"].append(f"{path.name}: write {exc}")
 
     return result
+
+
+def _atomic_write_json_doc(path: Path, doc: dict[str, Any]) -> None:
+    """Atomic JSON write with 0o644 so restamp never re-darkens Caddy.
+
+    Reuses signal_authority._atomic_write_text (mkstemp + chmod) rather than
+    bare write_text+replace, which inherits 0600 and broke HTTPS on signals.
+    """
+    text = json.dumps(doc, indent=2) + "\n"
+    try:
+        from src.monitor.signal_authority import _atomic_write_text
+
+        _atomic_write_text(path, text, mode=0o644)
+    except Exception:
+        # Fallback if import fails in minimal envs — still chmod after replace.
+        import os
+        import tempfile
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=str(path.parent),
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(text)
+                fh.flush()
+                os.fsync(fh.fileno())
+            try:
+                os.chmod(tmp_name, 0o644)
+            except OSError:
+                pass
+            os.replace(tmp_name, path)
+            try:
+                os.chmod(path, 0o644)
+            except OSError:
+                pass
+        except Exception:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
 
 
 def resolve_mirror_lag_for_consumer(
