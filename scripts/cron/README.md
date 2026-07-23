@@ -23,7 +23,7 @@ Every script sources `cron_guard.sh` which provides 4-layer defense:
 
 | Script | Makefile Target | Guard Timeout | Duration | Schedule |
 |--------|----------------|---------------|----------|----------|
-| `portfolio-lab-health-monitor.sh` | `make health` | 60s | 60s | `0,30 * * * *` |
+| `portfolio-lab-health-monitor.sh` | `make health` | 120s | 120s | `0,30 * * * *` |
 | `portfolio-lab-data-pipeline.sh` | `make data` | 300s | 5 min | `5 * * * *` |
 | `portfolio-lab-dashboard.sh` | `make dashboard` | 180s | 3 min | `15 * * * *` |
 | `portfolio-lab-strategy-eval.sh` | `make eval` | 600s | 10 min | `20 */2 * * *` |
@@ -43,12 +43,12 @@ Every script sources `cron_guard.sh` which provides 4-layer defense:
 
 ### Even Hours (0,2,4,6,8,10,12,14,16,18,20,22)
 ```
-:00  health        30m   60s
+:00  health        30m   120s
 :05  data          hourly 300s
 :15  dashboard     hourly 120s
 :20  eval          2h     600s    ← heaviest
 :25  research      2h     300s
-:30  health        30m   60s
+:30  health        30m   120s
 :35  wiki-sync     2h     120s
 :40  autonomous    2h     60s     ← pre-flight only
 :55  position-sync 2h     60s
@@ -56,10 +56,10 @@ Every script sources `cron_guard.sh` which provides 4-layer defense:
 
 ### Odd Hours (1,3,5,7,9,11,13,15,17,19,21,23)
 ```
-:00  health        30m   60s
+:00  health        30m   120s
 :05  data          hourly 300s
 :15  dashboard     hourly 120s
-:30  health        30m   60s
+:30  health        30m   120s
 ```
 
 ## Frequency Rules

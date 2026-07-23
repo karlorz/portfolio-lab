@@ -3,7 +3,8 @@ tasks:
     label: Health
     command: make health
     schedule: "0,30 * * * *"
-    timeout_seconds: 60
+    # Batch JO HT1: align with Makefile timeout 120 (was 60 → false timeout under load)
+    timeout_seconds: 120
 
   - id: portfolio-lab-data
     label: Data

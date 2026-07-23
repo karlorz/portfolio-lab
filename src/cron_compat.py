@@ -71,7 +71,7 @@ CRON_EXPECTED_DURATIONS = {
     "portfolio-lab-daily-pnl": 30,   # 30 sec — snapshot from portfolio state
     "portfolio-lab-attribution": 300,  # 5 min — attribution + adaptive weights
     "portfolio-lab-unified-dashboard": 120,  # 2 min — JSON serialization
-    "portfolio-lab-health": 30,  # 30 sec — rebalance health check
+    "portfolio-lab-health": 90,  # expected ~13–90s; wall 120 (Batch JO HT1)
     "portfolio-lab-prune-logs": 60,  # 1 min — bound tasker_logs growth + dead-log removal
     "portfolio-lab-prod-ideas": 60,  # 1 min — scan ops SSOT → channel delta (ML off)
     "portfolio-lab-fetch-trends": 300,  # 5 min — pytrends weekly refresh
