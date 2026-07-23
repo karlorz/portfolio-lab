@@ -273,6 +273,9 @@ def mirror_repo_public_data(
             # Batch HM: never append production DATA_DIR when source/dest are
             # pytest ephemeral trees (soft-mirror unit tests would poison SSOT).
             # Batch HO: also restamp private data/signals.json nested health SLI.
+            # Batch ID: also restamp private data/health_ops.json (IC multi-dest
+            # twin) so soft-mirror restamp cannot re-split public/repo vs private
+            # by adding only mirror_lag_restamped_at on PUBLIC roots.
             try:
                 from src.paths import DATA_DIR as _DATA_DIR
                 from src.monitor.repo_public_mirror_lag import (
@@ -283,7 +286,11 @@ def mirror_repo_public_data(
                     source_root
                 ) or is_ephemeral_restamp_path(dest_root)
                 if not roots_ephemeral:
-                    for basename in ("health.json", "signals.json"):
+                    for basename in (
+                        "health.json",
+                        "health_ops.json",
+                        "signals.json",
+                    ):
                         private_doc = Path(_DATA_DIR) / basename
                         if private_doc.is_file() and not is_ephemeral_restamp_path(
                             private_doc
