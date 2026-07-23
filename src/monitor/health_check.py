@@ -421,6 +421,22 @@ def apply_ops_monitor_to_dashboard_health(
     except Exception as exc:  # noqa: BLE001 — never block ops merge on lag SLI
         logger.warning("dashboard mirror lag projection failed: %s", exc)
 
+    # Batch IG: project graduation CB SSOT onto public dashboard health.
+    # signals.health already gets compact keys via kill_refresh (EM); private
+    # ops has nested graduation_circuit_breaker. Public health.json was the
+    # missing surface (ops_health_* only) → SPA split-brain on consecutive_ok.
+    try:
+        root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+        ssot = load_graduation_cb_ssot(root)
+        project_graduation_cb_onto_compact_health(
+            health_data, data_dir=root, ssot=ssot
+        )
+        # Nested ops-shape block for consumers that expect the full object
+        # (matches private data/health.json + health_ops dual surface).
+        project_graduation_cb_onto_report(health_data, data_dir=root, ssot=ssot)
+    except Exception as exc:  # noqa: BLE001 — never block ops merge on CB SLI
+        logger.warning("dashboard graduation CB projection failed: %s", exc)
+
     return health_data
 
 

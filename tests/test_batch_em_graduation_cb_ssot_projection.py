@@ -193,3 +193,76 @@ def test_load_ssot_missing_returns_none(tmp_path: Path) -> None:
     assert load_graduation_cb_ssot(tmp_path) is None
     h = project_graduation_cb_onto_compact_health({}, data_dir=tmp_path)
     assert h.get("graduation_cb_source") == "missing"
+
+
+def test_apply_ops_projects_graduation_cb_onto_dashboard_health(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Batch IG: public dashboard health.json must surface graduation CB SSOT.
+
+    Residual after EM: signals.health + private ops carry CB; public
+    health.json only had ops_health_* (SPA split-brain on consecutive_ok).
+    """
+    from src.monitor.health_check import apply_ops_monitor_to_dashboard_health
+
+    data = tmp_path / "data"
+    public = tmp_path / "public"
+    data.mkdir()
+    public.mkdir()
+    _write_ssot(data, consecutive_ok=5, status="green")
+    (data / "kill_switch.json").write_text(
+        json.dumps({"enabled": False}), encoding="utf-8"
+    )
+    (data / "incidents.json").write_text(
+        json.dumps({"open_count": 0, "status": "ok"}), encoding="utf-8"
+    )
+    # Monitor ops report without nested graduation block (merge must use SSOT)
+    ops = {
+        "status": "warning",
+        "timestamp": "2026-07-23T12:00:00+00:00",
+        "repo_public_mirror_lagging_count": 0,
+        "repo_public_mirror_total": 36,
+        "repo_public_mirror_lag_status": "ok",
+    }
+    (data / "health.json").write_text(json.dumps(ops), encoding="utf-8")
+
+    monkeypatch.setattr("src.monitor.health_check.DATA_DIR", data, raising=False)
+    monkeypatch.setattr(
+        "src.monitor.health_check.PUBLIC_DATA_DIR", public, raising=False
+    )
+
+    import src.monitor.repo_public_mirror_lag as mlag
+
+    monkeypatch.setattr(
+        mlag,
+        "summarize_repo_public_mirror_lag",
+        lambda **k: {
+            "lagging_count": 0,
+            "total": 36,
+            "lagging_paths": [],
+            "source": str(public),
+            "dest": str(public),
+            "ok": True,
+        },
+    )
+
+    dash = {
+        "system_status": "warning",
+        "generated_at": "2026-07-23T11:00:00+00:00",
+        "cron_jobs": [],
+        # Sticky stale compact keys from prior cycle
+        "graduation_circuit_breaker_consecutive_ok": 0,
+        "graduation_circuit_breaker_status": "yellow",
+    }
+    out = apply_ops_monitor_to_dashboard_health(
+        dash, ops, data_dir=data, public_dir=public
+    )
+    assert out["graduation_circuit_breaker_consecutive_ok"] == 5
+    assert out["graduation_circuit_breaker_status"] == "green"
+    assert out["graduation_cb_source"] == "disk_ssot"
+    # Nested block for operators who expect ops-shape keys on dashboard too
+    nested = out.get("graduation_circuit_breaker")
+    assert isinstance(nested, dict)
+    assert nested.get("consecutive_ok") == 5
+    assert nested.get("status") == "green"
+    assert nested.get("graduation_cb_source") == "disk_ssot"

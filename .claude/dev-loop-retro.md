@@ -238,3 +238,12 @@
 - ClaudeMd?:      no
 - WorkflowShift?: no
 - Deep-research: max(live,stamp) coherent only when stamp fields restamped with probe
+
+## [2026-07-23] retro | loop cycle: batch-ig-dashboard-graduation-cb
+- Friction:       Public health.json had ops_health_* but no graduation CB; signals.health + private ops did
+- Miss:           apply_ops_monitor_to_dashboard_health projected lag/kill/SH but not CB SSOT
+- Improve:        Project compact + nested graduation_circuit_breaker from .circuit_breaker.json onto dashboard health
+- Generalize?:    yes (every dual-surface SLI must fan-out to public dashboard, not only signals.health)
+- ClaudeMd?:      no
+- WorkflowShift?: no
+- Deep-research: dual-SSOT projection; compact+nested keys for SPA/ops consumers
