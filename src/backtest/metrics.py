@@ -8,6 +8,7 @@ functions that were previously copy-pasted across 11+ backtest files.
 import json
 import hashlib
 import logging
+import os
 import numpy as np
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,6 +19,10 @@ from src.paths import BASE_ALLOCATION
 
 logger = logging.getLogger(__name__)
 from src.costs.etf_cost_table import ETF_COST_BPS as _ETF_COST_BPS
+
+# Dashboard / Caddy-served JSON must be world-readable (Batch HZ residual after
+# multi-dest fchmod on signals). save_results_json still uses open()+write.
+_PUBLIC_JSON_MODE = 0o644
 
 
 __all__ = ['BacktestConfig', 'DailyPrices', 'BacktestResult', 'BacktestMetrics', 'OverlayMetrics', 'CrisisReturns', 'compute_metrics', 'compute_crisis_returns', 'print_metrics_report', 'compute_deflated_sharpe_ratio', 'build_data_snapshot_provenance', 'require_data_snapshot_provenance', 'save_results_json']
@@ -690,6 +695,14 @@ def save_results_json(
     try:
         with open(path, 'w') as f:
             json.dump(data, f, indent=2, default=_json_serializer)
+            f.flush()
+        # Batch HZ: normalize mode so public dashboard dual-writes via
+        # save_results_json never leave sticky 0600 (Caddy 403). Safe for
+        # private backtest artifacts on lab hosts (not secrets).
+        try:
+            os.chmod(path, _PUBLIC_JSON_MODE)
+        except OSError as chmod_exc:
+            logger.warning("chmod %s after save_results_json failed: %s", path, chmod_exc)
     except (OSError, TypeError) as e:
         logger.error("Failed to save results to %s: %s", path, e)
         raise

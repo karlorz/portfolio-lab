@@ -1022,6 +1022,13 @@ class TestSaveResultsJsonEdgeCases:
         assert explicit.exists()
         assert not (default_dir / "backtest_results.json").exists()
 
+    def test_save_results_json_mode_is_0644(self, tmp_path):
+        """Batch HZ: public dashboard dual-write path must leave world-readable JSON."""
+        path = tmp_path / "dashboard_artifact.json"
+        save_results_json({"system_status": "ok"}, output_path=str(path))
+        assert path.is_file()
+        assert (path.stat().st_mode & 0o777) == 0o644
+
     def test_json_serializer_raises_on_unknown_type(self):
         from src.backtest.metrics import _json_serializer
         with pytest.raises(TypeError):
