@@ -110,6 +110,50 @@ def _read_bytes(path: Path) -> Optional[bytes]:
         return None
 
 
+def _atomic_write_bytes(path: Path, data: bytes, *, mode: int = 0o644) -> None:
+    """Atomic replace with explicit mode (Batch HQ).
+
+    Prefer signal_authority's text atomic writer for JSON when available so
+    multi-dest and soft-mirror share the same 0o644 contract (mkstemp defaults
+    to 0o600 → Caddy 403). Fall back to same-dir tempfile for binary-safe copy.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # JSON soft-mirror: reuse production multi-dest atomic path when importable.
+    if path.suffix == ".json":
+        try:
+            from src.monitor.signal_authority import _atomic_write_text
+
+            _atomic_write_text(path, data.decode("utf-8"), mode=mode)
+            return
+        except Exception:  # noqa: BLE001 — fall through to byte path
+            pass
+    import os
+    import tempfile
+
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=str(path.parent),
+    )
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        try:
+            os.chmod(tmp_name, mode)
+        except OSError:
+            pass
+        os.replace(tmp_name, path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
 def _sha_from_bytes(raw: bytes) -> Optional[str]:
     try:
         payload = json.loads(raw.decode("utf-8"))
@@ -195,10 +239,8 @@ def mirror_repo_public_data(
             report.copied.append(rel)
             continue
         try:
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            tmp = dst.with_suffix(dst.suffix + ".tmp")
-            tmp.write_bytes(src_bytes)
-            tmp.replace(dst)
+            # Batch HQ: atomic 0o644 (not sticky 0600 / umask-dependent write_bytes)
+            _atomic_write_bytes(dst, src_bytes, mode=0o644)
             report.copied.append(rel)
         except OSError as exc:
             report.errors.append(f"write failed {dst}: {exc}")

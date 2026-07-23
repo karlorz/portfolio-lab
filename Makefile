@@ -561,6 +561,10 @@ overlay-signals:
 	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-overlay-signals $$STATUS $$DUR; \
+	if [ $$EXIT -eq 0 ]; then \
+	  $(MAKE) --no-print-directory mirror-repo-public-data || \
+	  echo "WARN: mirror-repo-public-data soft-failed after overlay-signals (repo public lag; non-blocking)"; \
+	fi; \
 	exit $$EXIT
 
 .PHONY: overlay-dashboard
@@ -576,6 +580,10 @@ overlay-dashboard:
 	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-overlay-dashboard $$STATUS $$DUR; \
+	if [ $$EXIT -eq 0 ]; then \
+	  $(MAKE) --no-print-directory mirror-repo-public-data || \
+	  echo "WARN: mirror-repo-public-data soft-failed after overlay-dashboard (repo public lag; non-blocking)"; \
+	fi; \
 	exit $$EXIT
 
 # Health / cron exit contract (Nagios-style + tasker):
@@ -595,6 +603,10 @@ health:
 	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-health $$STATUS $$DUR; \
+	if [ $$EXIT -eq 0 ]; then \
+	  $(MAKE) --no-print-directory mirror-repo-public-data || \
+	  echo "WARN: mirror-repo-public-data soft-failed after health (repo public lag; non-blocking)"; \
+	fi; \
 	exit $$EXIT
 
 .PHONY: rebalance-health
@@ -610,6 +622,10 @@ rebalance-health:
 	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-rebalance-health $$STATUS $$DUR; \
+	if [ $$EXIT -eq 0 ]; then \
+	  $(MAKE) --no-print-directory mirror-repo-public-data || \
+	  echo "WARN: mirror-repo-public-data soft-failed after rebalance-health (repo public lag; non-blocking)"; \
+	fi; \
 	exit $$EXIT
 
 # ── GARCH-CVaR Risk Metrics ────────────────────────────────────────────
@@ -685,6 +701,10 @@ attribution:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ] && [ $$EXIT2 -eq 0 ]; then STATUS="ok"; else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-attribution $$STATUS $$DUR; \
+	if [ $$EXIT -eq 0 ] && [ $$EXIT2 -eq 0 ]; then \
+	  $(MAKE) --no-print-directory mirror-repo-public-data || \
+	  echo "WARN: mirror-repo-public-data soft-failed after attribution (repo public lag; non-blocking)"; \
+	fi; \
 	if [ $$EXIT -ne 0 ]; then exit $$EXIT; fi; \
 	exit $$EXIT2
 
@@ -703,6 +723,10 @@ unified-dashboard:
 	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-unified-dashboard $$STATUS $$DUR; \
+	if [ $$EXIT -eq 0 ]; then \
+	  $(MAKE) --no-print-directory mirror-repo-public-data || \
+	  echo "WARN: mirror-repo-public-data soft-failed after unified-dashboard (repo public lag; non-blocking)"; \
+	fi; \
 	exit $$EXIT
 
 # ── Daily Brief ──────────────────────────────────────────────────────
