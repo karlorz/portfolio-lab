@@ -2422,6 +2422,25 @@ def run_health_check() -> dict:
             "message": f"FRED readiness check unavailable: {exc}",
             "remediation": "Verify src.monitor.fred_readiness is importable.",
         }
+    # Batch IZ/JA DO2: re-evaluate signal_staleness lifecycle so PASS clears
+    # false opens without waiting for full dashboard generate.
+    try:
+        from src.monitor.alerting import check_staleness_and_alert
+
+        for sp in (Path(DATA_DIR) / "signals.json", Path(PUBLIC_DATA_DIR) / "signals.json"):
+            if not sp.is_file():
+                continue
+            try:
+                payload = json.loads(sp.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            st = payload.get("staleness") if isinstance(payload, dict) else None
+            if isinstance(st, dict) and st:
+                check_staleness_and_alert(st)
+                break
+    except Exception as exc:  # noqa: BLE001 — never fail health job
+        logger.warning("Staleness lifecycle re-eval skipped: %s", exc)
+
     # End-of-build disk re-read (DE4): prefer latest kill_switch.json /
     # incidents.json over the first snapshot if lifecycle wrote mid-check.
     kill_switch = _check_kill_switch()
