@@ -27,16 +27,35 @@ import {
   type PriceDataQualityReport,
 } from '../src/data/price_quality';
 import { dirname, join, resolve } from 'path';
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync } from 'fs';
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+} from 'fs';
 import { execFileSync } from 'child_process';
 
 const PROJECT_ROOT = join(import.meta.dir, '..');
 const PYTHON_RUNTIME = join(PROJECT_ROOT, 'scripts', 'python_runtime.sh');
 const CRON_UPDATE_SCRIPT = join(PROJECT_ROOT, 'scripts', 'cron_update.py');
 const FRED_CACHE_PATH = join(PROJECT_ROOT, 'data', 'fred_series_cache.json');
+/** Private operator twin of market artifacts (not the public SoT). */
+const PRIVATE_DATA_DIR = join(PROJECT_ROOT, 'data');
 const START_DATE = '2005-01-01';
 const END_DATE = new Date().toISOString().split('T')[0];
 let atomicWriteCounter = 0;
+
+/** Market basenames dual-written to private data/ after public SoT write (Batch HY). */
+export const PRIVATE_MARKET_SOFT_MIRROR_BASENAMES = [
+  'prices.json',
+  'prices_compact.json',
+  'yields.json',
+  PRICE_DATA_QUALITY_FILENAME,
+  MARKET_DATA_SOURCE_MANIFEST_FILENAME,
+] as const;
 
 /**
  * Resolve the public data write/read root for the data job.
@@ -85,7 +104,19 @@ export async function writeJsonAtomic(path: string, payload: unknown): Promise<v
   const tmpPath = `${path}.${process.pid}.${Date.now()}.${atomicWriteCounter++}.tmp`;
   try {
     await Bun.write(tmpPath, JSON.stringify(payload, null, 2));
+    // Batch HY: Caddy/operator trees need world-readable JSON (mkstemp-style
+    // umask can leave 0600 → HTTPS 403 on public market artifacts).
+    try {
+      chmodSync(tmpPath, 0o644);
+    } catch {
+      // Best-effort; rename still proceeds.
+    }
     renameSync(tmpPath, path);
+    try {
+      chmodSync(path, 0o644);
+    } catch {
+      // Best-effort post-replace mode normalize.
+    }
   } catch (error) {
     try {
       unlinkSync(tmpPath);
@@ -94,6 +125,74 @@ export async function writeJsonAtomic(path: string, payload: unknown): Promise<v
     }
     throw error;
   }
+}
+
+/**
+ * Soft-mirror market-data basenames from public SoT → private repo data/.
+ *
+ * Live authority remains signals.json.target_allocations only. Private
+ * data/prices.json is a convenience twin for offline scripts / operator
+ * inspection; PRICES_JSON still points at PUBLIC_DATA_DIR.
+ *
+ * Skips when source==dest (dev shells writing checkout public/data only) or
+ * under pytest isolation paths (plab-pytest / pytest-of-*).
+ */
+export function softMirrorMarketArtifactsToPrivate(options?: {
+  publicRoot?: string;
+  privateRoot?: string;
+  basenames?: readonly string[];
+}): { copied: string[]; skipped: string[]; errors: string[] } {
+  const publicRoot = options?.publicRoot ?? DATA_DIR;
+  const privateRoot = options?.privateRoot ?? PRIVATE_DATA_DIR;
+  const basenames = options?.basenames ?? PRIVATE_MARKET_SOFT_MIRROR_BASENAMES;
+  const result = { copied: [] as string[], skipped: [] as string[], errors: [] as string[] };
+
+  const pub = resolve(publicRoot);
+  const priv = resolve(privateRoot);
+  if (pub === priv) {
+    result.skipped.push('same-root');
+    return result;
+  }
+  // Never poison production private SSOT from hermetic test trees.
+  const pubText = pub.replace(/\\/g, '/');
+  if (
+    pubText.includes('plab-pytest')
+    || pubText.includes('/pytest-of-')
+    || pubText.includes('/tmp/pytest-')
+  ) {
+    result.skipped.push('ephemeral-public-root');
+    return result;
+  }
+  if (process.env.PYTEST_CURRENT_TEST && !process.env.PORTFOLIO_LAB_ALLOW_LIVE_PUBLIC) {
+    // Bun unit tests do not set PYTEST; belt for mixed harnesses.
+    result.skipped.push('pytest-guard');
+    return result;
+  }
+
+  if (!existsSync(priv)) {
+    mkdirSync(priv, { recursive: true });
+  }
+
+  for (const name of basenames) {
+    const src = join(pub, name);
+    const dst = join(priv, name);
+    if (!existsSync(src)) {
+      result.skipped.push(`${name}:missing-source`);
+      continue;
+    }
+    try {
+      copyFileSync(src, dst);
+      try {
+        chmodSync(dst, 0o644);
+      } catch {
+        // Best-effort mode.
+      }
+      result.copied.push(name);
+    } catch (err) {
+      result.errors.push(`${name}:${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return result;
 }
 
 function latestObservationFromCompact(compact: Record<string, { d: string; p: number }[]>): string | null {
@@ -621,6 +720,22 @@ export async function main() {
   ], manifestGeneratedAt);
   await writeJsonAtomic(manifestPath, manifest);
   console.log(`Saved market data source manifest → ${manifestPath}`);
+
+  // Batch HY: soft-mirror market artifacts to private data/ so offline
+  // operator twins (data/prices.json) do not freeze at last ad-hoc copy.
+  // Public SoT remains PUBLIC_DATA_DIR; live routing still ignores prices.
+  const privateMirror = softMirrorMarketArtifactsToPrivate({
+    publicRoot: DATA_DIR,
+    privateRoot: PRIVATE_DATA_DIR,
+  });
+  if (privateMirror.copied.length > 0) {
+    console.log(
+      `Soft-mirrored market artifacts → ${PRIVATE_DATA_DIR}: ${privateMirror.copied.join(', ')}`,
+    );
+  }
+  if (privateMirror.errors.length > 0) {
+    console.error('Private market soft-mirror errors:', privateMirror.errors);
+  }
 
   // Batch BY: rebuild index.json immediately after source_manifest so
   // data_pipeline_slo never sees stale_index if dashboard gen lags/fails.
