@@ -86,6 +86,9 @@ _OPTIONAL_PUBLIC_DATA_FILES = (
     # Batch EH: optional until first garch-risk cron after deploy
     "garch_cvar.json",
     "risk_metrics.json",
+    # Satellite dashboards / term structure (deploy consistency; may lag catalog)
+    "unified_dashboard.json",
+    "vix_term_structure.json",
 )
 
 _LABS_OBJECT_PAGINATION_ROW_KEYS = {
