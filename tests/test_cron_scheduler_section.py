@@ -190,16 +190,29 @@ def test_refresh_public_health_also_updates_signals_health_compact(tmp_path: Pat
             }
         )
     )
+    signals_body = {
+        # Batch IA: TA required for multi-dest authority path
+        "target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
+        "health": {
+            "status": "warning",
+            "failed_cron_jobs": 0,
+            "scheduler_status": "degraded",
+            "open_incidents_count": 0,
+        },
+    }
     signals_path = public_dir / "signals.json"
-    signals_path.write_text(
+    signals_path.write_text(json.dumps(signals_body))
+    # Stale private twin (pre-cron-section) — multi-dest must equalize
+    private_signals = data_dir / "signals.json"
+    private_signals.write_text(
         json.dumps(
             {
+                **signals_body,
                 "health": {
+                    **signals_body["health"],
                     "status": "warning",
-                    "failed_cron_jobs": 0,
                     "scheduler_status": "degraded",
-                    "open_incidents_count": 0,
-                }
+                },
             }
         )
     )
@@ -225,6 +238,19 @@ def test_refresh_public_health_also_updates_signals_health_compact(tmp_path: Pat
     assert health["failed_cron_jobs"] == 0
     assert health["status"] == "healthy"
     assert health.get("cron_section_refreshed_at")
+    # Batch IA: private twin must match public after multi-dest fan-out
+    private = json.loads(private_signals.read_text())
+    assert private["health"]["scheduler_status"] == "ok"
+    assert private["health"].get("cron_section_refreshed_at") == health.get(
+        "cron_section_refreshed_at"
+    )
+    assert private["target_allocations"] == {
+        "SPY": 0.46,
+        "GLD": 0.38,
+        "TLT": 0.16,
+    }
+    assert (signals_path.stat().st_mode & 0o777) == 0o644
+    assert (private_signals.stat().st_mode & 0o777) == 0o644
 
 
 def test_refresh_cron_section_folds_signal_health_zero_of_n(tmp_path: Path) -> None:

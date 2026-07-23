@@ -175,6 +175,13 @@ def refresh_public_health_cron_section(
     payload["cron_section_refreshed_at"] = datetime.now(timezone.utc).isoformat()
     try:
         health_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        # Batch IA: public health dual-write must stay Caddy-readable
+        try:
+            import os
+
+            os.chmod(health_path, 0o644)
+        except OSError:
+            pass
     except OSError as exc:
         logger.warning("Failed to refresh public health cron section: %s", exc)
         return False
@@ -182,10 +189,13 @@ def refresh_public_health_cron_section(
 
     # Compact signals.health must not keep sticky scheduler_status=degraded /
     # failed_cron mismatch after post-stamp health refresh.
+    # Batch IA: fan-out same bytes to private + repo soft-mirror (public-only
+    # write_text left priv≠www nested health after full multi-dest generate).
     try:
         from src.monitor.hermes_cron import rollup_failed_cron_jobs
 
         signals_path = Path(PUBLIC_DATA_DIR) / "signals.json"
+        private_path = Path(DATA_DIR) / "signals.json"
         if signals_path.exists():
             signals = json.loads(signals_path.read_text(encoding="utf-8"))
             if isinstance(signals, dict):
@@ -226,8 +236,64 @@ def refresh_public_health_cron_section(
                 # scheduler degraded / failed jobs / kill sticky (Batch BH).
                 health = _elevate_compact_health_status(health)
                 health["cron_section_refreshed_at"] = payload["cron_section_refreshed_at"]
-                signals_path.write_text(json.dumps(signals, indent=2) + "\n", encoding="utf-8")
-                logger.info("Refreshed signals.health cron compact fields at %s", signals_path)
+                signals["health"] = health
+                # Prefer multi-dest serialize-once when authority present.
+                wrote_via_multi = False
+                try:
+                    from src.monitor.signal_authority import (
+                        AuthorityValidationError,
+                        try_write_signals_multi_dest,
+                        validate_authority_payload,
+                    )
+
+                    validate_authority_payload(signals)
+                    private_dest = (
+                        private_path
+                        if (private_path.exists() or private_path.parent.is_dir())
+                        else None
+                    )
+                    result = try_write_signals_multi_dest(
+                        signals,
+                        public_path=signals_path,
+                        private_path=private_dest,
+                        soft_mirror_repo=True,
+                    )
+                    wrote_via_multi = bool(
+                        result.wrote_public or result.wrote_private or result.wrote_repo
+                    )
+                    if result.skipped_reason:
+                        logger.warning(
+                            "signals cron compact multi-dest partial skip: %s",
+                            result.skipped_reason,
+                        )
+                    if wrote_via_multi:
+                        logger.info(
+                            "Refreshed signals.health cron compact (multi-dest) at %s",
+                            signals_path,
+                        )
+                except AuthorityValidationError:
+                    wrote_via_multi = False
+                except Exception as multi_exc:  # noqa: BLE001
+                    logger.warning(
+                        "signals cron compact multi-dest failed (%s); fallback write",
+                        multi_exc,
+                    )
+                    wrote_via_multi = False
+                if not wrote_via_multi:
+                    # Fallback: public-only with 0644 (tests without TA fixture).
+                    import os
+
+                    signals_path.write_text(
+                        json.dumps(signals, indent=2) + "\n", encoding="utf-8"
+                    )
+                    try:
+                        os.chmod(signals_path, 0o644)
+                    except OSError:
+                        pass
+                    logger.info(
+                        "Refreshed signals.health cron compact fields at %s",
+                        signals_path,
+                    )
     except Exception as exc:  # noqa: BLE001 — never fail health refresh on signals patch
         logger.warning("signals.health cron compact refresh failed: %s", exc)
 
