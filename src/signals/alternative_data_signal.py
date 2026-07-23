@@ -480,6 +480,27 @@ class AlternativeDataSignalGenerator:
             return "risk_off"
         return "neutral"
 
+    def _input_data_freshness_hours(
+        self,
+        components: Optional[List[ComponentSignal]] = None,
+        now_ts: Optional[datetime] = None,
+    ) -> float:
+        """Hours since producer inputs (Batch II DG3).
+
+        Prefer prices.json mtime (pipeline SoT for free alt-data components).
+        Falls back to 0.0 when the file is missing so consumers never see a
+        hardcoded 12.0 lie.
+        """
+        now = now_ts or datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        try:
+            mtime = Path(PRICES_PATH).stat().st_mtime
+            age_h = max(0.0, (now.timestamp() - float(mtime)) / 3600.0)
+            return round(age_h, 4)
+        except OSError:
+            return 0.0
+
     def calculate_composite(self, components: List[ComponentSignal]) -> AlternativeDataComposite:
         """Weighted composite from all component signals."""
         comp_map = {c.name: c for c in components}
@@ -517,7 +538,7 @@ class AlternativeDataSignalGenerator:
             components=comp_values,
             component_confidences=comp_confidences,
             weights=dict(self.weights),
-            data_freshness_hours=12.0,
+            data_freshness_hours=self._input_data_freshness_hours(components),
             sources_count=len(self.weights),
             symbol_coverage=SYMBOLS_REQUIRED,
         )

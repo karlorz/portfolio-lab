@@ -59,7 +59,7 @@ OPTIONAL_SUITE_TARGETS = {
 # Expected max duration per job (seconds). Exceeding 2x this triggers alerts.
 CRON_EXPECTED_DURATIONS = {
     "portfolio-lab-data": 300,      # 5 min — bun fetch-data
-    "portfolio-lab-dashboard": 120, # 2 min — static generation
+    "portfolio-lab-dashboard": 180, # 3 min — static generation (Batch II DF3; wall ~116s)
     "portfolio-lab-eval": 600,      # 10 min — iterates all portfolios
     "portfolio-lab-research": 300,  # 5 min — research loops
     "portfolio-lab-wiki-sync": 120, # 2 min — git operations

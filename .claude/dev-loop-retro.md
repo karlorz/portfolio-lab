@@ -247,3 +247,12 @@
 - ClaudeMd?:      no
 - WorkflowShift?: no
 - Deep-research: dual-SSOT projection; compact+nested keys for SPA/ops consumers
+
+## [2026-07-23] retro | loop cycle: batch-ii-health-timeout-freshness
+- Friction:       Sticky clear health_ops missed mid-cycle kill arm; dashboard 120s false-timeout (~116s wall); alt_data data_freshness_hours=12.0 hardcode
+- Miss:           reconcile only cleared sticky open, not bidirectional disk SSOT; timeout triple not buffered; freshness disclosure lied
+- Improve:        Bidirectional reconcile + end-of-run kill re-read; dashboard timeout 180 triple-sync; prices mtime freshness hours
+- Generalize?:    yes (disk SSOT wins both polarities; wall-clock budget > p95; disclosure fields must be computed)
+- ClaudeMd?:      no
+- WorkflowShift?: no
+- Deep-research: dual-mode timeout sync; max(disk,stamp) for kill/open

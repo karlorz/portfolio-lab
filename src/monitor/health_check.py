@@ -162,19 +162,17 @@ def reconcile_monitor_health_with_disk_ssot(
     Dashboard regeneration (data job) writes public health + incidents.json from
     disk lifecycle SSOT, but monitor ``data/health.json`` is only rewritten by
     the :00/:30 health cron. Between those ticks operators see dual-incident
-    split-brain: ``checks.open_incidents.open_count=1`` on the monitor report
-    while ``incidents.json`` already has open_count=0.
+    split-brain: sticky open on the monitor report while ``incidents.json`` is
+    already clear, **or** (Batch II DE4) sticky clear while kill_switch.json
+    just armed mid-cycle.
 
-    When disk kill is clear and open incidents are zero, rewrite the sticky
-    kill/open blocks on the monitor report and demote top-level ``status`` if
-    it was elevated solely by those dimensions. Returns True when a write
-    occurred.
+    Bidirectional: always re-project disk kill/open when they disagree with the
+    stamped report (clear→arm and arm→clear). Recompute top-level ``status``
+    from remaining check dims. Returns True when a write occurred.
     """
     root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
     path = Path(health_path) if health_path is not None else (root / "health.json")
     if not path.exists():
-        return False
-    if not _disk_kill_ssot_is_clear(root):
         return False
 
     try:
@@ -215,26 +213,29 @@ def reconcile_monitor_health_with_disk_ssot(
 
     prev_open = checks.get("open_incidents") if isinstance(checks.get("open_incidents"), dict) else {}
     prev_kill = checks.get("kill_switch") if isinstance(checks.get("kill_switch"), dict) else {}
-    sticky = (
-        int(prev_open.get("open_count") or 0) > 0
-        or bool(prev_kill.get("enabled"))
-        or str(prev_open.get("status") or "").lower() in {"warning", "critical", "degraded"}
-        or str(prev_kill.get("status") or "").lower() in {"warning", "critical", "degraded"}
-    )
-    if not sticky:
-        # Already aligned — avoid rewriting timestamps for no-op cycles.
-        if (
-            int(prev_open.get("open_count") or 0) == 0
-            and not bool(prev_kill.get("enabled"))
-            and str(prev_open.get("status") or "ok").lower() in {"ok", "healthy", ""}
-        ):
-            return False
+
+    prev_open_n = int(prev_open.get("open_count") or 0)
+    disk_open_n = int(disk_open.get("open_count") or 0)
+    prev_enabled = bool(prev_kill.get("enabled"))
+    disk_enabled = bool(disk_kill.get("enabled"))
+    prev_kill_status = str(prev_kill.get("status") or "ok").lower()
+    disk_kill_status = str(disk_kill.get("status") or "ok").lower()
+    prev_open_status = str(prev_open.get("status") or "ok").lower()
+    disk_open_status = str(disk_open.get("status") or "ok").lower()
+
+    # No-op when already aligned (avoid restamp thrash).
+    if (
+        prev_open_n == disk_open_n
+        and prev_enabled == disk_enabled
+        and prev_kill_status == disk_kill_status
+        and prev_open_status == disk_open_status
+    ):
+        return False
 
     checks["kill_switch"] = disk_kill
     checks["open_incidents"] = disk_open
 
-    # Demote top-level status when kill/open were the elevators. Preserve
-    # degraded/error from other checks by recomputing from remaining dims.
+    # Recompute top-level status from disk kill/open + remaining dims.
     circuit = checks.get("circuit_breaker") if isinstance(checks.get("circuit_breaker"), dict) else {}
     freshness = checks.get("data_freshness") if isinstance(checks.get("data_freshness"), dict) else {}
     rollup_checks = {
@@ -254,14 +255,25 @@ def reconcile_monitor_health_with_disk_ssot(
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        # Prefer atomic 0o644 multi-dest helper when available so reconcile never
+        # re-darkens Caddy if path is under a public tree.
+        try:
+            from src.monitor.signal_authority import _atomic_write_text
+
+            _atomic_write_text(
+                path, json.dumps(payload, indent=2) + "\n", mode=0o644
+            )
+        except Exception:
+            path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     except OSError as exc:
         logger.warning("Failed to reconcile monitor health SSOT at %s: %s", path, exc)
         return False
     logger.info(
-        "Reconciled monitor health kill/open SSOT at %s (status=%s)",
+        "Reconciled monitor health kill/open SSOT at %s (status=%s enabled=%s open=%s)",
         path,
         payload.get("status"),
+        disk_enabled,
+        disk_open_n,
     )
     return True
 
@@ -2212,6 +2224,9 @@ def run_health_check() -> dict:
     # Self-job race: do not publish prior terminal error while this process succeeds.
     _stamp_health_self_job_running_success(freshness)
     circuit = _check_circuit_breaker()
+    # Batch II DE4: re-read disk kill/open immediately before rollup so a
+    # mid-run arm (incident lifecycle after first probe) is not lost until
+    # the next :00/:30 health tick.
     kill_switch = _check_kill_switch()
     open_incidents = _check_open_incidents()
     fred_md_cache = _check_fred_md_cache()
@@ -2230,6 +2245,10 @@ def run_health_check() -> dict:
             "message": f"FRED readiness check unavailable: {exc}",
             "remediation": "Verify src.monitor.fred_readiness is importable.",
         }
+    # End-of-build disk re-read (DE4): prefer latest kill_switch.json /
+    # incidents.json over the first snapshot if lifecycle wrote mid-check.
+    kill_switch = _check_kill_switch()
+    open_incidents = _check_open_incidents()
     # Flatten nested freshness statuses for rollup while keeping nested shape
     # in the report. Critical/warning FRED readiness must still elevate.
     rollup_checks = {
