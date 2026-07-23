@@ -152,6 +152,12 @@ def apply_lag_summary_to_health_doc(
     After the catalog equalizes, those nested fields can freeze a false
     critical until the next health :30. Restamping rewrites nested SLIs from
     a fresh probe without inventing a full health job.
+
+    Batch IF: also rewrite consumer honesty meta (``mirror_lag_source_of_truth``,
+    live/stamp lagging counts). Prior restamp only updated the nested
+    ``repo_public_mirror_lag*`` gauge, leaving sticky
+    ``mirror_lag_stamp_lagging_count=1`` / ``source_of_truth=stamp`` while
+    lagging_count was already 0 (false residual after multi-dest heal).
     """
     from src.dashboard.generator import project_repo_public_mirror_lag_onto_health
 
@@ -173,6 +179,39 @@ def apply_lag_summary_to_health_doc(
         "source": projected.get("repo_public_mirror_source"),
         "dest": projected.get("repo_public_mirror_dest"),
     }
+    # Batch IF: align HO-style honesty meta with the restamp probe so
+    # consumers do not see stamp=1 while lagging_count=0 after heal.
+    if isinstance(lag_summary, dict):
+        stamp_snapshot = {
+            "lagging_count": doc.get("repo_public_mirror_lagging_count"),
+            "total": doc.get("repo_public_mirror_total"),
+            "lagging_paths": doc.get("repo_public_mirror_lagging_paths"),
+            "status": doc.get("repo_public_mirror_lag_status"),
+        }
+        nested_prior = doc.get("repo_public_mirror_lag")
+        if isinstance(nested_prior, dict):
+            if stamp_snapshot.get("lagging_count") is None:
+                stamp_snapshot["lagging_count"] = nested_prior.get("lagging_count")
+            if stamp_snapshot.get("total") is None:
+                stamp_snapshot["total"] = nested_prior.get("total")
+        # After restamp the document stamp *is* the live probe. Honesty meta
+        # must report both live and stamp as the post-restamp count (not the
+        # pre-restamp sticky stamp) so max(live,stamp) consumers stay coherent.
+        try:
+            live_n = int(lag_summary.get("lagging_count") or 0)
+        except (TypeError, ValueError):
+            live_n = 0
+        resolved = resolve_mirror_lag_for_consumer(
+            stamp={"lagging_count": live_n, "total": lag_summary.get("total")},
+            live=lag_summary,
+        )
+        projected["mirror_lag_source_of_truth"] = resolved.get("source_of_truth")
+        projected["mirror_lag_live_lagging_count"] = resolved.get(
+            "live_lagging_count"
+        )
+        projected["mirror_lag_stamp_lagging_count"] = resolved.get(
+            "stamp_lagging_count"
+        )
     if not elevate_status:
         # Nested SLI only — leave top-level status untouched
         projected["status"] = prior_status

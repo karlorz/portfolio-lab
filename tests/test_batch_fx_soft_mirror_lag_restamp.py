@@ -91,6 +91,88 @@ def test_consumer_max_clears_when_both_zero() -> None:
     )
     assert resolved["lagging_count"] == 0
     assert resolved["repo_public_mirror_lag_status"] == "ok"
+    assert resolved["source_of_truth"] == "live"
+    assert resolved["live_lagging_count"] == 0
+    assert resolved["stamp_lagging_count"] == 0
+
+
+def test_restamp_clears_sticky_honesty_meta(tmp_path) -> None:
+    """Batch IF: restamp live=0 must rewrite mirror_lag_* honesty meta.
+
+    Production residual after Session B multi-dest heal: repo_public_mirror
+    lagging_count=0 while mirror_lag_stamp_lagging_count=1 and
+    mirror_lag_source_of_truth=stamp (stale merge meta not restamped).
+    """
+    from src.monitor.repo_public_mirror_lag import apply_lag_summary_to_health_doc
+
+    sticky = {
+        "status": "ok",
+        "repo_public_mirror_lagging_count": 0,
+        "repo_public_mirror_total": 36,
+        "repo_public_mirror_lag_status": "ok",
+        "repo_public_mirror_lag_badge": "lagging=0/36",
+        "repo_public_mirror_lag": {
+            "lagging_count": 0,
+            "total": 36,
+            "status": "ok",
+            "badge": "lagging=0/36",
+        },
+        # Sticky honesty meta from prior max(live,stamp) merge
+        "mirror_lag_source_of_truth": "stamp",
+        "mirror_lag_live_lagging_count": 0,
+        "mirror_lag_stamp_lagging_count": 1,
+    }
+    live = {
+        "lagging_count": 0,
+        "total": 36,
+        "lagging_paths": [],
+        "source": "/var/www/portfolio-lab/data",
+        "dest": "/root/projects/portfolio-lab/public/data",
+        "ok": True,
+    }
+    out = apply_lag_summary_to_health_doc(sticky, live)
+    assert out["repo_public_mirror_lagging_count"] == 0
+    assert out["repo_public_mirror_lag_status"] == "ok"
+    assert out["mirror_lag_source_of_truth"] == "live"
+    assert out["mirror_lag_live_lagging_count"] == 0
+    assert out["mirror_lag_stamp_lagging_count"] == 0
+
+
+def test_restamp_document_honesty_meta_on_disk(tmp_path) -> None:
+    """Batch IF: restamp_mirror_lag_on_health_documents rewrites honesty meta."""
+    ops = tmp_path / "health_ops.json"
+    sticky = {
+        "status": "warning",
+        "repo_public_mirror_lagging_count": 1,
+        "repo_public_mirror_total": 36,
+        "repo_public_mirror_lag_status": "lagging",
+        "repo_public_mirror_lag": {
+            "lagging_count": 1,
+            "total": 36,
+            "status": "lagging",
+            "badge": "lagging=1/36",
+        },
+        "mirror_lag_source_of_truth": "stamp",
+        "mirror_lag_live_lagging_count": 0,
+        "mirror_lag_stamp_lagging_count": 1,
+    }
+    ops.write_text(json.dumps(sticky), encoding="utf-8")
+    live = {
+        "lagging_count": 0,
+        "total": 36,
+        "lagging_paths": [],
+        "source": "/var/www/portfolio-lab/data",
+        "dest": str(tmp_path),
+        "ok": True,
+    }
+    result = restamp_mirror_lag_on_health_documents(paths=[ops], lag_summary=live)
+    assert any("health_ops" in p for p in result["restamped"])
+    out = json.loads(ops.read_text(encoding="utf-8"))
+    assert out["repo_public_mirror_lagging_count"] == 0
+    assert out["repo_public_mirror_lag_status"] == "ok"
+    assert out["mirror_lag_source_of_truth"] == "live"
+    assert out["mirror_lag_live_lagging_count"] == 0
+    assert out["mirror_lag_stamp_lagging_count"] == 0
 
 
 def test_restamp_rewrites_nested_lag_on_health_ops(tmp_path) -> None:

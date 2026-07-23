@@ -221,3 +221,20 @@
 - ClaudeMd?:      no
 - WorkflowShift?: no
 - Deep-research: multi-dest alerts hold; fchmod chokepoint already in HM
+## [2026-07-23] retro | loop cycle: batch-ie-dashboard-health-multi-dest
+- Friction:       generate_health_json single-path save_results_json; public/repo only re-EQ after soft-mirror job
+- Miss:           IC multi-dest covered merge path only, not full dashboard generate
+- Improve:        write_json_multi_dest public+repo, private_path=None; fallback save_results_json; 3 TDD cases
+- Generalize?:    yes (every public JSON producer needs multi-dest, not only patch/merge paths)
+- ClaudeMd?:      no
+- WorkflowShift?: no
+- Deep-research: dual schema health public vs private SSOT
+
+## [2026-07-23] retro | loop cycle: batch-if-lag-honesty-meta-restamp
+- Friction:       After multi-dest heal lagging_count=0 but mirror_lag_stamp_lagging_count=1 / source_of_truth=stamp
+- Miss:           apply_lag_summary restamp rewrote gauge only, not HO honesty meta
+- Improve:        Restamp sets mirror_lag_* from live probe (stamp==live post-restamp); hermetic HO live mock
+- Generalize?:    yes (restamp must rewrite all consumer SLI fields, not only nested gauge)
+- ClaudeMd?:      no
+- WorkflowShift?: no
+- Deep-research: max(live,stamp) coherent only when stamp fields restamped with probe

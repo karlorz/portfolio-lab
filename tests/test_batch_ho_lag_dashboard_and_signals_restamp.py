@@ -39,6 +39,23 @@ def test_apply_ops_monitor_projects_mirror_lag_onto_dashboard_health(
         "src.monitor.health_check.PUBLIC_DATA_DIR", public, raising=False
     )
 
+    # Batch IF: mock live probe. Without it, conftest plab-pytest PUBLIC_DATA_DIR
+    # falls back to live WWW vs empty tmp dest → lagging≈36 and clobbers stamp=3.
+    import src.monitor.repo_public_mirror_lag as mlag
+
+    monkeypatch.setattr(
+        mlag,
+        "summarize_repo_public_mirror_lag",
+        lambda **k: {
+            "lagging_count": 3,
+            "total": 33,
+            "lagging_paths": ["decision_registry.json"],
+            "source": "/var/www/x",
+            "dest": str(public),
+            "ok": True,
+        },
+    )
+
     ops_report = {
         "status": "warning",
         "timestamp": "2026-07-23T04:00:00+00:00",
@@ -71,6 +88,10 @@ def test_apply_ops_monitor_projects_mirror_lag_onto_dashboard_health(
     assert out["repo_public_mirror_lag"]["lagging_count"] == 3
     # Soft-elevate dashboard system_status when lagging (ops hygiene, not halt)
     assert out["system_status"] == "warning"
+    # Honesty meta must agree with projected lag (not sticky pre-merge stamp)
+    assert out["mirror_lag_source_of_truth"] in ("live", "stamp")
+    assert out["mirror_lag_live_lagging_count"] == 3
+    assert out["mirror_lag_stamp_lagging_count"] == 3
 
 
 def test_apply_ops_monitor_uses_max_live_stamp_when_probe_provided(
