@@ -151,7 +151,7 @@ def apply_lag_summary_to_health_doc(
     return projected
 
 
-def is_ephemeral_restamp_path(path: Path | str) -> bool:
+def is_ephemeral_restamp_path(path: Path | str | None) -> bool:
     """True when *path* is a pytest/tmp fixture tree (must not restamp prod SSOT).
 
     Soft-mirror tests and unit fixtures live under ``/tmp/pytest-of-*``,
@@ -159,21 +159,28 @@ def is_ephemeral_restamp_path(path: Path | str) -> bool:
     ``/tmp/plab-pytest-public.*`` (conftest H16). Writing production
     ``data/health.json`` from those runs poisons private lag SLIs with
     fixture stamp values (Batch HM DA / HP).
+
+    Batch HU: single classifier shared with multi-dest write guards
+    (``signal_authority.is_ephemeral_write_path``) so plab/pytest rules
+    cannot drift between restamp and SSOT write protection.
     """
-    text = str(path or "")
-    if not text:
+    try:
+        from src.monitor.signal_authority import is_ephemeral_write_path
+
+        return is_ephemeral_write_path(path)
+    except Exception:  # noqa: BLE001 — offline/import-safe fallback
+        text = str(path or "").replace("\\", "/")
+        if not text:
+            return False
+        if "plab-pytest" in text:
+            return True
+        if "/pytest-of-" in text:
+            return True
+        if "/tmp/pytest-" in text or text.startswith("/tmp/pytest-"):
+            return True
+        if "/var/folders/" in text and "pytest" in text:
+            return True
         return False
-    # Normalize for substring checks (also catch resolved /private/tmp links)
-    lowered = text.replace("\\", "/")
-    if "plab-pytest" in lowered:
-        return True
-    if "/pytest-of-" in lowered:
-        return True
-    if "/tmp/pytest-" in lowered or lowered.startswith("/tmp/pytest-"):
-        return True
-    if "/var/folders/" in lowered and "pytest" in lowered:
-        return True
-    return False
 
 
 def restamp_mirror_lag_on_health_documents(
