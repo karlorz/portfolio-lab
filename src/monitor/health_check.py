@@ -537,9 +537,14 @@ def apply_ops_monitor_to_dashboard_health(
         return health_data
 
     projected = _project_public_kill_fields(report)
-    ops_status = str(projected.get("ops_health_status") or report.get("status") or "ok")
+    # Batch JL JH1b: always stamp ops_health_status from *this* monitor report
+    # status — never leave a sticky public warning when the live report is ok.
+    ops_status = str(report.get("status") or projected.get("ops_health_status") or "ok")
     health_data["ops_health_status"] = ops_status
-    health_data["ops_health_timestamp"] = projected.get("ops_health_timestamp")
+    health_data["ops_health_timestamp"] = (
+        report.get("timestamp")
+        or projected.get("ops_health_timestamp")
+    )
     health_data["ops_health_source"] = "monitor.health_check"
 
     sticky_kill = isinstance(health_data.get("kill_switch"), dict) and bool(
@@ -1149,6 +1154,11 @@ def publish_health_alerts_json(report: dict[str, Any] | None = None) -> Path | N
     Health cron previously left alerts.json frozen at the last full dashboard
     generate. Build a compact alerts payload so ``generated_at`` tracks the
     health job stamp. Best-effort; never raises to callers.
+
+    Batch JL JH1c: prefer **public dashboard** ``health.json`` (system_status +
+    signal_health) for SLO/quality rollup. Monitor-schema reports lack those
+    fields and produced false-empty alerts while public SH was degraded.
+    Kill/open identity still comes from disk SSOT.
     """
     public = Path(PUBLIC_DATA_DIR)
     out_path = public / "alerts.json"
@@ -1159,9 +1169,30 @@ def publish_health_alerts_json(report: dict[str, Any] | None = None) -> Path | N
         logger.warning("alerts publish imports failed: %s", exc)
         return None
 
-    health_payload: dict[str, Any] = report if isinstance(report, dict) else {}
-    if not health_payload:
-        for candidate in (Path(HEALTH_PATH), public / "health.json", public / "health_ops.json"):
+    monitor_report: dict[str, Any] = report if isinstance(report, dict) else {}
+    dashboard_health: dict[str, Any] | None = None
+    # Prefer operator-visible dashboard schema for SH / system_status
+    for candidate in (public / "health.json", Path(DATA_DIR) / "health.json"):
+        if not candidate.is_file():
+            continue
+        try:
+            blob = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if not isinstance(blob, dict):
+            continue
+        # Dashboard schema: system_status and/or signal_health present
+        if "system_status" in blob or isinstance(blob.get("signal_health"), dict):
+            dashboard_health = blob
+            break
+        # Skip pure monitor schema (status+checks, no system_status)
+        if _is_monitor_health_report(blob) and "system_status" not in blob:
+            continue
+        dashboard_health = blob
+        break
+
+    if dashboard_health is None and not monitor_report:
+        for candidate in (Path(HEALTH_PATH), public / "health_ops.json"):
             if not candidate.is_file():
                 continue
             try:
@@ -1169,14 +1200,42 @@ def publish_health_alerts_json(report: dict[str, Any] | None = None) -> Path | N
             except (OSError, json.JSONDecodeError, TypeError, ValueError):
                 continue
             if isinstance(blob, dict):
-                health_payload = blob
+                monitor_report = blob
                 break
+
+    # Merge: dashboard SH/system_status + live ops stamp from monitor report
+    health_payload: dict[str, Any] = dict(dashboard_health or monitor_report or {})
+    if monitor_report:
+        # Overlay kill/open from monitor checks when dashboard lacks them
+        mon_checks = (
+            monitor_report.get("checks")
+            if isinstance(monitor_report.get("checks"), dict)
+            else {}
+        )
+        if isinstance(mon_checks.get("kill_switch"), dict):
+            health_payload.setdefault("kill_switch", mon_checks["kill_switch"])
+        if isinstance(mon_checks.get("open_incidents"), dict):
+            health_payload.setdefault("open_incidents", mon_checks["open_incidents"])
+        # JH1b: live ops stamp for quality-vs-ops labeling
+        mon_status = str(monitor_report.get("status") or "").lower()
+        if mon_status:
+            health_payload["ops_health_status"] = mon_status
+            health_payload["ops_health_timestamp"] = monitor_report.get("timestamp")
+
+    # Disk kill SSOT always wins over sticky dashboard kill fields
+    try:
+        disk_kill, disk_open = _disk_kill_and_open_incidents(DATA_DIR)
+        health_payload["kill_switch"] = disk_kill
+        health_payload["open_incidents"] = disk_open
+    except Exception:  # noqa: BLE001
+        pass
 
     now_utc = datetime.now(timezone.utc).isoformat()
     # Prefer health stamp so operators can correlate
     stamp = (
         health_payload.get("generated_at")
         or health_payload.get("timestamp")
+        or (monitor_report.get("timestamp") if monitor_report else None)
         or now_utc
     )
     alerts = list(build_health_slo_alerts(health_payload) or [])
