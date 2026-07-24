@@ -136,10 +136,16 @@ remote_hosts:
 
 ## Interview
 
+Schema shape is `interview.setup` / `interview.work_item` (not flat
+`backend` / `trigger`). `default: native` keeps the built-in 3-question
+work-item interview; `trigger: auto` fires only when ambiguity detection
+flags the work item.
+
 ```yaml
 interview:
-  backend: native
-  trigger: auto
+  work_item:
+    default: native
+    trigger: auto
 ```
 
 `native` backend asks 3 fixed questions per work item:
@@ -158,13 +164,7 @@ detection, MARL agents, VIX regime, VPIN, drift-based rebalancing, etc.
 
 Agents dispatched by dev-loop should load CONTEXT.md as a reference before
 writing tests or implementation code. Keep it updated as new concepts land.
-
-```yaml
-glossary:
-  path: CONTEXT.md
-  maintainer: dev-loop
-  update_on: new_concept_landed
-```
+(No top-level `glossary:` key — not in schema; prose + CONTEXT.md only.)
 
 ## CI
 
@@ -384,13 +384,8 @@ notes:
 
 ## Gitignore
 
-```yaml
-gitignore:
-  - .skillwiki/.env
-  - skillwiki/.env
-  - .claude/dev-loop/
-  - .claude/dev-loop-debug/
-```
+(No top-level `gitignore:` key — not in schema. Patterns live in repo
+`.gitignore`.)
 
 `knowledge_layer: skillwiki` keeps work items in the vault, not the repo.
 Keep `/.skillwiki/.env` and `/skillwiki/.env` gitignored because hosts may
