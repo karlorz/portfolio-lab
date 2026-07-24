@@ -840,6 +840,97 @@ def _market_data_consistency_dimension(market_data_consistency: Mapping[str, Any
     return payload
 
 
+# Curated derived market-data artifacts that are NOT in source_manifest.json
+# (which only tracks prices/prices_compact/yields). These are rebuilt from
+# market.db / prices.json by standalone scripts; if a generator is unwired
+# (the vix_term_structure bug, 2026-07-24) the file freezes while the source
+# stays fresh and no other dimension surfaces it. Thresholds in hours.
+DERIVED_ARTIFACT_SLO: tuple[tuple[str, int, str], ...] = (
+    # vix_term_structure.json: rebuilt from market.db by update_vix_term_structure.py
+    # (now wired into fetch-data). Cron is hourly; allow 6h slack.
+    ("vix_term_structure.json", 6, "vix_term_structure"),
+    # garch_cvar.json: rebuilt from market.db by compute_garch_risk.py (hourly cron).
+    ("garch_cvar.json", 6, "garch_risk"),
+    # risk_metrics.json: same producer / cadence.
+    ("risk_metrics.json", 6, "garch_risk"),
+)
+
+
+def _derived_artifact_dimension(
+    data_dir: Path,
+    public_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Freshness-check derived artifacts that generators rebuild from market.db.
+
+    Uses mtime age (hours) against per-artifact thresholds. Missing files are
+    critical (generator never ran or was deleted); stale files are warning.
+
+    Searches both the private ``data_dir`` and the public data dir (some
+    artifacts like garch_cvar.json are dual-written or only public).
+
+    When none of the curated artifacts exist (isolated/test environments where
+    the data dir is not the production tree), the dimension is "unknown" rather
+    than critical-all-missing, so it does not false-alarm outside production.
+    """
+    search_dirs = [Path(data_dir)]
+    if public_dir is not None:
+        search_dirs.append(Path(public_dir))
+    else:
+        from src.paths import PUBLIC_DATA_DIR
+
+        search_dirs.append(Path(PUBLIC_DATA_DIR))
+    now = datetime.now(timezone.utc)
+    stale: list[dict[str, Any]] = []
+    missing: list[str] = []
+    checked: list[dict[str, Any]] = []
+    any_present = False
+    for filename, max_age_hours, producer in DERIVED_ARTIFACT_SLO:
+        path = None
+        for d in search_dirs:
+            candidate = d / filename
+            if candidate.exists():
+                path = candidate
+                break
+        if path is None:
+            missing.append(filename)
+            checked.append({"artifact": filename, "producer": producer, "status": "missing"})
+            continue
+        any_present = True
+        age_hours = (now - datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)).total_seconds() / 3600.0
+        entry = {
+            "artifact": filename,
+            "producer": producer,
+            "age_hours": round(age_hours, 2),
+            "max_age_hours": max_age_hours,
+            "status": "stale" if age_hours > max_age_hours else "ok",
+            "path": str(path),
+        }
+        if age_hours > max_age_hours:
+            stale.append({"artifact": filename, "age_hours": round(age_hours, 2), "max_age_hours": max_age_hours})
+        checked.append(entry)
+
+    if not any_present:
+        status = "unknown"
+        message = "derived artifacts not checked (data dir has no curated artifacts)"
+    elif missing:
+        status = "critical"
+        message = f"{len(missing)} missing derived artifacts: {', '.join(missing)}"
+    elif stale:
+        status = "warning"
+        message = f"{len(stale)} stale derived artifacts: {', '.join(a['artifact'] for a in stale)}"
+    else:
+        status = "ok"
+        message = "derived artifacts fresh"
+    return {
+        "status": status,
+        "checked_count": len(checked),
+        "stale_artifacts": stale[:10],
+        "missing_artifacts": missing[:10],
+        "checked": checked,
+        "message": message,
+    }
+
+
 def _overall_status(dimensions: Mapping[str, Mapping[str, Any]]) -> str:
     ranked = sorted(
         (str(row.get("status", "unknown")) for row in dimensions.values()),
@@ -1328,6 +1419,7 @@ def build_data_pipeline_slo(
     fred_readiness: Mapping[str, Any] | None = None,
     alpaca_feed_entitlement: Mapping[str, Any] | None = None,
     market_data_consistency: Mapping[str, Any] | None = None,
+    data_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Build a compact SLO summary from already-generated dashboard artifacts."""
     dimensions = {
@@ -1337,6 +1429,11 @@ def build_data_pipeline_slo(
         "signal": _signal_dimension(signal_staleness),
         "data_quality": _data_quality_dimension(source_manifest, data_quality_report),
     }
+    # Derived-artifact freshness is only checked when the caller opts in with
+    # an explicit data_dir (production). Unit tests construct synthetic SLOs
+    # and must not read real on-disk files (non-hermetic / flaky).
+    if data_dir is not None:
+        dimensions["derived_artifact"] = _derived_artifact_dimension(data_dir)
     reconciliation = provider_reconciliation
     if reconciliation is None:
         health_reconciliation = health_data.get("provider_reconciliation")

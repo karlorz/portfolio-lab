@@ -150,3 +150,38 @@ def test_runner_exit_2_is_blocked_for_eval_task(tmp_path):
     completed = runner.wait_for_run(run["run_id"], timeout_seconds=5)
     assert completed["status"] == "blocked"
     assert completed["exit_code"] == 2
+
+
+def test_runner_clears_thread_after_completion(tmp_path):
+    """Completed runs must not leak entries in _threads.
+
+    Without cleanup, a finished-but-not-removed thread leaves stale state. If
+    a later subprocess hangs (thread stays is_alive), the worker can report
+    "busy" forever - the condition that froze the scheduler on 2026-07-19 and
+    silently skipped the weekly fetch-trends job for weeks.
+    """
+    command = [sys.executable, "-c", "pass"]
+    registry = _registry(command)
+    store = _store(tmp_path)
+    store.sync_registry(registry)
+    runner = TaskRunner(registry=registry, store=store, project_root=tmp_path)
+
+    run = runner.start_task("env-task", trigger="manual")
+    runner.wait_for_run(run["run_id"], timeout_seconds=5)
+
+    assert run["run_id"] not in runner._threads
+
+
+def test_runner_clears_thread_after_timeout_kill(tmp_path):
+    """A timed-out run must also clear its thread so a hung subprocess cannot
+    permanently block the single worker slot."""
+    command = [sys.executable, "-c", "import time; time.sleep(30)"]
+    registry = _registry(command, timeout_seconds=1)
+    store = _store(tmp_path)
+    store.sync_registry(registry)
+    runner = TaskRunner(registry=registry, store=store, project_root=tmp_path)
+
+    run = runner.start_task("env-task", trigger="manual")
+    completed = runner.wait_for_run(run["run_id"], timeout_seconds=5)
+    assert completed["status"] == "timeout"
+    assert run["run_id"] not in runner._threads

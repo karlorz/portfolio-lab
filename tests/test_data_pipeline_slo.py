@@ -1,5 +1,8 @@
 """Tests for data pipeline SLO summary derivation."""
 
+import os
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from src.monitor.data_pipeline_slo import build_data_pipeline_slo
@@ -984,3 +987,48 @@ def test_slo_runbook_top_cause_prefers_critical_over_warning() -> None:
 
     assert slo["runbook"]["top_cause"]["code"] == "provider_outage"
     assert slo["runbook"]["top_cause"]["severity"] == "critical"
+
+
+def test_slo_flags_stale_derived_artifact_by_mtime(tmp_path) -> None:
+    """vix_term_structure.json and garch_cvar.json are derived from market.db
+    by standalone scripts; if their generator is not wired into cron the file
+    freezes while the source stays fresh. The SLO must surface that by mtime.
+    """
+    from src.monitor.data_pipeline_slo import _derived_artifact_dimension
+
+    now = datetime.now(timezone.utc)
+    old = now - timedelta(hours=48)
+    # Create every curated artifact so none are "missing" (critical).
+    # Make garch_cvar.json stale; the rest fresh.
+    for name in ("vix_term_structure.json", "risk_metrics.json"):
+        p = tmp_path / name
+        p.write_text("{}")
+        os.utime(p, (now.timestamp(), now.timestamp()))
+    stale_file = tmp_path / "garch_cvar.json"
+    stale_file.write_text("{}")
+    os.utime(stale_file, (old.timestamp(), old.timestamp()))
+
+    dim = _derived_artifact_dimension(tmp_path, public_dir=tmp_path)
+
+    assert dim["status"] == "warning"
+    stale_names = [a["artifact"] for a in dim["stale_artifacts"]]
+    assert "garch_cvar.json" in stale_names
+    assert "vix_term_structure.json" not in stale_names
+
+
+def test_slo_derived_artifact_missing_file_is_critical(tmp_path) -> None:
+    from src.monitor.data_pipeline_slo import _derived_artifact_dimension
+
+    # Two of three curated artifacts present (proves a real data dir); the
+    # missing one is critical (its generator never ran or was deleted).
+    now = datetime.now(timezone.utc)
+    for name in ("vix_term_structure.json", "risk_metrics.json"):
+        p = tmp_path / name
+        p.write_text("{}")
+        os.utime(p, (now.timestamp(), now.timestamp()))
+
+    dim = _derived_artifact_dimension(tmp_path, public_dir=tmp_path)
+
+    assert dim["status"] == "critical"
+    assert "garch_cvar.json" in dim["missing_artifacts"]
+

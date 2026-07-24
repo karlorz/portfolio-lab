@@ -150,4 +150,18 @@ describe('fetch-data PUBLIC_DATA_DIR resolution', () => {
     expect(source).toContain('PRIVATE_MARKET_SOFT_MIRROR_BASENAMES');
     expect(source).toContain('chmodSync');
   });
+
+  it('source contract: main rebuilds vix_term_structure.json from market.db after sync', () => {
+    // Without this call the derived VIX history file freezes at the last
+    // manual generation while market.db stays hourly-fresh; the term-structure
+    // signal then reads stale levels (FILE_STALE_DAYS fallback never trips).
+    const source = readFileSync('scripts/fetch-data.ts', 'utf8');
+    expect(source).toContain('update_vix_term_structure');
+    const syncIdx = source.indexOf("runPythonModule('src.data.market_db_sync')");
+    const vixIdx = source.indexOf('update_vix_term_structure');
+    const dashIdx = source.indexOf('await runDashboardGeneration()');
+    expect(syncIdx).toBeGreaterThan(-1);
+    expect(vixIdx).toBeGreaterThan(syncIdx);
+    expect(dashIdx).toBeGreaterThan(vixIdx);
+  });
 });

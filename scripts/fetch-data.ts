@@ -687,6 +687,29 @@ export async function main() {
   console.log('\nSyncing fetched prices into market.db...');
   await runPythonModule('src.data.market_db_sync');
 
+  // 2b. Rebuild vix_term_structure.json from the freshly-synced market.db so
+  // the derived VIX history archive stays current with ^VIX/^VIX3M rows.
+  // Without this the JSON freezes at the last manual generation while the
+  // term-structure signal reads stale levels (FILE_STALE_DAYS fallback never
+  // trips for a 1-2 day gap). Script reads market.db only; no network.
+  console.log('\nRebuilding vix_term_structure.json from market.db...');
+  try {
+    execFileSync(PYTHON_RUNTIME, ['scripts/update_vix_term_structure.py'], {
+      cwd: PROJECT_ROOT,
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        // Keep PUBLIC_DATA_DIR aligned with the tree fetch-data wrote so the
+        // dual-write lands in the operator-visible public data dir.
+        PUBLIC_DATA_DIR: DATA_DIR,
+      },
+    });
+  } catch (vixError) {
+    // Soft: dashboard gen still runs; term-structure signal has its market.db
+    // fallback. Surface noise so operators notice a broken rebuild.
+    console.error('vix_term_structure.json rebuild after market_db_sync failed:', vixError);
+  }
+
   // 3. Fetch yield curve data (FRED)
   const yieldResult = await fetchYieldCurveDataWithSummary(START_DATE, END_DATE, {
     cache: createFredDiskCache(),

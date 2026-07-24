@@ -168,6 +168,7 @@ class TaskRunner:
         finally:
             self._processes.pop(run_id, None)
             self._cancelled.discard(run_id)
+            self._threads.pop(run_id, None)
 
     def _terminate_process_group(self, process: subprocess.Popen[Any]) -> None:
         try:
