@@ -119,12 +119,18 @@ def test_lab_deploy_refreshes_dashboard_data_before_build():
     assert main_body.index("refresh_dashboard_data") < main_body.index("publish_dist")
 
 
-def test_lab_deploy_checks_public_data_consistency_before_publish():
+def test_lab_deploy_checks_public_data_consistency_after_live_mirror_before_publish():
     source = _read("scripts/deploy-lab-app.sh")
     main_body = source.split("main() {", 1)[1]
 
     assert "check_public_data_consistency" in source
     assert main_body.index("build_frontend") < main_body.index("check_public_data_consistency")
+    # Live WWW data must be mirrored into checkout public/data BEFORE the
+    # consistency check, else files the operator tree has but the repo mirror
+    # lacks (e.g. attribution_YYYY-MM-DD.json) false-fail the pre-publish gate.
+    assert main_body.index("mirror_repo_public_data_from_live") < main_body.index(
+        "check_public_data_consistency"
+    )
     assert main_body.index("check_public_data_consistency") < main_body.index("publish_dist")
 
 

@@ -480,10 +480,12 @@ main() {
   check_fred_readiness
   refresh_dashboard_data
   build_frontend
+  # Mirror live WWW data into checkout public/data BEFORE the consistency
+  # check, else files the operator tree has but the repo mirror lacks (e.g.
+  # attribution_YYYY-MM-DD.json) false-fail the pre-publish gate.
+  mirror_repo_public_data_from_live
   check_public_data_consistency
   publish_dist
-  # After publish: soft-mirror live WWW data into checkout public/data (H22b/BX)
-  mirror_repo_public_data_from_live
   install_tasker_service
   write_caddy_config
   install_update_command
