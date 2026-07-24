@@ -479,11 +479,12 @@ main() {
   install_dependencies
   check_fred_readiness
   refresh_dashboard_data
-  build_frontend
-  # Mirror live WWW data into checkout public/data BEFORE the consistency
-  # check, else files the operator tree has but the repo mirror lacks (e.g.
-  # attribution_YYYY-MM-DD.json) false-fail the pre-publish gate.
+  # Mirror live WWW data into checkout public/data BEFORE the frontend build
+  # (so dist/data captures the fresh mirror) and before the consistency check
+  # (so index entries resolve). Files the operator tree has but the repo
+  # mirror lacked otherwise false-fail the pre-publish gate.
   mirror_repo_public_data_from_live
+  build_frontend
   check_public_data_consistency
   publish_dist
   install_tasker_service
