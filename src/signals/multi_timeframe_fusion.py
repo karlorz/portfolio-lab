@@ -212,8 +212,6 @@ class MultiTimeframeFusion:
             Dict of {timeframe: TimeframeComponent}.
         """
         components = {}
-        # Precompute returns once per ticker, reuse across timeframes
-        all_returns = prices.pct_change().dropna()
 
         for tf_name, tf_config in TIMEFRAMES.items():
             lookback = tf_config["lookback_days"]
@@ -243,21 +241,29 @@ class MultiTimeframeFusion:
 
             raw_return = (end_price / start_price) - 1.0
 
-            # Volatility normalization: use shared TTL-cached computation cache
-            returns = all_returns.iloc[-lookback:]
-            cached_vol = get_realized_volatility(returns, window=lookback)
-            realized_vol = cached_vol if cached_vol is not None else 0.15
-            if realized_vol < 0.01:
-                realized_vol = 0.01  # Floor to avoid division explosion
+            # Volatility normalization: use shared TTL-cached computation cache.
+            # C1c: pass the PRICE slice (not returns) - get_realized_volatility
+            # applies pct_change internally, so passing returns double-differences
+            # and yields ~100x too-large vol, collapsing the signal to ~1e-4.
+            price_slice = prices.iloc[-lookback:]
+            cached_vol = get_realized_volatility(price_slice, window=lookback)
+            ann_vol = cached_vol if cached_vol is not None else 0.15
+            if ann_vol < 0.01:
+                ann_vol = 0.01  # Floor to avoid division explosion
+            # Period-matched vol: scale annualized vol to the lookback horizon
+            # so tanh(period_return / period_vol) is horizon-comparable.
+            period_vol = ann_vol * np.sqrt(lookback / 252.0)
+            if period_vol < 0.001:
+                period_vol = 0.001
 
             # Vol-scaled signal via tanh (bounded [-1, 1])
-            vol_scaled = raw_return / realized_vol
+            vol_scaled = raw_return / period_vol
             signal_value = float(np.tanh(vol_scaled))
 
             # Confidence: based on data coverage and vol regime stability
             data_coverage = min(len(prices) / lookback, 1.0)
             # Higher confidence when vol is moderate (not too high, not too low)
-            vol_confidence = 1.0 - abs(realized_vol - 0.15) / 0.30
+            vol_confidence = 1.0 - abs(ann_vol - 0.15) / 0.30
             vol_confidence = float(np.clip(vol_confidence, 0.3, 1.0))
             confidence = data_coverage * vol_confidence
 

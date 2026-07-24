@@ -276,6 +276,23 @@ class SignalHealthTracker:
     # accuracy collapsed to the 0.5 neutral default — fake health vs true IC.
     DIRECTION_DEADBAND: float = 0.05
 
+    # C1c: per-source deadband overrides.
+    # The default 0.05 was tuned for arms clipped to ±0.2 (cross_asset_regime_arb).
+    # Sources whose continuous signal is a gradual z-score / sentiment value
+    # accumulate weak readings near zero that are noise, not directional calls.
+    # Mapping those to ±1 destroys accuracy while IC (continuous) stays strong.
+    # The override sets the noise floor per source so only meaningful readings
+    # count as directional. Justified by IC-vs-accuracy gap (IC strong-positive,
+    # accuracy below 0.5 at the default deadband).
+    SOURCE_DEADBANDS: Dict[str, float] = {
+        "cross_asset_rv": 0.12,  # gradual -current_z/ZSCORE_ENTRY; weak |z|<0.6 is noise
+    }
+
+    @classmethod
+    def deadband_for(cls, source: str) -> float:
+        """Return the direction deadband for a source (default 0.05)."""
+        return float(cls.SOURCE_DEADBANDS.get(source, cls.DIRECTION_DEADBAND))
+
     @staticmethod
     def direction_from_signal_value(
         signal_value: float,
@@ -311,7 +328,9 @@ class SignalHealthTracker:
         metadata: Optional[Dict] = None
     ):
         """Convenience method for logging predictions."""
-        predicted = self.direction_from_signal_value(signal_value)
+        predicted = self.direction_from_signal_value(
+            signal_value, deadband=self.deadband_for(source)
+        )
 
         prediction = SignalPrediction(
             timestamp=timestamp or datetime.now().isoformat(),
@@ -898,12 +917,21 @@ class SignalHealthTracker:
         
             accuracies = {}
             counts = {}
-        
+
+            # C1c: when a source has a deadband override, recompute
+            # predicted_direction from signal_value so historical rows logged
+            # before the override are scored consistently with new predictions.
+            # Sources using the default deadband trust the stored column
+            # (callers/tests may set predicted_direction independently).
+            src_deadband = self.deadband_for(source)
+            recompute_direction = src_deadband != self.DIRECTION_DEADBAND
+
             for period, start_date in periods.items():
                 cursor.execute("""
-                    SELECT predicted_direction, actual_direction
+                    SELECT signal_value, predicted_direction, actual_direction
                     FROM (
                         SELECT
+                            signal_value,
                             predicted_direction,
                             actual_direction,
                             ROW_NUMBER() OVER (
@@ -917,17 +945,25 @@ class SignalHealthTracker:
                     )
                     WHERE daily_rank = 1
                 """, (source, start_date, end_date))
-            
+
                 rows = cursor.fetchall()
-            
+
                 if not rows:
                     accuracies[period] = 0.5  # Neutral if no data
                     counts[period] = 0
                     continue
-            
+
+                # Recompute direction with the per-source deadband when the
+                # source has an override; otherwise trust the stored column.
+                scored = []
+                for sv, pred, actual in rows:
+                    if recompute_direction and sv is not None:
+                        pred = self.direction_from_signal_value(sv, deadband=src_deadband)
+                    scored.append((pred, actual))
+
                 # Calculate directional accuracy
-                correct = sum(1 for pred, actual in rows if pred == actual and pred != 0)
-                total = sum(1 for pred, actual in rows if pred != 0)  # Exclude neutral predictions
+                correct = sum(1 for pred, actual in scored if pred == actual and pred != 0)
+                total = sum(1 for pred, actual in scored if pred != 0)  # Exclude neutral predictions
             
                 if total > 0:
                     accuracies[period] = correct / total
