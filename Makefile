@@ -42,11 +42,13 @@ PERF_UPDATE_BASELINE ?= 0
 help:
 	@echo "Portfolio-Lab Makefile"
 	@echo ""
-	@echo "  make test         Full safe suite (ML off, 6GB VSZ, 3600s, PUBLIC isolated)"
-	@echo "  make test-unit    Safe suite excluding generator + *integration* (S18 segment)"
+	@echo "  make test-gate    DEFAULT agent gate (= test-fast; <2m ensemble/signal)"
+	@echo "  make test-fast    Ensemble/signal subset only (alias of test-gate)"
+	@echo "  make test         Full safe suite merge gate (ML off, 6GB VSZ, ~30-45m, 3600s)"
+	@echo "  make test-unit    Safe suite excluding generator + *integration* (still ~15k tests)"
 	@echo "  make test-generator  Only tests/test_generator.py (heavy dashboard path)"
 	@echo "  make test-integration  Path-selected *integration* / e2e modules (S18)"
-	@echo "  make test-fast    Ensemble/signal subset only (not full unit; <2m target)"
+	@echo "  scripts/wait-test-exit.sh  Wait for make test exit stamp (max 60m; fail if dead)"
 	@echo "  S18b suite cron: OPTIONAL (commented in crontab; not in CRON_TARGETS/tasker)"
 	@echo "  make test-ml-extract  Run extracted ML-kernel tests (safe: ML disabled)"
 	@echo "  make test-ml      Run full test suite including ML (requires torch/sklearn)"
@@ -152,6 +154,7 @@ test:
 	echo "  Timeout: 3600s (raised after get_bl_views isolation; full safe suite ~45m on lab hosts)"; \
 	START=$$(date +%s); \
 	bash -c 'ulimit -v 6291456; \
+		ulimit -n 65536 2>/dev/null || true; \
 		PUBLIC_TMP=$$(mktemp -d /tmp/plab-pytest-public.XXXXXX); \
 		mkdir -p "$$PUBLIC_TMP/data"; \
 		if [ -f public/data/prices.json ]; then cp -a public/data/prices.json "$$PUBLIC_TMP/data/"; \
@@ -179,10 +182,11 @@ test:
 		> $(DATA_DIR)/test_last_exit.json 2>/dev/null || true; \
 	exit $$EXIT
 
-.PHONY: test test-ml test-fast test-unit test-generator test-integration test-ml-extract
+.PHONY: test test-ml test-fast test-gate test-unit test-generator test-integration test-ml-extract
 
 # S18 path segments (generator is ~6.6k lines; *integration* modules host-touch).
-# test-unit = full safe suite minus those files. Full gate remains `make test`.
+# test-unit = full safe suite minus those files (still ~15k tests — not a fast gate).
+# Default agent mid-session gate is test-gate (= test-fast). Full gate remains `make test`.
 TEST_GENERATOR_FILE := tests/test_generator.py
 TEST_INTEGRATION_FILES := \
 	tests/test_collect_signals_integration.py \
@@ -196,20 +200,25 @@ TEST_INTEGRATION_FILES := \
 	tests/test_tsmom_integration.py \
 	tests/test_vix_vol_targeting_integration.py
 
+# DEFAULT agent gate: alias of test-fast (<2m). Do not point agents at full `make test`.
+test-gate: test-fast
+
 test-fast:
 	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
-	echo "=== Test Suite (fast mode): $$(date) ==="; \
+	echo "=== Test Suite (fast / test-gate mode): $$(date) ==="; \
 	echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"; \
 	echo "  Focus: Core signal and ensemble tests only (NOT full unit suite)"; \
 	echo "  Target: <2 minutes execution time"; \
-	echo "  For broader non-generator suite use: make test-unit"; \
+	echo "  Full merge gate: make test (~30-45m). Wait helper: scripts/wait-test-exit.sh"; \
 	START=$$(date +%s); \
+	bash -c 'ulimit -n 65536 2>/dev/null || true; \
 	PORTFOLIO_LAB_ENABLE_ML=0 uv run pytest tests/test_adaptive_sizing.py tests/test_adaptive_consensus.py tests/test_adaptive_ensemble_weights.py tests/test_regime_conditional_weights.py tests/test_ensemble_voter.py tests/test_regime_gate.py tests/test_ensemble_diversity_floor.py tests/test_ensemble_correlation.py tests/test_ensemble_n_eff.py tests/test_regime_bandit_integration.py -q --tb=short -p no:cacheprovider; \
+	exit $$?'; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
 	echo ""; \
-	echo "=== Test Suite (fast): exit $$EXIT, duration $${DUR}s ==="; \
+	echo "=== Test Suite (fast/gate): exit $$EXIT, duration $${DUR}s ==="; \
 	if [ $$EXIT -eq 124 ]; then \
 		echo "TIMEOUT (124): Fast test suite exceeded 120s limit."; \
 	elif [ $$EXIT -eq 137 ]; then \
@@ -230,6 +239,7 @@ test-unit:
 	echo "  Timeout: 2400s (full suite uses 3600s)"; \
 	START=$$(date +%s); \
 	bash -c 'ulimit -v 6291456 2>/dev/null || true; \
+		ulimit -n 65536 2>/dev/null || true; \
 		PUBLIC_TMP=$$(mktemp -d /tmp/plab-pytest-public.XXXXXX); \
 		mkdir -p "$$PUBLIC_TMP/data"; \
 		export PUBLIC_DATA_DIR="$$PUBLIC_TMP/data"; \

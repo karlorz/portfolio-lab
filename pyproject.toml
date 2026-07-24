@@ -62,6 +62,11 @@ no-build-isolation-package = []
 
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"
+# Keep basetemp small on lab hosts: full suite used to leave multi-10k-inode
+# trees under /tmp/pytest-of-root, which tripped hermes pytest-watchdog cleanup
+# alerts every hour. Prefer failed-only retention of a single prior run.
+tmp_path_retention_policy = "failed"
+tmp_path_retention_count = 1
 markers = [
     "heavy: tests requiring heavy ML libraries (torch, xgboost) — require PORTFOLIO_LAB_ENABLE_ML=1",
     "ml_extract: safe-mode tests for extracted pure ML-adjacent kernels — require PORTFOLIO_LAB_ENABLE_ML=0 and --include-ml-extract",

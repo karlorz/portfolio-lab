@@ -5,6 +5,7 @@ Covers: all exported constants resolve to valid Path objects,
 PROJECT_ROOT correctness, BASE_ALLOCATION structure.
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -35,8 +36,30 @@ class TestDataPaths:
         assert paths.PUBLIC_DATA_DIR.name == "data"
 
     def test_market_db_path(self):
-        assert paths.MARKET_DB.parent == paths.DATA_DIR
+        configured = os.environ.get("PORTFOLIO_LAB_MARKET_DB")
+        if configured:
+            assert paths.MARKET_DB == Path(configured).expanduser()
+        else:
+            assert paths.MARKET_DB.parent == paths.DATA_DIR
         assert paths.MARKET_DB.name == "market.db"
+
+    def test_market_db_env_override_before_import(self, tmp_path):
+        configured = tmp_path / "market.db"
+        env = dict(os.environ)
+        env["PORTFOLIO_LAB_MARKET_DB"] = str(configured)
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "from src.paths import MARKET_DB; print(MARKET_DB)",
+            ],
+            cwd=paths.PROJECT_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert Path(result.stdout.strip()) == configured
 
 
 class TestDataFiles:

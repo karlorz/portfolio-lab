@@ -35,6 +35,8 @@ Allow live operator PUBLIC dual-writes (dangerous on lab hosts):
 import os
 import sys
 import builtins
+import shutil
+import sqlite3
 import tempfile
 from pathlib import Path
 import pytest
@@ -51,6 +53,9 @@ import pytest
 # covers bare `pytest` / `uv run pytest` invocations.
 
 _ISOLATED_PUBLIC_DATA_DIR: Path | None = None
+_ISOLATED_PUBLIC_DATA_ROOT: Path | None = None
+_ISOLATED_MARKET_DB: Path | None = None
+_ISOLATED_MARKET_DB_ROOT: Path | None = None
 
 
 def _seed_isolated_public_fixtures(public: Path) -> None:
@@ -61,8 +66,6 @@ def _seed_isolated_public_fixtures(public: Path) -> None:
     for prices.json even when market.db is available. Seed from repo fixtures
     when present; never touch live WWW.
     """
-    import shutil
-
     repo_root = Path(__file__).resolve().parent.parent
     candidates = [
         repo_root / "public" / "data" / "prices.json",
@@ -83,7 +86,7 @@ def _seed_isolated_public_fixtures(public: Path) -> None:
 
 def _bootstrap_public_data_dir_isolation() -> Path | None:
     """Ensure PUBLIC_DATA_DIR points at a hermetic temp tree for the session."""
-    global _ISOLATED_PUBLIC_DATA_DIR
+    global _ISOLATED_PUBLIC_DATA_DIR, _ISOLATED_PUBLIC_DATA_ROOT
     if os.environ.get("PORTFOLIO_LAB_ALLOW_LIVE_PUBLIC", "0") == "1":
         return None
     existing = os.environ.get("PUBLIC_DATA_DIR", "").strip()
@@ -94,6 +97,7 @@ def _bootstrap_public_data_dir_isolation() -> Path | None:
         _seed_isolated_public_fixtures(_ISOLATED_PUBLIC_DATA_DIR)
         return _ISOLATED_PUBLIC_DATA_DIR
     base = Path(tempfile.mkdtemp(prefix="plab-pytest-public-"))
+    _ISOLATED_PUBLIC_DATA_ROOT = base
     public = base / "data"
     public.mkdir(parents=True, exist_ok=True)
     os.environ["PUBLIC_DATA_DIR"] = str(public)
@@ -105,6 +109,55 @@ def _bootstrap_public_data_dir_isolation() -> Path | None:
 
 
 _bootstrap_public_data_dir_isolation()
+
+
+def _bootstrap_market_db_isolation() -> Path | None:
+    """Redirect default MARKET_DB reads/writes to a session-private backup.
+
+    Ensemble tests exercise real collection paths that log health predictions.
+    Without an import-time override, those synthetic rows land in the operator
+    market.db and later receive real SPY labels. Seed the private database with
+    the live schema/data so read-oriented tests retain realistic fixtures while
+    every mutation remains disposable.
+    """
+    global _ISOLATED_MARKET_DB, _ISOLATED_MARKET_DB_ROOT
+    if os.environ.get("PORTFOLIO_LAB_ALLOW_LIVE_MARKET_DB", "0") == "1":
+        return None
+
+    existing = os.environ.get("PORTFOLIO_LAB_MARKET_DB", "").strip()
+    if existing:
+        _ISOLATED_MARKET_DB = Path(existing).expanduser()
+        _ISOLATED_MARKET_DB.parent.mkdir(parents=True, exist_ok=True)
+        return _ISOLATED_MARKET_DB
+
+    repo_root = Path(__file__).resolve().parent.parent
+    source = repo_root / "data" / "market.db"
+    root = Path(tempfile.mkdtemp(prefix="plab-pytest-market-db-"))
+    isolated = root / "market.db"
+    if source.is_file():
+        # sqlite backup is consistent even while tasker has the live DB open.
+        with sqlite3.connect(source) as source_conn, sqlite3.connect(isolated) as dest_conn:
+            source_conn.backup(dest_conn)
+
+    os.environ["PORTFOLIO_LAB_MARKET_DB"] = str(isolated)
+    _ISOLATED_MARKET_DB_ROOT = root
+    _ISOLATED_MARKET_DB = isolated
+    return isolated
+
+
+_bootstrap_market_db_isolation()
+
+
+def pytest_sessionfinish(session, exitstatus) -> None:
+    """Remove only isolation trees created by this pytest process."""
+    del session, exitstatus
+    global _ISOLATED_PUBLIC_DATA_ROOT, _ISOLATED_MARKET_DB_ROOT
+    if _ISOLATED_PUBLIC_DATA_ROOT is not None:
+        shutil.rmtree(_ISOLATED_PUBLIC_DATA_ROOT, ignore_errors=True)
+    _ISOLATED_PUBLIC_DATA_ROOT = None
+    if _ISOLATED_MARKET_DB_ROOT is not None:
+        shutil.rmtree(_ISOLATED_MARKET_DB_ROOT, ignore_errors=True)
+    _ISOLATED_MARKET_DB_ROOT = None
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -558,13 +611,44 @@ def _isolate_evaluator_data_dir(request, tmp_path, monkeypatch):
     yield
 
 
+@pytest.fixture(scope="session")
+def _incidents_isolate_root(tmp_path_factory):
+    """One hermetic incidents tree for the whole suite (inode-friendly).
+
+    Historical bug: function-scoped ``tmp_path_factory.mktemp("incidents-isolate")``
+    created ~1 directory per test (~7k–15k inodes per ``make test``). That pushed
+    ``/tmp/pytest-of-root`` over the hermes pytest-watchdog 50k-entry cleanup
+    threshold every run and burned FS/CPU on mkdir churn.
+    """
+    return tmp_path_factory.mktemp("incidents-isolate")
+
+
+def _clear_incidents_isolate_root(root: Path) -> None:
+    """Drop leftover incident/kill files so tests do not inherit prior state."""
+    try:
+        children = list(root.iterdir())
+    except OSError:
+        return
+    for child in children:
+        try:
+            if child.is_symlink() or child.is_file():
+                child.unlink()
+            elif child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+        except OSError:
+            continue
+
+
 @pytest.fixture(autouse=True)
-def _isolate_incident_manager_singleton(request, tmp_path_factory, monkeypatch):
+def _isolate_incident_manager_singleton(request, _incidents_isolate_root, monkeypatch):
     """Batch JG TI1: rebind default IncidentManager away from live DATA_DIR.
 
     Complements refuse-on-write guards in incident_manager. Opt out:
       @pytest.mark.allow_live_incidents
       PORTFOLIO_LAB_ALLOW_LIVE_INCIDENTS=1
+
+    Uses a session-scoped temp root (cleared per test) instead of mktemp-per-test
+    so full-suite runs stay under the pytest-watchdog inode threshold.
     """
     if request.node.get_closest_marker("allow_live_incidents"):
         yield
@@ -572,7 +656,8 @@ def _isolate_incident_manager_singleton(request, tmp_path_factory, monkeypatch):
     if os.environ.get("PORTFOLIO_LAB_ALLOW_LIVE_INCIDENTS", "0") == "1":
         yield
         return
-    root = tmp_path_factory.mktemp("incidents-isolate")
+    root = _incidents_isolate_root
+    _clear_incidents_isolate_root(root)
     try:
         import src.monitor.alerting as alerting
     except Exception:

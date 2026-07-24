@@ -90,6 +90,7 @@ Domain glossary for dev-loop agents. Use these precise terms instead of paraphra
   Do not use repo-local `wiki/` or `work/` directories.
 - **Agent instructions**: slim `CLAUDE.md` / `AGENTS.md` (hard rules + wiki index only). Durable status/docs live in SkillWiki `projects/portfolio-lab/knowledge.md` and `compound/claude-md-agent-reference.md` — update those after features land, not a status dump in CLAUDE.md
 - **No ML imports without explicit user request** — always default to `PORTFOLIO_LAB_ENABLE_ML=0`
-- **Test safety**: `make test` runs the generated safe suite with ML disabled
-  and a 3GB ulimit. Treat exact test counts as generated output from the latest
-  run, not a static contract.
+- **Test safety**: tiered gates — default agent mid-session `make test-gate`
+  (= `test-fast`, &lt;2m). Full `make test` is the merge gate (ML off, 6GB VSZ,
+  ~30–45m). Wait with `scripts/wait-test-exit.sh`; do not poll with a 10m tool
+  timeout. Treat exact test counts as generated output, not a static contract.

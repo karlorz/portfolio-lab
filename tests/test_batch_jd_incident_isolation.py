@@ -137,3 +137,76 @@ def os_environ_pytest_active() -> bool:
     import os
 
     return bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+
+def test_ti1_d_incidents_isolate_is_session_scoped(tmp_path_factory: pytest.TempPathFactory) -> None:
+    """Autouse isolation must not mktemp-per-test (watchdog inode storm).
+
+    One basetemp child named incidents-isolate* is enough for the whole session.
+    """
+    conf = Path("tests/conftest.py").read_text(encoding="utf-8")
+    assert "def _incidents_isolate_root" in conf
+    assert 'scope="session"' in conf or "scope='session'" in conf
+    assert "_clear_incidents_isolate_root" in conf
+    # Executable call must live only on the session fixture (docstrings may mention
+    # the historical mktemp-per-test bug).
+    assert "return tmp_path_factory.mktemp(\"incidents-isolate\")" in conf
+    assert "root = tmp_path_factory.mktemp(\"incidents-isolate\")" not in conf
+
+    basetemp = tmp_path_factory.getbasetemp()
+    # pytest also creates an ``incidents-isolatecurrent`` symlink next to the real dir.
+    isolate_dirs = [
+        p
+        for p in basetemp.iterdir()
+        if p.is_dir()
+        and not p.is_symlink()
+        and p.name.startswith("incidents-isolate")
+        and not p.name.endswith("current")
+    ]
+    assert len(isolate_dirs) == 1, (
+        f"expected one session incidents-isolate dir, found {len(isolate_dirs)} under {basetemp}"
+    )
+
+
+def test_ti1_e_session_root_clears_between_tests(
+    _incidents_isolate_root: Path,
+) -> None:
+    """Reused session root must not leak open_count across tests."""
+    import src.monitor.alerting as alerting
+
+    mgr = alerting.get_incident_manager()
+    # Autouse fixture already cleared root and installed hermetic manager.
+    assert mgr.summary_path.parent == _incidents_isolate_root
+    assert not (mgr.summary_path.exists() and mgr.summary_path.stat().st_size > 2) or (
+        json.loads(mgr.summary_path.read_text(encoding="utf-8")).get("open_count", 0) == 0
+    )
+    opened = mgr.record_alert(
+        channel="signal_staleness",
+        level="warn",
+        message="session-root probe",
+    )
+    assert opened is not None
+    summary = json.loads(mgr.summary_path.read_text(encoding="utf-8"))
+    assert summary.get("open_count") == 1
+
+
+def test_ti1_f_session_root_was_cleared_after_prior_probe(
+    _incidents_isolate_root: Path,
+) -> None:
+    """Runs after ti1_e in same process — open_count must start at 0 again."""
+    import src.monitor.alerting as alerting
+
+    mgr = alerting.get_incident_manager()
+    assert mgr.summary_path.parent == _incidents_isolate_root
+    if mgr.summary_path.is_file():
+        body = json.loads(mgr.summary_path.read_text(encoding="utf-8"))
+        assert body.get("open_count", 0) == 0
+    else:
+        assert not mgr.summary_path.exists()
+
+
+def test_ti1_g_pytest_tmp_retention_is_tight() -> None:
+    """pyproject must not keep multi-run basetemp trees on lab hosts."""
+    text = Path("pyproject.toml").read_text(encoding="utf-8")
+    assert 'tmp_path_retention_policy = "failed"' in text
+    assert "tmp_path_retention_count = 1" in text

@@ -113,7 +113,14 @@ def resolve_runtime_public_data_dir(
 # in new call sites when env may change after import.
 PUBLIC_DATA_DIR = resolve_runtime_public_data_dir(emit_log=True)
 # Common database paths
-MARKET_DB = DATA_DIR / "market.db"
+#
+# Tests and other hermetic callers may redirect the mutable market database
+# before importing ``src.paths``. Production keeps the canonical repo data
+# path. Keeping the override here preserves the rule that consumers import
+# paths from this module instead of inventing local path resolution.
+MARKET_DB = Path(
+    os.environ.get("PORTFOLIO_LAB_MARKET_DB", str(DATA_DIR / "market.db"))
+).expanduser()
 TASKER_DB = DATA_DIR / "tasker.db"
 
 # Common data files
