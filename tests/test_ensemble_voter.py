@@ -2853,6 +2853,7 @@ class TestApplyHealthWeightsEdgeCases:
             bad.health_score = 0.43
             bad.status = "unhealthy"
             bad.ic = None  # unknown IC → fail-closed hard zero
+            bad.predictions_count = 20
             mock_instance.calculate_all_health_scores.return_value = {
                 'multi_speed_momentum': good,
                 'vix_term_structure': bad,
@@ -2908,6 +2909,7 @@ class TestApplyHealthWeightsEdgeCases:
             toxic.health_score = 0.5
             toxic.status = "degraded"
             toxic.ic = -0.29
+            toxic.predictions_count = 20
             mock_instance.calculate_all_health_scores.return_value = {
                 'cross_asset_rv': good,
                 'cross_asset_regime_arb': toxic,

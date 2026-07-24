@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from src.strategy.health_gate_policy import disclosure as hard_zero_policy_disclosure
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -90,11 +92,13 @@ def attach_signal_quality_disclosure(
             "ensemble sleeves are advisory (live_authoritative: false)."
         ),
     }
+    quality["hard_zero_policy"] = hard_zero_policy_disclosure()
     if zero_healthy:
         quality["severity"] = "degraded"
         quality["operator_action"] = (
             "Do not promote ensemble weights; investigate IC/accuracy on "
-            "degraded sleeves; optional hard-zero unhealthy arms (ADR pending)."
+            "degraded sleeves; apply ADR-006 advisory hard-zero policy while "
+            "retaining shadow collection."
         )
     # Batch CP: disclose when fleet is under collapsed_recency thresholds
     collapsed_n = int(summary.get("window_collapse_90_60_count") or 0)

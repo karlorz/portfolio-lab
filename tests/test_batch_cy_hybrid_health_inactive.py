@@ -15,18 +15,27 @@ def test_unhealthy_nonneg_ic_soft_floors_live_vix_shape() -> None:
     voter = EnsembleVoter.__new__(EnsembleVoter)
     scores = {
         "cross_asset_rv": SimpleNamespace(
-            health_score=0.57, status="healthy", ic=0.15
+            health_score=0.57, status="healthy", ic=0.15, predictions_count=20
         ),
         # Live residual IC ~0.059 is below ENSEMBLE_UNHEALTHY_MIN_IC → hard sleep
         "vix_term_structure": SimpleNamespace(
-            health_score=0.4648, status="unhealthy", ic=0.059
+            health_score=0.4648,
+            status="unhealthy",
+            ic=0.059,
+            predictions_count=20,
         ),
         # Strong IC unhealthy still soft-floors (DU)
         "google_trends": SimpleNamespace(
-            health_score=0.40, status="unhealthy", ic=0.15
+            health_score=0.40,
+            status="unhealthy",
+            ic=0.15,
+            predictions_count=20,
         ),
         "alternative_data": SimpleNamespace(
-            health_score=0.51, status="degraded", ic=-0.07
+            health_score=0.51,
+            status="degraded",
+            ic=-0.07,
+            predictions_count=20,
         ),
     }
     mock = MagicMock()

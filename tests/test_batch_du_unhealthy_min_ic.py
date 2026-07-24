@@ -11,10 +11,11 @@ from src.strategy.ensemble_voter import EnsembleVoter, Regime, SignalSource
 
 
 class _H:
-    def __init__(self, status: str, score: float, ic):
+    def __init__(self, status: str, score: float, ic, predictions_count: int = 20):
         self.status = status
         self.health_score = score
         self.ic = ic
+        self.predictions_count = predictions_count
 
 
 def test_unhealthy_weak_ic_hard_sleeps(tmp_path: Path, monkeypatch) -> None:

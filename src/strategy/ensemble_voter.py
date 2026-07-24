@@ -2514,13 +2514,11 @@ class EnsembleVoter:
     def _apply_health_weights(self, weights: Dict) -> Dict:
         """Apply health-adjusted weighting (v3.12) — soft floor + hard-zero gates.
 
-        Batch BH residual honesty:
-        - status == unhealthy → multiplier 0 (quality sleep / hard exclude)
-        - Batch CN: status == degraded **and** IC < 0 → multiplier 0
-          (negative-IC degraded arms are fail-closed; soft floor only for
-          degraded/healthy with non-negative IC — hybrid 2025–2026 SRE policy)
-        - Batch DU: unhealthy + IC < UNHEALTHY_MIN_IC (0.08) hard-zero —
-          weak non-neg IC is not enough evidence to keep vote mass
+        ADR-006 residual honesty:
+        - require the configured minimum labeled daily cohorts before hard-zero
+        - hard-zero non-healthy sleeves with negative IC
+        - hard-zero unhealthy sleeves with unknown IC or IC below the approved
+          minimum (0.08 by default)
         - otherwise soft floor max(0.2, health_score) for graceful degrade
         - if all arms hard-gated: freeze adaptive blend (all-zero mass, do not
           reinflate toxic arms via renorm)
@@ -2539,11 +2537,15 @@ class EnsembleVoter:
             if not health_scores:
                 return weights
 
-            # Batch DU: quant IC ~0.02–0.05 is "ok"; below ~0.08 with unhealthy
-            # quality score is noise — hard-sleep (see deep-research IC gates).
-            unhealthy_min_ic = float(
-                os.environ.get("ENSEMBLE_UNHEALTHY_MIN_IC", "0.08")
+            from src.strategy.health_gate_policy import (
+                minimum_labeled_daily_cohorts,
+                unhealthy_min_ic as resolve_unhealthy_min_ic,
             )
+
+            # ADR-006: health hard-zero is advisory-only and requires a
+            # sufficiently labeled daily cohort before excluding vote mass.
+            unhealthy_min_ic = resolve_unhealthy_min_ic()
+            hard_zero_min_cohorts = minimum_labeled_daily_cohorts()
 
             adjusted_weights = {}
             slept: list[str] = []
@@ -2560,44 +2562,58 @@ class EnsembleVoter:
                         ic_val = float(ic_raw) if ic_raw is not None else None
                     except (TypeError, ValueError):
                         ic_val = None
+                    cohorts_raw = getattr(
+                        health,
+                        "predictions_count",
+                        0,
+                    )
+                    try:
+                        labeled_cohorts = int(cohorts_raw)
+                    except (TypeError, ValueError):
+                        labeled_cohorts = 0
+                    cohort_eligible = labeled_cohorts >= hard_zero_min_cohorts
 
                     # Batch CY hybrid (evolves BH/CN) + Batch DU min-IC for unhealthy:
                     # - hard sleep toxic arms: IC < 0 (any non-healthy status), or
                     #   unhealthy with unknown IC (fail-closed without IC evidence)
                     # - hard sleep unhealthy with weak IC < UNHEALTHY_MIN_IC
                     # - soft floor max(0.2, hs) when quality is poor but IC ≥ min
-                    hard_zero = False
-                    sleep_reason = None
-                    if ic_val is not None and ic_val < 0.0:
-                        hard_zero = True
-                        sleep_reason = (
+                    hard_zero_candidate = False
+                    candidate_reason = None
+                    if (
+                        status != SignalHealthStatus.HEALTHY.value
+                        and ic_val is not None
+                        and ic_val < 0.0
+                    ):
+                        hard_zero_candidate = True
+                        candidate_reason = (
                             f"negative_ic({ic_val:.3f})"
                             if status != SignalHealthStatus.DEGRADED.value
                             else f"degraded_negative_ic({ic_val:.3f})"
                         )
                     elif status == SignalHealthStatus.UNHEALTHY.value:
                         if ic_val is None:
-                            hard_zero = True
-                            sleep_reason = "unhealthy_ic_unknown"
+                            hard_zero_candidate = True
+                            candidate_reason = "unhealthy_ic_unknown"
                         elif ic_val < unhealthy_min_ic:
-                            hard_zero = True
-                            sleep_reason = (
+                            hard_zero_candidate = True
+                            candidate_reason = (
                                 f"unhealthy_weak_ic({ic_val:.3f}<{unhealthy_min_ic:.2f})"
                             )
                         # else: unhealthy + IC≥min → soft floor below
-                    elif (
-                        status == SignalHealthStatus.DEGRADED.value
-                        and ic_val is not None
-                        and ic_val < 0.0
-                    ):
-                        # unreachable (neg IC handled above) — keep for clarity
-                        hard_zero = True
-                        sleep_reason = f"degraded_negative_ic({ic_val:.3f})"
+                    hard_zero = hard_zero_candidate and cohort_eligible
+                    insufficient_reason = None
+                    if hard_zero_candidate and not cohort_eligible:
+                        insufficient_reason = (
+                            "insufficient_cohorts("
+                            f"{labeled_cohorts}<{hard_zero_min_cohorts};"
+                            f"{candidate_reason or 'hard_zero'})"
+                        )
 
                     if hard_zero:
                         multiplier = 0.0
                         slept.append(source_str)
-                        reason = sleep_reason or "hard_zero"
+                        reason = candidate_reason or "hard_zero"
                         sleep_reasons[source_str] = reason
                         logger.info(
                             "Health-gated %s: weight %.2f%% → 0%% (%s, score=%.2f, ic=%s)",
@@ -2612,7 +2628,9 @@ class EnsembleVoter:
                         # Batch DU: only disclose soft-floor when arm still has
                         # vote mass (skip zero-baseline / already-zero weight).
                         still_votes = float(base_weight or 0.0) > 1e-12
-                        if still_votes and status == SignalHealthStatus.UNHEALTHY.value:
+                        if still_votes and insufficient_reason:
+                            soft_floor[source_str] = insufficient_reason
+                        elif still_votes and status == SignalHealthStatus.UNHEALTHY.value:
                             soft_floor[source_str] = (
                                 f"unhealthy_soft_floor(score={hs:.2f},ic={ic_val})"
                             )

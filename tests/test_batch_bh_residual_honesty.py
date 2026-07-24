@@ -17,16 +17,20 @@ def test_apply_health_weights_hard_zeros_unhealthy():
 
     voter = EnsembleVoter.__new__(EnsembleVoter)
 
-    healthy = SimpleNamespace(health_score=0.9, status="healthy", ic=0.1)
+    healthy = SimpleNamespace(
+        health_score=0.9, status="healthy", ic=0.1, predictions_count=20
+    )
     # unknown IC → hard sleep (fail-closed)
     unhealthy_unknown = SimpleNamespace(
-        health_score=0.43, status="unhealthy", ic=None
+        health_score=0.43, status="unhealthy", ic=None, predictions_count=20
     )
     # IC >= ENSEMBLE_UNHEALTHY_MIN_IC (0.08) → soft floor (Batch DU; not weak 0.05)
     unhealthy_pos_ic = SimpleNamespace(
-        health_score=0.43, status="unhealthy", ic=0.12
+        health_score=0.43, status="unhealthy", ic=0.12, predictions_count=20
     )
-    degraded = SimpleNamespace(health_score=0.55, status="degraded", ic=0.0)
+    degraded = SimpleNamespace(
+        health_score=0.55, status="degraded", ic=0.0, predictions_count=20
+    )
 
     scores = {
         SignalSource.MULTI_SPEED_MOM.value: healthy,
@@ -68,10 +72,10 @@ def test_apply_health_weights_freeze_when_all_unhealthy():
     voter = EnsembleVoter.__new__(EnsembleVoter)
     scores = {
         SignalSource.VIX_TERM_STRUCTURE.value: SimpleNamespace(
-            health_score=0.4, status="unhealthy", ic=None
+            health_score=0.4, status="unhealthy", ic=None, predictions_count=20
         ),
         SignalSource.UNIFIED_OVERLAY.value: SimpleNamespace(
-            health_score=0.3, status="unhealthy", ic=None
+            health_score=0.3, status="unhealthy", ic=None, predictions_count=20
         ),
     }
     mock_tracker = MagicMock()
