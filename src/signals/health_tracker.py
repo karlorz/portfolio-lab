@@ -902,10 +902,20 @@ class SignalHealthTracker:
             for period, start_date in periods.items():
                 cursor.execute("""
                     SELECT predicted_direction, actual_direction
-                    FROM signal_predictions
-                    WHERE source = ? 
-                    AND date(timestamp) BETWEEN date(?) AND date(?)
-                    AND actual_direction IS NOT NULL
+                    FROM (
+                        SELECT
+                            predicted_direction,
+                            actual_direction,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY date(timestamp)
+                                ORDER BY timestamp DESC, id DESC
+                            ) AS daily_rank
+                        FROM signal_predictions
+                        WHERE source = ?
+                          AND date(timestamp) BETWEEN date(?) AND date(?)
+                          AND actual_direction IS NOT NULL
+                    )
+                    WHERE daily_rank = 1
                 """, (source, start_date, end_date))
             
                 rows = cursor.fetchall()
@@ -1348,11 +1358,22 @@ class SignalHealthTracker:
             cursor.execute(
                 """
                 SELECT signal_value, actual_direction
-                FROM signal_predictions
-                WHERE source = ?
-                  AND date(timestamp) BETWEEN date(?) AND date(?)
-                  AND actual_direction IS NOT NULL
-                  AND signal_value IS NOT NULL
+                FROM (
+                    SELECT
+                        signal_value,
+                        actual_direction,
+                        timestamp,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY date(timestamp)
+                            ORDER BY timestamp DESC, id DESC
+                        ) AS daily_rank
+                    FROM signal_predictions
+                    WHERE source = ?
+                      AND date(timestamp) BETWEEN date(?) AND date(?)
+                      AND actual_direction IS NOT NULL
+                      AND signal_value IS NOT NULL
+                )
+                WHERE daily_rank = 1
                 ORDER BY timestamp
                 """,
                 (source, start_date, end_date),
@@ -1508,6 +1529,11 @@ class SignalHealthTracker:
                 "full_scheme": "50% 90d + 30% 60d + 20% 30d",
                 "collapsed_scheme": "40% 60d + 60% 30d (recency bias; no fake 90d)",
                 "collapse_rule": "c90==c60 (no extra labeled history in 60→90)",
+                "sampling_unit": "latest_prediction_per_source_calendar_date",
+                "sampling_reason": (
+                    "SPY forward labels are assigned per calendar date; one latest "
+                    "source/date observation prevents cron/test run-frequency bias."
+                ),
                 "live_authoritative": False,
             },
         }
