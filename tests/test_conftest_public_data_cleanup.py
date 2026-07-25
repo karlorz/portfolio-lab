@@ -16,7 +16,7 @@ def _project_conftest(pytestconfig):
 
 
 def test_owned_public_data_root_is_removed_at_session_finish(
-    tmp_path: Path, monkeypatch, pytestconfig
+    tmp_path: Path, monkeypatch, pytestconfig,
 ) -> None:
     conftest = _project_conftest(pytestconfig)
 
@@ -26,13 +26,15 @@ def test_owned_public_data_root_is_removed_at_session_finish(
     (public / "prices.json").write_text("{}", encoding="utf-8")
 
     monkeypatch.setattr(conftest, "_ISOLATED_PUBLIC_DATA_ROOT", owned_root)
+    # Never let this mid-suite regression test touch the session-owned DB root.
+    monkeypatch.setattr(conftest, "_ISOLATED_MARKET_DB_ROOT", None)
     conftest.pytest_sessionfinish(session=None, exitstatus=0)
 
     assert not owned_root.exists()
 
 
 def test_caller_provided_public_data_dir_is_not_removed(
-    tmp_path: Path, monkeypatch, pytestconfig
+    tmp_path: Path, monkeypatch, pytestconfig,
 ) -> None:
     conftest = _project_conftest(pytestconfig)
 
@@ -40,6 +42,7 @@ def test_caller_provided_public_data_dir_is_not_removed(
     caller_root.mkdir()
     monkeypatch.setattr(conftest, "_ISOLATED_PUBLIC_DATA_DIR", caller_root)
     monkeypatch.setattr(conftest, "_ISOLATED_PUBLIC_DATA_ROOT", None)
+    monkeypatch.setattr(conftest, "_ISOLATED_MARKET_DB_ROOT", None)
 
     conftest.pytest_sessionfinish(session=None, exitstatus=0)
 

@@ -99,5 +99,6 @@ select = ["T201"]  # flake8-print: detect print() calls
 "src/regime/transformer_regime.py" = ["T201"]  # ML-gated CLI output
 "src/research/gold_tlt_correlation.py" = ["T201"]  # research CLI summary
 "src/research/regime_walk_forward.py" = ["T201"]  # research CLI summary
+"src/monitor/prod_ideas.py" = ["T201"]  # tasker/CLI operator summary
 "src/strategy/hedge_selector.py" = ["T201"]  # CLI status/selection output
 "tests/**" = ["T201"]        # Test output — print() is expected

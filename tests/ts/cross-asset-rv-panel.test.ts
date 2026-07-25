@@ -5,7 +5,7 @@ import {
   CrossAssetRVPanel,
   normalizeCrossAssetRVData,
 } from '../../src/components/CrossAssetRVPanel';
-import producer from '../../public/data/cross_asset_rv.json';
+import producer from '../fixtures/dashboard/cross_asset_rv.json';
 
 describe('CrossAssetRVPanel producer shape', () => {
   it('normalizes public producer pairs without percentile_1y', () => {

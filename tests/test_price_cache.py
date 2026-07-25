@@ -93,17 +93,20 @@ class TestGetPrices:
 
         def reader():
             try:
-                with patch("src.data.price_cache.PRICES_JSON", prices_file):
-                    r = get_prices()
+                r = get_prices()
                 results.append(r)
             except Exception as e:
                 errors.append(e)
 
-        threads = [threading.Thread(target=reader) for _ in range(10)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        # Patch once around the concurrent operation. Nested overlapping
+        # unittest.mock.patch contexts are not thread-safe: each context may
+        # capture another thread's temporary value and restore that stale path.
+        with patch("src.data.price_cache.PRICES_JSON", prices_file):
+            threads = [threading.Thread(target=reader) for _ in range(10)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
 
         assert len(errors) == 0, f"Thread errors: {errors}"
         assert len(results) == 10

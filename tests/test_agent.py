@@ -45,8 +45,8 @@ class TestModuleConstants:
     def test_db_path_name(self):
         assert agent_module.DB_PATH.name == "market.db"
 
-    def test_db_path_parent_is_data_dir(self):
-        assert agent_module.DB_PATH.parent == agent_module.DATA_DIR
+    def test_db_path_matches_market_db(self):
+        assert agent_module.DB_PATH == agent_module.MARKET_DB
 
 
 # ---------------------------------------------------------------------------

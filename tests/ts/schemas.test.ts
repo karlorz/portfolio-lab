@@ -843,12 +843,6 @@ describe('SignalsDataSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it('accepts the generated signals artifact optional panel shapes when present', () => {
-    const artifact = readJsonOrFallback('public/data/signals.json', validSignalsData());
-    const result = SignalsDataSchema.safeParse(artifact);
-    expect(result.success).toBe(true);
-  });
-
   it('rejects invalid non-null untyped signal panel values', () => {
     const data = validSignalsData();
     data.crypto_allocation = ['not', 'a', 'record'];

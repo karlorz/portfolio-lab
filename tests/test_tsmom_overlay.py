@@ -1364,12 +1364,17 @@ class TestTSMOMBacktesterRun:
             # Higher costs should lead to lower end value
             assert res_low['end_value'] >= res_high['end_value']
 
-    def test_required_asset_missing_fails_closed(self):
+    def test_required_asset_missing_fails_closed(self, monkeypatch):
         bt = TSMOMBacktester(tickers=['SPY', 'GLD'])
         n = LOOKBACK_DAYS + SKIP_DAYS + 200
-        bt.overlay.price_cache['SPY'] = pd.DataFrame({
+        spy_prices = pd.DataFrame({
             'close': _make_prices_series(n_days=n, seed=7),
         })
+        monkeypatch.setattr(
+            bt.overlay,
+            "load_prices",
+            lambda ticker: spy_prices if ticker == "SPY" else None,
+        )
 
         result = bt.run_backtest()
 

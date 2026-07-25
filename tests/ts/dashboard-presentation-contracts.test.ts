@@ -243,12 +243,12 @@ describe('dashboard presentation source contracts', () => {
     for (const className of [
       'underwater-chart',
       'rolling-metrics-chart',
-      'crisis-overlay',
       'crisis-grid',
       'crisis-card',
     ]) {
       expect(analyticsCharts).toContain(`className="${className}`);
     }
+    expect(analyticsCharts).toContain('className={`crisis-overlay');
     expect(liveDashboard).toContain('className="analytics-summary"');
     expect(liveDashboard).toContain('className="analytics-card"');
     expect(liveDashboard).toContain('className="analytics-empty"');

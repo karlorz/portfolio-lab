@@ -148,15 +148,19 @@ def _bootstrap_market_db_isolation() -> Path | None:
 _bootstrap_market_db_isolation()
 
 
+def _remove_owned_isolation_root(root: Path | None) -> None:
+    """Remove one pytest-owned isolation tree, never a caller-owned path."""
+    if root is not None:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def pytest_sessionfinish(session, exitstatus) -> None:
     """Remove only isolation trees created by this pytest process."""
     del session, exitstatus
     global _ISOLATED_PUBLIC_DATA_ROOT, _ISOLATED_MARKET_DB_ROOT
-    if _ISOLATED_PUBLIC_DATA_ROOT is not None:
-        shutil.rmtree(_ISOLATED_PUBLIC_DATA_ROOT, ignore_errors=True)
+    _remove_owned_isolation_root(_ISOLATED_PUBLIC_DATA_ROOT)
     _ISOLATED_PUBLIC_DATA_ROOT = None
-    if _ISOLATED_MARKET_DB_ROOT is not None:
-        shutil.rmtree(_ISOLATED_MARKET_DB_ROOT, ignore_errors=True)
+    _remove_owned_isolation_root(_ISOLATED_MARKET_DB_ROOT)
     _ISOLATED_MARKET_DB_ROOT = None
 
 

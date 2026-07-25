@@ -1,0 +1,17 @@
+{
+  "signal_value": 0.23,
+  "pairs": [
+    {
+      "pair_name": "spy_qqq",
+      "symbol_a": "SPY",
+      "symbol_b": "QQQ",
+      "z_score": 2.67,
+      "conviction": 0.89
+    }
+  ],
+  "current_regime": "normal",
+  "is_gated_off": false,
+  "regime_note": "Active — mean-reversion favorable",
+  "weight_in_ensemble": 0.13,
+  "generated_at": "2026-07-26T00:00:00Z"
+}
