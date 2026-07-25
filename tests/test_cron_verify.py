@@ -169,3 +169,21 @@ def test_cron_reset_covers_all_tasker_registry_jobs() -> None:
     dry_run = result.stdout
     missing = [job_id for job_id in sorted(expected) if job_id not in dry_run]
     assert missing == []
+
+
+def test_cron_reset_covers_all_cron_compat_jobs() -> None:
+    """Fresh manual/Hermes status files must include the full compat inventory."""
+    from src.cron_compat import CRON_TARGETS
+
+    result = subprocess.run(
+        ["make", "--dry-run", "--no-print-directory", "cron-reset"],
+        cwd=PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0
+    missing = [job_id for job_id in sorted(CRON_TARGETS) if job_id not in result.stdout]
+    assert missing == []
