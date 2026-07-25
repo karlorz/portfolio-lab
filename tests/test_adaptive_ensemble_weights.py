@@ -14,7 +14,6 @@ Tests the AdaptiveEnsembleWeights class including:
 import json
 import os
 import sys
-import tempfile
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -24,6 +23,7 @@ import numpy as np
 from src.strategy.adaptive_ensemble_weights import (
     AdaptiveEnsembleWeights,
     DEFAULT_CONFIG,
+    STATE_FILE as DEFAULT_STATE_FILE,
     WeightAdjustment,
     AdaptiveWeightsState,
 )
@@ -33,25 +33,32 @@ from dataclasses import asdict
 # ── Fixtures ──────────────────────────────────────────────────────────────
 
 
-@pytest.fixture
-def tmp_state_dir(monkeypatch):
-    """Temporary directory for state files."""
-    with tempfile.TemporaryDirectory() as tmp:
-        state_path = Path(tmp) / "adaptive_weights_state.json"
-        monkeypatch.setattr(
-            "src.strategy.adaptive_ensemble_weights.STATE_FILE",
-            state_path,
-        )
-        # Also set DATA_DIR to use the tmp dir for attribution
-        monkeypatch.setattr(
-            "src.strategy.adaptive_ensemble_weights.DATA_DIR",
-            Path(tmp),
-        )
-        monkeypatch.setattr(
-            "src.strategy.adaptive_ensemble_weights.ATTRIBUTION_DIR",
-            Path(tmp) / "attribution",
-        )
-        yield tmp
+@pytest.fixture(autouse=True)
+def tmp_state_dir(monkeypatch, tmp_path):
+    """Keep every adaptive-weight test away from the live runtime state."""
+    state_path = tmp_path / "adaptive_weights_state.json"
+    monkeypatch.setattr(
+        "src.strategy.adaptive_ensemble_weights.STATE_FILE",
+        state_path,
+    )
+    # Also set DATA_DIR to use the tmp dir for attribution
+    monkeypatch.setattr(
+        "src.strategy.adaptive_ensemble_weights.DATA_DIR",
+        tmp_path,
+    )
+    monkeypatch.setattr(
+        "src.strategy.adaptive_ensemble_weights.ATTRIBUTION_DIR",
+        tmp_path / "attribution",
+    )
+    yield tmp_path
+
+
+def test_default_state_path_is_isolated(tmp_state_dir):
+    """The module default must never resolve to the live runtime state in tests."""
+    from src.strategy import adaptive_ensemble_weights as adaptive_module
+
+    assert adaptive_module.STATE_FILE == tmp_state_dir / "adaptive_weights_state.json"
+    assert adaptive_module.STATE_FILE != DEFAULT_STATE_FILE
 
 
 @pytest.fixture
@@ -166,7 +173,7 @@ def sample_attribution_mixed():
 
 
 @pytest.fixture
-def adaptive_weights(tmp_state_dir, sample_base_weights):
+def adaptive_weights(sample_base_weights):
     """Create AdaptiveEnsembleWeights instance with sample base weights."""
     return AdaptiveEnsembleWeights(base_weights=sample_base_weights)
 
@@ -359,7 +366,7 @@ class TestIntegration:
     """Integration tests with realistic data flow."""
 
     def test_end_to_end_attribution_flow(
-        self, tmp_state_dir, sample_base_weights, sample_attribution_good
+        self, sample_base_weights, sample_attribution_good
     ):
         """Full flow: attribution → weight update → normalized output."""
         weights = AdaptiveEnsembleWeights(base_weights=sample_base_weights)
@@ -381,7 +388,7 @@ class TestIntegration:
             "CTA trend (0.95 Sharpe) should outweigh HMM (0.2 Sharpe)"
 
     def test_attribution_with_extra_sources(
-        self, tmp_state_dir, sample_base_weights
+        self, sample_base_weights
     ):
         """Attribution-only ghosts must not enter live adaptive mass (Batch BJ)."""
         attribution = {
@@ -398,7 +405,7 @@ class TestIntegration:
         assert abs(sum(adapted.values()) - 1.0) < 0.01
         assert "tsfm_momentum" in adapted
 
-    def test_stale_attribution_handling(self, tmp_state_dir, sample_base_weights):
+    def test_stale_attribution_handling(self, sample_base_weights):
         """
         Fallback in EnsembleVoter: when attribution is stale (>7 days),
         the voter should not activate adaptive weights (handled in voter code).
@@ -422,7 +429,7 @@ class TestIntegration:
 
 class TestEdgeCases:
 
-    def test_empty_base_weights(self, tmp_state_dir):
+    def test_empty_base_weights(self):
         """Empty base weights should not crash (isolated state path)."""
         weights = AdaptiveEnsembleWeights(base_weights={})
         adapted = weights.update_weights({"sources": {}, "timestamp": "now"}, "normal")
@@ -466,7 +473,7 @@ class TestEdgeCases:
 class TestCLI:
     """Basic CLI smoke tests."""
 
-    def test_cli_update_no_attribution(self, tmp_state_dir, monkeypatch):
+    def test_cli_update_no_attribution(self, monkeypatch):
         """CLI update with no attribution files should exit with error."""
         monkeypatch.setattr(
             "sys.argv", ["adaptive_ensemble_weights", "update", "--regime", "normal"]
@@ -477,7 +484,7 @@ class TestCLI:
         # Should return error code 1
         assert exc.value.code != 0
 
-    def test_cli_show_no_state(self, tmp_state_dir, monkeypatch):
+    def test_cli_show_no_state(self, monkeypatch):
         """CLI show with no state file should print error."""
         monkeypatch.setattr(
             "sys.argv", ["adaptive_ensemble_weights", "show"]
@@ -1090,7 +1097,7 @@ class TestStatePersistenceEdgeCases:
             f.write("{not json}")
         assert not adaptive_weights._load_state()
 
-    def test_save_load_empty_baseline(self, tmp_state_dir):
+    def test_save_load_empty_baseline(self):
         """Save/load with empty baseline weights (isolated state path)."""
         weights = AdaptiveEnsembleWeights(base_weights={})
         weights.adjusted_weights = {}
@@ -1146,7 +1153,7 @@ class TestGetStateDictEdgeCases:
 class TestCLIEdgeCases:
     """Additional CLI command test coverage."""
 
-    def test_cli_reset_no_state(self, tmp_state_dir, monkeypatch):
+    def test_cli_reset_no_state(self, monkeypatch):
         """CLI reset without any prior update should not crash."""
         monkeypatch.setattr(
             "sys.argv", ["adaptive_ensemble_weights", "reset"],
@@ -1175,7 +1182,7 @@ class TestCLIEdgeCases:
             rc = main()
         assert rc == 0
 
-    def test_cli_unknown_command(self, tmp_state_dir, monkeypatch):
+    def test_cli_unknown_command(self, monkeypatch):
         """CLI with unknown command prints help and exits with error code 2."""
         monkeypatch.setattr(
             "sys.argv", ["adaptive_ensemble_weights", "unknown_command"],
@@ -1291,7 +1298,7 @@ class TestResetEdgeCases:
         assert result == {}
         assert weights.multipliers == {}
 
-    def test_reset_saves_state(self, tmp_state_dir):
+    def test_reset_saves_state(self):
         """Reset persists state to file."""
         weights = AdaptiveEnsembleWeights(
             base_weights={"a": 0.7, "b": 0.3},
