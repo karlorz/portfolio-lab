@@ -10,7 +10,7 @@ import hashlib
 import logging
 import os
 import numpy as np
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from scipy import stats as sp_stats
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
@@ -25,7 +25,7 @@ from src.costs.etf_cost_table import ETF_COST_BPS as _ETF_COST_BPS
 _PUBLIC_JSON_MODE = 0o644
 
 
-__all__ = ['BacktestConfig', 'DailyPrices', 'BacktestResult', 'BacktestMetrics', 'OverlayMetrics', 'CrisisReturns', 'compute_metrics', 'compute_crisis_returns', 'print_metrics_report', 'compute_deflated_sharpe_ratio', 'build_data_snapshot_provenance', 'require_data_snapshot_provenance', 'save_results_json']
+__all__ = ['BacktestConfig', 'DailyPrices', 'BacktestResult', 'BacktestMetrics', 'OverlayMetrics', 'CrisisReturns', 'compute_metrics', 'compute_one_way_turnover', 'build_profitability_evidence', 'compute_crisis_returns', 'print_metrics_report', 'compute_deflated_sharpe_ratio', 'build_data_snapshot_provenance', 'require_data_snapshot_provenance', 'save_results_json']
 
 # ── Module-level constants ──────────────────────────────────────────
 TRADING_DAYS_PER_YEAR: int = 252
@@ -33,6 +33,7 @@ DEFAULT_CRISIS_YEARS: List[str] = ['2008', '2020', '2022']
 REBALANCE_FREQUENCY_DAYS: int = 21   # Monthly (~21 trading days)
 DEFAULT_TRANSACTION_COST_BPS: float = 10.0
 DATA_SNAPSHOT_SCHEMA_VERSION: str = "data-snapshot/v1"
+PROFITABILITY_EVIDENCE_SCHEMA_VERSION: str = "profitability-evidence/v1"
 
 # ── Shared Dataclass Consolidation (v953) ───────────────────────────
 # These replace duplicated definitions across 14+ backtest files.
@@ -244,6 +245,204 @@ def compute_metrics(
         skewness=round(skewness, 4),
         kurtosis=round(kurtosis, 4),
     )
+
+
+def compute_one_way_turnover(
+    previous_weights: Mapping[str, float],
+    new_weights: Mapping[str, float],
+) -> float:
+    """Return one-way turnover, including an implicit residual cash weight."""
+    assets = set(previous_weights) | set(new_weights)
+    previous = {asset: float(previous_weights.get(asset, 0.0)) for asset in assets}
+    current = {asset: float(new_weights.get(asset, 0.0)) for asset in assets}
+
+    if "CASH" not in assets:
+        previous["CASH"] = 1.0 - sum(previous.values())
+        current["CASH"] = 1.0 - sum(current.values())
+        assets.add("CASH")
+
+    return sum(
+        abs(current.get(asset, 0.0) - previous.get(asset, 0.0))
+        for asset in assets
+    ) / 2.0
+
+
+def build_profitability_evidence(
+    *,
+    dates: Sequence[str],
+    gross_returns: Sequence[float],
+    turnovers: Optional[Sequence[float]],
+    assets: Sequence[str],
+    data_mode: str,
+    provenance: Mapping[str, Any],
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    initial_capital: float = 100000.0,
+    point_in_time: bool = True,
+    diagnostic_opt_in: bool = False,
+    require_real_data: bool = False,
+    missing_data_policy: str = "fail_closed",
+    trading_days_per_year: int = TRADING_DAYS_PER_YEAR,
+) -> Dict[str, Any]:
+    """Build the canonical, reproducible profitability evidence artifact.
+
+    The input returns and turnover must already share one strictly increasing
+    daily index. Transaction costs are charged on the same date as turnover:
+    ``net_return = gross_return - turnover * bps / 10_000``. All summary
+    metrics are delegated to :func:`compute_metrics`.
+
+    Non-real data is diagnostic-only and requires an explicit opt-in. Such
+    evidence is never eligible for promotion, even when the calculation is
+    otherwise point-in-time safe.
+    """
+    mode = str(data_mode).lower()
+    if mode not in {"real", "proxy", "synthetic"}:
+        raise ValueError("data_mode must be one of: real, proxy, synthetic")
+    if mode != "real" and not diagnostic_opt_in:
+        raise ValueError(
+            f"{mode} profitability evidence requires explicit diagnostic opt-in"
+        )
+    if require_real_data and mode != "real":
+        raise ValueError(
+            f"decision-grade profitability evidence requires real data, got {mode}"
+        )
+    if not provenance:
+        raise ValueError("profitability evidence requires data provenance")
+    if initial_capital <= 0:
+        raise ValueError("initial_capital must be positive")
+    if transaction_cost_bps < 0:
+        raise ValueError("transaction_cost_bps must be non-negative")
+    if trading_days_per_year <= 0:
+        raise ValueError("trading_days_per_year must be positive")
+
+    normalized_dates = [
+        value.isoformat() if hasattr(value, "isoformat") else str(value)
+        for value in dates
+    ]
+    gross = [float(value) for value in gross_returns]
+    turnover_values = (
+        [0.0] * len(gross)
+        if turnovers is None
+        else [float(value) for value in turnovers]
+    )
+    if not normalized_dates:
+        raise ValueError("profitability evidence requires at least one observation")
+    if len(normalized_dates) != len(gross) or len(gross) != len(turnover_values):
+        raise ValueError(
+            "dates, gross_returns, and turnovers must have aligned lengths"
+        )
+    if any(
+        normalized_dates[index] >= normalized_dates[index + 1]
+        for index in range(len(normalized_dates) - 1)
+    ):
+        raise ValueError("profitability evidence dates must be strictly increasing")
+    if not assets or any(not str(asset).strip() for asset in assets):
+        raise ValueError("profitability evidence requires named assets")
+    if len(set(map(str, assets))) != len(assets):
+        raise ValueError("profitability evidence assets must be unique")
+    if not all(np.isfinite(value) and value > -1.0 for value in gross):
+        raise ValueError("gross_returns must be finite and greater than -1")
+    if not all(np.isfinite(value) and value >= 0.0 for value in turnover_values):
+        raise ValueError("turnovers must be finite and non-negative")
+
+    gross_equity = float(initial_capital)
+    net_equity = float(initial_capital)
+    gross_curve = [gross_equity]
+    net_curve = [net_equity]
+    trace: List[Dict[str, Any]] = []
+    total_cost_dollars = 0.0
+    total_cost_return = 0.0
+    max_reconciliation_error = 0.0
+
+    for observation_date, gross_return, turnover in zip(
+        normalized_dates, gross, turnover_values
+    ):
+        cost_return = turnover * transaction_cost_bps / 10000.0
+        net_return = gross_return - cost_return
+        if net_return <= -1.0:
+            raise ValueError(
+                f"transaction costs make net return invalid on {observation_date}"
+            )
+
+        cost_dollars = net_equity * cost_return
+        gross_equity *= 1.0 + gross_return
+        net_equity *= 1.0 + net_return
+        gross_curve.append(gross_equity)
+        net_curve.append(net_equity)
+        reconciliation_error = abs(gross_return - cost_return - net_return)
+        max_reconciliation_error = max(
+            max_reconciliation_error,
+            reconciliation_error,
+        )
+        total_cost_return += cost_return
+        total_cost_dollars += cost_dollars
+        trace.append({
+            "date": observation_date,
+            "gross_return": gross_return,
+            "turnover": turnover,
+            "cost_return": cost_return,
+            "cost_dollars": cost_dollars,
+            "net_return": net_return,
+            "gross_equity": gross_equity,
+            "net_equity": net_equity,
+        })
+
+    gross_metrics = compute_metrics(
+        gross_curve,
+        initial_capital,
+        trading_days_per_year=trading_days_per_year,
+    )
+    net_metrics = compute_metrics(
+        net_curve,
+        initial_capital,
+        trading_days_per_year=trading_days_per_year,
+    )
+    rebalance_count = sum(value > 0 for value in turnover_values)
+    total_turnover = float(sum(turnover_values))
+
+    return {
+        "schema_version": PROFITABILITY_EVIDENCE_SCHEMA_VERSION,
+        "promotion_eligible": bool(mode == "real" and point_in_time),
+        "point_in_time": bool(point_in_time),
+        "coverage": {
+            "start_date": normalized_dates[0],
+            "end_date": normalized_dates[-1],
+            "observations": len(normalized_dates),
+            "aligned_daily_dates": True,
+        },
+        "assets": [str(asset) for asset in assets],
+        "data": {
+            "mode": mode,
+            "diagnostic_opt_in": bool(diagnostic_opt_in),
+            "missing_data_policy": missing_data_policy,
+            "provenance": dict(provenance),
+        },
+        "costs": {
+            "transaction_cost_bps": float(transaction_cost_bps),
+            "application": "incurred_date",
+            "formula": "net_return = gross_return - turnover * bps / 10000",
+            "total_return_deduction": float(total_cost_return),
+            "total_dollars": float(total_cost_dollars),
+            "max_reconciliation_error": float(max_reconciliation_error),
+        },
+        "turnover": {
+            "definition": "one_way_half_sum_absolute_weight_change",
+            "rebalance_count": int(rebalance_count),
+            "total": total_turnover,
+            "average_per_rebalance": (
+                total_turnover / rebalance_count if rebalance_count else 0.0
+            ),
+        },
+        "metrics": {
+            "source": "src.backtest.metrics.compute_metrics",
+            "parameters": {
+                "initial_capital": float(initial_capital),
+                "trading_days_per_year": int(trading_days_per_year),
+            },
+            "gross": asdict(gross_metrics),
+            "net": asdict(net_metrics),
+        },
+        "trace": trace,
+    }
 
 
 def compute_metrics_from_returns(
