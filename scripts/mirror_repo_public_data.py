@@ -76,6 +76,12 @@ DEFAULT_FILE_GLOBS: tuple[str, ...] = (
     "explainability/explainability_latest.json",
 )
 
+# The health job writes this artifact after evaluating mirror lag. Comparing
+# that new output with the prior repo mirror would make the SLI report its own
+# write as lag. Keep it in DEFAULT_FILE_GLOBS for copying and raw diagnostics;
+# exclude it only from the qualifying operational SLI.
+MIRROR_LAG_SLI_EXEMPT_PATHS: frozenset[str] = frozenset({"health_ops.json"})
+
 
 @dataclass
 class MirrorReport:
@@ -355,6 +361,19 @@ def lag_report(
     return rows
 
 
+def lag_sli_report(
+    source_root: Path,
+    dest_root: Path,
+    files: Sequence[str] = DEFAULT_FILE_GLOBS,
+) -> list[dict[str, Any]]:
+    """Return only comparisons that qualify for the mirror-lag SLI."""
+    return [
+        row
+        for row in lag_report(source_root, dest_root, files=files)
+        if row.get("path") not in MIRROR_LAG_SLI_EXEMPT_PATHS
+    ]
+
+
 def _default_source() -> Path:
     from src.paths import PUBLIC_DATA_DIR
 
@@ -396,7 +415,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     dest = Path(args.dest) if args.dest else _default_dest()
 
     if args.lag_only:
-        rows = lag_report(source, dest)
+        rows = lag_sli_report(source, dest)
         lagging = [r for r in rows if r.get("lagging")]
         print(json.dumps({"lagging": lagging, "total": len(rows)}, indent=2))
         return 1 if lagging else 0

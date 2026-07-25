@@ -111,7 +111,7 @@ def summarize_repo_public_mirror_lag(
     # comparing src==dest is always zero lag — still report honest zeros.
     try:
         mod = load_mirror_script_module()
-        rows = mod.lag_report(src, dest)
+        rows = mod.lag_sli_report(src, dest)
     except Exception as exc:  # noqa: BLE001
         logger.warning("repo public mirror lag probe failed: %s", exc)
         return {

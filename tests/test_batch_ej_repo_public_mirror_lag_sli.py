@@ -13,6 +13,11 @@ from pathlib import Path
 from src.dashboard.generator import project_repo_public_mirror_lag_onto_health
 from src.monitor.health_check import refresh_signals_health_kill_fields
 from src.monitor.repo_public_mirror_lag import summarize_repo_public_mirror_lag
+from scripts.mirror_repo_public_data import (
+    DEFAULT_FILE_GLOBS,
+    lag_report,
+    mirror_repo_public_data,
+)
 
 
 def test_project_mirror_lag_ok_when_zero() -> None:
@@ -83,6 +88,88 @@ def test_summarize_detects_lag(tmp_path) -> None:
     assert summary["lagging_count"] >= 1
     assert "signals.json" in summary["lagging_paths"]
     assert summary["total"] >= 1
+
+
+def test_health_ops_self_output_is_not_a_qualifying_lag(tmp_path) -> None:
+    src = tmp_path / "live"
+    dest = tmp_path / "repo"
+    src.mkdir()
+    dest.mkdir()
+
+    (src / "health_ops.json").write_text('{"run": 2}', encoding="utf-8")
+    (dest / "health_ops.json").write_text('{"run": 1}', encoding="utf-8")
+    matching = '{"generator_git_sha": "same"}'
+    (src / "alerts.json").write_text(matching, encoding="utf-8")
+    (dest / "alerts.json").write_text(matching, encoding="utf-8")
+
+    raw_rows = lag_report(src, dest)
+    assert any(
+        row["path"] == "health_ops.json" and row["lagging"]
+        for row in raw_rows
+    )
+
+    summary = summarize_repo_public_mirror_lag(
+        source_root=src, dest_root=dest
+    )
+    assert summary["ok"] is True
+    assert summary["lagging_count"] == 0
+    assert summary["lagging_paths"] == []
+    assert summary["total"] == 1
+
+    projected = project_repo_public_mirror_lag_onto_health(
+        {"status": "ok"}, summary
+    )
+    assert projected["repo_public_mirror_lag_status"] == "ok"
+    assert projected["repo_public_mirror_lag_badge"] == "lagging=0/1"
+    assert projected["status"] == "ok"
+
+
+def test_non_exempt_lag_remains_visible_and_uses_qualifying_total(tmp_path) -> None:
+    src = tmp_path / "live"
+    dest = tmp_path / "repo"
+    src.mkdir()
+    dest.mkdir()
+
+    (src / "health_ops.json").write_text('{"run": 2}', encoding="utf-8")
+    (dest / "health_ops.json").write_text('{"run": 1}', encoding="utf-8")
+    (src / "signals.json").write_text('{"signal": 2}', encoding="utf-8")
+    (dest / "signals.json").write_text('{"signal": 1}', encoding="utf-8")
+    matching = '{"generator_git_sha": "same"}'
+    (src / "alerts.json").write_text(matching, encoding="utf-8")
+    (dest / "alerts.json").write_text(matching, encoding="utf-8")
+
+    summary = summarize_repo_public_mirror_lag(
+        source_root=src, dest_root=dest
+    )
+    assert summary["lagging_count"] == 1
+    assert summary["lagging_paths"] == ["signals.json"]
+    assert summary["total"] == 2
+
+    projected = project_repo_public_mirror_lag_onto_health(
+        {"status": "ok"}, summary
+    )
+    assert projected["repo_public_mirror_lag_status"] == "lagging"
+    assert projected["repo_public_mirror_lag_badge"] == "lagging=1/2"
+    assert projected["status"] == "warning"
+
+
+def test_health_ops_self_output_remains_in_copy_catalog(tmp_path) -> None:
+    src = tmp_path / "live"
+    dest = tmp_path / "repo"
+    src.mkdir()
+    dest.mkdir()
+    expected = b'{"run": 2}'
+    (src / "health_ops.json").write_bytes(expected)
+    assert "health_ops.json" in DEFAULT_FILE_GLOBS
+
+    report = mirror_repo_public_data(
+        source_root=src,
+        dest_root=dest,
+        restamp_health_lag=False,
+    )
+
+    assert report.copied == ["health_ops.json"]
+    assert (dest / "health_ops.json").read_bytes() == expected
 
 
 def test_partial_health_patch_projects_mirror_lag(tmp_path, monkeypatch) -> None:
