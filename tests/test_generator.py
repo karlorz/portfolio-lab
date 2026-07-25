@@ -6678,3 +6678,43 @@ def test_garch_cvar_demotes_when_coverage_fails(tmp_path, monkeypatch):
     assert data.get("runtime_role") == "advisory_degraded"
     assert "coverage" in (data.get("garch_active_reason") or "").lower()
     gen.conn.close()
+
+
+def test_generator_data_dir_isolated_by_autouse_without_explicit_patch(
+    tmp_path, monkeypatch
+):
+    """Generator DATA_DIR reads are isolated by autouse, not opt-in patch().
+
+    Retro (P1): missing/ignored generator fixture inventory caused host-only noise.
+    Root cause: ``_isolate_live_ensemble_and_ic_health`` stubs compute but never
+    rebinds ``src.dashboard.generator.DATA_DIR``, so any test that forgets the
+    explicit ``patch("src.dashboard.generator.DATA_DIR", tmp_path)`` reads live
+    host state (``data/.health_report.json``, ``performance.jsonl``, etc).
+
+    This test must pass WITHOUT an explicit DATA_DIR patch: it seeds a sentinel
+    ``.health_report.json`` under ``tmp_path`` and asserts the generator reads the
+    sentinel (isolated), not the live host file.
+    """
+    gen, _ = _make_generator(tmp_path)
+    # Sentinel: a value the live host file does not hold (host has cvar_95=-2.21).
+    (tmp_path / ".health_report.json").write_text(json.dumps({
+        "garch_filtered": True,
+        "filter_active": True,
+        "cvar_95": -9.99,
+        "var_95": -8.88,
+        "cvar_ratio": 1.11,
+        "conditional_volatility_current": 1.0,
+        "garch_persistence": 0.90,
+    }))
+    # Intentionally NO patch("src.dashboard.generator.DATA_DIR", tmp_path).
+    # The autouse fixture must rebind DATA_DIR to tmp_path for this to pass.
+    try:
+        garch = gen._load_garch_cvar_data()
+    finally:
+        gen.conn.close()
+    # If DATA_DIR leaked to the live host, cvar_95 would be -2.21 (host value).
+    # Sentinel -9.99 / 100 -> -0.0999 (abs>1 branch divides by 100).
+    assert garch["cvar_95"] == -0.0999, (
+        f"DATA_DIR not isolated by autouse: cvar_95={garch['cvar_95']} "
+        "indicates live host .health_report.json leaked into the test"
+    )
