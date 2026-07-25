@@ -611,6 +611,35 @@ def _isolate_evaluator_data_dir(request, tmp_path, monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _isolate_generator_data_dir(request, tmp_path, monkeypatch):
+    """Point generator DATA_DIR at tmp so host state files stay hermetic.
+
+    Retro (P1): missing/ignored generator fixture inventory caused host-only
+    noise. ``_isolate_live_ensemble_and_ic_health`` (in test_generator.py) stubs
+    IC/vote compute but never rebinds ``src.dashboard.generator.DATA_DIR``, so
+    tests that forgot the explicit ``patch("...DATA_DIR", tmp_path)`` read live
+    host state (``data/.health_report.json``, ``performance.jsonl``,
+    ``ensemble_weights.json``, etc).
+
+    This mirrors ``_isolate_evaluator_data_dir``. Opt out with
+    @pytest.mark.allow_live_data when a test must touch live paths.
+    """
+    if request.node.get_closest_marker("allow_live_data"):
+        yield
+        return
+    if os.environ.get("PORTFOLIO_LAB_ALLOW_LIVE_PERF_WRITES", "0") == "1":
+        yield
+        return
+    try:
+        import src.dashboard.generator as gen_mod
+    except Exception:
+        yield
+        return
+    monkeypatch.setattr(gen_mod, "DATA_DIR", tmp_path, raising=False)
+    yield
+
+
 @pytest.fixture(scope="session")
 def _incidents_isolate_root(tmp_path_factory):
     """One hermetic incidents tree for the whole suite (inode-friendly).
