@@ -35,8 +35,8 @@ def test_derive_system_status_escalation() -> None:
     assert derive_system_status(slo_status="critical", failed_jobs=3) == "critical"
 
 
-def test_signal_health_zero_healthy_demotes_system_status() -> None:
-    """Batch BN: 0/N healthy tracked sources → system_status not healthy."""
+def test_signal_health_zero_healthy_stays_on_quality_plane() -> None:
+    """0/N remains quality-degraded without demoting the ops badge."""
     sh = {
         "status": "degraded",
         "overall_health": "degraded",
@@ -48,16 +48,15 @@ def test_signal_health_zero_healthy_demotes_system_status() -> None:
         },
     }
     assert signal_health_status_contribution(sh) == "degraded"
-    assert derive_system_status(signal_health=sh) == "degraded"
-    # Cannot stay green when all tracked sleeves are non-healthy
-    assert derive_system_status(current="healthy", signal_health=sh) != "healthy"
-    # Critical path still wins over signal_health demotion
+    assert derive_system_status() == "healthy"
+    assert derive_system_status(current="healthy") == "healthy"
+    # A real ops-critical SLO still wins independently of signal quality.
     assert (
-        derive_system_status(slo_status="critical", signal_health=sh) == "critical"
+        derive_system_status(slo_status="critical") == "critical"
     )
 
 
-def test_signal_health_all_unhealthy_is_critical() -> None:
+def test_signal_health_all_unhealthy_is_quality_critical_only() -> None:
     sh = {
         "summary": {
             "healthy": 0,
@@ -67,13 +66,13 @@ def test_signal_health_all_unhealthy_is_critical() -> None:
         },
     }
     assert signal_health_status_contribution(sh) == "critical"
-    assert derive_system_status(signal_health=sh) == "critical"
+    assert derive_system_status() == "healthy"
 
 
 def test_signal_health_absent_does_not_demote() -> None:
     assert signal_health_status_contribution(None) is None
     assert signal_health_status_contribution({}) is None
-    assert derive_system_status(signal_health=None) == "healthy"
+    assert derive_system_status() == "healthy"
 
 
 def test_build_symbol_freshness_entry() -> None:

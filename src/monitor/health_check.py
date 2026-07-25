@@ -583,24 +583,9 @@ def apply_ops_monitor_to_dashboard_health(
                 pass
             health_data["system_status"] = elevated
 
-    # Batch BO / BN residual: after kill clear demotes sticky kill→healthy,
-    # re-fold signal_health so 0/N healthy cannot leave system_status green.
-    # Partial ops merges must not undo full-generate signal_health honesty.
-    if "system_status" in health_data:
-        try:
-            from src.dashboard.health_report import (
-                derive_system_status,
-                signal_health_status_contribution,
-            )
-
-            sh = health_data.get("signal_health")
-            if signal_health_status_contribution(sh if isinstance(sh, dict) else None):
-                health_data["system_status"] = derive_system_status(
-                    current=str(health_data.get("system_status") or "healthy"),
-                    signal_health=sh if isinstance(sh, dict) else None,
-                )
-        except Exception:  # noqa: BLE001 — never block ops merge on SH fold
-            pass
+    # Dual-plane contract: this ops restamp must not fold signal-health quality
+    # into the operator-facing system badge. Quality remains on signal_health /
+    # signal_quality surfaces and in the graduation circuit-breaker projection.
 
     # Batch HO: project repo_public_mirror_lag* onto dashboard health so SPA
     # consumers share the same SLI as health_ops / signals.health (was split-
@@ -826,7 +811,10 @@ def refresh_signals_health_kill_fields(
         logger.warning("signals.health SH freeze re-project skipped: %s", exc)
 
     if report.get("status") is not None:
-        health.setdefault("status", report.get("status"))
+        # The monitor report is the current ops-plane baseline. Assign rather
+        # than setdefault so a legacy SH-derived degraded value cannot remain
+        # sticky; compact ops dimensions below may still elevate it.
+        health["status"] = report.get("status")
     if report.get("timestamp") is not None:
         health["generated_at"] = report.get("timestamp")
 

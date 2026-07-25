@@ -253,8 +253,8 @@ def test_refresh_public_health_also_updates_signals_health_compact(tmp_path: Pat
     assert (private_signals.stat().st_mode & 0o777) == 0o644
 
 
-def test_refresh_cron_section_folds_signal_health_zero_of_n(tmp_path: Path) -> None:
-    """Partial cron refresh must not greenwash system_status when SH is 0/N (c340/c359)."""
+def test_refresh_cron_section_keeps_signal_health_off_ops_status(tmp_path: Path) -> None:
+    """Partial cron refresh keeps green ops status while preserving SH 0/N."""
     data_dir = tmp_path / "data"
     public_dir = tmp_path / "public"
     data_dir.mkdir()
@@ -311,15 +311,14 @@ def test_refresh_cron_section_folds_signal_health_zero_of_n(tmp_path: Path) -> N
     )
     assert wrote is True
     health = json.loads(health_path.read_text())
-    assert health["system_status"] == "degraded"
+    assert health["system_status"] == "healthy"
     # SH section must survive the partial rewrite
     assert health["signal_health"]["summary"]["healthy"] == 0
 
 
-def test_refresh_cron_section_source_passes_signal_health_kwarg() -> None:
-    """Guard: cron partial path must pass signal_health into derive_system_status."""
+def test_refresh_cron_section_source_excludes_signal_health_from_ops_derive() -> None:
+    """Guard: cron partial path must not pass quality into ops derivation."""
     src = Path("src/dashboard/cron_scheduler_section.py").read_text(encoding="utf-8")
-    assert "signal_health=" in src
-    assert 'payload.get("signal_health")' in src
-    # Must not call derive without the SH kwarg nearby (Batch BZ)
-    assert "signal_health=sh" in src
+    derive_call = src.split('payload["system_status"] = derive_system_status(', 1)[1]
+    derive_call = derive_call.split(")", 1)[0]
+    assert "signal_health" not in derive_call

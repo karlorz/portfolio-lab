@@ -6223,7 +6223,6 @@ class DashboardGenerator:
             slo_status=slo_status,
             failed_jobs=failed_jobs,
             stale_count=stale_count,
-            signal_health=health_data.get("signal_health"),
         )
         health_data["system_status"] = elevate_system_status_for_kill(
             health_data["system_status"],
