@@ -22,7 +22,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from src.paths import DATA_DIR, PUBLIC_DATA_DIR
 from src.monitor.alerting import AlertChannel, AlertLevel, send_alert
@@ -599,6 +599,60 @@ def apply_ops_monitor_to_dashboard_health(
         )
     except Exception as exc:  # noqa: BLE001 — never block ops merge on lag SLI
         logger.warning("dashboard mirror lag projection failed: %s", exc)
+
+    # Dual-plane partial-path honesty: when the monitor report is ops-ok and
+    # all ops SLIs on the dashboard are green (kill off, incidents 0, scheduler
+    # ok, data_pipeline_slo ok, mirror lag 0), clear a sticky quality-only
+    # system_status demotion. ``derive_system_status`` excludes signal_health by
+    # design, so a thin SH (e.g. 1/9) cannot keep the ops badge warning. Real
+    # ops failures (kill on, scheduler degraded, SLO warn, mirror lag) keep
+    # their demotion: derive_system_status re-elevates from scheduler/SLO/stale
+    # dims, and mirror lag is gated explicitly below.
+    if ssot_clear and "system_status" in health_data:
+        ops_green = str(ops_status).lower() in {"ok", "healthy", "green", "success", ""}
+        lag_status = str(health_data.get("repo_public_mirror_lag_status") or "").lower()
+        lag_ok = lag_status in {"", "ok", "healthy", "green", "unknown"}
+        try:
+            lag_count = int(health_data.get("repo_public_mirror_lagging_count") or 0)
+        except (TypeError, ValueError):
+            lag_count = 0
+        if ops_green and lag_ok and lag_count == 0:
+            try:
+                from src.dashboard.health_report import derive_system_status
+
+                scheduler_status = None
+                sched = health_data.get("scheduler_status")
+                if isinstance(sched, Mapping):
+                    scheduler_status = sched.get("status") or sched.get("state")
+                slo_status = None
+                slo = health_data.get("data_pipeline_slo")
+                if isinstance(slo, Mapping):
+                    slo_status = slo.get("status")
+                stale_count = 0
+                freshness = health_data.get("data_freshness")
+                if isinstance(freshness, Mapping):
+                    stale_count = sum(
+                        1
+                        for item in freshness.values()
+                        if isinstance(item, Mapping)
+                        and item.get("status") not in {"fresh", "ok"}
+                    )
+                failed_jobs = 0
+                try:
+                    failed_jobs = int(health_data.get("failed_cron_jobs") or 0)
+                except (TypeError, ValueError):
+                    failed_jobs = 0
+                recomputed = derive_system_status(
+                    current="healthy",
+                    backend_error=False,
+                    scheduler_status=scheduler_status,
+                    slo_status=slo_status,
+                    failed_jobs=failed_jobs,
+                    stale_count=stale_count,
+                )
+                health_data["system_status"] = recomputed
+            except ImportError:
+                pass
 
     # Batch IG: project graduation CB SSOT onto public dashboard health.
     # signals.health already gets compact keys via kill_refresh (EM); private
