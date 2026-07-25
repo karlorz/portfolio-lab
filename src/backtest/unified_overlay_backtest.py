@@ -31,7 +31,10 @@ import numpy as np
 from src.backtest.metrics import (
     BacktestConfig as _BaseConfig,
     BacktestResult,
+    build_data_snapshot_provenance,
+    build_profitability_evidence,
     compute_metrics,
+    compute_one_way_turnover,
     save_results_json,
 )
 from src.paths import PRICES_JSON, BACKTEST_RESULTS_DIR
@@ -76,10 +79,17 @@ class DailyData:
 class UnifiedOverlayBacktester:
     """Walk-forward backtest for the unified overlay signal."""
 
-    def __init__(self, config: Optional[BacktestConfig] = None):
+    def __init__(
+        self,
+        config: Optional[BacktestConfig] = None,
+        *,
+        allow_proxy_data: bool = False,
+    ):
         self.config = config or BacktestConfig()
+        self.allow_proxy_data = allow_proxy_data
         self.data: List[DailyData] = []
         self.prices_raw: Dict = {}
+        self._data_path: Optional[Path] = None
 
     # ------------------------------------------------------------------
     # Data loading
@@ -95,7 +105,12 @@ class UnifiedOverlayBacktester:
             with open(prices_path) as f:
                 self.prices_raw = json.load(f)
 
+            self.data = []
+            self._data_path = prices_path
             self._process_price_data()
+            if not self.data:
+                logger.error("No aligned SPY/GLD/TLT observations found")
+                return False
             logger.info("Loaded %d days of price data", len(self.data))
             return True
 
@@ -131,10 +146,10 @@ class UnifiedOverlayBacktester:
                         # VIX proxy: realized vol * 1.1 (VIX typically > realized)
                         self._vix_proxy[spy_prices_list[j]["d"]] = vol * 1.1
 
-        dates = [p["d"] for p in spy]
         spy_px = {p["d"]: p["p"] for p in spy}
         gld_px = {p["d"]: p["p"] for p in gld}
         tlt_px = {p["d"]: p["p"] for p in tlt}
+        dates = sorted(spy_px)
 
         cfg = self.config
         for i, date in enumerate(dates[1:], 1):
@@ -229,15 +244,18 @@ class UnifiedOverlayBacktester:
         if not self.data:
             logger.error("No data loaded. Call load_data() first.")
             return empty_result
+        if not self.allow_proxy_data:
+            raise ValueError(
+                "unified overlay proxy data requires explicit diagnostic opt-in"
+            )
 
         cfg = self.config
 
         # Build equity curves
         baseline_curve = [cfg.initial_capital]
-        overlay_curve = [cfg.initial_capital]
 
         baseline_weights = dict(cfg.base_weights)
-        overlay_weights = dict(baseline_weights)
+        applied_weights = {**baseline_weights, "CRYPTO_PROXY": 0.0}
 
         # Overlay stats
         overlay_active_days = 0
@@ -246,8 +264,9 @@ class UnifiedOverlayBacktester:
         crypto_active = 0
         bond_dur_active = 0
         total_rebalances = 0
-        total_costs = 0.0
-        equity_curve_sampled = []
+        evidence_dates = []
+        gross_returns = []
+        turnovers = []
 
         # Price data for signal computation
         spy_prices = sorted(self.prices_raw.get("SPY", []), key=lambda x: x["d"])
@@ -327,14 +346,22 @@ class UnifiedOverlayBacktester:
                 new_gld = cfg.base_weights['GLD'] * non_crypto
                 new_tlt = cfg.base_weights['TLT'] * non_crypto
 
-            overlay_weights = {"SPY": new_spy, "GLD": new_gld, "TLT": new_tlt}
+            target_weights = {
+                "SPY": new_spy,
+                "GLD": new_gld,
+                "TLT": new_tlt,
+                "CRYPTO_PROXY": crypto_alloc,
+            }
 
             # --- Rebalance on schedule ---
+            turnover = 0.0
             if i % cfg.rebalance_frequency_days == 0:
                 total_rebalances += 1
-                for key in overlay_weights:
-                    delta_w = abs(overlay_weights[key] - baseline_weights[key])
-                    total_costs += delta_w * overlay_curve[-1] * cfg.transaction_cost_bps / 10000
+                turnover = compute_one_way_turnover(
+                    applied_weights,
+                    target_weights,
+                )
+                applied_weights = target_weights
 
             # --- Compute daily returns ---
             baseline_ret = (
@@ -346,33 +373,56 @@ class UnifiedOverlayBacktester:
             # Crypto gets 1.5x SPY return as proxy
             crypto_ret = day.spy_return * 1.5
             overlay_ret = (
-                overlay_weights["SPY"] * day.spy_return +
-                overlay_weights["GLD"] * day.gld_return +
-                overlay_weights["TLT"] * day.tlt_return +
-                crypto_alloc * crypto_ret
+                applied_weights["SPY"] * day.spy_return +
+                applied_weights["GLD"] * day.gld_return +
+                applied_weights["TLT"] * day.tlt_return +
+                applied_weights["CRYPTO_PROXY"] * crypto_ret
             )
 
             baseline_curve.append(baseline_curve[-1] * (1 + baseline_ret))
-            overlay_curve.append(overlay_curve[-1] * (1 + overlay_ret))
+            evidence_dates.append(day.date)
+            gross_returns.append(float(overlay_ret))
+            turnovers.append(float(turnover))
 
             # Crisis tracking
             for year in crisis_daily_returns:
                 if day.date.startswith(year):
                     crisis_daily_returns[year].append(overlay_ret)
 
-            # Sample equity curve monthly
-            if i % 21 == 0:
-                equity_curve_sampled.append({
-                    "date": day.date,
-                    "baseline": round(baseline_curve[-1], 2),
-                    "overlay": round(overlay_curve[-1], 2),
-                })
-
         # --- Compute metrics ---
         baseline_metrics = compute_metrics(baseline_curve, cfg.initial_capital)
-        overlay_metrics = compute_metrics(overlay_curve, cfg.initial_capital)
+        evidence = build_profitability_evidence(
+            dates=evidence_dates,
+            gross_returns=gross_returns,
+            turnovers=turnovers,
+            assets=["SPY", "GLD", "TLT", "CRYPTO_PROXY", "VIX_OR_REALIZED_VOL"],
+            data_mode="proxy",
+            provenance={
+                "source": "prices JSON with SPY-derived crypto and optional VIX proxy",
+                "snapshot": build_data_snapshot_provenance(
+                    self._data_path or PRICES_JSON,
+                    symbol_universe=self.prices_raw,
+                ),
+            },
+            transaction_cost_bps=cfg.transaction_cost_bps,
+            initial_capital=cfg.initial_capital,
+            point_in_time=True,
+            diagnostic_opt_in=self.allow_proxy_data,
+        )
+        overlay_metrics = evidence["metrics"]["net"]
+        equity_curve_sampled = [
+            {
+                "date": row["date"],
+                "baseline": round(baseline_curve[index + 1], 2),
+                "overlay": round(row["net_equity"], 2),
+            }
+            for index, row in enumerate(evidence["trace"])
+            if index % 21 == 0
+        ]
 
-        sharpe_improvement = overlay_metrics.sharpe_ratio - baseline_metrics.sharpe_ratio
+        sharpe_improvement = (
+            overlay_metrics["sharpe_ratio"] - baseline_metrics.sharpe_ratio
+        )
 
         # Crisis annualized returns
         crisis_returns = {}
@@ -384,15 +434,16 @@ class UnifiedOverlayBacktester:
                 crisis_returns[year] = round((cumulative - 1) * 100, 2)
 
         return BacktestResult(
-            total_return=overlay_metrics.total_return,
-            cagr=overlay_metrics.cagr,
-            volatility=overlay_metrics.volatility,
-            sharpe_ratio=overlay_metrics.sharpe_ratio,
-            max_drawdown=overlay_metrics.max_drawdown,
+            total_return=overlay_metrics["total_return"],
+            cagr=overlay_metrics["cagr"],
+            volatility=overlay_metrics["volatility"],
+            sharpe_ratio=overlay_metrics["sharpe_ratio"],
+            max_drawdown=overlay_metrics["max_drawdown"],
             baseline_sharpe=baseline_metrics.sharpe_ratio,
             sharpe_improvement=sharpe_improvement,
             total_rebalances=total_rebalances,
-            total_transaction_costs=total_costs,
+            total_transaction_costs=evidence["costs"]["total_dollars"],
+            avg_turnover=evidence["turnover"]["average_per_rebalance"],
             crisis_returns={
                 "2008": crisis_returns.get("2008"),
                 "2020": crisis_returns.get("2020"),
@@ -406,6 +457,7 @@ class UnifiedOverlayBacktester:
                 "crypto_active_days": crypto_active,
                 "bond_duration_active_days": bond_dur_active,
                 "equity_curve": equity_curve_sampled,
+                "profitability_evidence": evidence,
             },
         )
 
@@ -458,7 +510,9 @@ class UnifiedOverlayBacktester:
 
 def main():
     import sys
-    backtester = UnifiedOverlayBacktester()
+    backtester = UnifiedOverlayBacktester(
+        allow_proxy_data="--allow-proxy" in sys.argv,
+    )
 
     if not backtester.load_data():
         logger.info("Failed to load price data")

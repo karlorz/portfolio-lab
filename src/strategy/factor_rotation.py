@@ -20,7 +20,7 @@ Strategy Logic:
 import json
 import logging
 import sqlite3
-from src.paths import sqlite_connect, RISK_FREE_RATE
+from src.paths import sqlite_connect
 import numpy as np
 import pandas as pd
 from datetime import datetime
@@ -28,6 +28,11 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.backtest.metrics import (
+    DEFAULT_TRANSACTION_COST_BPS,
+    build_profitability_evidence,
+    compute_one_way_turnover,
+)
 from src.paths import MARKET_DB
 from src.utils import safe_get
 
@@ -118,8 +123,13 @@ class FactorMomentumEngine:
         # Factor categories for diversity constraint
         self.max_per_category = 1  # Max 1 per category in selection
     
-    def _fetch_price_data(self, symbol: str, days: int = 300) -> List[Dict]:
-        """Fetch historical price data from SQLite"""
+    def _fetch_price_data(
+        self,
+        symbol: str,
+        days: int = 300,
+        as_of: Optional[str] = None,
+    ) -> List[Dict]:
+        """Fetch historical price data from SQLite, optionally as of a date."""
         if not self.db_path.exists():
             return []
 
@@ -127,13 +137,22 @@ class FactorMomentumEngine:
             with sqlite_connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
-                cursor.execute("""
-                    SELECT date, close, volume
-                    FROM prices
-                    WHERE symbol = ?
-                    ORDER BY date DESC
-                    LIMIT ?
-                """, (symbol, days))
+                if as_of is None:
+                    cursor.execute("""
+                        SELECT date, close, volume
+                        FROM prices
+                        WHERE symbol = ?
+                        ORDER BY date DESC
+                        LIMIT ?
+                    """, (symbol, days))
+                else:
+                    cursor.execute("""
+                        SELECT date, close, volume
+                        FROM prices
+                        WHERE symbol = ? AND date <= ?
+                        ORDER BY date DESC
+                        LIMIT ?
+                    """, (symbol, as_of, days))
 
                 rows = cursor.fetchall()
         except (sqlite3.Error, OSError) as e:
@@ -145,9 +164,16 @@ class FactorMomentumEngine:
             for row in reversed(rows)
         ]
     
-    def _calculate_factor_score(self, symbol: str) -> Optional[FactorScore]:
+    def _calculate_factor_score(
+        self,
+        symbol: str,
+        as_of: Optional[str] = None,
+    ) -> Optional[FactorScore]:
         """Calculate momentum metrics for a factor ETF"""
-        data = self._fetch_price_data(symbol, 300)
+        if as_of is None:
+            data = self._fetch_price_data(symbol, 300)
+        else:
+            data = self._fetch_price_data(symbol, 300, as_of=as_of)
         
         if len(data) < 252:  # Need at least 1 year
             return None
@@ -207,22 +233,29 @@ class FactorMomentumEngine:
             composite_ml_score=float(tsfm_score)  # Use TSFM as base ML score
         )
     
-    def evaluate(self) -> Dict:
+    def evaluate(self, as_of: Optional[str] = None) -> Dict:
         """
-        Run factor momentum evaluation and generate rotation signal
+        Run factor momentum evaluation and generate rotation signal.
+
+        When ``as_of`` is supplied, every factor score uses only rows dated on
+        or before that date. Historical backtests must always supply it.
         """
         timestamp = datetime.now().isoformat()
         
         # Calculate scores for all factors
         factor_scores = {}
         for symbol in self.universe:
-            score = self._calculate_factor_score(symbol)
+            if as_of is None:
+                score = self._calculate_factor_score(symbol)
+            else:
+                score = self._calculate_factor_score(symbol, as_of=as_of)
             if score:
                 factor_scores[symbol] = score
         
         if not factor_scores:
             return {
                 "timestamp": timestamp,
+                "as_of": as_of,
                 "error": "Insufficient data for factor analysis",
                 "selected_factors": [],
                 "allocation": {},
@@ -267,6 +300,7 @@ class FactorMomentumEngine:
         # Build output
         return {
             "timestamp": timestamp,
+            "as_of": as_of,
             "selected_factors": [s[0] for s in selected],
             "allocation": allocation,
             "current_scores": {
@@ -751,7 +785,8 @@ class FactorRotationBacktest:
         self,
         start_date: str,
         end_date: str,
-        rebalance_frequency: str = "monthly"
+        rebalance_frequency: str = "monthly",
+        transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
     ) -> Dict:
         """
         Run historical backtest of factor rotation strategy.
@@ -790,8 +825,27 @@ class FactorRotationBacktest:
 
         if spy_prices.empty:
             return {"error": "No SPY benchmark data", "status": "failed"}
+        missing_assets = sorted(set(symbols) - set(price_data))
+        if missing_assets:
+            return {
+                "error": "Missing required real factor price data",
+                "status": "failed",
+                "missing_assets": missing_assets,
+            }
 
         spy_series = spy_prices.set_index('date')['close']
+        common_dates = set(spy_series.index)
+        for series in price_data.values():
+            common_dates &= set(series.index)
+        dates = sorted(common_dates)
+        if len(dates) < 252:
+            return {
+                "error": (
+                    f"Insufficient aligned real data: {len(dates)} days "
+                    "(need 252+)"
+                ),
+                "status": "failed",
+            }
 
         # Determine rebalance dates (monthly)
         rebalance_dates = []
@@ -803,12 +857,13 @@ class FactorRotationBacktest:
                 prev_month = month
 
         # Simulate portfolio
-        portfolio_value = 100000.0
         spy_value = 100000.0
-        values = [portfolio_value]
         spy_values = [spy_value]
         current_weights = {}
         trade_count = 0
+        evidence_dates = []
+        gross_returns = []
+        turnovers = []
 
         for i, date in enumerate(dates):
             if i == 0:
@@ -825,46 +880,62 @@ class FactorRotationBacktest:
                         if prev_p > 0:
                             daily_return += weight * (cur_p - prev_p) / prev_p
 
-            portfolio_value *= (1 + daily_return)
-            values.append(portfolio_value)
-
             # SPY benchmark
             if date in spy_series.index and dates[i - 1] in spy_series.index:
                 spy_ret = (spy_series[date] - spy_series[dates[i - 1]]) / spy_series[dates[i - 1]]
                 spy_value *= (1 + spy_ret)
             spy_values.append(spy_value)
 
+            turnover = 0.0
             # Rebalance
             if date in rebalance_dates:
                 # Temporarily set universe to available symbols for this date
                 available = [s for s in symbols if s in price_data and date in price_data[s].index]
                 if available:
                     old_universe = self.engine.universe
-                    self.engine.universe = available
-                    result = self.engine.evaluate()
-                    self.engine.universe = old_universe
+                    try:
+                        self.engine.universe = available
+                        result = self.engine.evaluate(as_of=date)
+                    finally:
+                        self.engine.universe = old_universe
 
                     new_weights = result.get('allocation', {})
                     if new_weights:
+                        turnover = compute_one_way_turnover(
+                            current_weights,
+                            new_weights,
+                        )
                         current_weights = new_weights
                         trade_count += 1
 
-        # Compute metrics
-        years = len(dates) / 252
-        final_value = values[-1]
-        cagr = (final_value / 100000.0) ** (1 / years) - 1 if years > 0 else 0
+            evidence_dates.append(date)
+            gross_returns.append(float(daily_return))
+            turnovers.append(float(turnover))
 
-        # Daily returns for Sharpe
-        daily_returns = np.diff(values) / values[:-1]
-        vol = float(np.std(daily_returns) * np.sqrt(252))
-        sharpe = (cagr - RISK_FREE_RATE / 100) / vol if vol > 0 else 0
-
-        # Max drawdown
-        peak = np.maximum.accumulate(values)
-        drawdowns = (np.array(values) - peak) / peak
-        max_dd = float(np.min(drawdowns))
+        evidence = build_profitability_evidence(
+            dates=evidence_dates,
+            gross_returns=gross_returns,
+            turnovers=turnovers,
+            assets=symbols,
+            data_mode="real",
+            provenance={
+                "source": "prices table",
+                "path": str(self.engine.db_path),
+            },
+            transaction_cost_bps=transaction_cost_bps,
+            initial_capital=100000.0,
+            point_in_time=True,
+            require_real_data=True,
+        )
+        metrics = evidence["metrics"]["net"]
+        final_value = evidence["trace"][-1]["net_equity"]
+        cagr = metrics["cagr"] / 100
+        vol = metrics["volatility"] / 100
+        sharpe = metrics["sharpe_ratio"]
+        max_dd = metrics["max_drawdown"] / 100
 
         # SPY benchmark
+        years = len(dates) / 252
         spy_cagr = (spy_values[-1] / 100000.0) ** (1 / years) - 1 if years > 0 else 0
 
         return {
@@ -881,6 +952,7 @@ class FactorRotationBacktest:
             "excess_return": round(cagr - spy_cagr, 4),
             "trade_count": trade_count,
             "trading_days": len(dates),
+            "profitability_evidence": evidence,
             "status": "completed"
         }
 

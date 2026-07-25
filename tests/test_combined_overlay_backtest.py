@@ -24,6 +24,9 @@ from src.backtest.metrics import (
     BacktestMetrics,
     OverlayMetrics,
     CrisisReturns,
+    build_profitability_evidence,
+    compute_metrics,
+    compute_one_way_turnover,
 )
 
 
@@ -62,7 +65,7 @@ class TestCombinedOverlayBacktest:
 
     @pytest.fixture
     def bt(self):
-        return CombinedOverlayBacktest()
+        return CombinedOverlayBacktest(allow_synthetic=True)
 
     def test_collar_signal_normal(self, bt):
         delta = bt._collar_signal(16.0, 0.001)
@@ -146,8 +149,24 @@ class TestCombinedOverlayBacktest:
         assert 0 <= result.extras["bond_rotation_avg_tlt"] <= 100
 
     def test_convenience_function(self):
-        result = run_combined_backtest()
+        result = run_combined_backtest(allow_synthetic=True)
         assert isinstance(result, BacktestResult)
+
+    def test_decision_grade_run_fails_closed_without_real_data(self, tmp_path):
+        bt = CombinedOverlayBacktest(data_dir=tmp_path)
+        with pytest.raises(ValueError, match="real market data"):
+            bt.run_backtest()
+
+    def test_explicit_synthetic_run_is_not_promotion_eligible(self, tmp_path):
+        result = CombinedOverlayBacktest(
+            data_dir=tmp_path,
+            allow_synthetic=True,
+        ).run_backtest()
+
+        evidence = result.extras["profitability_evidence"]
+        assert evidence["data"]["mode"] == "synthetic"
+        assert evidence["promotion_eligible"] is False
+        assert evidence["data"]["diagnostic_opt_in"] is True
 
     def test_main_logs_report_without_blank_logger_type_error(self, monkeypatch, caplog):
         """CLI report should emit blank lines with logger.info("") not bare logger.info()."""
@@ -379,7 +398,7 @@ class TestSignalBoundaries:
 
     @pytest.fixture
     def bt(self):
-        return CombinedOverlayBacktest()
+        return CombinedOverlayBacktest(allow_synthetic=True)
 
     # --- Collar signal boundaries ---
 
@@ -518,7 +537,7 @@ class TestUtilityFunctions:
 
     @pytest.fixture
     def bt(self):
-        return CombinedOverlayBacktest()
+        return CombinedOverlayBacktest(allow_synthetic=True)
 
     def test_compute_returns_empty(self, bt):
         rets = bt._compute_returns([])
@@ -594,7 +613,7 @@ class TestBacktestResultValidation:
 
     @pytest.fixture
     def bt(self):
-        return CombinedOverlayBacktest()
+        return CombinedOverlayBacktest(allow_synthetic=True)
 
     @pytest.fixture
     def result(self, bt):
@@ -663,7 +682,7 @@ class TestSyntheticData:
 
     @pytest.fixture
     def bt(self):
-        return CombinedOverlayBacktest()
+        return CombinedOverlayBacktest(allow_synthetic=True)
 
     def test_synthetic_data_all_symbols(self, bt):
         data = bt._generate_synthetic_data()
@@ -710,3 +729,69 @@ class TestSyntheticData:
         for sym in ("SPY", "GLD", "TLT", "BTC", "ETH"):
             prices = np.array(data[sym]["prices"])
             assert np.all(prices > 0), f"Non-positive prices for {sym}"
+
+
+class TestProfitabilityEvidenceContract:
+    def test_one_way_turnover_includes_implicit_cash(self):
+        assert compute_one_way_turnover(
+            {},
+            {"SPY": 0.6, "GLD": 0.4},
+        ) == pytest.approx(1.0)
+        assert compute_one_way_turnover(
+            {"SPY": 0.6, "GLD": 0.4},
+            {"SPY": 0.5, "GLD": 0.5},
+        ) == pytest.approx(0.1)
+
+    def test_canonical_metrics_and_cost_reconciliation(self):
+        evidence = build_profitability_evidence(
+            dates=["2026-01-02", "2026-01-05", "2026-01-06"],
+            gross_returns=[0.01, -0.004, 0.006],
+            turnovers=[0.0, 0.25, 0.0],
+            assets=["SPY", "GLD", "TLT"],
+            data_mode="real",
+            provenance={"source": "test-fixture", "path": "memory"},
+            transaction_cost_bps=10.0,
+            point_in_time=True,
+        )
+
+        trace = evidence["trace"]
+        assert [row["date"] for row in trace] == [
+            "2026-01-02", "2026-01-05", "2026-01-06",
+        ]
+        assert evidence["costs"]["max_reconciliation_error"] < 1e-12
+        assert trace[1]["net_return"] == pytest.approx(
+            trace[1]["gross_return"] - trace[1]["cost_return"]
+        )
+        assert trace[-1]["net_equity"] < trace[-1]["gross_equity"]
+
+        expected = compute_metrics(
+            [100000.0] + [row["net_equity"] for row in trace],
+            100000.0,
+        )
+        assert evidence["metrics"]["net"]["cagr"] == expected.cagr
+        assert evidence["metrics"]["net"]["sortino_ratio"] == expected.sortino_ratio
+        assert evidence["metrics"]["net"]["max_drawdown"] == expected.max_drawdown
+        assert evidence["promotion_eligible"] is True
+
+    @pytest.mark.parametrize("mode", ["proxy", "synthetic"])
+    def test_non_real_modes_require_explicit_diagnostic_opt_in(self, mode):
+        with pytest.raises(ValueError, match="diagnostic opt-in"):
+            build_profitability_evidence(
+                dates=["2026-01-02"],
+                gross_returns=[0.0],
+                turnovers=[0.0],
+                assets=["SPY"],
+                data_mode=mode,
+                provenance={"source": "test"},
+            )
+
+    def test_dates_must_be_aligned_unique_and_sorted(self):
+        with pytest.raises(ValueError, match="strictly increasing"):
+            build_profitability_evidence(
+                dates=["2026-01-03", "2026-01-02"],
+                gross_returns=[0.0, 0.0],
+                turnovers=[0.0, 0.0],
+                assets=["SPY"],
+                data_mode="real",
+                provenance={"source": "test"},
+            )

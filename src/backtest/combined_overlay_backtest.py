@@ -28,9 +28,11 @@ import numpy as np
 from src.backtest.rolling_vol import precomputed_rolling_volatility
 from src.backtest.metrics import (
     BacktestResult,
+    DEFAULT_TRANSACTION_COST_BPS,
+    build_profitability_evidence,
+    compute_one_way_turnover,
     save_results_json,
 )
-from src.utils import safe_get
 
 __all__ = [
     'CombinedOverlayBacktest', 'run_combined_backtest',
@@ -54,11 +56,24 @@ class CombinedOverlayBacktest:
     # IEF ~ intermediate treasuries
     # BTC/ETH ~ synthetic high-vol assets
 
-    def __init__(self, data_dir: Optional[Path] = None):
+    REQUIRED_ASSETS = ("SPY", "GLD", "TLT", "IEF", "SHY", "BTC", "ETH", "VIX")
+
+    def __init__(
+        self,
+        data_dir: Optional[Path] = None,
+        *,
+        allow_synthetic: bool = False,
+        allow_proxy: bool = False,
+        transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    ):
         self.data_dir = data_dir or DATA_DIR
+        self.allow_synthetic = allow_synthetic
+        self.allow_proxy = allow_proxy
+        self.transaction_cost_bps = transaction_cost_bps
+        self._data_mode = "real"
 
     def _load_historical_data(self) -> Dict:
-        """Load historical price data from market.db or generate synthetic."""
+        """Load complete historical data or an explicitly allowed diagnostic."""
         db_path = self.data_dir / "market.db"
         data = {}
 
@@ -74,18 +89,42 @@ class CombinedOverlayBacktest:
                     )
 
                 if not df.empty:
-                    for sym in ["SPY", "GLD", "TLT"]:
-                        sym_df = df[df["symbol"] == sym]
+                    for sym in self.REQUIRED_ASSETS:
+                        db_symbol = "^VIX" if sym == "VIX" else sym
+                        sym_df = df[df["symbol"] == db_symbol]
                         if not sym_df.empty:
                             data[sym] = {
                                 "dates": sym_df["date"].tolist(),
                                 "prices": sym_df["close"].tolist(),
                             }
-                    return data
+                    if set(data) == set(self.REQUIRED_ASSETS):
+                        common_dates = set(data[self.REQUIRED_ASSETS[0]]["dates"])
+                        for symbol in self.REQUIRED_ASSETS[1:]:
+                            common_dates &= set(data[symbol]["dates"])
+                        aligned_dates = sorted(common_dates)
+                        if aligned_dates:
+                            for symbol in self.REQUIRED_ASSETS:
+                                by_date = dict(zip(
+                                    data[symbol]["dates"],
+                                    data[symbol]["prices"],
+                                ))
+                                data[symbol] = {
+                                    "dates": aligned_dates,
+                                    "prices": [by_date[value] for value in aligned_dates],
+                                }
+                            self._data_mode = "proxy"
+                            return data
             except (ImportError, OSError, KeyError, ValueError, TypeError, RuntimeError) as e:
                 logger.warning("Database load failed: %s", e)
 
-        # Generate synthetic data spanning 2006-2026
+        if not self.allow_synthetic:
+            missing = sorted(set(self.REQUIRED_ASSETS) - set(data))
+            raise ValueError(
+                "decision-grade run requires complete real market data; "
+                f"missing assets: {', '.join(missing) or 'aligned observations'}"
+            )
+
+        self._data_mode = "synthetic"
         return self._generate_synthetic_data()
 
     def _generate_synthetic_data(self) -> Dict:
@@ -207,15 +246,19 @@ class CombinedOverlayBacktest:
     def run_backtest(self) -> BacktestResult:
         """Run combined overlay backtest."""
         data = self._load_historical_data()
+        if self._data_mode == "proxy" and not self.allow_proxy:
+            raise ValueError(
+                "combined overlay proxy data requires explicit diagnostic opt-in"
+            )
 
         spy_prices = data["SPY"]["prices"]
         gld_prices = data["GLD"]["prices"]
         tlt_prices = data["TLT"]["prices"]
-        ief_prices = safe_get(data, "IEF", "prices", default=data["TLT"]["prices"])
-        shy_prices = safe_get(data, "SHY", "prices", default=data["TLT"]["prices"])
-        btc_prices = safe_get(data, "BTC", "prices", default=data["TLT"]["prices"])
-        eth_prices = safe_get(data, "ETH", "prices", default=data["TLT"]["prices"])
-        vix_data = safe_get(data, "VIX", "prices", default=[18.0] * len(spy_prices))
+        ief_prices = data["IEF"]["prices"]
+        shy_prices = data["SHY"]["prices"]
+        btc_prices = data["BTC"]["prices"]
+        eth_prices = data["ETH"]["prices"]
+        vix_data = data["VIX"]["prices"]
         dates = data["SPY"]["dates"]
 
         n = len(spy_prices)
@@ -238,20 +281,20 @@ class CombinedOverlayBacktest:
         min_len = min(len(spy_rets), n - 1)
 
         baseline_value = 1.0
-        combined_value = 1.0
         peak_baseline = 1.0
-        peak_combined = 1.0
 
         daily_baseline = []
-        daily_combined = []
         dd_baseline = []
-        dd_combined = []
 
         # Tracking
         collar_weights = []
         crypto_weights = []
         tlt_weights = []
         active_counts = []
+        evidence_dates = []
+        evidence_returns = []
+        evidence_turnovers = []
+        previous_weights = None
 
         # Crisis tracking
         crisis_2008_base = []
@@ -313,6 +356,20 @@ class CombinedOverlayBacktest:
             spy_w /= total; gld_w /= total; tlt_alloc /= total
             ief_alloc /= total; shy_alloc /= total
             btc_w /= total; eth_w /= total
+            current_weights = {
+                "SPY": spy_w,
+                "GLD": gld_w,
+                "TLT": tlt_alloc,
+                "IEF": ief_alloc,
+                "SHY": shy_alloc,
+                "BTC": btc_w,
+                "ETH": eth_w,
+            }
+            turnover = compute_one_way_turnover(
+                previous_weights or {},
+                current_weights,
+            )
+            previous_weights = current_weights
 
             # Daily returns
             s_r = spy_rets[min(i, len(spy_rets)-1)]
@@ -333,20 +390,19 @@ class CombinedOverlayBacktest:
                 tlt_alloc * t_r + ief_alloc * i_r + shy_alloc * sh_r +
                 btc_w * b_r + eth_w * e_r
             )
+            evidence_dates.append(dates[min(i + 1, len(dates) - 1)])
+            evidence_returns.append(float(comb_ret))
+            evidence_turnovers.append(float(turnover))
 
             baseline_value *= (1 + base_ret)
-            combined_value *= (1 + comb_ret)
 
             peak_baseline = max(peak_baseline, baseline_value)
-            peak_combined = max(peak_combined, combined_value)
 
             daily_baseline.append(base_ret * 100)
-            daily_combined.append(comb_ret * 100)
             dd_baseline.append((baseline_value / peak_baseline - 1) * 100)
-            dd_combined.append((combined_value / peak_combined - 1) * 100)
 
             # Crisis tracking
-            date_str = dates[min(i, len(dates)-1)]
+            date_str = evidence_dates[-1]
             if "2008" in date_str or "2009" in date_str:
                 crisis_2008_base.append(base_ret * 100)
                 crisis_2008_comb.append(comb_ret * 100)
@@ -360,13 +416,9 @@ class CombinedOverlayBacktest:
         # Compute summary statistics
         if len(daily_baseline) > 0:
             b_cagr = np.mean(daily_baseline) * 252
-            c_cagr = np.mean(daily_combined) * 252
             b_vol = np.std(daily_baseline) * math.sqrt(252)
-            c_vol = np.std(daily_combined) * math.sqrt(252)
             b_sharpe = b_cagr / b_vol if b_vol > 0 else 0
-            c_sharpe = c_cagr / c_vol if c_vol > 0 else 0
             b_max_dd = min(dd_baseline) if dd_baseline else 0
-            c_max_dd = min(dd_combined) if dd_combined else 0
 
             c08b = np.sum(crisis_2008_base) if crisis_2008_base else 0
             c08c = np.sum(crisis_2008_comb) if crisis_2008_comb else 0
@@ -375,18 +427,45 @@ class CombinedOverlayBacktest:
             c22b = np.sum(crisis_2022_base) if crisis_2022_base else 0
             c22c = np.sum(crisis_2022_comb) if crisis_2022_comb else 0
         else:
-            b_cagr = c_cagr = b_vol = c_vol = b_sharpe = c_sharpe = 0
-            b_max_dd = c_max_dd = 0
+            b_cagr = b_vol = b_sharpe = 0
+            b_max_dd = 0
             c08b = c08c = c20b = c20c = c22b = c22c = 0
 
-        total_return = round((combined_value - 1.0) * 100, 2)
+        evidence = build_profitability_evidence(
+            dates=evidence_dates,
+            gross_returns=evidence_returns,
+            turnovers=evidence_turnovers,
+            assets=self.REQUIRED_ASSETS,
+            data_mode=self._data_mode,
+            provenance={
+                "source": (
+                    "deterministic synthetic generator"
+                    if self._data_mode == "synthetic"
+                    else "prices table with yield-spread proxy signals"
+                ),
+                "path": str(self.data_dir / "market.db"),
+            },
+            transaction_cost_bps=self.transaction_cost_bps,
+            initial_capital=100000.0,
+            point_in_time=True,
+            diagnostic_opt_in=(
+                self.allow_synthetic
+                if self._data_mode == "synthetic"
+                else self.allow_proxy
+            ),
+        )
+        canonical = evidence["metrics"]["net"]
+        total_return = canonical["total_return"]
 
         return BacktestResult(
             total_return=total_return,
-            cagr=round(c_cagr, 2),
-            volatility=round(c_vol, 2),
-            sharpe_ratio=round(c_sharpe, 3),
-            max_drawdown=round(c_max_dd, 2),
+            cagr=canonical["cagr"],
+            volatility=canonical["volatility"],
+            sharpe_ratio=canonical["sharpe_ratio"],
+            max_drawdown=canonical["max_drawdown"],
+            total_rebalances=evidence["turnover"]["rebalance_count"],
+            total_transaction_costs=evidence["costs"]["total_dollars"],
+            avg_turnover=evidence["turnover"]["average_per_rebalance"],
             extras={
                 "timestamp": datetime.now().isoformat(),
                 "start_date": dates[180] if len(dates) > 180 else dates[0],
@@ -396,12 +475,12 @@ class CombinedOverlayBacktest:
                 "baseline_vol": round(b_vol, 2),
                 "baseline_sharpe": round(b_sharpe, 3),
                 "baseline_max_dd": round(b_max_dd, 2),
-                "combined_cagr": round(c_cagr, 2),
-                "combined_vol": round(c_vol, 2),
-                "combined_max_dd": round(c_max_dd, 2),
-                "sharpe_delta": round(c_sharpe - b_sharpe, 3),
-                "dd_improvement": round(b_max_dd - c_max_dd, 2),
-                "cagr_delta": round(c_cagr - b_cagr, 2),
+                "combined_cagr": canonical["cagr"],
+                "combined_vol": canonical["volatility"],
+                "combined_max_dd": canonical["max_drawdown"],
+                "sharpe_delta": round(canonical["sharpe_ratio"] - b_sharpe, 3),
+                "dd_improvement": round(b_max_dd - canonical["max_drawdown"], 2),
+                "cagr_delta": round(canonical["cagr"] - b_cagr, 2),
                 "collar_active_pct": round(
                     sum(collar_weights) / len(collar_weights) * 100, 1
                 ) if collar_weights else 0,
@@ -414,8 +493,9 @@ class CombinedOverlayBacktest:
                 "avg_overlays_active": round(
                     np.mean(active_counts), 1
                 ) if active_counts else 0,
-                "meets_sharpe_target": c_sharpe >= 0.90,
-                "meets_dd_target": c_max_dd >= -22.0,
+                "meets_sharpe_target": canonical["sharpe_ratio"] >= 0.90,
+                "meets_dd_target": canonical["max_drawdown"] >= -22.0,
+                "profitability_evidence": evidence,
             },
             crisis_returns={
                 "2008_baseline": round(c08b, 2),
@@ -428,14 +508,24 @@ class CombinedOverlayBacktest:
         )
 
 
-def run_combined_backtest() -> BacktestResult:
+def run_combined_backtest(
+    *,
+    allow_synthetic: bool = False,
+    allow_proxy: bool = False,
+) -> BacktestResult:
     """Convenience function."""
-    bt = CombinedOverlayBacktest()
+    bt = CombinedOverlayBacktest(
+        allow_synthetic=allow_synthetic,
+        allow_proxy=allow_proxy,
+    )
     return bt.run_backtest()
 
 
 def main():
-    bt = CombinedOverlayBacktest()
+    bt = CombinedOverlayBacktest(
+        allow_synthetic="--allow-synthetic" in sys.argv,
+        allow_proxy="--allow-proxy" in sys.argv,
+    )
     result = bt.run_backtest()
     e = result.extras
 
