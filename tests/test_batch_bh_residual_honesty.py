@@ -116,8 +116,8 @@ def test_elevate_compact_health_status_max_severity():
     assert h2["status"] != "healthy"
 
 
-def test_elevate_compact_folds_signal_health_status_degraded():
-    """Batch AO: healthy + signal_health_status=degraded → demote to degraded."""
+def test_elevate_compact_keeps_signal_health_status_on_quality_plane():
+    """SH degraded remains compact disclosure without demoting ops status."""
     from src.dashboard.cron_scheduler_section import _elevate_compact_health_status
 
     h = _elevate_compact_health_status(
@@ -130,14 +130,13 @@ def test_elevate_compact_folds_signal_health_status_degraded():
             "failed_cron_jobs": 0,
         }
     )
-    assert h["status"] == "degraded"
-    assert h.get("status_elevated_from") == "healthy"
-    reason = str(h.get("status_elevate_reason") or "")
-    assert "signal_health_status=degraded" in reason
+    assert h["status"] == "healthy"
+    assert h["signal_health_status"] == "degraded"
+    assert h.get("status_elevated_from") is None
 
 
-def test_elevate_compact_folds_signal_health_zero_healthy_counts():
-    """healthy_count==0 with total>0 demotes even if SH status field empty."""
+def test_elevate_compact_keeps_zero_healthy_counts_on_quality_plane():
+    """0/N remains compact quality disclosure without demoting ops status."""
     from src.dashboard.cron_scheduler_section import _elevate_compact_health_status
 
     h = _elevate_compact_health_status(
@@ -149,8 +148,10 @@ def test_elevate_compact_folds_signal_health_zero_healthy_counts():
             "failed_cron_jobs": 0,
         }
     )
-    assert h["status"] == "degraded"
-    assert "signal_health_healthy=0/8" in str(h.get("status_elevate_reason") or "")
+    assert h["status"] == "healthy"
+    assert h["signal_health_healthy"] == 0
+    assert h["signal_health_total_tracked"] == 8
+    assert h.get("status_elevate_reason") is None
 
 
 def test_elevate_compact_never_promotes_worse_status():

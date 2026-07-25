@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from src.dashboard.health_report import signal_health_status_contribution
+
 HEALTH_SLO_ALERT_TYPE = "health_slo"
 SIGNAL_QUALITY_ALERT_TYPE = "signal_quality"
 
@@ -55,6 +57,7 @@ def _signal_health_quality_context(
     summary = summary if isinstance(summary, Mapping) else {}
     status = (
         signal_health.get("status")
+        or signal_health.get("overall_health")
         or summary.get("status")
         or signal_health.get("overall")
     )
@@ -78,11 +81,14 @@ def _signal_health_quality_context(
 def _ops_dimensions_ok(health: Mapping[str, Any], *, slo_status: str | None) -> bool:
     """True when kill/open/scheduler/data_pipeline look operationally fine.
 
-    Does **not** hard-fail on sticky ``ops_health_status`` alone — that field
-    can lag on public health until JH1b restamp. Kill/open/slo/scheduler are
-    the authoritative ops dimensions for alert ownership.
+    The live monitor restamps ``ops_health_status`` on every health publish,
+    so a present non-green value is operational evidence. Mirror lag is also
+    an ops SLI and must prevent quality-only ownership.
     """
     if slo_status and slo_status not in {"ok", "healthy", ""}:
+        return False
+    ops_status = str(health.get("ops_health_status") or "").lower()
+    if ops_status and ops_status not in {"ok", "healthy", "green", "success"}:
         return False
     kill = health.get("kill_switch")
     if isinstance(kill, Mapping) and kill.get("enabled"):
@@ -96,6 +102,14 @@ def _ops_dimensions_ok(health: Mapping[str, Any], *, slo_status: str | None) -> 
     else:
         sched = str(scheduler or "").lower()
     if sched and sched not in {"ok", "healthy", "success"}:
+        return False
+    lag_status = str(health.get("repo_public_mirror_lag_status") or "").lower()
+    if lag_status and lag_status not in {"ok", "healthy", "green"}:
+        return False
+    try:
+        if int(health.get("repo_public_mirror_lagging_count") or 0) > 0:
+            return False
+    except (TypeError, ValueError):
         return False
     return True
 
@@ -112,9 +126,16 @@ def build_health_slo_alerts(health: Mapping[str, Any] | None) -> list[dict[str, 
     if not isinstance(health, Mapping):
         return []
 
+    signal_status, quality_badge, zero_healthy = _signal_health_quality_context(health)
+    signal_health = health.get("signal_health")
+    quality_warning = bool(
+        signal_health_status_contribution(
+            signal_health if isinstance(signal_health, Mapping) else None
+        )
+    )
     is_critical = critical_health_requires_alert(health)
     is_warning = warning_health_requires_alert(health)
-    if not is_critical and not is_warning:
+    if not is_critical and not is_warning and not quality_warning:
         return []
 
     system_status = str(health.get("system_status") or "").lower() or None
@@ -141,7 +162,6 @@ def build_health_slo_alerts(health: Mapping[str, Any] | None) -> list[dict[str, 
     else:
         scheduler_label = str(scheduler_status or "").lower() or None
 
-    signal_status, quality_badge, zero_healthy = _signal_health_quality_context(health)
     signal_summary = signal_status
     if quality_badge and (zero_healthy or signal_status in {"degraded", "warning", "unhealthy"}):
         signal_summary = quality_badge
@@ -149,11 +169,7 @@ def build_health_slo_alerts(health: Mapping[str, Any] | None) -> list[dict[str, 
     ops_ok = _ops_dimensions_ok(health, slo_status=slo_status)
     sh_only = bool(
         ops_ok
-        and (
-            zero_healthy
-            or (signal_status in {"degraded", "warning", "unhealthy"})
-            or (system_status in {"warning", "degraded"} and not top_dim_str)
-        )
+        and quality_warning
         and (not top_dim_str or top_dim_str in {"signal_health", "signal_quality"})
     )
 

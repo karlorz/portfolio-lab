@@ -52,12 +52,12 @@ def _max_status(a: str, b: str) -> str:
 def signal_health_status_contribution(
     signal_health: Mapping[str, Any] | None,
 ) -> str | None:
-    """Map signal_health section → system_status contribution (Batch BN).
+    """Map signal_health section to a quality-plane severity contribution.
 
-    When zero sources are healthy among a non-empty tracked set, the overall
-    system must not present as fully healthy (SRE max-severity: all-arms
-    degraded is at least ``degraded``). Returns None when signal_health is
-    absent/empty (do not invent demotion).
+    This helper remains the SSOT for quality-sensitive consumers such as the
+    graduation circuit breaker and ensemble freeze policy. It must not be
+    folded into the operator-facing ``system_status`` ops badge. Returns None
+    when signal_health is absent/empty (do not invent demotion).
     """
     if not isinstance(signal_health, Mapping):
         return None
@@ -116,13 +116,13 @@ def derive_system_status(
     slo_status: str | None = None,
     failed_jobs: int = 0,
     stale_count: int = 0,
-    signal_health: Mapping[str, Any] | None = None,
 ) -> str:
-    """Merge cron, freshness, scheduler, SLO, and signal_health into system_status.
+    """Merge operational dimensions into the ``system_status`` ops badge.
 
-    Batch BN: fold signal_health (0 healthy of N tracked → at least degraded)
-    so dashboard cannot show overall healthy while every tracked sleeve is
-    degraded/unhealthy.
+    Signal predictive health is intentionally excluded. Thin or unhealthy
+    sleeves remain disclosed by the ``signal_health`` block and
+    ``signal_quality`` alerts; they do not make serving/data plumbing look
+    warning or critical when the ops plane is green.
     """
     status = current
     if status not in {"warning", "critical", "degraded"}:
@@ -139,10 +139,6 @@ def derive_system_status(
         status = _max_status(status, "warning")
     if slo_status == "critical" or failed_jobs > 2 or stale_count > 10:
         status = _max_status(status, "critical")
-
-    sh_contrib = signal_health_status_contribution(signal_health)
-    if sh_contrib:
-        status = _max_status(status, sh_contrib)
 
     return status
 
