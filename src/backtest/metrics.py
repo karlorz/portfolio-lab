@@ -252,18 +252,24 @@ def compute_one_way_turnover(
     new_weights: Mapping[str, float],
 ) -> float:
     """Return one-way turnover, including an implicit residual cash weight."""
-    assets = set(previous_weights) | set(new_weights)
-    previous = {asset: float(previous_weights.get(asset, 0.0)) for asset in assets}
-    current = {asset: float(new_weights.get(asset, 0.0)) for asset in assets}
+    supplied_assets = set(previous_weights) | set(new_weights)
+    ordered_assets = sorted(supplied_assets | {"CASH"})
+    previous = {
+        asset: float(previous_weights.get(asset, 0.0))
+        for asset in ordered_assets
+    }
+    current = {
+        asset: float(new_weights.get(asset, 0.0))
+        for asset in ordered_assets
+    }
 
-    if "CASH" not in assets:
+    if "CASH" not in supplied_assets:
         previous["CASH"] = 1.0 - sum(previous.values())
         current["CASH"] = 1.0 - sum(current.values())
-        assets.add("CASH")
 
     return sum(
         abs(current.get(asset, 0.0) - previous.get(asset, 0.0))
-        for asset in assets
+        for asset in ordered_assets
     ) / 2.0
 
 
