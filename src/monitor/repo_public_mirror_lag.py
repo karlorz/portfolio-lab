@@ -27,9 +27,15 @@ __all__ = [
     "resolve_mirror_lag_for_consumer",
     "apply_lag_summary_to_health_doc",
     "is_ephemeral_restamp_path",
+    "ops_dimensions_block_lag_heal",
+    "rederive_ops_status_for_lag_heal",
 ]
 
 _MIRROR_MOD_NAME = "portfolio_lab_mirror_repo_public_data"
+
+_OK_SCHEDULER = frozenset({"", "ok", "healthy", "success", "green"})
+_OK_SLO = frozenset({"", "ok", "healthy", "green", "success"})
+_OK_LAG = frozenset({"", "ok", "healthy", "green"})
 
 
 def load_mirror_script_module():
@@ -140,6 +146,118 @@ def summarize_repo_public_mirror_lag(
     }
 
 
+def _scheduler_label(doc: dict[str, Any]) -> str:
+    sched = doc.get("scheduler_status")
+    if isinstance(sched, dict):
+        return str(sched.get("status") or sched.get("state") or "").lower()
+    return str(sched or "").lower()
+
+
+def _slo_label(doc: dict[str, Any]) -> str:
+    slo = doc.get("data_pipeline_slo")
+    if isinstance(slo, dict):
+        return str(slo.get("status") or "").lower()
+    return ""
+
+
+def ops_dimensions_block_lag_heal(doc: dict[str, Any]) -> bool:
+    """True when an independent ops failure forbids demotion after lag heal.
+
+    Signal quality / thin ``signal_health`` is intentionally ignored — that is
+    a separate plane and must not keep sticky lag-only ops warnings.
+    """
+    if not isinstance(doc, dict):
+        return True
+    kill = doc.get("kill_switch") if isinstance(doc.get("kill_switch"), dict) else {}
+    if kill.get("enabled"):
+        return True
+    # Monitor schema may only expose kill under checks.
+    checks = doc.get("checks") if isinstance(doc.get("checks"), dict) else {}
+    check_kill = (
+        checks.get("kill_switch")
+        if isinstance(checks.get("kill_switch"), dict)
+        else {}
+    )
+    if check_kill.get("enabled"):
+        return True
+    open_inc = (
+        doc.get("open_incidents")
+        if isinstance(doc.get("open_incidents"), dict)
+        else {}
+    )
+    check_open = (
+        checks.get("open_incidents")
+        if isinstance(checks.get("open_incidents"), dict)
+        else {}
+    )
+    for block in (open_inc, check_open):
+        try:
+            if int(block.get("open_count") or 0) > 0:
+                return True
+        except (TypeError, ValueError):
+            pass
+    if _scheduler_label(doc) not in _OK_SCHEDULER:
+        return True
+    if _slo_label(doc) not in _OK_SLO:
+        return True
+    lag_status = str(doc.get("repo_public_mirror_lag_status") or "").lower()
+    if lag_status and lag_status not in _OK_LAG:
+        return True
+    try:
+        if int(doc.get("repo_public_mirror_lagging_count") or 0) > 0:
+            return True
+    except (TypeError, ValueError):
+        pass
+    return False
+
+
+def rederive_ops_status_for_lag_heal(doc: dict[str, Any]) -> dict[str, Any]:
+    """Return field updates that demote lag-only sticky ops status.
+
+    Empty dict means do not demote (independent ops failure still present).
+    Never consults ``signal_health`` / quality plane.
+    """
+    if not isinstance(doc, dict) or ops_dimensions_block_lag_heal(doc):
+        return {}
+    updates: dict[str, Any] = {}
+    # Monitor schema (status + optional ops_health_status)
+    if "status" in doc or isinstance(doc.get("checks"), dict):
+        updates["status"] = "ok"
+    if "ops_health_status" in doc:
+        updates["ops_health_status"] = "ok"
+    # Dashboard schema
+    if "system_status" in doc:
+        try:
+            from src.dashboard.health_report import derive_system_status
+
+            sched = _scheduler_label(doc) or None
+            slo = _slo_label(doc) or None
+            try:
+                failed = int(doc.get("failed_cron_jobs") or 0)
+            except (TypeError, ValueError):
+                failed = 0
+            stale = 0
+            freshness = doc.get("data_freshness")
+            if isinstance(freshness, dict):
+                stale = sum(
+                    1
+                    for item in freshness.values()
+                    if isinstance(item, dict)
+                    and item.get("status") not in {"fresh", "ok"}
+                )
+            updates["system_status"] = derive_system_status(
+                current="healthy",
+                backend_error=False,
+                scheduler_status=sched,
+                slo_status=slo,
+                failed_jobs=failed,
+                stale_count=stale,
+            )
+        except Exception:  # noqa: BLE001 — demote conservatively to healthy
+            updates["system_status"] = "healthy"
+    return updates
+
+
 def apply_lag_summary_to_health_doc(
     doc: dict[str, Any] | None,
     lag_summary: dict[str, Any] | None,
@@ -158,13 +276,18 @@ def apply_lag_summary_to_health_doc(
     ``repo_public_mirror_lag*`` gauge, leaving sticky
     ``mirror_lag_stamp_lagging_count=1`` / ``source_of_truth=stamp`` while
     lagging_count was already 0 (false residual after multi-dest heal).
+
+    Cause-aware heal: when live lag is 0 and ``elevate_status`` is true,
+    re-derive ops status from kill/open/scheduler/SLO/lag and demote lag-only
+    sticky warnings. Independent ops failures still block demotion. Soft-elevate
+    remains elevate-only while lag is present.
     """
     from src.dashboard.generator import project_repo_public_mirror_lag_onto_health
 
     if not isinstance(doc, dict):
         doc = {}
     # Snapshot prior top-level status before soft-elevate so we can restore
-    # when lag clears (sticky warning must not outlive the SLI).
+    # when elevate_status is false (nested SLI only).
     prior_status = doc.get("status")
     projected = project_repo_public_mirror_lag_onto_health(
         dict(doc), lag_summary
@@ -181,6 +304,7 @@ def apply_lag_summary_to_health_doc(
     }
     # Batch IF: align HO-style honesty meta with the restamp probe so
     # consumers do not see stamp=1 while lagging_count=0 after heal.
+    live_n = -1
     if isinstance(lag_summary, dict):
         stamp_snapshot = {
             "lagging_count": doc.get("repo_public_mirror_lagging_count"),
@@ -215,8 +339,11 @@ def apply_lag_summary_to_health_doc(
     if not elevate_status:
         # Nested SLI only — leave top-level status untouched
         projected["status"] = prior_status
-    # Soft-elevate is elevate-only (project_repo_public_mirror_lag_onto_health).
-    # Never demote top-level status on restamp; next full health job owns heal.
+        return projected
+    # Cause-aware heal when live lag is 0: demote lag-only sticky warnings.
+    if live_n == 0:
+        for key, value in rederive_ops_status_for_lag_heal(projected).items():
+            projected[key] = value
     return projected
 
 
@@ -404,6 +531,7 @@ def restamp_mirror_lag_on_health_documents(
         # restamp cannot freeze sticky kill.enabled while kill_switch.json is
         # clear (or the reverse arm lag). Nested signals.health kill keys are
         # left to refresh_signals_health_kill_fields / multi-dest writers.
+        status_before_kill_patch = updated.get("status")
         try:
             from src.monitor.health_check import (
                 _disk_kill_and_open_incidents,
@@ -442,6 +570,35 @@ def restamp_mirror_lag_on_health_documents(
             logger.warning(
                 "restamp kill/open disk re-project skipped for %s: %s", path, exc
             )
+
+        # Kill/open force-patch re-rolls monitor status from sparse checks
+        # (often "unknown") and can undo lag-only heal. Re-apply cause-aware
+        # demotion when live lag is 0; if demotion is blocked, restore the
+        # pre-patch status when the rollup collapsed to unknown.
+        try:
+            live_n = int((lag_summary or {}).get("lagging_count") or 0)
+        except (TypeError, ValueError):
+            live_n = -1
+        if live_n == 0:
+            checks = (
+                updated.get("checks")
+                if isinstance(updated.get("checks"), dict)
+                else {}
+            )
+            ck = checks.get("kill_switch")
+            if isinstance(ck, dict) and "kill_switch" not in updated:
+                updated["kill_switch"] = ck
+            co = checks.get("open_incidents")
+            if isinstance(co, dict) and "open_incidents" not in updated:
+                updated["open_incidents"] = co
+            heal = rederive_ops_status_for_lag_heal(updated)
+            if heal:
+                updated.update(heal)
+            elif (
+                str(updated.get("status") or "").lower() == "unknown"
+                and status_before_kill_patch not in (None, "unknown")
+            ):
+                updated["status"] = status_before_kill_patch
 
         try:
             _atomic_write_json_doc(path, updated)
