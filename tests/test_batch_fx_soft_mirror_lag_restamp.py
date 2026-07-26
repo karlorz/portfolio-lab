@@ -350,3 +350,244 @@ def test_restamp_skips_production_when_mixed_with_pytest(tmp_path, monkeypatch) 
     # Production SSOT must remain untouched
     assert prod_health.read_text(encoding="utf-8") == before
     assert json.loads(before)["marker"] == "prod-ssot"
+
+
+def test_apply_lag_summary_demotes_lag_only_warning_when_lag_heals() -> None:
+    """Lag-only sticky warning must demote when live lag is 0."""
+    from src.monitor.repo_public_mirror_lag import apply_lag_summary_to_health_doc
+
+    sticky = {
+        "status": "warning",
+        "ops_health_status": "warning",
+        "kill_switch": {"enabled": False},
+        "open_incidents": {"open_count": 0},
+        "scheduler_status": {"status": "ok"},
+        "data_pipeline_slo": {"status": "ok"},
+        "repo_public_mirror_lagging_count": 2,
+        "repo_public_mirror_total": 35,
+        "repo_public_mirror_lag_status": "lagging",
+        "repo_public_mirror_lagging_paths": ["index.json", "incidents.json"],
+        "signal_health": {
+            "status": "degraded",
+            "summary": {"healthy": 1, "total_tracked": 9, "quality_badge": "1/9"},
+        },
+    }
+    live = {
+        "lagging_count": 0,
+        "total": 35,
+        "lagging_paths": [],
+        "source": "/var/www/portfolio-lab/data",
+        "dest": "/root/projects/portfolio-lab/public/data",
+        "ok": True,
+    }
+    out = apply_lag_summary_to_health_doc(sticky, live)
+    assert out["repo_public_mirror_lagging_count"] == 0
+    assert out["repo_public_mirror_lag_status"] == "ok"
+    assert out["status"] == "ok"
+    assert out.get("ops_health_status") == "ok"
+    # Quality plane remains disclosed, not folded into ops status
+    assert out["signal_health"]["summary"]["healthy"] == 1
+
+
+def test_apply_lag_summary_does_not_demote_when_kill_enabled() -> None:
+    from src.monitor.repo_public_mirror_lag import apply_lag_summary_to_health_doc
+
+    sticky = {
+        "status": "warning",
+        "kill_switch": {"enabled": True, "level": "halt"},
+        "open_incidents": {"open_count": 0},
+        "scheduler_status": {"status": "ok"},
+        "data_pipeline_slo": {"status": "ok"},
+        "repo_public_mirror_lagging_count": 2,
+        "repo_public_mirror_total": 35,
+        "repo_public_mirror_lag_status": "lagging",
+    }
+    live = {
+        "lagging_count": 0,
+        "total": 35,
+        "lagging_paths": [],
+        "ok": True,
+    }
+    out = apply_lag_summary_to_health_doc(sticky, live)
+    assert out["repo_public_mirror_lagging_count"] == 0
+    assert out["status"] == "warning"  # real ops failure preserved
+
+
+def test_apply_lag_summary_does_not_demote_when_open_incidents() -> None:
+    from src.monitor.repo_public_mirror_lag import apply_lag_summary_to_health_doc
+
+    sticky = {
+        "status": "warning",
+        "kill_switch": {"enabled": False},
+        "open_incidents": {"open_count": 1},
+        "scheduler_status": {"status": "ok"},
+        "data_pipeline_slo": {"status": "ok"},
+        "repo_public_mirror_lagging_count": 1,
+        "repo_public_mirror_total": 35,
+        "repo_public_mirror_lag_status": "lagging",
+    }
+    live = {"lagging_count": 0, "total": 35, "lagging_paths": [], "ok": True}
+    out = apply_lag_summary_to_health_doc(sticky, live)
+    assert out["status"] == "warning"
+
+
+def test_apply_lag_summary_does_not_demote_when_scheduler_degraded() -> None:
+    from src.monitor.repo_public_mirror_lag import apply_lag_summary_to_health_doc
+
+    sticky = {
+        "status": "warning",
+        "kill_switch": {"enabled": False},
+        "open_incidents": {"open_count": 0},
+        "scheduler_status": {"status": "degraded"},
+        "data_pipeline_slo": {"status": "ok"},
+        "repo_public_mirror_lagging_count": 1,
+        "repo_public_mirror_total": 35,
+        "repo_public_mirror_lag_status": "lagging",
+    }
+    live = {"lagging_count": 0, "total": 35, "lagging_paths": [], "ok": True}
+    out = apply_lag_summary_to_health_doc(sticky, live)
+    assert out["status"] == "warning"
+
+
+def test_apply_lag_summary_does_not_demote_when_slo_warning() -> None:
+    from src.monitor.repo_public_mirror_lag import apply_lag_summary_to_health_doc
+
+    sticky = {
+        "status": "warning",
+        "kill_switch": {"enabled": False},
+        "open_incidents": {"open_count": 0},
+        "scheduler_status": {"status": "ok"},
+        "data_pipeline_slo": {"status": "warning"},
+        "repo_public_mirror_lagging_count": 1,
+        "repo_public_mirror_total": 35,
+        "repo_public_mirror_lag_status": "lagging",
+    }
+    live = {"lagging_count": 0, "total": 35, "lagging_paths": [], "ok": True}
+    out = apply_lag_summary_to_health_doc(sticky, live)
+    assert out["status"] == "warning"
+
+
+def test_apply_lag_summary_still_elevates_when_live_lag_present() -> None:
+    from src.monitor.repo_public_mirror_lag import apply_lag_summary_to_health_doc
+
+    base = {
+        "status": "ok",
+        "kill_switch": {"enabled": False},
+        "open_incidents": {"open_count": 0},
+        "scheduler_status": {"status": "ok"},
+        "data_pipeline_slo": {"status": "ok"},
+        "repo_public_mirror_lagging_count": 0,
+        "repo_public_mirror_total": 35,
+        "repo_public_mirror_lag_status": "ok",
+    }
+    live = {
+        "lagging_count": 2,
+        "total": 35,
+        "lagging_paths": ["prices.json", "signals.json"],
+        "ok": True,
+    }
+    out = apply_lag_summary_to_health_doc(base, live)
+    assert out["repo_public_mirror_lagging_count"] == 2
+    assert out["status"] == "warning"
+
+
+def test_dashboard_schema_demotes_system_status_on_lag_heal() -> None:
+    from src.monitor.repo_public_mirror_lag import apply_lag_summary_to_health_doc
+
+    sticky = {
+        "system_status": "warning",
+        "ops_health_status": "warning",
+        "status": "warning",
+        "kill_switch": {"enabled": False},
+        "open_incidents": {"open_count": 0},
+        "scheduler_status": {"status": "ok"},
+        "data_pipeline_slo": {"status": "ok"},
+        "failed_cron_jobs": 0,
+        "repo_public_mirror_lagging_count": 2,
+        "repo_public_mirror_total": 35,
+        "repo_public_mirror_lag_status": "lagging",
+    }
+    live = {"lagging_count": 0, "total": 35, "lagging_paths": [], "ok": True}
+    out = apply_lag_summary_to_health_doc(sticky, live)
+    assert out["repo_public_mirror_lagging_count"] == 0
+    assert out["system_status"] in {"healthy", "ok"}
+    assert out.get("ops_health_status") in {"ok", "healthy"}
+
+
+def test_restamp_on_disk_demotes_lag_only_warning(tmp_path) -> None:
+    from src.monitor.repo_public_mirror_lag import restamp_mirror_lag_on_health_documents
+
+    ops = tmp_path / "health_ops.json"
+    sticky = {
+        "status": "warning",
+        "ops_health_status": "warning",
+        "checks": {"kill_switch": {"enabled": False}},
+        "kill_switch": {"enabled": False},
+        "open_incidents": {"open_count": 0},
+        "scheduler_status": {"status": "ok"},
+        "data_pipeline_slo": {"status": "ok"},
+        "repo_public_mirror_lagging_count": 2,
+        "repo_public_mirror_total": 35,
+        "repo_public_mirror_lag_status": "lagging",
+        "repo_public_mirror_lag": {
+            "lagging_count": 2,
+            "total": 35,
+            "status": "lagging",
+        },
+    }
+    ops.write_text(json.dumps(sticky), encoding="utf-8")
+    live = {
+        "lagging_count": 0,
+        "total": 35,
+        "lagging_paths": [],
+        "source": str(tmp_path),
+        "dest": str(tmp_path),
+        "ok": True,
+    }
+    result = restamp_mirror_lag_on_health_documents(paths=[ops], lag_summary=live)
+    assert any("health_ops" in p for p in result["restamped"])
+    out = json.loads(ops.read_text(encoding="utf-8"))
+    assert out["repo_public_mirror_lagging_count"] == 0
+    assert out["status"] == "ok"
+
+
+def test_lag_heal_does_not_let_signal_quality_block_ops_demotion() -> None:
+    """Thin SH must not keep ops warning after lag-only heal."""
+    from src.dashboard.health_slo_alerts import build_health_slo_alerts
+    from src.monitor.repo_public_mirror_lag import apply_lag_summary_to_health_doc
+
+    sticky = {
+        "status": "warning",
+        "system_status": "warning",
+        "ops_health_status": "warning",
+        "kill_switch": {"enabled": False},
+        "open_incidents": {"open_count": 0},
+        "scheduler_status": {"status": "ok"},
+        "data_pipeline_slo": {"status": "ok"},
+        "repo_public_mirror_lagging_count": 2,
+        "repo_public_mirror_total": 35,
+        "repo_public_mirror_lag_status": "lagging",
+        "signal_health": {
+            "status": "degraded",
+            "summary": {
+                "healthy": 1,
+                "total_tracked": 9,
+                "quality_badge": "1/9 healthy",
+            },
+        },
+    }
+    live = {"lagging_count": 0, "total": 35, "lagging_paths": [], "ok": True}
+    out = apply_lag_summary_to_health_doc(sticky, live)
+    assert out["system_status"] in {"healthy", "ok"}
+    assert out["ops_health_status"] in {"ok", "healthy", "green", "success"}
+    alerts = build_health_slo_alerts(out)
+    ops_warn = [
+        a
+        for a in alerts
+        if a.get("reason") == "system_status_warning"
+        or (
+            a.get("type") == "health_slo"
+            and "ops" in str(a.get("title", "")).lower()
+        )
+    ]
+    assert ops_warn == []
