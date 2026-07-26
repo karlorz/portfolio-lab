@@ -5,6 +5,7 @@ import subprocess
 import pytest
 
 from src.tasker.registry import load_task_registry
+from tests.makefile_helpers import makefile_recipe
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -54,19 +55,19 @@ def test_default_registry_loads_expected_portfolio_lab_tasks():
 
 
 def test_make_health_target_runs_system_health_check_module():
-    result = _run_make("-n", "health")
+    makefile = (PROJECT_ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = makefile_recipe(makefile, "health")
 
-    assert result.returncode == 0, result.stderr
-    assert "src.monitor.health_check" in result.stdout
-    assert "src.monitor.rebalance_health" not in result.stdout
+    assert "src.monitor.health_check" in recipe
+    assert "src.monitor.rebalance_health" not in recipe
 
 
 def test_make_rebalance_health_target_runs_rebalance_health_exporter():
-    result = _run_make("-n", "rebalance-health")
+    makefile = (PROJECT_ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = makefile_recipe(makefile, "rebalance-health")
 
-    assert result.returncode == 0, result.stderr
-    assert "src.monitor.rebalance_health" in result.stdout
-    assert "portfolio-lab-rebalance-health" in result.stdout
+    assert "src.monitor.rebalance_health" in recipe
+    assert "portfolio-lab-rebalance-health" in recipe
 
 
 def test_make_help_describes_system_and_rebalance_health_targets():

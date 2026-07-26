@@ -340,9 +340,11 @@ class TestRiskLimits:
         # Should not trigger extreme tail risk with normal returns
         assert result is None or "extreme_tail_risk" not in result
 
-    def test_garch_cvar_writes_health_report(self, tmp_path):
+    def test_garch_cvar_writes_health_report(self, tmp_path, monkeypatch):
         """check_risk_limits should write .health_report.json to DATA_DIR."""
-        from src.paths import DATA_DIR as PROJECT_DATA_DIR
+        import src.strategy.evaluator as evaluator
+
+        monkeypatch.setattr(evaluator, "DATA_DIR", tmp_path)
         p = _make_portfolio(tmp_path, cash=100000)
         p.positions = {"SPY": _make_position(weight=0.30)}
         rng = np.random.RandomState(42)
@@ -352,8 +354,7 @@ class TestRiskLimits:
                 "daily_return": float(rng.normal(0.0004, 0.01)),
             })
         p.check_risk_limits({"SPY": 460})
-        # Report is written to project DATA_DIR (not tmp_path)
-        report_path = PROJECT_DATA_DIR / ".health_report.json"
+        report_path = tmp_path / ".health_report.json"
         assert report_path.exists()
         with open(report_path) as f:
             data = json.load(f)

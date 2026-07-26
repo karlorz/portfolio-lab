@@ -779,8 +779,15 @@ class TestCollarOverlayEdgeCases:
 
     def test_collar_suppressed_status_still_returns(self, orch):
         """Suppressed collar should still generate a contribution."""
-        result = orch._collect_collar_overlay("suppressed", 35.0)
-        assert len(result) >= 1
+        import src.strategy.unified_orchestrator as uo_mod
+        from src.signals.collar_signal import generate_collar_signal
+
+        collar = generate_collar_signal(spot=500.0, vix=35.0)
+        with unittest.mock.patch.object(
+            uo_mod, "generate_collar_signal", return_value=collar,
+        ):
+            result = orch._collect_collar_overlay("suppressed", 35.0)
+        assert len(result) == 1
         assert result[0].status == "suppressed"
 
     def test_collar_exception_returns_empty(self, orch):
@@ -1335,4 +1342,3 @@ class TestEnsembleVoterConflictReduction:
         # Still detects conflict because both positive and negative exist
         spy_conflicts = [c for c in conflicts if "SPY" in c]
         assert len(spy_conflicts) >= 1
-
