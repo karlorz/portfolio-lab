@@ -322,7 +322,7 @@ class FredMdFetcher:
     """
 
     def __init__(self, api_key: str = "", use_cache: bool = True):
-        self._api_key = api_key
+        self._api_key = api_key or os.environ.get("FRED_API_KEY", "")
         self.use_cache = use_cache
         self._fred_client = None
         self._initialized = False
