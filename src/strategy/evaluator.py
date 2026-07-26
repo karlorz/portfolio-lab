@@ -552,7 +552,16 @@ class Portfolio:
                 data["status"] = "unhealthy"
             else:
                 data["status"] = "healthy"
-            data["summary"] = {"passed": 1, "total_checks": 1}
+            data["summary"] = {
+                "passed": 1,
+                "total_checks": 1,
+                "inventory_role": "garch_risk",
+                "inventory_note": (
+                    "Not an ops multi-day health inventory; graduation multi-day "
+                    "SSOT is data/.circuit_breaker.json consecutive_ok"
+                ),
+            }
+            data["schema_version"] = data.get("schema_version") or "garch-health-report/v1"
 
             save_results_json(data, output_path=str(report_path))
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError) as e:

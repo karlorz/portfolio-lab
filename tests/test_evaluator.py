@@ -2367,3 +2367,33 @@ def test_garch_health_report_separates_policy_and_measured_dd(tmp_path, monkeypa
     assert report.get("measured_max_drawdown") is not None
     assert abs(report["measured_max_drawdown"] + 0.06) < 0.01  # ~-6%
     assert "drawdown_field_semantics" in report
+
+
+def test_garch_health_report_marks_non_ops_inventory(tmp_path, monkeypatch):
+    """GARCH writer must tag summary so graduation multi-day SSOT is not blocked."""
+    from dataclasses import dataclass
+
+    import src.strategy.evaluator as ev
+    from src.strategy.evaluator import Portfolio
+
+    monkeypatch.setattr(ev, "DATA_DIR", tmp_path)
+    state = tmp_path / "paper_state.json"
+    state.write_text('{"cash": 100000, "positions": {}, "history": []}')
+    port = Portfolio(state_file=state)
+
+    @dataclass
+    class FakeMetrics:
+        max_drawdown: float = -0.15
+        current_drawdown: float = 0.0
+        tail_severity: str = "normal"
+        cvar_ratio: float = 1.2
+        filter_active: bool = True
+        var_95: float = -1.46
+        cvar_95: float = -2.21
+        garch_filtered: bool = True
+
+    port._write_garch_health_report(FakeMetrics())
+    report = json.loads((tmp_path / ".health_report.json").read_text())
+    assert report["summary"]["inventory_role"] == "garch_risk"
+    assert report["summary"]["total_checks"] == 1
+    assert report.get("schema_version") == "garch-health-report/v1"
