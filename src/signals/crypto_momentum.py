@@ -257,7 +257,12 @@ class CryptoMomentumSignalGenerator:
         SIGNALS_DIR.mkdir(parents=True, exist_ok=True)
 
     def _fetch_crypto_prices(self, symbol: str, days: int = 200) -> Tuple[List[float], List[float]]:
-        """Fetch crypto price history. Returns (prices, returns)."""
+        """Fetch crypto price history from market.db. Returns (prices, returns).
+
+        Returns empty lists when the symbol is absent from the database so the
+        signal degrades honestly to FLAT (price 0, momentum 0, vol 0) rather
+        than fabricating synthetic random data. Caller must handle empty.
+        """
         db_path = MARKET_DB
         if db_path.exists():
             try:
@@ -280,24 +285,16 @@ class CryptoMomentumSignalGenerator:
             except (OSError, sqlite3.Error, KeyError, ValueError, TypeError, AttributeError, RuntimeError) as e:
                 logger.warning("Failed to fetch price history for %s from DB: %s", symbol, e)
 
-        # Fallback: generate realistic simulated data
-        rng = np.random.RandomState(hash(symbol) % 2**31)
-        price = 85000 if symbol == "BTC" else 3200
-        vol_daily = 0.04  # ~75% annualized
-        prices = [price]
-        for _ in range(days):
-            ret = rng.normal(0.0005, vol_daily)
-            prices.append(prices[-1] * (1 + ret))
-        returns = [(prices[i] / prices[i-1] - 1) for i in range(1, len(prices))]
-        return prices, returns
+        # Honest degrade: no data -> empty, signal goes FLAT via assess_asset_signal
+        return [], []
 
     def generate_signal(self) -> CryptoCompositeSignal:
         """Generate complete crypto allocation signal."""
         btc_prices, btc_returns = self._fetch_crypto_prices("BTC")
         eth_prices, eth_returns = self._fetch_crypto_prices("ETH")
 
-        btc_price = btc_prices[-1] if btc_prices else 85000
-        eth_price = eth_prices[-1] if eth_prices else 3200
+        btc_price = btc_prices[-1] if btc_prices else 0.0
+        eth_price = eth_prices[-1] if eth_prices else 0.0
 
         btc_signal = self.calculator.assess_asset_signal(
             "BTC", btc_price, btc_prices, btc_returns

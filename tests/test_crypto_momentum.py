@@ -973,6 +973,93 @@ class TestEmptyDataEdgeCases:
         assert signal.vol_regime == "low"
 
 
+class TestFetchCryptoPricesHonestDegrade:
+    """When BTC/ETH are absent from market.db, _fetch_crypto_prices must return
+    empty lists (honest FLAT) - not synthetic random data (Batch B3)."""
+
+    def test_fetch_returns_empty_when_symbol_absent_from_db(self, tmp_path):
+        """No BTC/ETH rows in market.db -> empty (prices, returns), not synthetic."""
+        import sqlite3
+        from src.signals.crypto_momentum import CryptoMomentumSignalGenerator
+
+        # Build a market.db with SPY rows but no crypto
+        db_path = tmp_path / "market.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE prices (symbol TEXT, date TEXT, close REAL)")
+        conn.execute("INSERT INTO prices VALUES ('SPY', '2026-01-01', 100.0)")
+        conn.commit()
+        conn.close()
+
+        gen = CryptoMomentumSignalGenerator()
+        # Point MARKET_DB at the temp db by monkeypatching the module path
+        import src.signals.crypto_momentum as mod
+        original = mod.MARKET_DB
+        mod.MARKET_DB = db_path
+        try:
+            prices, returns = gen._fetch_crypto_prices("BTC")
+            assert prices == []
+            assert returns == []
+        finally:
+            mod.MARKET_DB = original
+
+    def test_fetch_returns_real_data_when_symbol_present(self, tmp_path):
+        """BTC-USD rows in market.db -> populated (prices, returns)."""
+        import sqlite3
+        from src.signals.crypto_momentum import CryptoMomentumSignalGenerator
+
+        db_path = tmp_path / "market.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE prices (symbol TEXT, date TEXT, close REAL)")
+        for i in range(10):
+            conn.execute(
+                "INSERT INTO prices VALUES (?, ?, ?)",
+                ("BTC-USD", f"2026-01-{i+1:02d}", 50000.0 + i * 100),
+            )
+        conn.commit()
+        conn.close()
+
+        gen = CryptoMomentumSignalGenerator()
+        import src.signals.crypto_momentum as mod
+        original = mod.MARKET_DB
+        mod.MARKET_DB = db_path
+        try:
+            prices, returns = gen._fetch_crypto_prices("BTC")
+            assert len(prices) == 10
+            assert len(returns) == 9
+            assert prices[0] == 50000.0
+            assert prices[-1] == 50900.0
+        finally:
+            mod.MARKET_DB = original
+
+    def test_generate_signal_degrades_flat_when_no_crypto_data(self, tmp_path):
+        """End-to-end: no crypto in DB -> composite flat, zero weight, price 0."""
+        import sqlite3
+        from src.signals.crypto_momentum import CryptoMomentumSignalGenerator
+
+        db_path = tmp_path / "market.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE prices (symbol TEXT, date TEXT, close REAL)")
+        conn.execute("INSERT INTO prices VALUES ('SPY', '2026-01-01', 100.0)")
+        conn.commit()
+        conn.close()
+
+        gen = CryptoMomentumSignalGenerator()
+        import src.signals.crypto_momentum as mod
+        original = mod.MARKET_DB
+        mod.MARKET_DB = db_path
+        try:
+            signal = gen.generate_signal()
+            # Honest degrade: flat, zero composite, zero prices
+            assert signal.signal_state == "flat"
+            assert signal.composite_weight == 0.0
+            assert signal.btc_signal.price == 0.0
+            assert signal.eth_signal.price == 0.0
+            assert signal.btc_signal.momentum_6m == 0.0
+            assert signal.eth_signal.momentum_6m == 0.0
+        finally:
+            mod.MARKET_DB = original
+
+
 class TestVolScaleBoundaries:
     """Test vol_scale boundary conditions precisely."""
 

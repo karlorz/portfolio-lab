@@ -1,7 +1,7 @@
 export const SYMBOL_UNIVERSE_VERSION = 'symbol-universe/v1';
 
 export type SymbolProvider = 'yahoo' | 'licensed_eod' | 'broker' | 'fred';
-export type SymbolCategory = 'core' | 'sector' | 'leveraged_treasury' | 'fx' | 'factor' | 'macro';
+export type SymbolCategory = 'core' | 'sector' | 'leveraged_treasury' | 'fx' | 'factor' | 'crypto' | 'macro';
 
 export interface SymbolUniverseEntry {
   symbol: string;
@@ -77,6 +77,10 @@ export const DEFAULT_SYMBOL_UNIVERSE: SymbolUniverseEntry[] = [
   marketSymbol('VLUE', 'factor'),
   marketSymbol('USMV', 'factor'),
   marketSymbol('QUAL', 'factor'),
+  // Crypto (advisory non-routed; fills risk crypto factor + crypto_momentum signal).
+  // Yahoo tickers BTC-USD / ETH-USD; provider-neutral alias strips the suffix.
+  marketSymbol('BTC-USD', 'crypto'),
+  marketSymbol('ETH-USD', 'crypto'),
   macroSymbol('DGS2'),
   macroSymbol('DGS10'),
   macroSymbol('DGS30'),
@@ -165,12 +169,14 @@ export const SECTOR_ETFS = marketSymbolsForCategory('sector');
 export const LEVERAGED_TREASURY_ETFS = marketSymbolsForCategory('leveraged_treasury');
 export const FX_SYMBOLS = marketSymbolsForCategory('fx');
 export const FACTOR_ETFS = marketSymbolsForCategory('factor');
+export const CRYPTO_SYMBOLS = marketSymbolsForCategory('crypto');
 export const MARKET_DATA_SYMBOLS = [
   ...CORE_SYMBOLS,
   ...SECTOR_ETFS,
   ...LEVERAGED_TREASURY_ETFS,
   ...FX_SYMBOLS,
   ...FACTOR_ETFS,
+  ...CRYPTO_SYMBOLS,
 ];
 export const FRED_SERIES = {
   dgs2: resolveProviderSymbol('DGS2', 'fred'),
