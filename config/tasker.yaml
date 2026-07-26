@@ -78,6 +78,12 @@ tasks:
     schedule: "10,40 * * * *"
     timeout_seconds: 60
 
+  - id: portfolio-lab-daily-brief
+    label: Daily Brief
+    command: make daily-brief
+    schedule: "25 * * * *"
+    timeout_seconds: 120
+
   - id: portfolio-lab-prune-logs
     label: Log Pruning
     command: make prune-logs

@@ -745,9 +745,22 @@ unified-dashboard:
 
 .PHONY: daily-brief
 daily-brief:
-		@echo "[$$(date '+%Y-%m-%d %H:%M:%S')] Generating daily brief..."
-		@cd $(CURDIR) && uv run python -m src.monitor.daily_brief --save
-		@echo "[$$(date '+%Y-%m-%d %H:%M:%S')] Daily brief saved to data/daily_brief.json"
+	@echo "=== Daily Brief: $$(date) ==="; \
+	START=$$(date +%s); \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 120 $(PYTHON_RUNTIME) -m src.monitor.daily_brief --save 2>&1 | tee -a $(DATA_DIR)/daily_brief.log; \
+	EXIT=$${PIPESTATUS[0]}; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-daily-brief $$STATUS $$DUR; \
+	if [ $$EXIT -eq 0 ]; then \
+	  $(MAKE) --no-print-directory mirror-repo-public-data || \
+	  echo "WARN: mirror-repo-public-data soft-failed after daily-brief (repo public lag; non-blocking)"; \
+	fi; \
+	exit $$EXIT
 
 # ── Portfolio Query ──────────────────────────────────────────────────
 
@@ -829,6 +842,7 @@ cron-reset:
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-prune-logs pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-prod-ideas pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-fetch-trends pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-daily-brief pending 0 manual
 	@echo "Cron status reset: $(CRON_STATUS)"
 
 # ── Verification ─────────────────────────────────────────────────────

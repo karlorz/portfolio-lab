@@ -43,6 +43,7 @@ def test_default_registry_loads_expected_portfolio_lab_tasks():
         "portfolio-lab-autonomous-agent",
         "portfolio-lab-prod-ideas",
         "portfolio-lab-fetch-trends",
+        "portfolio-lab-daily-brief",
     }
 
     assert {task.id for task in registry.tasks} == expected_ids
@@ -68,6 +69,36 @@ def test_make_rebalance_health_target_runs_rebalance_health_exporter():
 
     assert "src.monitor.rebalance_health" in recipe
     assert "portfolio-lab-rebalance-health" in recipe
+
+
+def test_make_daily_brief_target_reports_cron_status():
+    """daily-brief must follow the dual-mode cron_status reporting contract.
+
+    Previously the target was a bare stub that saved the JSON but never wrote
+    cron_status, so the brief froze at 2026-07-04 while ops stayed green.
+    The cron dual-mode wire (Makefile + crontab + cron_compat + tasker.yaml)
+    requires the standard START/EXIT/STATUS/DUR/CRON_UPDATE recipe shape.
+    """
+    makefile = (PROJECT_ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = makefile_recipe(makefile, "daily-brief")
+
+    assert "src.monitor.daily_brief" in recipe
+    assert "--save" in recipe
+    assert "portfolio-lab-daily-brief" in recipe
+    assert "CRON_UPDATE" in recipe
+    assert "STATUS" in recipe
+
+
+def test_daily_brief_tasker_entry_uses_hourly_25_schedule():
+    """tasker SoT schedule for daily-brief: :25 hourly (after dashboard :15)."""
+    registry = load_task_registry()
+    task = registry.get("portfolio-lab-daily-brief")
+
+    assert task.enabled is True
+    assert task.manual_only is False
+    assert task.schedule == "25 * * * *"
+    assert task.command == ["make", "daily-brief"]
+    assert task.timeout_seconds > 0
 
 
 def test_make_help_describes_system_and_rebalance_health_targets():
