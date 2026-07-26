@@ -38,10 +38,70 @@ REGIME_LOG_TAIL_LINES = int(os.environ.get("GRADUATION_REGIME_LOG_TAIL_LINES", "
 __all__ = [
     'CheckResult',
     'GraduationChecklist',
+    'is_ops_health_inventory',
     'run_check_and_exit',
     'run_report_and_exit',
     'run_progress_and_exit',
 ]
+
+
+def is_ops_health_inventory(health: dict | None) -> bool:
+    """True only for multi-check ops inventories; False for GARCH/risk stubs.
+
+    GARCH writers reuse ``.health_report.json`` and stamp
+    ``summary.total_checks=1`` (portfolio_entropy only). That must not
+    suppress the graduation CB consecutive_ok multi-day SSOT.
+    """
+    if not isinstance(health, dict) or not health:
+        return False
+
+    summary = health.get("summary") if isinstance(health.get("summary"), dict) else {}
+    role = str(
+        summary.get("inventory_role")
+        or health.get("inventory_role")
+        or health.get("schema_role")
+        or ""
+    ).lower()
+    if role in {"garch_risk", "garch", "risk", "risk_only", "non_ops"}:
+        return False
+
+    # Explicit GARCH / risk shape markers (producer historical + current)
+    garch_markers = (
+        "var_95",
+        "cvar_95",
+        "garch_filtered",
+        "garch_omega",
+        "garch_alpha",
+        "garch_beta",
+        "garch_active",
+        "conditional_volatility_current",
+    )
+    if any(k in health for k in garch_markers):
+        return False
+
+    total = 0
+    try:
+        total = int(summary.get("total_checks") or 0)
+    except (TypeError, ValueError):
+        total = 0
+
+    if total <= 0:
+        return False
+
+    # Single entropy-only stub without multi-day fields is not ops inventory
+    checks = health.get("checks") if isinstance(health.get("checks"), dict) else {}
+    consecutive_keys = (
+        "consecutive_passing_days",
+        "consecutive_ok_days",
+        "consecutive_green_days",
+    )
+    has_consecutive = any(summary.get(k) is not None for k in consecutive_keys)
+    if total == 1 and not has_consecutive:
+        if not checks or set(checks.keys()) <= {"portfolio_entropy"}:
+            return False
+
+    return True
+
 
 class CheckResult(NamedTuple):
     """Result of a single graduation criterion check."""
@@ -912,8 +972,16 @@ class GraduationChecklist:
         """
         health = state.get("health_report", {})
         summary = health.get("summary", {}) if isinstance(health, dict) else {}
-        total = int(summary.get("total_checks") or 0)
-        passed = int(summary.get("passed") or 0)
+        if not isinstance(summary, dict):
+            summary = {}
+        try:
+            total = int(summary.get("total_checks") or 0) if summary else 0
+        except (TypeError, ValueError):
+            total = 0
+        try:
+            passed = int(summary.get("passed") or 0) if summary else 0
+        except (TypeError, ValueError):
+            passed = 0
 
         required = int(self.criteria["health_checks"]["value"])
         consecutive_days = int(
@@ -922,15 +990,18 @@ class GraduationChecklist:
             or summary.get("consecutive_green_days")
             or 0
         )
-        # CB producer is the multi-day green streak SSOT only when the health
-        # summary has no inventory of its own (no total_checks). If health
-        # reports total_checks but omits consecutive_* , the observation
-        # window is unproven — do not invent days from CB.
+        # CB producer is multi-day green streak SSOT when health_report is not a
+        # real ops inventory (missing inventory, or GARCH/risk stub that stamps
+        # total_checks without multi-day counters). Real ops inventories with
+        # total_checks but no consecutive_* stay fail-closed (Batch AO).
+        ops_inventory = is_ops_health_inventory(
+            health if isinstance(health, dict) else None
+        )
         cb = state.get("circuit_breaker", {})
         if (
             isinstance(cb, dict)
             and consecutive_days == 0
-            and total == 0
+            and not ops_inventory
         ):
             cb_ok = int(cb.get("consecutive_ok") or 0)
             if cb_ok > 0:
@@ -976,9 +1047,12 @@ class GraduationChecklist:
                 description=f"{desc} — blocked: signal_health 0/N or degraded",
             )
 
-        # Ops currently all-pass OR no inventory (rely on consecutive counter)
-        ops_ok = (total > 0 and passed == total) or (
-            total == 0 and consecutive_days > 0
+        # Ops inventory all-pass, or non-ops / empty inventory relying on
+        # consecutive/CB multi-day streak SSOT.
+        ops_ok = (
+            (ops_inventory and total > 0 and passed == total)
+            or (not ops_inventory and consecutive_days > 0)
+            or (total == 0 and consecutive_days > 0)
         )
         if ops_ok and consecutive_days >= required:
             return CheckResult(
