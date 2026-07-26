@@ -13,6 +13,18 @@ Use `projects/portfolio-lab/` under that vault for project files. Do not
 recreate repo-local `wiki/` or `work/` folders; they are legacy copies and the
 vault is the canonical location.
 
+Start here in the vault: `projects/portfolio-lab/knowledge.md`.
+
+## Ops quick notes
+
+- **Live authority:** `signals.json.target_allocations` → order router (champion SPY/GLD/TLT **46/38/16**).
+- **Dual-mode cron:** change jobs in `Makefile` + `crontab` + `src/cron_compat.py` + `config/tasker.yaml`; then `make verify-cron-sync`.
+- **Daily brief:** `make daily-brief` (also tasker `portfolio-lab-daily-brief` at `:25` hourly) → `data/daily_brief.json`.
+- **Deploy lab host:** `make deploy-lab-app` (see `scripts/deploy-lab-app.sh`).
+- **Agent test gate:** `make test-gate` mid-session; full `make test` merge-only.
+
+## Frontend
+
 To install dependencies:
 
 ```bash

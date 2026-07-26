@@ -81,6 +81,16 @@ Domain glossary for dev-loop agents. Use these precise terms instead of paraphra
   MTUM, QQQ, QUAL, SHY, SPY, TLT, TMF, UBT, UDN, USMV, UUP, VBR, VLUE, VTI,
   VXUS, XLB, XLC, XLE, XLF, XLI, XLK, XLP, XLRE, XLU, XLV, XLY, ^VIX3M.
 
+## Ops / Cron
+
+- **Dual-mode cron** — New or changed jobs must update `Makefile` + `crontab` +
+  `src/cron_compat.py` + `config/tasker.yaml` together; run `make verify-cron-sync`.
+  Tasker is the live source of truth; crontab entries are commented fallbacks.
+- **Daily brief** — `make daily-brief` / tasker job `portfolio-lab-daily-brief`
+  (`25 * * * *`). Writes `data/daily_brief.json` (operator narrative/sections;
+  data-plane, not an ops SLI). Graceful degrade if LLM narrative unavailable.
+  Vault: `projects/portfolio-lab/work/2026-07-26-daily-brief-stale-cron-wiring/`.
+
 ## Project Conventions
 
 - **Work item slugs**: `vXX-<feature>` pattern (e.g., `v292-etf-premium-monitor`)

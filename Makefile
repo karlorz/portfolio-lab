@@ -56,6 +56,7 @@ help:
 	@echo "  make data         Fetch Yahoo Finance market data"
 	@echo "  make dashboard    Regenerate dashboard JSON files"
 	@echo "  make health       Generate public/data/health.json system health monitor"
+	@echo "  make daily-brief  Operator daily brief (tasker :25 hourly; dual-mode cron)"
 	@echo "  make rebalance-health  Generate public/data/rebalance_health.json diagnostics"
 	@echo "  make ops-regen    Post-merge operator refresh: dashboard + wiki-sync + health"
 	@echo "  make eval         Run strategy evaluator (paper trading)"
