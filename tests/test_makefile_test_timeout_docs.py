@@ -1,5 +1,6 @@
-import re
 from pathlib import Path
+
+from tests.makefile_helpers import makefile_recipe
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -9,13 +10,7 @@ EXPECTED_SAFE_TEST_TIMEOUT_SECONDS = "3600"
 
 def _make_test_target_body() -> str:
     text = MAKEFILE.read_text(encoding="utf-8")
-    match = re.search(
-        r"^test:\n(?P<body>.*?)(?=^\S|\Z)",
-        text,
-        flags=re.MULTILINE | re.DOTALL,
-    )
-    assert match is not None
-    return match.group("body")
+    return makefile_recipe(text, "test")
 
 
 def test_make_test_timeout_docs_match_command() -> None:

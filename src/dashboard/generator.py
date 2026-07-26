@@ -6193,6 +6193,7 @@ class DashboardGenerator:
         health_data["data_pipeline_slo"] = build_data_pipeline_slo_section(
             health_data=health_data,
             public_dir=PUBLIC_DIR,
+            data_dir=DATA_DIR,
             log_error=_log_signal_error,
         )
 

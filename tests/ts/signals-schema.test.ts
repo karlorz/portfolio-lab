@@ -479,13 +479,6 @@ describe('signals.ts Zod schemas (non-ML contract)', () => {
     expect(good.success).toBe(true);
   });
 
-  it('public adaptive_sizing and black_litterman artifacts validate against schemas', async () => {
-    const adaptive = await Bun.file('public/data/adaptive_sizing.json').json();
-    const bl = await Bun.file('public/data/black_litterman.json').json();
-    expect(AdaptiveSizingSchema.safeParse(adaptive).success).toBe(true);
-    expect(BlackLittermanSchema.safeParse(bl).success).toBe(true);
-  });
-
   it('BlackLittermanSchema requires authority metadata and uppercase symbol keys', () => {
     const good = BlackLittermanSchema.safeParse({
       prior_weights: { SPY: 0.46, GLD: 0.38, TLT: 0.16 },

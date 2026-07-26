@@ -356,6 +356,8 @@ describe('market data fetcher source provenance', () => {
     expect(report).toEqual({
       schema_version: PRICE_DATA_QUALITY_SCHEMA_VERSION,
       generated_at: '2026-06-12T00:00:00Z',
+      generator_git_sha: expect.any(String),
+      generator_git_sha_status: 'full_generate',
       overall_status: 'ok',
       issue_counts: {
         duplicate_dates: 0,
@@ -383,7 +385,7 @@ describe('market data fetcher source provenance', () => {
           internal_gaps: [],
           invalid_dates: [],
           invalid_prices: [],
-          latest_lag_days: 0,
+          latest_lag_days: 1,
           missing_required_keys: [],
           non_monotonic_rows: [],
           non_object_records: [],
@@ -402,7 +404,7 @@ describe('market data fetcher source provenance', () => {
           internal_gaps: [],
           invalid_dates: [],
           invalid_prices: [],
-          latest_lag_days: 0,
+          latest_lag_days: 1,
           missing_required_keys: [],
           non_monotonic_rows: [],
           non_object_records: [],
@@ -414,7 +416,7 @@ describe('market data fetcher source provenance', () => {
     });
   });
 
-  it('keeps aligned cross-sections ok and does not treat weekends as missing trading days', () => {
+  it('keeps aligned cross-sections ok and counts only the weekday since the latest bar', () => {
     const report = buildPriceDataQualityReport(
       {
         SPY: [
@@ -437,7 +439,7 @@ describe('market data fetcher source provenance', () => {
     expect(report.issue_counts.internal_gaps).toBe(0);
     expect(report.issue_counts.stale_latest_dates).toBe(0);
     expect(report.symbols.every((symbol) => symbol.internal_gaps.length === 0)).toBe(true);
-    expect(report.symbols.every((symbol) => symbol.latest_lag_days === 0)).toBe(true);
+    expect(report.symbols.every((symbol) => symbol.latest_lag_days === 1)).toBe(true);
   });
 
   it('flags symbols whose latest date lags the reference calendar beyond threshold', () => {

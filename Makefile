@@ -153,6 +153,7 @@ test:
 	echo "  PUBLIC_DATA_DIR: isolated mktemp (H16 — no live WWW dual-write)"; \
 	echo "  Timeout: 3600s (raised after get_bl_views isolation; full safe suite ~45m on lab hosts)"; \
 	START=$$(date +%s); \
+	set +e; \
 	bash -c 'ulimit -v 6291456; \
 		ulimit -n 65536 2>/dev/null || true; \
 		PUBLIC_TMP=$$(mktemp -d /tmp/plab-pytest-public.XXXXXX); \
@@ -164,6 +165,7 @@ test:
 		timeout 3600 uv run pytest tests/ -q --tb=short -p no:cacheprovider; \
 		EXIT=$$?; rm -rf "$$PUBLIC_TMP"; exit $$EXIT'; \
 	EXIT=$$?; \
+	set -e; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
 	echo ""; \
@@ -820,6 +822,7 @@ cron-reset:
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-overlay-signals pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-overlay-dashboard pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-garch-risk pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-mark-to-market pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-daily-pnl pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-attribution pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-unified-dashboard pending 0 manual

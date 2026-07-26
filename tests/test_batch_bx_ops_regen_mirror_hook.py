@@ -27,12 +27,13 @@ def test_deploy_lab_app_mirror_hook_soft_gate():
     # soft: warn on failure, do not die
     assert "soft-failed" in src or "non-blocking" in src
     assert "mirror_repo_public_data_from_live" in src
-    # invoked from main after publish
+    # Invoked from main before build so dist captures the fresh live mirror.
     main = src.split("main()")[1]
     assert "mirror_repo_public_data_from_live" in main
     assert "publish_dist" in main
-    # publish before mirror (order: publish then mirror)
-    assert main.find("publish_dist") < main.find("mirror_repo_public_data_from_live")
+    assert "build_frontend" in main
+    assert main.find("mirror_repo_public_data_from_live") < main.find("build_frontend")
+    assert main.find("build_frontend") < main.find("publish_dist")
 
 
 def test_dashboard_delivery_ops_regen_still_has_core_steps():

@@ -860,7 +860,14 @@ def print_report(report: AttributionReport):
         worst = report.sources[report.worst_source]
         logger.info(f"  Worst source: {worst.display_name} (Sharpe {worst.sharpe_contribution:+.2f})")
 
-    logger.info(f"\n  Average hit rate: {'n/a' if report.avg_hit_rate is None else f'{report.avg_hit_rate:.1%}'} (status={getattr(report, "status", "ok")})")
+    average_hit_rate = (
+        "n/a" if report.avg_hit_rate is None else f"{report.avg_hit_rate:.1%}"
+    )
+    logger.info(
+        "\n  Average hit rate: %s (status=%s)",
+        average_hit_rate,
+        getattr(report, "status", "ok"),
+    )
     logger.info(f"  Average signal correlation: {report.avg_correlation:.2f}")
     logger.info("=" * 72)
     logger.info("")

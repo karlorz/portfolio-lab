@@ -16,18 +16,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
-def _recipe_body(makefile: str, target: str) -> str:
-    """Extract recipe text after ``\\ntarget:`` until next .PHONY / section."""
-    marker = f"\n{target}:"
-    if marker not in makefile:
-        raise AssertionError(f"missing target {target}")
-    body = makefile.split(marker, 1)[1]
-    # Cut at next top-level target or section banner
-    for stop in ("\n.PHONY:", "\n# ──"):
-        if stop in body:
-            body = body.split(stop, 1)[0]
-    return body
+from tests.makefile_helpers import makefile_recipe
 
 
 def test_satellite_targets_include_mirror_soft_gate() -> None:
@@ -42,7 +31,7 @@ def test_satellite_targets_include_mirror_soft_gate() -> None:
         "overlay-signals",
     )
     for name in targets:
-        body = _recipe_body(makefile, name)
+        body = makefile_recipe(makefile, name)
         assert "mirror-repo-public-data" in body, f"{name} missing mirror soft-gate"
         assert "||" in body, f"{name} mirror must soft-fail with ||"
         assert "non-blocking" in body or "soft-failed" in body, (
@@ -58,7 +47,7 @@ def test_data_dashboard_still_have_mirror_soft_gate() -> None:
     """Regression: Batch CA data/dashboard gates remain."""
     makefile = Path("Makefile").read_text(encoding="utf-8")
     for name in ("data", "dashboard"):
-        body = _recipe_body(makefile, name)
+        body = makefile_recipe(makefile, name)
         assert "mirror-repo-public-data" in body
         assert "||" in body
 

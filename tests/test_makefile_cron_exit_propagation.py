@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.makefile_helpers import makefile_recipe
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MAKEFILE = PROJECT_ROOT / "Makefile"
 
@@ -37,33 +39,10 @@ CRON_EXIT_TARGETS = (
 )
 
 
-def _recipe_body(makefile: str, target: str) -> str:
-    """Return the recipe body for a simple Make target (tab-indented lines)."""
-    # Allow blank lines between target: and first recipe (garch-risk quirk)
-    pattern = rf"^{re.escape(target)}:[^\n]*\n((?:(?:\t|[ ]{{0}})[^\n]*\n)*)"
-    # Prefer: target line then optional blank lines then tab recipes
-    m = re.search(
-        rf"^{re.escape(target)}:(?:[^\n]*)\n((?:\n|\t[^\n]*\n)+)",
-        makefile,
-        re.M,
-    )
-    if not m:
-        raise AssertionError(f"Makefile target not found: {target}")
-    body = m.group(1)
-    # Stop at next non-empty non-tab line that looks like a new target/comment block end
-    lines = []
-    for line in body.splitlines(keepends=True):
-        if line.startswith("\t") or line.strip() == "":
-            lines.append(line)
-        else:
-            break
-    return "".join(lines)
-
-
 def test_health_recipe_exits_with_job_exit_code() -> None:
     """make health must end with exit $$EXIT so critical health is non-zero."""
     text = MAKEFILE.read_text()
-    body = _recipe_body(text, "health")
+    body = makefile_recipe(text, "health")
     assert "src.monitor.health_check" in body
     assert "portfolio-lab-health" in body
     assert re.search(r"exit\s+\$\$EXIT\b", body), (
@@ -76,7 +55,7 @@ def test_health_recipe_exits_with_job_exit_code() -> None:
 def test_cron_makefile_targets_propagate_exit(target: str) -> None:
     """All EXIT-capturing cron Makefile targets must end with exit $$EXIT."""
     text = MAKEFILE.read_text()
-    body = _recipe_body(text, target)
+    body = makefile_recipe(text, target)
     assert "EXIT=" in body or "EXIT2=" in body
     assert "$(CRON_UPDATE)" in body or "cron_update" in body
     assert re.search(r"exit\s+\$\$EXIT\b", body) or re.search(
@@ -87,7 +66,7 @@ def test_cron_makefile_targets_propagate_exit(target: str) -> None:
 def test_attribution_propagates_either_exit() -> None:
     """attribution runs two jobs; non-zero from either must surface."""
     text = MAKEFILE.read_text()
-    body = _recipe_body(text, "attribution")
+    body = makefile_recipe(text, "attribution")
     assert "EXIT2=" in body
     assert re.search(r"exit\s+\$\$EXIT\b", body)
     assert re.search(r"exit\s+\$\$EXIT2\b", body)

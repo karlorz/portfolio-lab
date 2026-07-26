@@ -540,21 +540,20 @@ class TestRiskHistoryEdgeCases:
             for key in ["health", "portfolio", "risk", "risk_history", "tca", "overlays", "regime", "attribution", "cron"]:
                 assert key in dashboard, f"Missing section: {key}"
 
-    def test_health_available_with_real_data(self):
-        """Integration test: read the actual health report."""
-        dashboard = generate_unified_dashboard()
+    def test_health_available_with_fixture_data(self, tmp_path, sample_health_report):
+        """Integration test: generate a dashboard from an isolated health report."""
+        (tmp_path / ".health_report.json").write_text(
+            json.dumps(sample_health_report),
+            encoding="utf-8",
+        )
+        with (
+            patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path),
+            patch("src.monitor.unified_dashboard.PUBLIC_DATA_DIR", tmp_path),
+        ):
+            dashboard = generate_unified_dashboard()
         health = dashboard["health"]
         assert health["available"] is True
-        # Max-severity rollups may report degraded/warning/critical
-        assert health["status"] in (
-            "healthy",
-            "ok",
-            "unhealthy",
-            "degraded",
-            "warning",
-            "critical",
-            "error",
-        )
+        assert health["status"] == "healthy"
 
 
 class TestGenerateStatusText:

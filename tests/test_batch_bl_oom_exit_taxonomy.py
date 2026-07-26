@@ -63,3 +63,6 @@ def test_make_test_writes_test_last_exit_json() -> None:
     text = MAKEFILE.read_text(encoding="utf-8")
     assert "test_last_exit.json" in text
     assert "memory_class" in text
+    test_body = text.split("\ntest:", 1)[1].split("\n.PHONY:", 1)[0]
+    assert "set +e" in test_body
+    assert test_body.find("set +e") < test_body.find("EXIT=$$?")

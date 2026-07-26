@@ -6,8 +6,21 @@ from src.monitor.health_check import apply_ops_monitor_to_dashboard_health
 from src.strategy.ensemble_voter import EnsembleVoter
 
 
-def test_ops_merge_refolds_signal_health_after_kill_clear_demote(tmp_path):
-    """Sticky kill→healthy demote must not leave 0/N SH as system healthy."""
+def test_ops_merge_keeps_signal_health_on_quality_plane_after_kill_clear(
+    tmp_path, monkeypatch
+):
+    """Sticky kill clears without folding signal quality into the ops badge."""
+    monkeypatch.setattr(
+        "src.monitor.repo_public_mirror_lag.summarize_repo_public_mirror_lag",
+        lambda **_kwargs: {
+            "ok": True,
+            "lagging_count": 0,
+            "total": 0,
+            "lagging_paths": [],
+            "source": str(tmp_path),
+            "dest": str(tmp_path),
+        },
+    )
     health = {
         "system_status": "warning",  # was elevated by kill
         "kill_switch": {"enabled": True, "level": "warning"},
@@ -38,8 +51,10 @@ def test_ops_merge_refolds_signal_health_after_kill_clear_demote(tmp_path):
     out = apply_ops_monitor_to_dashboard_health(
         health, ops, data_dir=tmp_path, public_dir=tmp_path
     )
-    # Kill cleared → would set healthy without SH fold; with fold → degraded
-    assert out["system_status"] == "degraded"
+    # Operational SLIs are green after the kill clears. Predictive signal
+    # health stays degraded on its own quality plane.
+    assert out["system_status"] == "healthy"
+    assert out["signal_health"]["status"] == "degraded"
     assert out["kill_switch"].get("enabled") is False
 
 

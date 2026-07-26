@@ -142,7 +142,7 @@ class TestBacktestPipeline:
         """v4.90: combined overlay backtest."""
         from src.backtest.combined_overlay_backtest import CombinedOverlayBacktest
 
-        bt = CombinedOverlayBacktest()
+        bt = CombinedOverlayBacktest(allow_synthetic=True)
         result = bt.run_backtest()
         assert result.extras["trading_days"] > 0
         assert result.baseline_sharpe != 0

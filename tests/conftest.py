@@ -59,29 +59,19 @@ _ISOLATED_MARKET_DB_ROOT: Path | None = None
 
 
 def _seed_isolated_public_fixtures(public: Path) -> None:
-    """Copy minimal price/public fixtures into hermetic PUBLIC_DATA_DIR.
+    """Generate price history inside the hermetic PUBLIC_DATA_DIR.
 
     Many integration/backtest tests resolve ``PRICES_JSON`` via PUBLIC_DATA_DIR
-    (H16 isolation). An empty mktemp tree yields ~100 FileNotFoundError fails
-    for prices.json even when market.db is available. Seed from repo fixtures
-    when present; never touch live WWW.
+    (H16 isolation). Always use deterministic test data so a lab host's runtime
+    artifacts cannot make local results differ from a clean CI checkout.
     """
-    repo_root = Path(__file__).resolve().parent.parent
-    candidates = [
-        repo_root / "public" / "data" / "prices.json",
-        repo_root / "data" / "prices.json",
-        repo_root / "tests" / "fixtures" / "prices.json",
-    ]
     dest = public / "prices.json"
     if dest.exists():
         return
-    for src in candidates:
-        if src.is_file() and src.stat().st_size > 0:
-            try:
-                shutil.copy2(src, dest)
-            except OSError:
-                continue
-            break
+
+    from tests.fixtures.synthetic_prices import write_synthetic_prices
+
+    write_synthetic_prices(dest)
 
 
 def _bootstrap_public_data_dir_isolation() -> Path | None:
@@ -148,15 +138,19 @@ def _bootstrap_market_db_isolation() -> Path | None:
 _bootstrap_market_db_isolation()
 
 
+def _remove_owned_isolation_root(root: Path | None) -> None:
+    """Remove one pytest-owned isolation tree, never a caller-owned path."""
+    if root is not None:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def pytest_sessionfinish(session, exitstatus) -> None:
     """Remove only isolation trees created by this pytest process."""
     del session, exitstatus
     global _ISOLATED_PUBLIC_DATA_ROOT, _ISOLATED_MARKET_DB_ROOT
-    if _ISOLATED_PUBLIC_DATA_ROOT is not None:
-        shutil.rmtree(_ISOLATED_PUBLIC_DATA_ROOT, ignore_errors=True)
+    _remove_owned_isolation_root(_ISOLATED_PUBLIC_DATA_ROOT)
     _ISOLATED_PUBLIC_DATA_ROOT = None
-    if _ISOLATED_MARKET_DB_ROOT is not None:
-        shutil.rmtree(_ISOLATED_MARKET_DB_ROOT, ignore_errors=True)
+    _remove_owned_isolation_root(_ISOLATED_MARKET_DB_ROOT)
     _ISOLATED_MARKET_DB_ROOT = None
 
 
