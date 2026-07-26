@@ -31,6 +31,10 @@ def test_compute_garch_risk_script_has_policy_vs_measured_fields():
     assert "drawdown_field_semantics" in src
     assert "max_possible" in src
     assert "policy_max_dd" in src
+    # Cron producer must tag non-ops inventory so graduation multi-day SSOT
+    # is not blocked by summary.total_checks=1 (GARCH residual restamp).
+    assert 'inventory_role' in src
+    assert "garch_risk" in src
 
 
 def test_compute_garch_risk_writes_measured_not_policy_as_max_drawdown(tmp_path, monkeypatch):
