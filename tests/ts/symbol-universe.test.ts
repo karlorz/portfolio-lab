@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  CRYPTO_SYMBOLS,
   DEFAULT_SYMBOL_UNIVERSE,
   MARKET_DATA_SYMBOLS,
   SYMBOL_UNIVERSE_HASH,
@@ -20,10 +21,14 @@ describe('market data symbol universe contract', () => {
       'UBT', 'TMF',
       'UUP', 'UDN', 'FXE', 'FXY', 'FXB', 'FXA', 'FXC', 'FXF',
       'MTUM', 'VLUE', 'USMV', 'QUAL',
+      'BTC-USD', 'ETH-USD',
     ]);
     expect(DEFAULT_SYMBOL_UNIVERSE.map((entry) => entry.symbol)).toContain('SPY');
     expect(DEFAULT_SYMBOL_UNIVERSE.map((entry) => entry.symbol)).toContain('VIX3M');
     expect(DEFAULT_SYMBOL_UNIVERSE.map((entry) => entry.symbol)).toContain('VIX');
+    expect(DEFAULT_SYMBOL_UNIVERSE.map((entry) => entry.symbol)).toContain('BTC-USD');
+    expect(DEFAULT_SYMBOL_UNIVERSE.map((entry) => entry.symbol)).toContain('ETH-USD');
+    expect(CRYPTO_SYMBOLS).toEqual(['BTC-USD', 'ETH-USD']);
     expect(SYMBOL_UNIVERSE_VERSION).toBe('symbol-universe/v1');
     expect(SYMBOL_UNIVERSE_HASH).toMatch(/^[a-f0-9]{64}$/);
     expect(SYMBOL_UNIVERSE_METADATA).toEqual({
