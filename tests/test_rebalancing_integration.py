@@ -22,6 +22,45 @@ from src.rebalancing.smart_rebalancer import (
 # RebalanceGateResult dataclass
 # ---------------------------------------------------------------------------
 
+
+@pytest.fixture
+def isolated_gate(tmp_path):
+    """Fresh gate: no host DATA_DIR / smart_rebalance_state YTD budget pollution."""
+    return SmartRebalanceGate(
+        data_dir=tmp_path,
+        state_path=tmp_path / "smart_rebalance_state.json",
+        load_state=False,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _autouse_isolate_rebalance_data_dir(tmp_path, monkeypatch):
+    """Keep SmartRebalanceGate() default ctor off live DATA_DIR YTD budget state."""
+    monkeypatch.setattr("src.rebalancing.integration.DATA_DIR", tmp_path)
+    monkeypatch.setattr("src.rebalancing.smart_rebalancer.DATA_DIR", tmp_path)
+    # Default state path under tmp so load_state cannot read host file
+    state = tmp_path / "smart_rebalance_state.json"
+    monkeypatch.setattr(
+        "src.rebalancing.smart_rebalancer.DEFAULT_STATE_PATH",
+        state,
+        raising=False,
+    )
+    # If controller uses a module-level state path constant, also patch common names
+    for mod_attr in (
+        "src.rebalancing.smart_rebalancer.STATE_PATH",
+        "src.rebalancing.smart_rebalancer.SMART_REBALANCE_STATE_PATH",
+    ):
+        try:
+            monkeypatch.setattr(mod_attr, state, raising=False)
+        except Exception:
+            pass
+    yield
+
+
+
+
+
+
 class TestRebalanceGateResult:
     def test_creation(self):
         r = RebalanceGateResult(
@@ -106,8 +145,8 @@ class TestComputeVpin:
 # ---------------------------------------------------------------------------
 
 class TestEvaluate:
-    def test_evaluate_high_drift_executes(self):
-        gate = SmartRebalanceGate()
+    def test_evaluate_high_drift_executes(self, isolated_gate):
+        gate = isolated_gate
         # SPY 52% vs target 46% = 6% drift → should execute
         result = gate.evaluate(
             current_holdings={'SPY': 52000, 'GLD': 33000, 'TLT': 15000},
@@ -124,8 +163,8 @@ class TestEvaluate:
         assert isinstance(result.reason, str)
         assert isinstance(result.metadata, dict)
 
-    def test_evaluate_low_drift_skips(self):
-        gate = SmartRebalanceGate()
+    def test_evaluate_low_drift_skips(self, isolated_gate):
+        gate = isolated_gate
         # Nearly on-target → should skip
         result = gate.evaluate(
             current_holdings={'SPY': 46000, 'GLD': 38000, 'TLT': 16000},
@@ -138,8 +177,8 @@ class TestEvaluate:
         if result.max_drift < 0.05:
             assert result.should_execute is False
 
-    def test_evaluate_with_vpin_from_cache(self):
-        gate = SmartRebalanceGate()
+    def test_evaluate_with_vpin_from_cache(self, isolated_gate):
+        gate = isolated_gate
         gate.update_vpin(0.55)
         result = gate.evaluate(
             current_holdings={'SPY': 52000, 'GLD': 33000, 'TLT': 15000},

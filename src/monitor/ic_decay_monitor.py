@@ -45,14 +45,69 @@ from src.paths import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ICMonitor", "compute_ic_decay_report"]
+__all__ = ["ICMonitor", "compute_ic_decay_report", "advisory_factor_half_life_table", "ADVISORY_FACTOR_HALF_LIFE_DAYS"]
 
 # Configurable via environment variables
 IC_WINDOW_SIZE = int(os.environ.get("IC_MONITOR_WINDOW", "60"))
 IC_DECAY_THRESHOLD = float(os.environ.get("IC_DECAY_THRESHOLD", "0.05"))
 IC_STABLE_MIN = float(os.environ.get("IC_STABLE_MIN", "0.10"))
 IC_TREND_WINDOW = int(os.environ.get("IC_TREND_WINDOW", "20"))
+# Spearman IC with n≈5–10 is extremely noisy; do not escalate kill on thin history.
+IC_MIN_OBS_FOR_STATUS = int(os.environ.get("IC_MIN_OBS_FOR_STATUS", "20"))
 IC_STATE_PATH = DATA_DIR / "ic_monitor_state.json"
+
+# Advisory factor / sleeve half-lives (trading days) from multi-market IC decay
+# literature (Flint/Vermaak-style summaries via Alpha Architect / Quantpedia).
+# NOT live-authoritative — operators only; rebalance cadence is still governed by
+# signals.json.target_allocations + smart-rebalance cost budget.
+ADVISORY_FACTOR_HALF_LIFE_DAYS: Dict[str, Dict[str, Any]] = {
+    "investment": {
+        "half_life_days": 21,
+        "suggested_rebalance_days": 21,
+        "note": "fastest equity-factor decay; ~1 month optimal",
+    },
+    "momentum": {
+        "half_life_days": 63,
+        "suggested_rebalance_days": 63,
+        "note": "~3 months typical equity momentum half-life band",
+    },
+    "value": {
+        "half_life_days": 84,
+        "suggested_rebalance_days": 84,
+        "note": "longest persistence; ~3–4 months rebalance",
+    },
+    "quality": {
+        "half_life_days": 105,
+        "suggested_rebalance_days": 105,
+        "note": "~4–5 months optimal in global studies",
+    },
+    "low_volatility": {
+        "half_life_days": 126,
+        "suggested_rebalance_days": 126,
+        "note": "~5–6 months; slow decay sleeve",
+    },
+    "strategic_spy_gld_tlt": {
+        "half_life_days": None,
+        "suggested_rebalance_days": 252,
+        "note": "champion book risk control; annual or ±5% band, cost-aware",
+    },
+}
+
+
+def advisory_factor_half_life_table() -> Dict[str, Any]:
+    """Public advisory payload for IC half-life → rebalance cadence mapping."""
+    return {
+        "role": "advisory",
+        "live_authoritative": False,
+        "unit": "trading_days",
+        "source": "literature_defaults_not_fitted_to_lab_ic",
+        "sleeves": dict(ADVISORY_FACTOR_HALF_LIFE_DAYS),
+        "disclosure": (
+            "Half-lives are literature defaults for operator cadence design; "
+            "they do not override signals.json.target_allocations or order_router."
+        ),
+    }
+
 
 
 def _spearman_rank_correlation(x: List[float], y: List[float]) -> float:
@@ -118,11 +173,13 @@ class ICMonitor:
         window_size: int = IC_WINDOW_SIZE,
         decay_threshold: float = IC_DECAY_THRESHOLD,
         stable_min: float = IC_STABLE_MIN,
+        min_obs_for_status: int = IC_MIN_OBS_FOR_STATUS,
         trend_window: int = IC_TREND_WINDOW,
     ):
         self.window_size = window_size
         self.decay_threshold = decay_threshold
         self.stable_min = stable_min
+        self.min_obs_for_status = max(5, int(min_obs_for_status))
         self.trend_window = trend_window
 
         # Per-signal data: deque of (prediction, actual_return)
@@ -263,7 +320,9 @@ class ICMonitor:
             trend = self.compute_ic_trend(signal_name)
             n_obs = len(self._data[signal_name])
 
-            if ic is None:
+            # Thin resolved history produces unstable Spearman IC; do not escalate
+            # warning/critical (and thus kill HALT) until min_obs_for_status.
+            if ic is None or n_obs < self.min_obs_for_status:
                 status = "insufficient_data"
             elif ic < self.decay_threshold:
                 status = "critical"
@@ -277,6 +336,7 @@ class ICMonitor:
                 "ic_trend": trend,
                 "observations": n_obs,
                 "status": status,
+                "min_obs_for_status": self.min_obs_for_status,
             }
 
         return report
@@ -325,6 +385,91 @@ class ICMonitor:
             logger.warning("Failed to load IC monitor state: %s", e)
 
 
+
+def _signal_prediction_date_expr(columns: set[str]) -> str:
+    """SQL expression for prediction calendar date across schema variants.
+
+    Production SignalHealthTracker uses ``timestamp`` (ISO datetime). Older /
+    test fixtures may use ``prediction_date`` only. Prefer date(timestamp) when
+    present so distinct pending dates and oldest unresolved are honest.
+    """
+    if "prediction_date" in columns:
+        return "prediction_date"
+    if "timestamp" in columns:
+        # date() handles ISO 'YYYY-MM-DD…' prefixes; substr fallback for odd values
+        return "COALESCE(date(timestamp), substr(timestamp, 1, 10))"
+    return "NULL"
+
+
+def _signal_prediction_backlog(db_path: Optional[Path] = None) -> Dict[str, Any]:
+    """Row-level pending backlog from SignalHealthTracker table (not staged IC window).
+
+    pending_predictions in the IC report is staged-date count; pending_rows is the
+    full unlabeled prediction history operators confuse with near-green pending=6.
+    """
+    from src.paths import MARKET_DB, sqlite_connect
+
+    path = Path(db_path) if db_path is not None else MARKET_DB
+    empty = {
+        "pending_rows": 0,
+        "pending_dates": 0,
+        "oldest_unresolved_date": None,
+        "total_predictions": 0,
+        "resolved_predictions": 0,
+        "pending_semantics": "signal_predictions.actual_direction IS NULL",
+    }
+    if not path.exists():
+        return empty
+    try:
+        with sqlite_connect(path) as conn:
+            cur = conn.cursor()
+            # Fail soft if table missing
+            tables = {
+                r[0]
+                for r in cur.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            if "signal_predictions" not in tables:
+                return empty
+            col_rows = cur.execute("PRAGMA table_info(signal_predictions)").fetchall()
+            columns = {str(r[1]) for r in col_rows}
+            if "actual_direction" not in columns:
+                return empty
+
+            total = int(cur.execute("SELECT COUNT(*) FROM signal_predictions").fetchone()[0])
+            resolved = int(
+                cur.execute(
+                    "SELECT COUNT(*) FROM signal_predictions WHERE actual_direction IS NOT NULL"
+                ).fetchone()[0]
+            )
+            pending_rows = max(0, total - resolved)
+            date_expr = _signal_prediction_date_expr(columns)
+            row = cur.execute(
+                f"""
+                SELECT COUNT(DISTINCT {date_expr}), MIN({date_expr})
+                FROM signal_predictions
+                WHERE actual_direction IS NULL
+                """
+            ).fetchone()
+            pending_dates = int(row[0] or 0) if row else 0
+            oldest = row[1] if row else None
+        return {
+            "pending_rows": pending_rows,
+            "pending_dates": pending_dates,
+            "oldest_unresolved_date": oldest,
+            "total_predictions": total,
+            "resolved_predictions": resolved,
+            "pending_semantics": (
+                "pending_predictions=IC staged window; "
+                "pending_rows=signal_predictions unlabeled rows"
+            ),
+        }
+    except Exception as exc:  # noqa: BLE001 — optional enrichment
+        logger.warning("signal prediction backlog unavailable: %s", exc)
+        return empty
+
+
 def compute_ic_decay_report() -> Dict[str, Any]:
     """Convenience function: compute IC decay report from saved state.
 
@@ -349,11 +494,25 @@ def compute_ic_decay_report() -> Dict[str, Any]:
         status = "waiting_for_forward_returns"
     else:
         status = "no_data"
+    backlog = _signal_prediction_backlog()
     return {
         "status": status,
         "signals": signals,
         "resolved_signal_count": len(signals),
         "pending_predictions": pending,
+        "pending_scope": "ic_staged_date_window",
+        "pending_rows": backlog.get("pending_rows", 0),
+        "pending_rows_scope": "historical_db_unlabeled_rows",
+        "pending_dates": backlog.get("pending_dates", 0),
+        "oldest_unresolved_date": backlog.get("oldest_unresolved_date"),
+        "total_predictions": backlog.get("total_predictions", 0),
+        "resolved_predictions": backlog.get("resolved_predictions", 0),
+        "pending_semantics": backlog.get("pending_semantics")
+        or (
+            "pending_predictions=IC staged-date window; "
+            "pending_rows=signal_predictions unlabeled rows (full history)"
+        ),
         "staged_date": monitor.get_staged_date(),
         "label_horizon": "SPY close-to-close forward return from staged market-data date to latest available SPY row",
+        "advisory_factor_half_life": advisory_factor_half_life_table(),
     }

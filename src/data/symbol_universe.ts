@@ -49,6 +49,9 @@ export const DEFAULT_SYMBOL_UNIVERSE: SymbolUniverseEntry[] = [
   marketSymbol('EFA', 'core'),
   marketSymbol('VXUS', 'core'),
   marketSymbol('VIX3M', 'core', '^VIX3M'),
+  // Spot VIX for term-structure slope (VIX3M/VIX). Without ^VIX, contango
+  // hydrates as 0 via VIX3M-only proxy (Batch BF residual → Batch BG).
+  marketSymbol('VIX', 'core', '^VIX'),
   marketSymbol('XLK', 'sector'),
   marketSymbol('XLV', 'sector'),
   marketSymbol('XLF', 'sector'),

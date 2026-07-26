@@ -119,11 +119,20 @@ def test_lab_deploy_refreshes_dashboard_data_before_build():
     assert main_body.index("refresh_dashboard_data") < main_body.index("publish_dist")
 
 
-def test_lab_deploy_checks_public_data_consistency_before_publish():
+def test_lab_deploy_checks_public_data_consistency_after_live_mirror_before_publish():
     source = _read("scripts/deploy-lab-app.sh")
+    # Isolate the main() call sequence (after the last function definition),
+    # so .index() resolves call sites rather than earlier function defs.
     main_body = source.split("main() {", 1)[1]
+    main_body = main_body.split("}", 1)[0]
 
     assert "check_public_data_consistency" in source
+    # Live WWW data must be mirrored into checkout public/data BEFORE build
+    # (so dist/data captures the fresh mirror) and before the consistency
+    # check (so index entries resolve). Files the operator tree has but the
+    # repo mirror lacked (e.g. attribution_YYYY-MM-DD.json) otherwise
+    # false-fail the pre-publish gate.
+    assert main_body.index("mirror_repo_public_data_from_live") < main_body.index("build_frontend")
     assert main_body.index("build_frontend") < main_body.index("check_public_data_consistency")
     assert main_body.index("check_public_data_consistency") < main_body.index("publish_dist")
 
@@ -138,7 +147,7 @@ def test_public_data_consistency_checker_accepts_matching_public_and_dist_data(t
     checker = _load_consistency_checker()
     _write_public_data_artifacts(tmp_path)
 
-    result = checker.check_public_data_consistency(tmp_path)
+    result = checker.check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
 
     assert result.ok is True, result.errors
 
@@ -151,7 +160,7 @@ def test_public_data_consistency_checker_rejects_stale_public_index(tmp_path: Pa
         index_generated_at="2026-06-12T03:12:34.220521+00:00",
     )
 
-    result = checker.check_public_data_consistency(tmp_path)
+    result = checker.check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
 
     assert result.ok is False
     assert any("public/data/index.json is older than source_manifest.json" in error for error in result.errors)
@@ -162,7 +171,7 @@ def test_public_data_consistency_checker_rejects_dist_data_copy_mismatch(tmp_pat
     _write_public_data_artifacts(tmp_path)
     _write_json(tmp_path / "dist/data/health.json", {"status": "critical"})
 
-    result = checker.check_public_data_consistency(tmp_path)
+    result = checker.check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
 
     assert result.ok is False
     assert any("dist/data/health.json does not match public/data/health.json" in error for error in result.errors)

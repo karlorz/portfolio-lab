@@ -80,31 +80,67 @@ def _parse_order_file(path: Path) -> dict[str, Any] | None:
         return None
 
 
+def _parse_order_event_timestamps(orders: list) -> list[datetime]:
+    """Collect timezone-aware event timestamps from order dicts."""
+    out: list[datetime] = []
+    for order in orders:
+        if not isinstance(order, dict) or not order.get("timestamp"):
+            continue
+        try:
+            ts = datetime.fromisoformat(
+                str(order["timestamp"]).replace("Z", "+00:00")
+            )
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            out.append(ts)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def _parse_daily_order_summary(path: Path) -> dict[str, Any] | None:
-    """Parse root daily order summaries named order-history-YYYY-MM-DD.json."""
+    """Parse root daily order summaries named order-history-YYYY-MM-DD.json.
+
+    Batch DR: accept ``recent_orders`` (live) or ``orders`` (legacy).
+
+    Batch DS: **schedule last-execution uses max order event timestamp**, not
+    payload/file ``date``. wiki-sync rewrites order-history-TODAY.json daily
+    with the full orders.jsonl tail (same May/July fills, date=today) — using
+    file date invents false daily executions. Keep ``summary_file_date`` for
+    forensics; ``timestamp`` / ``date`` for schedule = last real fill event.
+    """
     try:
         payload = json.loads(path.read_text())
         if not isinstance(payload, dict):
             return None
-        orders = payload.get("orders")
+        # Live dual-write schema: recent_orders; legacy/tests: orders
+        orders = payload.get("recent_orders")
+        if not isinstance(orders, list) or len(orders) == 0:
+            orders = payload.get("orders")
         if not isinstance(orders, list) or len(orders) == 0:
             return None
 
-        timestamp = None
-        for order in orders:
-            if isinstance(order, dict) and order.get("timestamp"):
-                timestamp = str(order["timestamp"])
-                break
-        if timestamp:
-            ts = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-        elif payload.get("date"):
-            ts = datetime.fromisoformat(str(payload["date"])).replace(tzinfo=timezone.utc)
+        dict_orders = [order for order in orders if isinstance(order, dict)]
+        event_ts = _parse_order_event_timestamps(dict_orders)
+        summary_file_date = None
+        if payload.get("date"):
+            try:
+                summary_file_date = str(payload["date"])[:10]
+            except (TypeError, ValueError):
+                summary_file_date = None
+
+        if event_ts:
+            ts = max(event_ts)
+            clock_source = "order_event_timestamp"
+        elif summary_file_date:
+            ts = datetime.fromisoformat(summary_file_date).replace(
+                tzinfo=timezone.utc
+            )
+            clock_source = "summary_file_date"
         else:
             ts = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+            clock_source = "file_mtime"
 
-        dict_orders = [order for order in orders if isinstance(order, dict)]
         total_value = sum(
             order.get("estimated_value", order.get("value", order.get("fill_value", 0)))
             for order in dict_orders
@@ -113,7 +149,7 @@ def _parse_daily_order_summary(path: Path) -> dict[str, Any] | None:
         sell_count = sum(1 for order in dict_orders if order.get("side") == "sell")
         symbols = sorted(set(order.get("symbol", "?") for order in dict_orders))
 
-        return {
+        entry = {
             "timestamp": ts.isoformat(),
             "date": ts.strftime("%Y-%m-%d"),
             "time": ts.strftime("%H:%M"),
@@ -123,8 +159,23 @@ def _parse_daily_order_summary(path: Path) -> dict[str, Any] | None:
             "sell_count": sell_count,
             "total_value": round(total_value, 2),
             "symbols": symbols,
-            "reasons": sorted(set(order.get("reason", "rebalance") for order in dict_orders)),
+            "reasons": sorted(
+                set(order.get("reason", "rebalance") for order in dict_orders)
+            ),
+            "clock_source": clock_source,
+            "last_order_event_at": max(event_ts).isoformat() if event_ts else None,
+            "summary_file_date": summary_file_date,
         }
+        # Batch DS: detect snapshot rewrite (file date >> last event)
+        if summary_file_date and event_ts:
+            file_day = datetime.fromisoformat(summary_file_date).replace(
+                tzinfo=timezone.utc
+            )
+            lag_days = (file_day.date() - max(event_ts).date()).days
+            if lag_days > 1:
+                entry["snapshot_rewrite_lag_days"] = lag_days
+                entry["snapshot_rewrite"] = True
+        return entry
     except (FileNotFoundError, json.JSONDecodeError, ValueError, TypeError, OSError):
         logger.exception("Failed to parse daily order summary: %s", path)
         return None
@@ -203,6 +254,21 @@ def generate() -> dict[str, Any]:
         last_ts = now - timedelta(days=30)
 
     next_rebalance = last_ts + timedelta(days=30)
+    days_until = (next_rebalance - now).days
+    # Negative days_until means the projected monthly slot is already past —
+    # disclose overdue rather than looking like a future schedule.
+    if days_until < 0:
+        next_status = "overdue"
+        next_status_reason = (
+            f"projected next rebalance {next_rebalance.strftime('%Y-%m-%d')} "
+            f"is {abs(days_until)} day(s) past (last execution + 30d)"
+        )
+    elif days_until == 0:
+        next_status = "due_today"
+        next_status_reason = "projected next rebalance is today"
+    else:
+        next_status = "scheduled"
+        next_status_reason = None
 
     # Schedule compliance
     on_time = 0
@@ -222,21 +288,65 @@ def generate() -> dict[str, Any]:
         else:
             delayed += 1
 
-    # Recent executions (last 10)
-    recent = history[-10:] if len(history) > 10 else history
+    # Batch EG: UI timeline + total_executions use event-day canonical rows.
+    # Raw daily snapshot rewrites (same fills, new write_day) inflated the
+    # operator-facing list (live: 10× identical 2026-07-11 rows; total=96).
+    # Schedule already used canonical_history (Batch DS); timeline now matches.
+    # Keep raw_history_entries / snapshot_rewrite_files for forensics only.
+    recent = (
+        canonical_history[-10:]
+        if len(canonical_history) > 10
+        else canonical_history
+    )
     execution_times = [
-        {"date": e["date"], "time": e["time"], "orders": e["orders"],
-         "total_value": e["total_value"], "symbols": e["symbols"],
-         "source": e.get("source", "unknown")}
+        {
+            "date": e["date"],
+            "time": e["time"],
+            "orders": e["orders"],
+            "total_value": e["total_value"],
+            "symbols": e["symbols"],
+            "source": e.get("source", "unknown"),
+            **(
+                {"clock_source": e["clock_source"]}
+                if e.get("clock_source")
+                else {}
+            ),
+            **(
+                {
+                    "snapshot_rewrite": True,
+                    "snapshot_rewrite_lag_days": e["snapshot_rewrite_lag_days"],
+                }
+                if e.get("snapshot_rewrite")
+                else {}
+            ),
+            **(
+                {"summary_file_date": e["summary_file_date"]}
+                if e.get("summary_file_date")
+                else {}
+            ),
+        }
         for e in reversed(recent)  # Most recent first
     ]
+
+    snapshot_rewrites = sum(
+        1 for e in history if e.get("snapshot_rewrite")
+    )
 
     return {
         "generated": now.isoformat(),
         "next_rebalance": {
             "date": next_rebalance.strftime("%Y-%m-%d"),
-            "days_until": (next_rebalance - now).days,
+            "days_until": days_until,
             "frequency": "monthly (~30 days)",
+            "status": next_status,
+            "status_reason": next_status_reason,
+            "overdue": next_status == "overdue",
+            "last_execution_at": last_ts.isoformat() if last_ts else None,
+            "last_execution_clock": (
+                canonical_history[-1].get("clock_source")
+                if canonical_history
+                else None
+            ),
         },
         "schedule_compliance": {
             "on_time": on_time,
@@ -247,8 +357,18 @@ def generate() -> dict[str, Any]:
             ),
         },
         "execution_history": execution_times,
-        "total_executions": len(history),
+        # Batch EG: operator total = unique event days (matches timeline).
+        "total_executions": len(canonical_history),
+        "canonical_execution_days": len(canonical_history),
+        "raw_history_entries": len(history),
         "canonical_order_history_source": _canonical_source_label(history),
+        "snapshot_rewrite_files": snapshot_rewrites,
+        "snapshot_rewrite_policy": (
+            "schedule_uses_order_event_timestamp; file date is write day only"
+        ),
+        "execution_timeline_policy": (
+            "canonical_event_day; raw rewrites forensic only"
+        ),
         "market_data_consistency": _generate_market_data_consistency(),
         "alpaca_feed_entitlement": _generate_alpaca_feed_entitlement(),
     }
@@ -289,13 +409,86 @@ def _generate_alpaca_feed_entitlement() -> dict[str, Any]:
 
 def main():
     data = generate()
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    save_results_json(data, output_path=str(OUTPUT_PATH))
+    try:
+        from src.dashboard.generator import _stamp_generator_git_sha
 
-    # Also copy to public/data/ for dashboard fetch
-    public_dir = PUBLIC_DATA_DIR
-    public_dir.mkdir(parents=True, exist_ok=True)
-    save_results_json(data, output_path=str(public_dir / "rebalance_health.json"))
+        data = _stamp_generator_git_sha(data)
+    except Exception:  # noqa: BLE001 — never block rebalance export
+        pass
+
+    private_path = OUTPUT_PATH
+    public_path = Path(PUBLIC_DATA_DIR) / "rebalance_health.json"
+    paths_identical = False
+    try:
+        paths_identical = private_path.resolve() == public_path.resolve()
+    except OSError:
+        paths_identical = False
+
+    try:
+        from src.dashboard.generator import _attach_dual_write_provenance
+
+        data = _attach_dual_write_provenance(
+            data,
+            private_path=private_path,
+            public_path=public_path,
+            dual_write_attempted=not paths_identical,
+            dual_write_ok=None if not paths_identical else True,
+            paths_identical=paths_identical,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+    private_path.parent.mkdir(parents=True, exist_ok=True)
+    save_results_json(data, output_path=str(private_path))
+
+    if not paths_identical:
+        try:
+            public_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                from src.dashboard.generator import _attach_dual_write_provenance
+
+                data = _attach_dual_write_provenance(
+                    data,
+                    private_path=private_path,
+                    public_path=public_path,
+                    dual_write_attempted=True,
+                    dual_write_ok=True,
+                    paths_identical=False,
+                )
+                save_results_json(data, output_path=str(private_path))
+            except Exception:  # noqa: BLE001
+                pass
+            save_results_json(data, output_path=str(public_path))
+            # Batch CJ: honest lag/hash after both trees exist
+            try:
+                from src.dashboard.generator import finalize_dual_write_provenance_after_sync
+
+                data = finalize_dual_write_provenance_after_sync(
+                    data,
+                    private_path=private_path,
+                    public_path=public_path,
+                    dual_write_ok=True,
+                    note="post_sync rebalance_health dual-write (Batch CJ)",
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        except OSError as exc:
+            logger.warning("Public rebalance_health dual-write failed: %s", exc)
+            try:
+                from src.dashboard.generator import _attach_dual_write_provenance
+
+                data = _attach_dual_write_provenance(
+                    data,
+                    private_path=private_path,
+                    public_path=public_path,
+                    dual_write_attempted=True,
+                    dual_write_ok=False,
+                    paths_identical=False,
+                    note=str(exc),
+                )
+                save_results_json(data, output_path=str(private_path))
+            except Exception:  # noqa: BLE001
+                pass
 
     logger.info("Rebalance health data exported to %s", OUTPUT_PATH)
     logger.info("  Executions: %d", data['total_executions'])

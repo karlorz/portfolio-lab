@@ -30,7 +30,7 @@ import logging
 from src.paths import BASE_ALLOCATION as DEFAULT_WEIGHTS
 from src.utils import safe_get
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -254,6 +254,89 @@ def _ols_beta(x: np.ndarray, y: np.ndarray) -> Tuple[float, float, float]:
     return beta, t_stat, p_value
 
 
+def _ols_multivariate(
+    X: np.ndarray, y: np.ndarray
+) -> Tuple[np.ndarray, float, np.ndarray, np.ndarray, np.ndarray]:
+    """Multivariate OLS: y = X @ beta (no intercept).
+
+    Used for joint factor betas so R² / systematic variance are coherent.
+    Univariate-per-factor betas cannot be summed into a valid residual
+    (correlated factors double-count explained variance → residual_var > total).
+
+    Returns:
+        beta (k,), r_squared, residuals (n,), t_stats (k,), p_values (k,)
+    """
+    y = np.asarray(y, dtype=float).flatten()
+    X = np.asarray(X, dtype=float)
+    if X.ndim != 2:
+        X = X.reshape(-1, 1)
+    n, k = X.shape
+    zero_beta = np.zeros(k)
+    zero_t = np.zeros(k)
+    one_p = np.ones(k)
+    if n < 3 or k == 0:
+        return zero_beta, 0.0, y.copy(), zero_t, one_p
+
+    col_std = np.std(X, axis=0)
+    active = col_std > 1e-12
+    n_active = int(np.sum(active))
+    if n_active == 0:
+        return zero_beta, 0.0, y.copy(), zero_t, one_p
+    if n < n_active + 2:
+        # Under-determined: fall back to zeros rather than unstable fit
+        return zero_beta, 0.0, y.copy(), zero_t, one_p
+
+    Xa = X[:, active]
+    try:
+        beta_a, _, rank, _ = np.linalg.lstsq(Xa, y, rcond=None)
+    except np.linalg.LinAlgError:
+        return zero_beta, 0.0, y.copy(), zero_t, one_p
+
+    if rank < n_active:
+        # Rank-deficient: use pseudoinverse solution already from lstsq
+        pass
+
+    beta = np.zeros(k)
+    beta[active] = beta_a
+    fitted = X @ beta
+    resid = y - fitted
+
+    total_var = float(np.var(y, ddof=1)) if n > 1 else 0.0
+    resid_var = float(np.var(resid, ddof=1)) if n > 1 else 0.0
+    if total_var > 1e-12:
+        r_squared = 1.0 - (resid_var / total_var)
+    else:
+        r_squared = 0.0
+    # Numerical guard (no-intercept OLS can slightly leave [0,1])
+    r_squared = float(min(max(r_squared, 0.0), 1.0))
+
+    t_stats = np.zeros(k)
+    p_values = np.ones(k)
+    df = n - n_active
+    if df > 0:
+        mse = float(np.dot(resid, resid) / df)
+        try:
+            xtx_inv = np.linalg.pinv(Xa.T @ Xa)
+            se = np.sqrt(np.maximum(np.diag(xtx_inv) * mse, 0.0))
+            t_a = np.zeros_like(beta_a, dtype=float)
+            for j, s in enumerate(se):
+                if s > 1e-12:
+                    t_a[j] = float(beta_a[j] / s)
+            t_stats[active] = t_a
+            from scipy.stats import t as t_dist
+
+            p_a = 2.0 * t_dist.sf(np.abs(t_a), df=df)
+            p_values[active] = p_a
+            # Perfect fit
+            if mse < 1e-15:
+                t_stats[active] = 999.0
+                p_values[active] = 0.0
+        except np.linalg.LinAlgError:
+            pass
+
+    return beta, r_squared, resid, t_stats, p_values
+
+
 def _build_factor_returns(
     prices: Dict[str, np.ndarray],
     factor_defs: Dict[str, Dict] = None,
@@ -425,16 +508,16 @@ class RiskDecomposer:
             logger.warning("Insufficient aligned data for %s", symbol)
             return {}
 
-        len(aligned_asset)
+        beta_vec, _r2, _resid, t_stats, p_values = _ols_multivariate(
+            factor_matrix, aligned_asset
+        )
         betas: Dict[str, FactorBeta] = {}
-
         for i, fkey in enumerate(self.factor_keys):
-            x = factor_matrix[:, i]
-            beta_val, t_stat, p_val = _ols_beta(x, aligned_asset)
+            p_val = float(p_values[i]) if i < len(p_values) else 1.0
             betas[fkey] = FactorBeta(
                 factor_name=self.factor_defs[fkey]["name"],
-                beta=beta_val,
-                t_stat=t_stat,
+                beta=float(beta_vec[i]) if i < len(beta_vec) else 0.0,
+                t_stat=float(t_stats[i]) if i < len(t_stats) else 0.0,
                 p_value=p_val,
                 significant=p_val < 0.05,
             )
@@ -461,12 +544,7 @@ class RiskDecomposer:
         if len(returns) < 3:
             return None
 
-        # Get betas
-        betas = self.estimate_asset_betas(symbol, returns)
-        if not betas:
-            return None
-
-        # Use most recent window
+        # Use most recent window (same alignment as beta estimation)
         window = min(self.window, len(returns))
         asset_window = returns[-window:]
         aligned_asset, factor_matrix = _align_series(asset_window, self.factor_returns)
@@ -475,21 +553,28 @@ class RiskDecomposer:
         if n_obs < 3:
             return None
 
-        # Explained returns (systematic)
-        explained = np.zeros(n_obs)
+        # Joint multivariate OLS: coherent betas + R² (not stacked univariate)
+        beta_vec, r_squared, residuals, t_stats, p_values = _ols_multivariate(
+            factor_matrix, aligned_asset
+        )
+        betas: Dict[str, FactorBeta] = {}
         for i, fkey in enumerate(self.factor_keys):
-            if fkey in betas:
-                explained += betas[fkey].beta * factor_matrix[:, i]
+            p_val = float(p_values[i]) if i < len(p_values) else 1.0
+            betas[fkey] = FactorBeta(
+                factor_name=self.factor_defs[fkey]["name"],
+                beta=float(beta_vec[i]) if i < len(beta_vec) else 0.0,
+                t_stat=float(t_stats[i]) if i < len(t_stats) else 0.0,
+                p_value=p_val,
+                significant=p_val < 0.05,
+            )
 
-        residuals = aligned_asset - explained
-
-        # Variance components (annualized approximation)
-        # Use traditional mean-centered variance for R² (most interpretable)
-        total_var = np.var(aligned_asset, ddof=1)
-        residual_var = np.var(residuals, ddof=1)
-        r_squared = 1.0 - (residual_var / total_var) if total_var > 1e-12 else 0.0
-        r_squared = min(max(r_squared, 0.0), 1.0)  # Clip to [0, 1]
-        systematic_var = max(total_var - residual_var, 0.0)
+        # Variance components from the same joint residual
+        total_var = float(np.var(aligned_asset, ddof=1))
+        residual_var = float(np.var(residuals, ddof=1))
+        # Prefer r² * total for systematic so components stay consistent when
+        # residual_var slightly exceeds total_var numerically.
+        systematic_var = float(max(r_squared * total_var, 0.0))
+        residual_var = float(max(total_var - systematic_var, 0.0))
 
         return AssetRiskDecomposition(
             symbol=symbol,
@@ -620,7 +705,7 @@ class RiskDecomposer:
             factor_corr = None
 
         return PortfolioRiskDecomposition(
-            timestamp=datetime.now().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             portfolio_weights=norm_weights,
             total_portfolio_variance=total_portfolio_var,
             total_portfolio_volatility=annualized_vol,

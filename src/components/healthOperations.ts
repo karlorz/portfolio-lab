@@ -1,4 +1,8 @@
-import type { DataPipelineRunbookAction, HealthData } from '../types/live';
+import type {
+  DataPipelineRunbookAction,
+  HealthData,
+  ProvenanceCompleteness,
+} from '../types/live';
 
 export interface HealthOperationsRunbookAction {
   dimension: string;
@@ -9,6 +13,18 @@ export interface HealthOperationsRunbookAction {
   artifact?: string;
   provider?: string;
   reason?: string;
+}
+
+/** Dual-write / split-brain badge for operator health bar (M11). */
+export interface DualWriteProvenanceSummary {
+  /** absent = no provenance block; ok/warning/critical for operator scan */
+  status: 'ok' | 'warning' | 'critical' | 'unknown' | 'absent';
+  label: string;
+  detail: string | null;
+  dualWriteOk: boolean | null;
+  dualWriteLagSeconds: number | null;
+  dualWriteLagStale: boolean;
+  dualWriteAttempted: boolean;
 }
 
 export interface HealthOperationsSummary {
@@ -37,6 +53,8 @@ export interface HealthOperationsSummary {
       actions: HealthOperationsRunbookAction[];
     } | null;
   } | null;
+  /** Dual-write lag / ok badge (provenance_completeness). */
+  dualWrite: DualWriteProvenanceSummary;
   topCauses: string[];
 }
 
@@ -67,7 +85,123 @@ const normalizeRunbookAction = (
   };
 };
 
-export function summarizeHealthOperations(health: HealthData): HealthOperationsSummary {
+export interface HealthOperationsKillContext {
+  /** alerts.json rows — kill_switch type elevates ops summary when health omits kill block */
+  alerts?: Array<{ type?: string; kill_switch_level?: string | null; level?: string; title?: string; message?: string | null }>;
+  /** signals.broker kill fields when health.kill_switch absent */
+  broker?: {
+    kill_switch?: boolean;
+    kill_switch_level?: string | null;
+    kill_switch_incident_id?: string | null;
+    kill_switch_reason?: string | null;
+  } | null;
+  /**
+   * Dual-write provenance from health_ops (or other dual-write artifact) when
+   * health.json itself lacks provenance_completeness.
+   */
+  dualWriteProvenance?: ProvenanceCompleteness | null;
+}
+
+/**
+ * Map provenance_completeness → operator badge (decision-first health bar).
+ *
+ * Severity (advisory, not live authority):
+ * - critical: dual_write_attempted && dual_write_ok === false (split-brain write fail)
+ * - warning: dual_write_lag_stale (public mtime behind private beyond threshold)
+ * - ok: attempted + ok, or paths identical / not attempted
+ * - absent: no block
+ */
+export function summarizeDualWriteProvenance(
+  pc: ProvenanceCompleteness | null | undefined,
+): DualWriteProvenanceSummary {
+  if (!pc || typeof pc !== 'object') {
+    return {
+      status: 'absent',
+      label: 'Dual-write: n/a',
+      detail: null,
+      dualWriteOk: null,
+      dualWriteLagSeconds: null,
+      dualWriteLagStale: false,
+      dualWriteAttempted: false,
+    };
+  }
+  const attempted = Boolean(pc.dual_write_attempted);
+  const ok = pc.dual_write_ok;
+  const lag =
+    typeof pc.dual_write_lag_seconds === 'number' && Number.isFinite(pc.dual_write_lag_seconds)
+      ? pc.dual_write_lag_seconds
+      : null;
+  const lagStale = Boolean(pc.dual_write_lag_stale);
+  const thr =
+    typeof pc.dual_write_lag_threshold_seconds === 'number'
+      ? pc.dual_write_lag_threshold_seconds
+      : 120;
+
+  if (attempted && ok === false) {
+    return {
+      status: 'critical',
+      label: 'Dual-write: FAIL',
+      detail: pc.note
+        ? String(pc.note)
+        : 'dual_write_attempted but dual_write_ok=false (check private vs public SSOT)',
+      dualWriteOk: false,
+      dualWriteLagSeconds: lag,
+      dualWriteLagStale: lagStale,
+      dualWriteAttempted: true,
+    };
+  }
+  if (lagStale) {
+    const lagTxt = lag === null ? '?' : `${lag.toFixed(0)}s`;
+    return {
+      status: 'warning',
+      label: `Dual-write lag: ${lagTxt}`,
+      detail:
+        `Public mtime behind private (threshold ${thr}s). ` +
+        'Advisory forensics only — private DATA_DIR is producer SSOT when paths differ.',
+      dualWriteOk: ok === undefined ? null : Boolean(ok),
+      dualWriteLagSeconds: lag,
+      dualWriteLagStale: true,
+      dualWriteAttempted: attempted,
+    };
+  }
+  if (attempted && ok === true) {
+    const lagTxt = lag === null ? '' : ` lag ${lag.toFixed(0)}s`;
+    return {
+      status: 'ok',
+      label: `Dual-write: OK${lagTxt}`,
+      detail: pc.disclosure ? String(pc.disclosure) : null,
+      dualWriteOk: true,
+      dualWriteLagSeconds: lag,
+      dualWriteLagStale: false,
+      dualWriteAttempted: true,
+    };
+  }
+  if (pc.paths_identical === true) {
+    return {
+      status: 'ok',
+      label: 'Dual-write: same path',
+      detail: 'Private and public paths resolve identical — no dual-write lag.',
+      dualWriteOk: true,
+      dualWriteLagSeconds: lag,
+      dualWriteLagStale: false,
+      dualWriteAttempted: attempted,
+    };
+  }
+  return {
+    status: 'unknown',
+    label: 'Dual-write: unknown',
+    detail: pc.note ? String(pc.note) : 'provenance_completeness present but incomplete',
+    dualWriteOk: ok === undefined || ok === null ? null : Boolean(ok),
+    dualWriteLagSeconds: lag,
+    dualWriteLagStale: lagStale,
+    dualWriteAttempted: attempted,
+  };
+}
+
+export function summarizeHealthOperations(
+  health: HealthData,
+  context?: HealthOperationsKillContext,
+): HealthOperationsSummary {
   const freshnessEntries = Object.entries(health.data_freshness || {});
   const fresh = freshnessEntries.filter(([, d]) => d.status === 'fresh').length;
   const stale = freshnessEntries.filter(([, d]) => d.status === 'stale').length;
@@ -107,7 +241,36 @@ export function summarizeHealthOperations(health: HealthData): HealthOperationsS
   const sloLabel = slo
     ? `Data pipeline SLO ${slo.status}${slo.top_dimension ? `: ${slo.top_dimension}` : ''}`
     : '';
-  const primaryCause = sloStatus && sloStatus !== 'ok'
+  // Kill/halt may appear on health.kill_switch, alerts kill_switch rows, or broker.
+  // Prefer health SSOT projection; fall back so ops bar still discloses HALT.
+  const healthKill = health.kill_switch;
+  const alertKill = (context?.alerts ?? []).find((a) => a?.type === 'kill_switch');
+  const broker = context?.broker;
+  const brokerKillEnabled = Boolean(broker?.kill_switch);
+  const killEnabled = Boolean(healthKill?.enabled) || Boolean(alertKill) || brokerKillEnabled;
+  const killLevel = (
+    healthKill?.level
+    ?? alertKill?.kill_switch_level
+    ?? broker?.kill_switch_level
+    ?? ''
+  ).toString().toLowerCase();
+  const killStatus = (healthKill?.status ?? '').toString().toLowerCase();
+  const killIncidentId = healthKill?.incident_id
+    ?? broker?.kill_switch_incident_id
+    ?? undefined;
+  const openIncidentsCritical = (health.open_incidents?.status ?? '').toString().toLowerCase() === 'critical';
+  const titleLooksHalt = Boolean(alertKill?.title && /halt|kill/i.test(alertKill.title));
+  const killHalt =
+    (killEnabled && (killLevel === 'halt' || killStatus === 'critical'))
+    || openIncidentsCritical
+    || (Boolean(alertKill) && (killLevel === 'halt' || titleLooksHalt || !killLevel));
+  const killActive = killEnabled || openIncidentsCritical;
+
+  const primaryCause = killHalt
+    ? 'kill/halt active'
+    : killActive
+    ? 'kill switch active'
+    : sloStatus && sloStatus !== 'ok'
     ? `data pipeline ${sloTopDimension ?? sloStatus}`
     : dataStatus === 'critical'
     ? 'data freshness critical'
@@ -130,15 +293,50 @@ export function summarizeHealthOperations(health: HealthData): HealthOperationsS
       const lagLabel = data.market_lag_days === undefined ? 'stale' : 'market lag';
       return `${symbol} ${lagLabel} ${lagDays}d (last update ${data.last_update})`;
     });
-  const topCauses = runbookTopCause
+  const killCause = killHalt
+    ? [`kill/halt${killLevel ? ` level=${killLevel}` : ''}${killIncidentId ? ` incident=${killIncidentId}` : ''}`]
+    : killActive
+      ? [`kill switch active${killLevel ? ` level=${killLevel}` : ''}`]
+      : [];
+  const dualWrite = summarizeDualWriteProvenance(
+    health.provenance_completeness ?? context?.dualWriteProvenance ?? null,
+  );
+
+  const dualWriteCause =
+    dualWrite.status === 'critical'
+      ? [dualWrite.label]
+      : dualWrite.status === 'warning'
+        ? [dualWrite.label]
+        : [];
+
+  const topCauses = killCause.length > 0
+    ? [...killCause, ...(runbookTopCause ? [runbookTopCause.label] : sloFailingDimensions.length > 0 ? sloFailingDimensions : freshnessCauses)].slice(0, 5)
+    : runbookTopCause
     ? [runbookTopCause.label]
     : sloFailingDimensions.length > 0
       ? sloFailingDimensions
       : freshnessCauses;
 
+  // Surface dual-write failures in topCauses (after kill; before pure freshness)
+  const mergedCauses = dualWriteCause.length > 0
+    ? [...dualWriteCause, ...topCauses.filter((c) => !dualWriteCause.includes(c))].slice(0, 5)
+    : topCauses;
+
+  // Elevate headline primary cause when dual-write is critical (after kill)
+  const dualWritePrimary =
+    !killHalt && !killActive && dualWrite.status === 'critical'
+      ? 'dual-write fail'
+      : !killHalt && !killActive && dualWrite.status === 'warning' && primaryCause === 'all tracked subsystems nominal'
+        ? 'dual-write lag stale'
+        : null;
+  const headlineFinal = dualWritePrimary
+    ? `System ${normalizeSystemStatus(health.system_status)}: ${dualWritePrimary}; scheduler ${schedulerStatus}`
+    : headline;
+  const headerTextFinal = `${headlineFinal} (${totalJobs} scheduled jobs, ${failedJobs} failed)`;
+
   return {
-    headline,
-    headerText,
+    headline: headlineFinal,
+    headerText: headerTextFinal,
     scheduler: {
       status: schedulerStatus,
       totalJobs,
@@ -158,6 +356,7 @@ export function summarizeHealthOperations(health: HealthData): HealthOperationsS
       label: sloLabel,
       runbook,
     } : null,
-    topCauses,
+    dualWrite,
+    topCauses: mergedCauses,
   };
 }

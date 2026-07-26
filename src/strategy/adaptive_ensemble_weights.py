@@ -18,9 +18,11 @@ Usage:
 
 import json
 import logging
+import os
 import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional
 import numpy as np
 
@@ -28,11 +30,29 @@ from src.backtest.metrics import save_results_json
 from src.paths import DATA_DIR, ATTRIBUTION_DIR
 
 
-__all__ = ['DEFAULT_CONFIG', 'WeightAdjustment', 'AdaptiveWeightsState', 'AdaptiveEnsembleWeights']
+__all__ = [
+    'DEFAULT_CONFIG',
+    'WeightAdjustment',
+    'AdaptiveWeightsState',
+    'AdaptiveEnsembleWeights',
+    'ENSEMBLE_WEIGHTS_FILE',
+    'stamp_ensemble_weights_freshness',
+]
 
 logger = logging.getLogger(__name__)
 
 STATE_FILE = DATA_DIR / "adaptive_weights_state.json"
+
+
+def _default_ensemble_weights_path() -> Path:
+    return Path(
+        os.environ.get(
+            "ENSEMBLE_WEIGHTS_FILE", str(DATA_DIR / "ensemble_weights.json")
+        )
+    )
+
+
+ENSEMBLE_WEIGHTS_FILE = _default_ensemble_weights_path()
 
 # ─────────────────────────────────────────────
 #  Configuration
@@ -48,6 +68,9 @@ DEFAULT_CONFIG = {
     "min_weight": 0.01,
     "max_weight": 0.40,
     "min_weight_active_sources": 0.005,
+    # When True, arms with baseline weight == 0 are hard-excluded from the
+    # min_weight floor (zero baseline must remain zero after renorm).
+    "respect_zero_baseline": True,
     "decay_half_life": 30,
     "stale_attribution_days": 7,
     "min_readings_per_source": 20,
@@ -103,16 +126,25 @@ class AdaptiveEnsembleWeights:
     - Persistent state saved to disk for EnsembleVoter to read
     """
 
-    def __init__(self, base_weights: Optional[Dict[str, float]] = None, config: Optional[Dict] = None):
+    def __init__(
+        self,
+        base_weights: Optional[Dict[str, float]] = None,
+        config: Optional[Dict] = None,
+        state_file: Optional[Path] = None,
+    ):
         self.config = {**DEFAULT_CONFIG, **(config or {})}
         self.base_weights = base_weights or {}
-        self.state_file = STATE_FILE
+        # Prefer explicit state_file (tests / isolation); default live STATE_FILE.
+        self.state_file = Path(state_file) if state_file is not None else STATE_FILE
 
         # Current computed state
         self.adjusted_weights: Dict[str, float] = {}
         self.multipliers: Dict[str, float] = {}
         self.history: List[WeightAdjustment] = []
         self.current_regime: str = "normal"
+        self._last_save_refused: Optional[str] = None
+        # Arms with baseline==0 that were hard-excluded from min_weight floor
+        self.zero_baseline_exclusions: List[str] = []
 
     # ── Public API ──
 
@@ -133,8 +165,19 @@ class AdaptiveEnsembleWeights:
         if not sources:
             logger.info("No attribution data available, using base weights unchanged")
             self.adjusted_weights = dict(self.base_weights)
-            self.multipliers = {k: 1.0 for k in self.base_weights}
-            self._save_state()
+            # Batch DO: zero-baseline arms disclose multiplier 0 even on no-data path
+            respect_zero = bool(self.config.get("respect_zero_baseline", True))
+            self.multipliers = {}
+            self.zero_baseline_exclusions = []
+            for k, base_w in self.base_weights.items():
+                if respect_zero and float(base_w or 0.0) <= 0.0:
+                    self.multipliers[k] = 0.0
+                    self.zero_baseline_exclusions.append(k)
+                else:
+                    self.multipliers[k] = 1.0
+            self.zero_baseline_exclusions = sorted(self.zero_baseline_exclusions)
+            # Empty base + empty sources must not clobber a healthy on-disk state
+            self._save_state(force_empty=not bool(self.base_weights))
             return self.adjusted_weights
 
         # Get baseline weights for this regime
@@ -150,23 +193,48 @@ class AdaptiveEnsembleWeights:
             multipliers[source_name] = multiplier
             raw_adjusted[source_name] = base_weight * multiplier
 
-        # Add any attribution-only sources (that might not be in baseline)
-        for source_name, attribution in sources.items():
+        # Batch BJ: do NOT promote attribution-only ghost sources into the
+        # live adaptive mass. Ghosts (not in baseline / voter enum) previously
+        # diluted the norm so enum arms summed < 1 after EnsembleVoter drop.
+        skipped_ghosts: list[str] = []
+        for source_name in sources:
             if source_name not in raw_adjusted:
-                multiplier = self._compute_multiplier(source_name, attribution)
-                multipliers[source_name] = multiplier
-                # For extra sources, use a small default base weight
-                base = attribution.get("avg_weight", 0.01)
-                if base <= 0:
-                    base = 0.01
-                raw_adjusted[source_name] = base * multiplier
-
-        # Apply min weight floor
-        for source_name in raw_adjusted:
-            raw_adjusted[source_name] = max(
-                self.config["min_weight"],
-                raw_adjusted[source_name]
+                skipped_ghosts.append(source_name)
+        if skipped_ghosts:
+            logger.info(
+                "Adaptive weights skipped %d attribution-only ghost(s): %s",
+                len(skipped_ghosts),
+                ", ".join(sorted(skipped_ghosts)[:12]),
             )
+
+        # Zero-baseline arms are hard excludes when respect_zero_baseline is on
+        # (default). Floor only applies to arms with positive baseline weight.
+        respect_zero = bool(self.config.get("respect_zero_baseline", True))
+        zero_baseline = {
+            name
+            for name, base_w in baseline.items()
+            if respect_zero and float(base_w or 0.0) <= 0.0
+        }
+        self.zero_baseline_exclusions = sorted(zero_baseline)
+        if zero_baseline:
+            logger.info(
+                "Adaptive weights hard-excluding %d zero-baseline arm(s): %s",
+                len(zero_baseline),
+                ", ".join(self.zero_baseline_exclusions[:12]),
+            )
+
+        def _floorable(name: str) -> bool:
+            return name not in zero_baseline
+
+        # Apply min weight floor (skip zero-baseline hard excludes)
+        for source_name in raw_adjusted:
+            if _floorable(source_name):
+                raw_adjusted[source_name] = max(
+                    self.config["min_weight"],
+                    raw_adjusted[source_name],
+                )
+            else:
+                raw_adjusted[source_name] = 0.0
 
         # Normalize to sum = 1.0
         total = sum(raw_adjusted.values())
@@ -194,6 +262,9 @@ class AdaptiveEnsembleWeights:
         while any_below_min and iteration < max_iterations:
             any_below_min = False
             for source_name in normalized:
+                if not _floorable(source_name):
+                    normalized[source_name] = 0.0
+                    continue
                 if normalized[source_name] < self.config["min_weight"] - 1e-8:
                     normalized[source_name] = self.config["min_weight"]
                     any_below_min = True
@@ -208,6 +279,9 @@ class AdaptiveEnsembleWeights:
 
         # Final hard clamp for any remaining sub-min weights
         for source_name in normalized:
+            if not _floorable(source_name):
+                normalized[source_name] = 0.0
+                continue
             if normalized[source_name] < self.config["min_weight"]:
                 normalized[source_name] = self.config["min_weight"]
 
@@ -218,6 +292,31 @@ class AdaptiveEnsembleWeights:
                 normalized = {k: v / total_clamped for k, v in normalized.items()}
                 # Round again
                 normalized = {k: round(v, 6) for k, v in normalized.items()}
+                # Keep hard excludes exactly zero after renorm rounding
+                for source_name in zero_baseline:
+                    if source_name in normalized:
+                        normalized[source_name] = 0.0
+                total_clamped2 = sum(normalized.values())
+                if total_clamped2 > 0 and abs(total_clamped2 - 1.0) > 1e-6:
+                    # Renorm only floorable mass
+                    active_sum = sum(
+                        v for k, v in normalized.items() if _floorable(k)
+                    )
+                    if active_sum > 0:
+                        for k in list(normalized.keys()):
+                            if _floorable(k):
+                                normalized[k] = round(
+                                    normalized[k] / active_sum, 6
+                                )
+                            else:
+                                normalized[k] = 0.0
+
+        # Batch DO: soft-delete / zero-baseline arms must not advertise a
+        # non-zero "boost" multiplier when adjusted mass is hard-zeroed.
+        # Operators misread MSM ×1.73 as active when weight stays 0.
+        for source_name in zero_baseline:
+            multipliers[source_name] = 0.0
+            normalized[source_name] = 0.0
 
         self.adjusted_weights = normalized
         self.multipliers = multipliers
@@ -316,9 +415,31 @@ class AdaptiveEnsembleWeights:
             self.config["max_multiplier"],
         ))
 
-    def _save_state(self):
-        """Persist current state to JSON."""
+    def _save_state(self, *, force_empty: bool = False):
+        """Persist current state to JSON.
+
+        Batch BJ residual honesty: refuse to overwrite a non-empty on-disk
+        adaptive state with empty adjusted/multipliers (test isolation accidents
+        and empty-source updates must not wipe live cron state).
+        """
+        self._last_save_refused = None
         try:
+            new_empty = not self.adjusted_weights and not self.multipliers
+            if new_empty and not force_empty and self.state_file.exists():
+                try:
+                    prior = json.loads(self.state_file.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError, UnicodeDecodeError, TypeError):
+                    prior = {}
+                prior_adj = prior.get("adjusted_weights") if isinstance(prior, dict) else None
+                prior_nonempty = isinstance(prior_adj, dict) and len(prior_adj) > 0
+                if prior_nonempty:
+                    self._last_save_refused = "refuse_empty_overwrite_of_nonempty_state"
+                    logger.warning(
+                        "Refusing to overwrite non-empty adaptive state at %s "
+                        "with empty adjusted_weights (Batch BJ empty-write guard)",
+                        self.state_file,
+                    )
+                    return
             state = {
                 "timestamp": datetime.now().isoformat(),
                 "regime": self.current_regime,
@@ -327,8 +448,13 @@ class AdaptiveEnsembleWeights:
                 "history": [asdict(h) for h in self.history[-50:]],  # Keep last 50
                 "baseline_weights": self.base_weights,
                 "config": self.config,
+                "zero_baseline_exclusions": list(self.zero_baseline_exclusions),
             }
-            save_results_json(state, output_path=str(self.state_file))
+            # Atomic write when possible
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.state_file.with_suffix(self.state_file.suffix + ".tmp")
+            save_results_json(state, output_path=str(tmp))
+            tmp.replace(self.state_file)
             logger.debug("Saved adaptive weights state to %s", self.state_file)
         except (OSError, TypeError, ValueError) as e:
             logger.warning("Failed to save adaptive weights state: %s", e)
@@ -345,6 +471,10 @@ class AdaptiveEnsembleWeights:
             self.current_regime = state.get("regime", "normal")
             self.history = [WeightAdjustment(**h) for h in state.get("history", [])]
             self.base_weights = state.get("baseline_weights", self.base_weights)
+            excl = state.get("zero_baseline_exclusions", [])
+            self.zero_baseline_exclusions = (
+                list(excl) if isinstance(excl, list) else []
+            )
             logger.debug("Loaded adaptive weights state from %s", self.state_file)
             return True
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
@@ -378,6 +508,11 @@ class AdaptiveEnsembleWeights:
             "multipliers": self.multipliers,
             "top_changes": top_changes[:10],
             "history_count": len(self.history),
+            # Hard-excluded arms (baseline weight == 0) under respect_zero_baseline
+            "zero_baseline_exclusions": list(self.zero_baseline_exclusions),
+            "respect_zero_baseline": bool(
+                self.config.get("respect_zero_baseline", True)
+            ),
         }
 
 
@@ -416,6 +551,86 @@ def _load_latest_attribution() -> Optional[Dict]:
         return None
 
 
+def stamp_ensemble_weights_freshness(
+    weights_path: Optional[Path] = None,
+    *,
+    reason: str = "freshness_stamp",
+) -> dict:
+    """Batch CS: reaffirm static ensemble_weights.json without changing weights.
+
+    Age of ``ensemble_weights.json`` drove false freeze (pre-CQ) and still
+    surfaces as ``weight_file_stale`` after CQ. Content recompute requires
+    attribution + promotion; this path only rewrites the same regime map
+    with an updated ``_meta`` so mtime/age reflect last verification.
+
+    Does **not** change live allocation authority (champion 46/38/16).
+    """
+    path = (
+        Path(weights_path)
+        if weights_path is not None
+        else _default_ensemble_weights_path()
+    )
+    result: dict = {
+        "path": str(path),
+        "ok": False,
+        "reason": reason,
+    }
+    if not path.is_file():
+        result["error"] = "missing"
+        logger.warning("ensemble_weights stamp skipped — missing %s", path)
+        return result
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        result["error"] = str(exc)
+        logger.warning("ensemble_weights stamp read failed: %s", exc)
+        return result
+    if not isinstance(raw, dict):
+        result["error"] = "invalid_payload"
+        return result
+
+    now = datetime.now().isoformat()
+    regime_keys = [k for k in raw if not str(k).startswith("_") and isinstance(raw.get(k), dict)]
+    meta = raw.get("_meta") if isinstance(raw.get("_meta"), dict) else {}
+    meta = {
+        **meta,
+        "schema": meta.get("schema") or "ensemble-weights/v1",
+        "last_freshness_stamp": now,
+        "stamp_reason": reason,
+        "regime_count": len(regime_keys),
+        "content_identity": "unchanged",
+        "note": (
+            "Freshness stamp only — regime source weights not recomputed. "
+            "Live target_allocations remain champion baseline unless separately promoted."
+        ),
+    }
+    out = {k: v for k, v in raw.items() if not str(k).startswith("_") or k == "_meta"}
+    # Preserve regimes; set _meta last
+    out = {k: v for k, v in raw.items() if k != "_meta"}
+    out["_meta"] = meta
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        save_results_json(out, output_path=str(tmp))
+        tmp.replace(path)
+    except (OSError, TypeError, ValueError) as exc:
+        result["error"] = str(exc)
+        logger.warning("ensemble_weights stamp write failed: %s", exc)
+        return result
+
+    result["ok"] = True
+    result["last_freshness_stamp"] = now
+    result["regime_count"] = len(regime_keys)
+    logger.info(
+        "Stamped ensemble_weights freshness at %s (regimes=%d reason=%s)",
+        path,
+        len(regime_keys),
+        reason,
+    )
+    return result
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Adaptive Ensemble Signal Weighting")
@@ -425,13 +640,27 @@ def main():
     update_parser = subparsers.add_parser("update", help="Compute updated weights from latest attribution")
     update_parser.add_argument("--regime", default="normal", help="Current market regime")
     update_parser.add_argument("--attribution-file", help="Specific attribution file path")
-
     # Show command
     show_parser = subparsers.add_parser("show", help="Display current adaptive weights")
     show_parser.add_argument("--top", type=int, default=20, help="Show top N sources")
 
     # Reset command
     reset_parser = subparsers.add_parser("reset", help="Reset weights to baseline")
+
+    # Batch CS: stamp only
+    stamp_parser = subparsers.add_parser(
+        "stamp",
+        help="Reaffirm ensemble_weights.json mtime/_meta without changing weights",
+    )
+    stamp_parser.add_argument(
+        "--path",
+        help="Override ensemble_weights.json path (default ENSEMBLE_WEIGHTS_FILE / data/)",
+    )
+    stamp_parser.add_argument(
+        "--reason",
+        default="cli_stamp",
+        help="Stamp reason recorded in _meta",
+    )
 
     args = parser.parse_args()
 
@@ -484,6 +713,23 @@ def main():
             )
 
         logger.info("  State saved to: %s", STATE_FILE)
+        # Batch CS: always reaffirm static weights file age after adaptive update
+        stamp = stamp_ensemble_weights_freshness(reason="adaptive_update")
+        if not stamp.get("ok"):
+            logger.warning("ensemble_weights stamp after update: %s", stamp)
+
+    elif args.command == "stamp":
+        path = Path(args.path) if args.path else None
+        stamp = stamp_ensemble_weights_freshness(path, reason=args.reason)
+        if not stamp.get("ok"):
+            logger.error("stamp failed: %s", stamp)
+            sys.exit(1)
+        logger.info(
+            "Stamped ensemble_weights: path=%s stamp=%s regimes=%s",
+            stamp.get("path"),
+            stamp.get("last_freshness_stamp"),
+            stamp.get("regime_count"),
+        )
 
     elif args.command == "show":
         loaded = adaptive._load_state()

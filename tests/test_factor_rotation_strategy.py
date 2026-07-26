@@ -256,6 +256,30 @@ class TestEvaluate:
         result = engine.evaluate()
         assert 0.0 <= result["signal_strength"] <= 1.0
 
+    def test_as_of_decision_is_unchanged_by_future_rows(self, tmp_path):
+        np.random.seed(42)
+        db = tmp_path / "market.db"
+        _seed_prices(db, days=320)
+        engine = _make_engine(tmp_path)
+        as_of = "2026-06-30"
+
+        before = engine.evaluate(as_of=as_of)
+
+        conn = sqlite3.connect(db)
+        for symbol in engine.universe:
+            conn.execute(
+                "INSERT INTO prices VALUES (?, ?, ?, ?)",
+                (symbol, "2099-01-04", 999999.0, 1000000),
+            )
+        conn.commit()
+        conn.close()
+
+        after = engine.evaluate(as_of=as_of)
+        assert after["as_of"] == as_of
+        assert after["selected_factors"] == before["selected_factors"]
+        assert after["allocation"] == before["allocation"]
+        assert after["current_scores"] == before["current_scores"]
+
     def test_min_momentum_filter(self, tmp_path):
         """Factors with return_12m < min_momentum should be excluded."""
         np.random.seed(42)
@@ -525,18 +549,25 @@ class TestFactorRotationBacktest:
     def test_backtest_with_data(self, tmp_path):
         np.random.seed(42)
         db = tmp_path / "market.db"
-        _seed_prices(db, days=400)
+        _seed_prices(
+            db,
+            symbols=list(FactorMomentumEngine.FACTORS),
+            days=400,
+        )
         engine = _make_engine(tmp_path)
         bt = FactorRotationBacktest(engine)
         result = bt.run_backtest("2024-01-01", "2026-01-01")
-        # Might succeed or fail depending on data coverage
-        if "error" not in result:
-            assert result["strategy"] == "factor_momentum_rotation"
-            assert result["status"] == "completed"
-            assert "cagr" in result
-            assert "sharpe_ratio" in result
-            assert "max_drawdown" in result
-            assert "trade_count" in result
+        assert result["strategy"] == "factor_momentum_rotation"
+        assert result["status"] == "completed"
+        assert "cagr" in result
+        assert "sharpe_ratio" in result
+        assert "max_drawdown" in result
+        assert "trade_count" in result
+        evidence = result["profitability_evidence"]
+        assert evidence["point_in_time"] is True
+        assert evidence["data"]["mode"] == "real"
+        assert evidence["promotion_eligible"] is True
+        assert evidence["costs"]["total_dollars"] > 0
 
     def test_backtest_no_spy_returns_error(self, tmp_path):
         np.random.seed(42)

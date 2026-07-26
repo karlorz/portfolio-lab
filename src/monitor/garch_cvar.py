@@ -282,7 +282,8 @@ class GARCHFilteredCVaR:
         
         Falls back to historical CVaR if GARCH fails to converge.
         """
-        timestamp = __import__('datetime').datetime.now().isoformat()
+        from datetime import datetime, timezone
+        timestamp = datetime.now(timezone.utc).isoformat()
         
         # Always calculate historical baseline
         historical_vol = calculate_volatility(returns)

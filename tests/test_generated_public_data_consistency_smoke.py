@@ -71,7 +71,7 @@ def _write_consistent_public_data_set(app_dir: Path, *, source_hash: str | None 
 def test_generated_public_data_consistency_smoke_accepts_coherent_artifact_set(tmp_path: Path) -> None:
     _write_consistent_public_data_set(tmp_path)
 
-    result = check_public_data_consistency(tmp_path)
+    result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
 
     assert result.ok is True, result.errors
 
@@ -79,7 +79,7 @@ def test_generated_public_data_consistency_smoke_accepts_coherent_artifact_set(t
 def test_generated_public_data_consistency_smoke_rejects_source_manifest_hash_drift(tmp_path: Path) -> None:
     _write_consistent_public_data_set(tmp_path, source_hash="0" * 64)
 
-    result = check_public_data_consistency(tmp_path)
+    result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
 
     assert result.ok is False
     assert any(
@@ -92,10 +92,121 @@ def test_generated_public_data_consistency_smoke_rejects_missing_required_artifa
     _write_consistent_public_data_set(tmp_path)
     (tmp_path / "public" / "data" / "health.json").unlink()
 
-    result = check_public_data_consistency(tmp_path)
+    result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
 
     assert result.ok is False
     assert "public/data/health.json is missing" in result.errors
+
+
+def test_generated_public_data_consistency_rejects_critical_health_without_health_slo_alert(
+    tmp_path: Path,
+) -> None:
+    """Critical health/SLO must not be invisible from alerts.json."""
+    from src.dashboard.health_slo_alerts import HEALTH_SLO_ALERT_TYPE
+
+    _write_consistent_public_data_set(tmp_path)
+    public_data = tmp_path / "public" / "data"
+    _write_json(
+        public_data / "health.json",
+        {
+            "system_status": "critical",
+            "generated_at": "2026-06-12T09:06:00+00:00",
+            "data_pipeline_slo": {
+                "status": "critical",
+                "top_dimension": "alpaca_feed_entitlement",
+            },
+        },
+    )
+    # alerts present but missing health_slo projection
+    _write_json(
+        public_data / "alerts.json",
+        {
+            "alerts": [
+                {
+                    "level": "error",
+                    "type": "kill_switch",
+                    "title": "Kill Switch",
+                    "message": "test",
+                }
+            ],
+            "count": 1,
+        },
+    )
+    # index alerts.json so unmanaged-json check does not fire first
+    index_path = public_data / "index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["entries"].append(
+        {
+            "filename": "alerts.json",
+            "path": "alerts.json",
+            "status": "present",
+            "generated_at": index.get("generated_at"),
+        }
+    )
+    _write_json(index_path, index)
+    shutil.copyfile(public_data / "health.json", tmp_path / "dist" / "data" / "health.json")
+    shutil.copyfile(public_data / "index.json", tmp_path / "dist" / "data" / "index.json")
+
+    result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
+
+    assert result.ok is False
+    assert any(
+        f"type={HEALTH_SLO_ALERT_TYPE!r}" in error or HEALTH_SLO_ALERT_TYPE in error
+        for error in result.errors
+    )
+
+
+def test_generated_public_data_consistency_accepts_critical_health_with_health_slo_alert(
+    tmp_path: Path,
+) -> None:
+    from src.dashboard.health_slo_alerts import HEALTH_SLO_ALERT_TYPE
+
+    _write_consistent_public_data_set(tmp_path)
+    public_data = tmp_path / "public" / "data"
+    _write_json(
+        public_data / "health.json",
+        {
+            "system_status": "critical",
+            "generated_at": "2026-06-12T09:06:00+00:00",
+            "data_pipeline_slo": {
+                "status": "critical",
+                "top_dimension": "alpaca_feed_entitlement",
+            },
+        },
+    )
+    _write_json(
+        public_data / "alerts.json",
+        {
+            "alerts": [
+                {
+                    "level": "error",
+                    "type": HEALTH_SLO_ALERT_TYPE,
+                    "title": "Critical Health/SLO: alpaca_feed_entitlement",
+                    "message": "Critical health/SLO: alpaca_feed_entitlement (missing_entitlement)",
+                    "top_dimension": "alpaca_feed_entitlement",
+                    "requires_action": True,
+                }
+            ],
+            "count": 1,
+        },
+    )
+    index_path = public_data / "index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["entries"].append(
+        {
+            "filename": "alerts.json",
+            "path": "alerts.json",
+            "status": "present",
+            "generated_at": index.get("generated_at"),
+        }
+    )
+    _write_json(index_path, index)
+    shutil.copyfile(public_data / "health.json", tmp_path / "dist" / "data" / "health.json")
+    shutil.copyfile(public_data / "index.json", tmp_path / "dist" / "data" / "index.json")
+
+    result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
+
+    assert result.ok is True, result.errors
 
 
 def test_generated_public_data_consistency_smoke_rejects_present_index_entry_with_missing_path(
@@ -114,7 +225,7 @@ def test_generated_public_data_consistency_smoke_rejects_present_index_entry_wit
     _write_json(index_path, index)
     shutil.copyfile(index_path, tmp_path / "dist" / "data" / "index.json")
 
-    result = check_public_data_consistency(tmp_path)
+    result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
 
     assert result.ok is False
     assert (
@@ -143,7 +254,7 @@ def test_generated_public_data_consistency_smoke_rejects_manifest_referenced_qua
     shutil.copyfile(source_path, tmp_path / "dist" / "data" / "source_manifest.json")
     shutil.copyfile(index_path, tmp_path / "dist" / "data" / "index.json")
 
-    result = check_public_data_consistency(tmp_path)
+    result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
 
     assert result.ok is False
     assert (
@@ -161,7 +272,7 @@ def test_generated_public_data_consistency_smoke_rejects_unmanaged_public_json(
         {"schema_version": "duration-sweep-results/v1", "results": []},
     )
 
-    result = check_public_data_consistency(tmp_path)
+    result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
 
     assert result.ok is False
     assert (
@@ -210,7 +321,7 @@ def test_generated_public_data_consistency_smoke_rejects_stale_market_db_vix3m(
         )
         conn.execute("INSERT INTO prices VALUES ('^VIX3M', '2026-06-26', 20.13)")
 
-    result = check_public_data_consistency(tmp_path)
+    result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
 
     assert result.ok is False
     assert any("^VIX3M market.db latest date 2026-06-26 lags prices.json 2026-07-02 by 6d" in error for error in result.errors)

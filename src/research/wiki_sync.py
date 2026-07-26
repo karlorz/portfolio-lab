@@ -181,13 +181,166 @@ Based on recent regime patterns:
         
         return page_path
     
+    @staticmethod
+    def _filter_phantom_cash_days(daily_entries: List[dict]) -> List[dict]:
+        """Drop trailing cash-only days after a history that already held positions.
+
+        Phantom rows (positions_count==0, initial capital) from test isolation
+        leaks must not become last-of-day equity for graduation summaries.
+        """
+        if not daily_entries:
+            return daily_entries
+
+        def positions_count(entry: dict) -> int | None:
+            if "positions_count" in entry and entry.get("positions_count") is not None:
+                try:
+                    return int(entry.get("positions_count"))
+                except (TypeError, ValueError):
+                    return None
+            positions = entry.get("positions")
+            if isinstance(positions, dict):
+                return len(positions)
+            if isinstance(positions, list):
+                return len(positions)
+            return None
+
+        ever_held = False
+        for entry in daily_entries:
+            n = positions_count(entry)
+            if n is not None and n > 0:
+                ever_held = True
+                break
+        if not ever_held:
+            return daily_entries
+
+        trimmed = list(daily_entries)
+        while trimmed:
+            n = positions_count(trimmed[-1])
+            # Only strip clear empty-portfolio tails (missing count stays).
+            if n == 0:
+                trimmed.pop()
+                continue
+            break
+        return trimmed or daily_entries
+
+    @staticmethod
+    def _portfolio_paper_mark(data_dir: Path | None = None) -> Optional[dict]:
+        """Load portfolio_paper mark when positions exist."""
+        root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+        path = root / "portfolio_paper.json"
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        positions = payload.get("positions") or {}
+        if not isinstance(positions, dict) or not positions:
+            return None
+        cash = float(payload.get("cash") or 0.0)
+        position_value = 0.0
+        for pos in positions.values():
+            if not isinstance(pos, dict):
+                continue
+            if pos.get("value") is not None:
+                try:
+                    position_value += float(pos.get("value") or 0.0)
+                    continue
+                except (TypeError, ValueError):
+                    pass
+            try:
+                shares = float(pos.get("shares") or 0.0)
+                price = float(pos.get("current_price") or pos.get("avg_price") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            position_value += shares * price
+        total = cash + position_value
+        return {
+            "total_value": round(total, 2),
+            "positions_count": len(positions),
+            "cash": cash,
+            "source": "portfolio_paper",
+        }
+
+    @staticmethod
+    def _kill_blocks_graduation(data_dir: Path | None = None) -> tuple[bool, Optional[dict]]:
+        """Return (blocked, payload) when kill authority blocks candidacy."""
+        root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+        try:
+            from src.dashboard.kill_authority import (
+                is_kill_execution_blocked,
+                load_kill_switch_payload,
+            )
+
+            payload = load_kill_switch_payload(root)
+            return is_kill_execution_blocked(payload), payload
+        except ImportError:
+            kill_file = root / "kill_switch.json"
+            if not kill_file.exists():
+                return False, None
+            try:
+                payload = json.loads(kill_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+                return True, None
+            if isinstance(payload, dict) and payload.get("enabled"):
+                return True, payload
+            return False, None
+
     def sync_performance_summary(self) -> Optional[Path]:
         """Sync paper trading performance to app-level data directory.
 
         Paper trading P&L is personal app state, not research knowledge.
         Written to DATA_DIR (not wiki vault) to avoid polluting shared
         knowledge base with user-specific runtime data.
+
+        Prefer daily_pnl.jsonl session SSOT (c358) when available so
+        current_value cannot lag the capture path. Fall back to the legacy
+        performance.jsonl path when daily_pnl is thin.
         """
+        # c358: prefer write-SSOT series when capture has enough session history.
+        try:
+            from src.monitor.paper_return_ssot import (
+                load_daily_pnl_sessions,
+                write_paper_trading_performance_from_ssot,
+            )
+
+            sessions = load_daily_pnl_sessions(DATA_DIR)
+            if len(sessions) >= 5:
+                paper_mark = self._portfolio_paper_mark(DATA_DIR)
+                cv = paper_mark["total_value"] if paper_mark is not None else None
+                path = write_paper_trading_performance_from_ssot(
+                    DATA_DIR, current_value=cv
+                )
+                if path is not None:
+                    # Enrich with graduation block for wiki_sync consumers.
+                    try:
+                        summary = json.loads(path.read_text(encoding="utf-8"))
+                        perf = summary.get("performance") or {}
+                        summary["graduation"] = self._graduation_status_dict(
+                            float(perf.get("total_return") or 0),
+                            float(perf.get("sharpe") or 0),
+                            float(perf.get("max_drawdown") or 0),
+                            int(perf.get("days_tracked") or 0),
+                            data_dir=DATA_DIR,
+                        )
+                        summary["schema_version"] = "paper-trading-performance/v3-ssot"
+                        generator_git_sha = None
+                        try:
+                            from src.monitor.decision_registry import _git_sha_short
+
+                            generator_git_sha = _git_sha_short()
+                        except Exception:
+                            generator_git_sha = None
+                        summary["generator_git_sha"] = generator_git_sha
+                        save_results_json(summary, output_path=str(path))
+                    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                        logger.debug("SSOT snapshot enrich failed: %s", exc)
+                    return path
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("daily_pnl SSOT snapshot path skipped: %s", exc)
+
         perf_log = DATA_DIR / "performance.jsonl"
         if not perf_log.exists():
             return None
@@ -217,15 +370,24 @@ Based on recent regime patterns:
                 date_key = f"__no_ts_{idx}__"
             daily_map[date_key] = entry
         daily_entries = [daily_map[d] for d in sorted(daily_map)]
+        filtered_entries = self._filter_phantom_cash_days(daily_entries)
+        phantom_days_dropped = max(0, len(daily_entries) - len(filtered_entries))
 
         # Calculate metrics from deduplicated daily entries
-        values = [e.get("total_value", 0) for e in daily_entries if e.get("total_value")]
-        returns = [e.get("daily_return", 0) for e in daily_entries if e.get("daily_return") is not None]
+        values = [e.get("total_value", 0) for e in filtered_entries if e.get("total_value")]
+        returns = [e.get("daily_return", 0) for e in filtered_entries if e.get("daily_return") is not None]
 
         if not values or len(values) < 5:
             return None
 
-        total_return = (values[-1] - values[0]) / values[0] if values[0] > 0 else 0
+        paper_mark = self._portfolio_paper_mark(DATA_DIR)
+        current_value = values[-1]
+        current_value_source = "performance_jsonl"
+        if paper_mark is not None:
+            current_value = paper_mark["total_value"]
+            current_value_source = "portfolio_paper"
+
+        total_return = (current_value - values[0]) / values[0] if values[0] > 0 else 0
 
         # Sharpe ratio calculation with variance check to avoid division by zero
         if returns and len(returns) > 1:
@@ -240,16 +402,27 @@ Based on recent regime patterns:
             sharpe = 0
         max_dd = 0
         peak = values[0]
-        for v in values:
+        series_for_dd = list(values)
+        if paper_mark is not None:
+            series_for_dd = list(values[:-1]) + [current_value] if values else [current_value]
+        for v in series_for_dd:
             if v > peak:
                 peak = v
-            dd = (peak - v) / peak
+            dd = (peak - v) / peak if peak else 0
             if dd > max_dd:
                 max_dd = dd
 
         timestamp = datetime.now().strftime("%Y-%m-%d")
         # Write to app-level DATA_DIR, not wiki vault
         page_path = DATA_DIR / f"paper-trading-performance-{timestamp}.json"
+
+        generator_git_sha = None
+        try:
+            from src.monitor.decision_registry import _git_sha_short
+
+            generator_git_sha = _git_sha_short()
+        except Exception:
+            generator_git_sha = None
 
         summary = {
             "date": timestamp,
@@ -259,15 +432,22 @@ Based on recent regime patterns:
                 "max_drawdown": max_dd,
                 "days_tracked": len(values),
                 "start_value": values[0],
-                "current_value": values[-1],
+                "current_value": current_value,
+                "current_value_source": current_value_source,
             },
             "daily_returns_distribution": {
                 "positive_days": sum(1 for r in returns if r > 0),
                 "negative_days": sum(1 for r in returns if r < 0),
                 "win_rate": sum(1 for r in returns if r > 0) / len(returns) if returns else 0,
             },
-            "graduation": self._graduation_status_dict(total_return, sharpe, max_dd, len(values)),
+            "graduation": self._graduation_status_dict(
+                total_return, sharpe, max_dd, len(values), data_dir=DATA_DIR
+            ),
             "raw_entries_count": len(entries),
+            "phantom_cash_days_dropped": phantom_days_dropped,
+            "generator_git_sha": generator_git_sha,
+            "schema_version": "paper-trading-performance/v2",
+            "return_source": "performance.jsonl_fallback",
         }
 
         save_results_json(summary, output_path=str(page_path))
@@ -299,12 +479,33 @@ Based on recent regime patterns:
         # Recent orders only
         recent = orders[-20:]  # Last 20 orders
 
-        timestamp = datetime.now().strftime("%Y-%m-%d")
-        # Write to app-level DATA_DIR, not wiki vault
-        page_path = DATA_DIR / f"order-history-{timestamp}.json"
+        # Batch DS: file date is write day; also stamp last real fill event so
+        # rebalance_health does not treat daily log snapshots as new executions.
+        write_day = datetime.now().strftime("%Y-%m-%d")
+        last_event = None
+        for o in orders:
+            ts = o.get("timestamp")
+            if not ts:
+                continue
+            try:
+                t = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                continue
+            if last_event is None or t > last_event:
+                last_event = t
+        last_event_at = last_event.isoformat() if last_event else None
+        last_event_day = (
+            last_event.strftime("%Y-%m-%d") if last_event else write_day
+        )
+
+        page_path = DATA_DIR / f"order-history-{write_day}.json"
 
         summary = {
-            "date": timestamp,
+            "date": write_day,
+            "write_day": write_day,
+            "last_order_event_at": last_event_at,
+            "last_order_event_day": last_event_day,
+            "snapshot_kind": "orders_jsonl_tail",
             "total_orders": len(orders),
             "recent_shown": len(recent),
             "recent_orders": recent,
@@ -313,6 +514,11 @@ Based on recent regime patterns:
                 "total_sell_orders": sum(1 for o in orders if o.get('side') == 'sell'),
                 "total_volume": sum(o.get('fill_value', 0) for o in orders),
             },
+            "provenance_note": (
+                "Daily file is a rolling snapshot of orders.jsonl; schedule "
+                "freshness must use last_order_event_at / order timestamps, "
+                "not write_day alone (Batch DS)."
+            ),
         }
 
         save_results_json(summary, output_path=str(page_path))
@@ -407,45 +613,137 @@ Market data snapshots saved to `raw/market/` with SHA256 provenance.
         return implications.get(regime, implications['normal'])
     
     def _graduation_status(self, total_return: float, sharpe: float, max_dd: float, days: int) -> str:
-        """Generate graduation status text (markdown, for regime analysis page)."""
+        """Generate graduation status text (markdown, for regime analysis page).
+
+        Narrative uses advisory performance metrics for readability. When the
+        GraduationChecklist SSOT disagrees with an advisory candidacy claim,
+        append a conflict note so operators do not treat wiki prose as promote
+        authority.
+        """
         MIN_DAYS = 63
         MIN_SHARPE = 0.5
         MAX_DD = 0.15
 
         if days < MIN_DAYS:
-            return f"Not Ready — Need {MIN_DAYS - days} more days of history"
-
-        checks = []
-        if sharpe >= MIN_SHARPE:
-            checks.append(f"Sharpe {sharpe:.2f} >= {MIN_SHARPE}")
+            base = f"Not Ready — Need {MIN_DAYS - days} more days of history"
         else:
-            checks.append(f"Sharpe {sharpe:.2f} < {MIN_SHARPE}")
+            checks = []
+            if sharpe >= MIN_SHARPE:
+                checks.append(f"Sharpe {sharpe:.2f} >= {MIN_SHARPE}")
+            else:
+                checks.append(f"Sharpe {sharpe:.2f} < {MIN_SHARPE}")
 
-        if max_dd <= MAX_DD:
-            checks.append(f"Max DD {max_dd:.1%} <= {MAX_DD:.0%}")
-        else:
-            checks.append(f"Max DD {max_dd:.1%} > {MAX_DD:.0%}")
+            if max_dd <= MAX_DD:
+                checks.append(f"Max DD {max_dd:.1%} <= {MAX_DD:.0%}")
+            else:
+                checks.append(f"Max DD {max_dd:.1%} > {MAX_DD:.0%}")
 
-        if sharpe >= MIN_SHARPE and max_dd <= MAX_DD:
-            return f"GRADUATION CANDIDATE: " + "; ".join(checks)
-        else:
-            return f"Tracking — Not yet meeting graduation criteria: " + "; ".join(checks)
+            if sharpe >= MIN_SHARPE and max_dd <= MAX_DD:
+                base = f"GRADUATION CANDIDATE: " + "; ".join(checks)
+            else:
+                base = f"Tracking — Not yet meeting graduation criteria: " + "; ".join(checks)
 
-    def _graduation_status_dict(self, total_return: float, sharpe: float, max_dd: float, days: int) -> dict:
-        """Generate graduation status as dict (for JSON output)."""
+        # Annotate when checklist SSOT would block while advisory text claims candidate
+        try:
+            from src.strategy.graduation_checklist import GraduationChecklist
+
+            checklist = GraduationChecklist()
+            results = checklist.check()
+            if (
+                "GRADUATION CANDIDATE" in base
+                and not checklist.is_graduation_ready(results)
+            ):
+                return (
+                    f"{base} — BLOCKED by checklist SSOT "
+                    f"(readiness={checklist.readiness_score(results)}%; "
+                    f"graduation_conflict=true; promote marker not authoritative)"
+                )
+        except (ImportError, OSError, TypeError, ValueError):
+            pass
+        return base
+
+    def _graduation_status_dict(
+        self,
+        total_return: float,
+        sharpe: float,
+        max_dd: float,
+        days: int,
+        *,
+        data_dir: Path | None = None,
+    ) -> dict:
+        """Generate graduation status as dict (for JSON output).
+
+        ``sharpe_met`` / candidacy follow GraduationChecklist when available so
+        performance files cannot claim candidate while checklist fails.
+        Kill halt always forces tracking (never candidate).
+        """
         MIN_DAYS = 63
         MIN_SHARPE = 0.5
         MAX_DD = 0.15
+        advisory_sharpe_met = sharpe >= MIN_SHARPE
+        advisory_max_dd_met = max_dd <= MAX_DD
+        advisory_ready = days >= MIN_DAYS and advisory_sharpe_met and advisory_max_dd_met
 
-        ready = days >= MIN_DAYS and sharpe >= MIN_SHARPE and max_dd <= MAX_DD
+        kill_blocked, kill_payload = self._kill_blocks_graduation(data_dir)
+        kill_level = None
+        kill_reason = None
+        if isinstance(kill_payload, dict):
+            kill_level = kill_payload.get("level")
+            kill_reason = kill_payload.get("reason")
+
+        checklist_ready = None
+        readiness_score = None
+        graduation_conflict = False
+        try:
+            from src.strategy.graduation_checklist import GraduationChecklist
+
+            checklist = GraduationChecklist()
+            results = checklist.check()
+            checklist_ready = checklist.is_graduation_ready(results)
+            readiness_score = checklist.readiness_score(results)
+            graduation_conflict = bool(advisory_ready and not checklist_ready)
+        except (ImportError, OSError, TypeError, ValueError):
+            checklist_ready = None
+
+        # Authoritative candidacy = checklist when available; never claim
+        # candidate from advisory metrics alone; never under kill halt.
+        if kill_blocked:
+            status = "tracking"
+            sharpe_met = False
+            max_dd_met = False
+            graduation_conflict = bool(graduation_conflict or advisory_ready or checklist_ready)
+        elif checklist_ready is True:
+            status = "candidate"
+            sharpe_met = True
+            max_dd_met = True
+        elif checklist_ready is False:
+            status = "tracking"
+            sharpe_met = False
+            max_dd_met = False
+        else:
+            # Checklist unavailable: fail closed — tracking only
+            status = "tracking"
+            sharpe_met = False
+            max_dd_met = False
+
         return {
-            "status": "candidate" if ready else "tracking",
+            "status": status,
             "days_tracked": days,
             "min_days_required": MIN_DAYS,
-            "sharpe_met": sharpe >= MIN_SHARPE,
-            "max_dd_met": max_dd <= MAX_DD,
+            "sharpe_met": sharpe_met,
+            "max_dd_met": max_dd_met,
             "sharpe": sharpe,
             "max_drawdown": max_dd,
+            "source": "graduation_checklist" if checklist_ready is not None else "advisory_metrics_fail_closed",
+            "checklist_ready": checklist_ready,
+            "readiness_score": readiness_score,
+            "graduation_conflict": graduation_conflict,
+            "advisory_sharpe_met": advisory_sharpe_met,
+            "advisory_max_dd_met": advisory_max_dd_met,
+            "advisory_ready": advisory_ready,
+            "kill_blocked": kill_blocked,
+            "kill_level": kill_level,
+            "kill_reason": kill_reason,
         }
     
     def run(self):
@@ -478,5 +776,10 @@ Market data snapshots saved to `raw/market/` with SHA256 provenance.
         logger.info("Wiki Sync Complete (%d wiki, %d app)", len(wiki_pages), len(app_data))
 
 if __name__ == "__main__":
+    # Cron/Makefile tee captures stdout; enable StreamHandler so tasker logs
+    # and data/wiki_sync.log receive structured INFO lines on each run.
+    from src.utils.log_config import configure_logging
+
+    configure_logging()
     sync = WikiSync()
     sync.run()

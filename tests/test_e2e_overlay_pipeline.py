@@ -107,11 +107,15 @@ class TestDashboardPipeline:
         assert dashboard.crypto is not None
         assert dashboard.kurtosis is not None
 
-    def test_dashboard_risk_assessment(self):
-        """Risk assessment should classify correctly."""
+    def test_dashboard_risk_assessment(self, tmp_path):
+        """Risk assessment should classify correctly.
+
+        Use isolated data_dir so live kill_switch.json cannot elevate a low-risk
+        fixture score (kill authority is intentional; this test is overlay-only).
+        """
         from src.dashboard.overlay_dashboard import OverlayDashboardGenerator
 
-        gen = OverlayDashboardGenerator()
+        gen = OverlayDashboardGenerator(data_dir=tmp_path)
         risk, alerts = gen._assess_portfolio_risk({
             "collar": {"vix_level": 15.0},
             "crypto": {"btc_vol_regime": "normal"},
@@ -138,7 +142,7 @@ class TestBacktestPipeline:
         """v4.90: combined overlay backtest."""
         from src.backtest.combined_overlay_backtest import CombinedOverlayBacktest
 
-        bt = CombinedOverlayBacktest()
+        bt = CombinedOverlayBacktest(allow_synthetic=True)
         result = bt.run_backtest()
         assert result.extras["trading_days"] > 0
         assert result.baseline_sharpe != 0
@@ -177,7 +181,10 @@ class TestEndToEndFlow:
 
         collar = generate_collar_signal(spot=550.0, vix=16.0)
         crypto = generate_crypto_signal()
-        bond = generate_bond_duration_signal()
+        # Explicit yields so bond is live-valid (no SSOT → defaults is degraded)
+        bond = generate_bond_duration_signal(
+            yield_10y=4.5, yield_2y=4.0, real_rate=2.0, rate_change_6m=0.15
+        )
         rng = np.random.RandomState(42)
         kurt = detect_kurtosis_regime(list(rng.normal(0, 0.01, 200)))
 

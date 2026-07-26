@@ -472,6 +472,22 @@ async function parseYahooChartResponse(response: Response, symbol: string): Prom
 }
 
 /**
+ * Yahoo chart `period2` is exclusive. Date-only end strings parse as UTC
+ * midnight, so using that instant as period2 drops same-day session bars
+ * (observed for ^VIX3M: last bar stuck while SPY advanced). Treat endDate as
+ * an inclusive calendar day by requesting through the next UTC midnight.
+ */
+export function yahooChartPeriodBounds(startDate: string, endDate: string): {
+  period1: number;
+  period2: number;
+} {
+  const period1 = Math.floor(new Date(startDate).getTime() / 1000);
+  const endMidnightUtc = Math.floor(new Date(endDate).getTime() / 1000);
+  const period2 = endMidnightUtc + 86_400;
+  return { period1, period2 };
+}
+
+/**
  * Fetch historical data from Yahoo Finance v8 chart API.
  */
 export async function fetchYahooV8(
@@ -480,8 +496,7 @@ export async function fetchYahooV8(
   endDate: string,
   options: YahooFetchOptions = {},
 ): Promise<HistoricalPrice[]> {
-  const period1 = Math.floor(new Date(startDate).getTime() / 1000);
-  const period2 = Math.floor(new Date(endDate).getTime() / 1000);
+  const { period1, period2 } = yahooChartPeriodBounds(startDate, endDate);
 
   const url = `https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${period1}&period2=${period2}&interval=1d`;
   const maxAttempts = Math.max(1, options.maxAttempts ?? 3);

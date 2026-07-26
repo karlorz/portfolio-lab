@@ -22,11 +22,11 @@ Usage:
 import json
 import logging
 import sqlite3
-from src.paths import sqlite_connect
+from src.paths import sqlite_connect, PUBLIC_DATA_DIR
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import numpy as np
 
 
@@ -64,8 +64,8 @@ class SourceAttribution:
     active_days: int
 
     # Directional accuracy
-    hit_rate: float          # % of times signal direction matched subsequent return
-    win_rate: float          # % of times signal produced positive return contribution
+    hit_rate: Optional[float]  # None when active_days==0 (no_data); else directional hit rate
+    win_rate: Optional[float]  # None when active_days==0; else positive-return rate contribution
     avg_return_bps: float    # Average daily return contribution (bps)
     total_return_bps: float  # Cumulative return contribution (bps)
 
@@ -88,7 +88,7 @@ class SourceAttribution:
         """Return per-unit-of-risk efficiency."""
         if self.avg_return_bps == 0:
             return 0.0
-        return self.hit_rate * abs(self.avg_return_bps) / 100
+        return 0.0 if self.hit_rate is None else self.hit_rate * abs(self.avg_return_bps) / 100
 
 
 @dataclass
@@ -105,7 +105,7 @@ class AttributionReport:
     # Aggregate
     best_source: Optional[str]
     worst_source: Optional[str]
-    avg_hit_rate: float
+    avg_hit_rate: Optional[float]  # None when no source has active_days > 0
     avg_correlation: float
 
     # Signal diversity
@@ -115,6 +115,7 @@ class AttributionReport:
     # Special flags
     degradation_signals: List[str]  # Sources degrading performance
     top_performers: List[str]       # Sources adding most value
+    status: str = "ok"  # ok | no_data
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -133,24 +134,57 @@ class PerformanceAttribution:
         self.attribution_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_signal_history(self, days: int = 90) -> List[Dict]:
-        """Extract signal reading history from ensemble database."""
+        """Extract signal reading history from ensemble database.
+
+        Live ``source_readings`` has thousands of rows per day. A tight
+        ``LIMIT days * n_sources * 2`` only returned the latest calendar day
+        (~1k rows), so attribution always looked like no_data when joined to
+        multi-day returns. Prefer one latest reading per (source, date).
+        """
         if not self.ensemble_db.exists():
             logger.warning("Ensemble DB not found: %s", self.ensemble_db)
             return []
 
         history = []
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         try:
             with sqlite_connect(self.ensemble_db) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
 
-                # Get source readings from the source_readings table
-                cursor.execute("""
-                    SELECT timestamp, source, value, confidence, weight, regime_fit, explanation
-                    FROM source_readings
-                    ORDER BY timestamp DESC
-                    LIMIT ?
-                """, (days * len(SIGNAL_SOURCE_META) * 2,))
+                # One row per source per calendar day (latest timestamp wins).
+                # Window functions require SQLite 3.25+ (available on prod).
+                try:
+                    cursor.execute(
+                        """
+                        SELECT timestamp, source, value, confidence, weight, regime_fit, explanation
+                        FROM (
+                            SELECT
+                                timestamp, source, value, confidence, weight, regime_fit, explanation,
+                                ROW_NUMBER() OVER (
+                                    PARTITION BY source, substr(timestamp, 1, 10)
+                                    ORDER BY timestamp DESC
+                                ) AS rn
+                            FROM source_readings
+                            WHERE substr(timestamp, 1, 10) >= ?
+                        ) ranked
+                        WHERE rn = 1
+                        ORDER BY timestamp DESC
+                        """,
+                        (cutoff,),
+                    )
+                except sqlite3.OperationalError:
+                    # Fallback: larger raw limit if window functions unavailable
+                    cursor.execute(
+                        """
+                        SELECT timestamp, source, value, confidence, weight, regime_fit, explanation
+                        FROM source_readings
+                        WHERE substr(timestamp, 1, 10) >= ?
+                        ORDER BY timestamp DESC
+                        LIMIT ?
+                        """,
+                        (cutoff, max(days * 50, 5000)),
+                    )
 
                 for row in cursor.fetchall():
                     history.append({
@@ -164,13 +198,17 @@ class PerformanceAttribution:
                     })
 
                 # Also get ensemble votes to cross-reference
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT timestamp, regime, consensus, agreement_ratio, equity_bias,
                            duration_bias, gold_bias, action, confidence, reasoning
                     FROM ensemble_votes
+                    WHERE substr(timestamp, 1, 10) >= ?
                     ORDER BY timestamp DESC
                     LIMIT ?
-                """, (days,))
+                    """,
+                    (cutoff, days * 4),
+                )
 
                 for row in cursor.fetchall():
                     history.append({
@@ -192,9 +230,80 @@ class PerformanceAttribution:
 
         return history
 
+    def _ingest_return_row(
+        self,
+        daily_returns: Dict[str, Dict],
+        date_str: Optional[str],
+        daily_return: Any,
+        cumulative_return: Any = None,
+        *,
+        overwrite: bool = True,
+    ) -> None:
+        """Insert one day into the returns map when date/return are parseable."""
+        if not date_str or not isinstance(date_str, str):
+            return
+        day = date_str[:10]
+        if len(day) < 10:
+            return
+        try:
+            ret = float(daily_return)
+        except (TypeError, ValueError):
+            return
+        if day in daily_returns and not overwrite:
+            return
+        entry = daily_returns.get(day, {})
+        entry["daily_return"] = ret
+        if cumulative_return is not None:
+            try:
+                entry["cumulative_return"] = float(cumulative_return)
+            except (TypeError, ValueError):
+                pass
+        daily_returns[day] = entry
+
+    def _load_returns_from_jsonl(self, path: Path, *, days: int) -> Dict[str, Dict]:
+        """Parse performance.jsonl / daily_pnl.jsonl into date → return map."""
+        out: Dict[str, Dict] = {}
+        if not path.exists():
+            return out
+        try:
+            # Tail-ish read for large performance.jsonl
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            logger.warning("Could not read %s: %s", path, exc)
+            return out
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        # Prefer last occurrences (later lines overwrite earlier same date)
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(row, dict) or "daily_return" not in row:
+                continue
+            date_str = row.get("date") or row.get("timestamp")
+            self._ingest_return_row(
+                out,
+                str(date_str) if date_str is not None else None,
+                row.get("daily_return"),
+                row.get("cumulative_return") or row.get("total_pnl_pct"),
+                overwrite=True,
+            )
+        if days > 0 and out:
+            # Keep the newest ``days`` calendar dates only
+            keep = sorted(out.keys(), reverse=True)[:days]
+            out = {k: out[k] for k in keep}
+        return out
+
     def _get_paper_trading_returns(self, days: int = 90) -> Dict[str, Dict]:
-        """Get daily returns from paper trading simulation."""
-        daily_returns = {}
+        """Get daily returns from paper trading simulation.
+
+        SSOT order:
+        1. ``paper_trading.db`` daily_snapshots (legacy)
+        2. ``daily_pnl.jsonl`` / ``daily_pnl_latest.json`` (capture_daily_pnl)
+        3. ``performance.jsonl`` (eval / paper journal)
+        4. ``logs/performance_summary_*.json`` (legacy summaries)
+        """
+        daily_returns: Dict[str, Dict] = {}
         paper_db = self.data_dir / "paper_trading.db"
 
         if paper_db.exists():
@@ -209,29 +318,57 @@ class PerformanceAttribution:
                         LIMIT ?
                     """, (days,))
                     for row in cursor.fetchall():
-                        daily_returns[row["date"]] = {
-                            "daily_return": row["daily_return"],
-                            "cumulative_return": row["cumulative_return"],
-                        }
+                        self._ingest_return_row(
+                            daily_returns,
+                            row["date"],
+                            row["daily_return"],
+                            row["cumulative_return"],
+                        )
             except (KeyError, ValueError, TypeError, AttributeError, RuntimeError, sqlite3.Error) as e:
                 logger.warning("Could not read paper trading DB: %s", e)
 
+        # Live paper SSOT: daily_pnl + performance journals (paper_trading.db often absent)
+        if not daily_returns:
+            for name in ("daily_pnl.jsonl", "performance.jsonl"):
+                loaded = self._load_returns_from_jsonl(
+                    self.data_dir / name, days=max(days, 120)
+                )
+                for day, payload in loaded.items():
+                    # Prefer earlier sources (daily_pnl over performance when both set)
+                    self._ingest_return_row(
+                        daily_returns,
+                        day,
+                        payload.get("daily_return"),
+                        payload.get("cumulative_return"),
+                        overwrite=False,
+                    )
+            # Cap to newest ``days`` after merge
+            if days > 0 and daily_returns:
+                keep = sorted(daily_returns.keys(), reverse=True)[:days]
+                daily_returns = {k: daily_returns[k] for k in keep}
+
         # Fallback: check json reports
         if not daily_returns:
-            perf_file = max(
-                (DATA_DIR / "logs").glob("performance_summary_*.json"),
-                default=None,
-            )
+            logs_root = self.data_dir / "logs"
+            perf_file = max(logs_root.glob("performance_summary_*.json"), default=None) if logs_root.exists() else None
+            if perf_file is None:
+                # Legacy global DATA_DIR path used by older tests
+                perf_file = max(
+                    (DATA_DIR / "logs").glob("performance_summary_*.json"),
+                    default=None,
+                )
             if perf_file and perf_file.exists():
                 try:
                     with open(perf_file) as f:
                         data = json.load(f)
                     if "daily_returns" in data:
                         for dr in data["daily_returns"]:
-                            daily_returns[dr["date"]] = {
-                                "daily_return": dr["return"],
-                                "cumulative_return": dr["cumulative"],
-                            }
+                            self._ingest_return_row(
+                                daily_returns,
+                                dr.get("date"),
+                                dr.get("return"),
+                                dr.get("cumulative"),
+                            )
                 except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
                     logger.warning("Could not read performance file: %s", e)
 
@@ -261,8 +398,8 @@ class PerformanceAttribution:
                 category="unknown",
                 total_readings=0,
                 active_days=0,
-                hit_rate=0.0,
-                win_rate=0.0,
+                hit_rate=None,
+                win_rate=None,
                 avg_return_bps=0.0,
                 total_return_bps=0.0,
                 sharpe_contribution=0.0,
@@ -334,8 +471,12 @@ class PerformanceAttribution:
                 contribution_bps = ret * 10000 * weight * 2  # Scaled by weight
             daily_contributions.append(contribution_bps)
 
-        hit_rate = hits / max(total, 1)
-        win_rate = wins / max(total, 1)
+        if total == 0:
+            hit_rate = None
+            win_rate = None
+        else:
+            hit_rate = hits / total
+            win_rate = wins / total
         avg_return_bps = np.mean(daily_contributions) if daily_contributions else 0.0
         total_return_bps = np.sum(daily_contributions) if daily_contributions else 0.0
 
@@ -357,8 +498,8 @@ class PerformanceAttribution:
             category=meta.get("category", "other"),
             total_readings=len(source_signals),
             active_days=total,
-            hit_rate=round(hit_rate, 4),
-            win_rate=round(win_rate, 4),
+            hit_rate=None if hit_rate is None else round(hit_rate, 4),
+            win_rate=None if win_rate is None else round(win_rate, 4),
             avg_return_bps=round(avg_return_bps, 2),
             total_return_bps=round(total_return_bps, 2),
             sharpe_contribution=round(sharpe_contribution, 4),
@@ -463,7 +604,7 @@ class PerformanceAttribution:
         # Identify degradation signals (negative sharpe or hit rate < 0.4)
         degradation_signals = [
             s.source for s in valid_sources
-            if s.sharpe_contribution < -0.1 or (s.hit_rate < 0.4 and s.total_readings > 5)
+            if s.sharpe_contribution < -0.1 or (s.hit_rate is not None and s.hit_rate < 0.4 and s.total_readings > 5)
         ]
 
         top_performers = [
@@ -471,7 +612,14 @@ class PerformanceAttribution:
             if s.sharpe_contribution > 0.5
         ]
 
-        avg_hit_rate = float(np.mean([s.hit_rate for s in valid_sources])) if valid_sources else 0.0
+        sources_with_days = [s for s in source_list if getattr(s, "active_days", 0) > 0]
+        if sources_with_days:
+            rates = [s.hit_rate for s in sources_with_days if s.hit_rate is not None]
+            avg_hit_rate = float(np.mean(rates)) if rates else None
+            report_status = "ok"
+        else:
+            avg_hit_rate = None
+            report_status = "no_data"
         avg_corr = float(np.mean([s.avg_correlation for s in valid_sources])) if valid_sources else 0.0
 
         # Count average active sources per day
@@ -493,8 +641,9 @@ class PerformanceAttribution:
             sources=sources,
             best_source=best_source,
             worst_source=worst_source,
-            avg_hit_rate=round(avg_hit_rate, 4),
+            avg_hit_rate=None if avg_hit_rate is None else round(avg_hit_rate, 4),
             avg_correlation=round(avg_corr, 4),
+            status=report_status,
             avg_active_sources_per_day=avg_active,
             total_sources_tracked=len(sources),
             degradation_signals=degradation_signals,
@@ -504,12 +653,116 @@ class PerformanceAttribution:
         return report
 
     def save_report(self, report: AttributionReport) -> Path:
-        """Save attribution report to disk."""
+        """Save attribution report to private DATA_DIR and public dual-write."""
         self.attribution_dir.mkdir(parents=True, exist_ok=True)
         filename = f"attribution_{report.timestamp[:10]}.json"
         path = self.attribution_dir / filename
-        save_results_json(report.to_dict(), output_path=str(path))
+        payload = report.to_dict()
+        # Operator lag detection: stamp code tip when available
+        try:
+            from src.dashboard.generator import _stamp_generator_git_sha
+
+            payload = _stamp_generator_git_sha(payload)
+        except Exception:  # noqa: BLE001 — never block attribution save on stamp
+            pass
+
+        public_dir = Path(PUBLIC_DATA_DIR) / "attribution"
+        latest = public_dir / "latest.json"
+        dated = public_dir / filename
+        paths_identical = False
+        try:
+            paths_identical = path.resolve() == latest.resolve()
+        except OSError:
+            paths_identical = False
+
+        try:
+            from src.dashboard.generator import _attach_dual_write_provenance
+
+            payload = _attach_dual_write_provenance(
+                payload,
+                private_path=path,
+                public_path=latest,
+                dual_write_attempted=not paths_identical,
+                dual_write_ok=None if not paths_identical else True,
+                paths_identical=paths_identical,
+                note="public dual-write under PUBLIC_DATA_DIR/attribution/",
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+        save_results_json(payload, output_path=str(path))
         logger.info("Saved attribution report: %s", path)
+        # Public latest for dual-tree SSOT / index consumers
+        if not paths_identical:
+            try:
+                public_dir.mkdir(parents=True, exist_ok=True)
+                try:
+                    from src.dashboard.generator import _attach_dual_write_provenance
+
+                    payload = _attach_dual_write_provenance(
+                        payload,
+                        private_path=path,
+                        public_path=latest,
+                        dual_write_attempted=True,
+                        dual_write_ok=True,
+                        paths_identical=False,
+                        note="public dual-write under PUBLIC_DATA_DIR/attribution/",
+                    )
+                    save_results_json(payload, output_path=str(path))
+                except Exception:  # noqa: BLE001
+                    pass
+                save_results_json(payload, output_path=str(latest))
+                save_results_json(payload, output_path=str(dated))
+                logger.info("Published attribution to public: %s", latest)
+                # Batch CJ: post-sync lag/hash on private + public latest
+                try:
+                    from src.dashboard.generator import (
+                        finalize_dual_write_provenance_after_sync,
+                    )
+
+                    payload = finalize_dual_write_provenance_after_sync(
+                        payload,
+                        private_path=path,
+                        public_path=latest,
+                        dual_write_ok=True,
+                        note="post_sync attribution dual-write (Batch CJ)",
+                    )
+                    # dated public copy should match finalized private body
+                    save_results_json(payload, output_path=str(dated))
+                except Exception:  # noqa: BLE001
+                    pass
+                # H19/BI: keep public index catalog current without full dashboard
+                try:
+                    from src.dashboard.public_data_index import (
+                        refresh_public_data_index_after_partial_write,
+                    )
+                    from src.paths import PUBLIC_DATA_DIR as _pub
+
+                    if refresh_public_data_index_after_partial_write(
+                        public_dir=Path(_pub),
+                        extra_paths=[latest, dated],
+                        reason="attribution_dual_write",
+                    ):
+                        logger.info("Refreshed public index after attribution dual-write")
+                except Exception as idx_exc:  # noqa: BLE001 — never block attribution
+                    logger.warning("Public index refresh after attribution failed: %s", idx_exc)
+            except (OSError, TypeError, ValueError) as exc:
+                logger.warning("Public attribution dual-write failed: %s", exc)
+                try:
+                    from src.dashboard.generator import _attach_dual_write_provenance
+
+                    payload = _attach_dual_write_provenance(
+                        payload,
+                        private_path=path,
+                        public_path=latest,
+                        dual_write_attempted=True,
+                        dual_write_ok=False,
+                        paths_identical=False,
+                        note=str(exc),
+                    )
+                    save_results_json(payload, output_path=str(path))
+                except Exception:  # noqa: BLE001
+                    pass
         return path
 
     def load_latest_report(self) -> Optional[AttributionReport]:
@@ -524,10 +777,28 @@ class PerformanceAttribution:
             for src_key, src_data in data.get("sources", {}).items():
                 sources[src_key] = SourceAttribution(**src_data)
             data["sources"] = sources
+            # Provenance stamps (Batch AY+) are operator metadata, not dataclass fields
+            for meta_key in (
+                "generator_git_sha",
+                "generator_git_sha_status",
+                "last_full_generator_git_sha",
+                "provenance_completeness",
+            ):
+                data.pop(meta_key, None)
             return AttributionReport(**data)
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.error("Error loading report: %s", e)
             return None
+
+
+def _fmt_rate(value: Optional[float], *, width: int = 8) -> str:
+    """Format optional hit/win rate for console; None → n/a (no_data sources)."""
+    if value is None:
+        return f"{'n/a':>{width}}"
+    try:
+        return f"{float(value):>{width}.1%}"
+    except (TypeError, ValueError):
+        return f"{'n/a':>{width}}"
 
 
 def print_report(report: AttributionReport):
@@ -543,21 +814,25 @@ def print_report(report: AttributionReport):
     # Sort sources by sharpe contribution
     sorted_sources = sorted(
         report.sources.values(),
-        key=lambda s: s.sharpe_contribution,
+        key=lambda s: s.sharpe_contribution if s.sharpe_contribution is not None else float("-inf"),
         reverse=True,
     )
 
     logger.info(f"  {'Source':30} {'HitRate':>9} {'WinRate':>9} {'AvgRet':>9} {'Sharpe':>9} {'Corr':>7} {'Active':>7}")
     logger.info("  " + "-" * 80)
     for s in sorted_sources:
+        avg_ret = 0.0 if s.avg_return_bps is None else float(s.avg_return_bps)
+        sharpe = 0.0 if s.sharpe_contribution is None else float(s.sharpe_contribution)
+        corr = 0.0 if s.avg_correlation is None else float(s.avg_correlation)
+        active = 0 if s.active_days is None else int(s.active_days)
         logger.info(
             f"  {s.display_name:30}"
-            f" {s.hit_rate:>8.1%}"
-            f" {s.win_rate:>8.1%}"
-            f" {s.avg_return_bps:>8.2f}"
-            f" {s.sharpe_contribution:>8.2f}"
-            f" {s.avg_correlation:>6.2f}"
-            f" {s.active_days:>6d}"
+            f" {_fmt_rate(s.hit_rate)}"
+            f" {_fmt_rate(s.win_rate)}"
+            f" {avg_ret:>8.2f}"
+            f" {sharpe:>8.2f}"
+            f" {corr:>6.2f}"
+            f" {active:>6d}"
         )
     logger.info("")
 
@@ -566,7 +841,7 @@ def print_report(report: AttributionReport):
         for sig in report.degradation_signals:
             src = report.sources.get(sig)
             if src:
-                logger.info(f"     {src.display_name:30} sharpe={src.sharpe_contribution:+.2f} hit={src.hit_rate:.1%}")
+                logger.info(f"     {src.display_name:30} sharpe={src.sharpe_contribution:+.2f} hit={'n/a' if src.hit_rate is None else f'{src.hit_rate:.1%}'}")
         logger.info("")
 
     if report.top_performers:
@@ -574,7 +849,7 @@ def print_report(report: AttributionReport):
         for sig in report.top_performers:
             src = report.sources.get(sig)
             if src:
-                logger.info(f"     {src.display_name:30} sharpe={src.sharpe_contribution:+.2f} hit={src.hit_rate:.1%}")
+                logger.info(f"     {src.display_name:30} sharpe={src.sharpe_contribution:+.2f} hit={'n/a' if src.hit_rate is None else f'{src.hit_rate:.1%}'}")
         logger.info("")
 
     if report.best_source and report.best_source in report.sources:
@@ -585,7 +860,14 @@ def print_report(report: AttributionReport):
         worst = report.sources[report.worst_source]
         logger.info(f"  Worst source: {worst.display_name} (Sharpe {worst.sharpe_contribution:+.2f})")
 
-    logger.info(f"\n  Average hit rate: {report.avg_hit_rate:.1%}")
+    average_hit_rate = (
+        "n/a" if report.avg_hit_rate is None else f"{report.avg_hit_rate:.1%}"
+    )
+    logger.info(
+        "\n  Average hit rate: %s (status=%s)",
+        average_hit_rate,
+        getattr(report, "status", "ok"),
+    )
     logger.info(f"  Average signal correlation: {report.avg_correlation:.2f}")
     logger.info("=" * 72)
     logger.info("")
@@ -645,9 +927,12 @@ def main():
 
     if args.command == "report":
         report = attributor.generate_report(days=args.days)
-        print_report(report)
+        # Persist before console print so a display bug never blocks artifact SSOT
+        # (cron stamps error if print_report raises after a good compute).
         if args.save:
             attributor.save_report(report)
+        print_report(report)
+        return 0
 
     elif args.command == "dashboard":
         report = attributor.load_latest_report()
@@ -655,16 +940,19 @@ def main():
             print_report(report)
         else:
             logger.warning("No saved reports found. Run 'report' first.")
+        return 0
 
     elif args.command == "patch":
         patch_save_vote()
         logger.info("EnsembleVoter patched. Run ensemble_voter vote to populate source_readings.")
+        return 0
 
     else:
         parser.print_help()
+        return 0
 
 
 if __name__ == "__main__":
     from src.utils.log_config import configure_logging
     configure_logging()
-    main()
+    raise SystemExit(main() or 0)

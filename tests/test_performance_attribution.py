@@ -446,6 +446,43 @@ class TestPrintReport:
             print_report(report)
         assert "PERFORMANCE ATTRIBUTION REPORT" in caplog.text
 
+    def test_print_report_none_win_rate_no_data_source(self, caplog):
+        """Sources with active_days=0 use win_rate=None — must not TypeError."""
+        src = SourceAttribution(
+            source="stale_src",
+            display_name="Stale Source",
+            category="other",
+            total_readings=3,
+            active_days=0,
+            hit_rate=None,
+            win_rate=None,
+            avg_return_bps=0.0,
+            total_return_bps=0.0,
+            sharpe_contribution=0.0,
+            max_consecutive_losses=0,
+            avg_correlation=0.0,
+            avg_weight=0.0,
+        )
+        report = AttributionReport(
+            timestamp="2026-07-20T00:00:00",
+            start_date="2026-04-21",
+            end_date="2026-07-20",
+            analysis_days=90,
+            sources={"stale_src": src},
+            best_source=None,
+            worst_source=None,
+            avg_hit_rate=None,
+            avg_correlation=0.0,
+            avg_active_sources_per_day=0.0,
+            total_sources_tracked=1,
+            degradation_signals=[],
+            top_performers=[],
+        )
+        with caplog.at_level(logging.INFO, logger="src.monitor.performance_attribution"):
+            print_report(report)
+        assert "Stale Source" in caplog.text
+        assert "n/a" in caplog.text
+
     def test_print_report_with_data(self, caplog):
         src = SourceAttribution(
             source="vp_macd", display_name="VP-MACD", category="momentum",
@@ -589,7 +626,7 @@ class TestComputeSourceAttributionExtended:
         daily_returns = {"2026-05-15": {"daily_return": 0.01}}
         attrib = attributor._compute_source_attribution(signals, daily_returns)
         assert attrib.active_days == 0
-        assert attrib.hit_rate == 0.0
+        assert attrib.hit_rate is None  # no_data: no joined return days
 
     def test_none_daily_return_skipped(self, attributor):
         """daily_return=None should be skipped."""
@@ -1033,6 +1070,37 @@ class TestGetPaperTradingReturnsExtended:
             assert returns["2026-01-02"]["cumulative_return"] == 0.002
         finally:
             pa.DATA_DIR = original_data_dir
+
+    def test_fallback_performance_jsonl(self, tmpdir):
+        """When paper_trading.db missing, use performance.jsonl SSOT."""
+        data_dir = Path(tmpdir) / "data"
+        data_dir.mkdir()
+        (data_dir / "performance.jsonl").write_text(
+            '{"timestamp":"2026-07-18T10:00:00","daily_return":0.001}\n'
+            '{"date":"2026-07-19","daily_return":-0.0005}\n'
+            '{"date":"2026-07-20","daily_return":0.0,"source":"capture_daily_pnl"}\n',
+            encoding="utf-8",
+        )
+        attributor = PerformanceAttribution(data_dir=data_dir)
+        returns = attributor._get_paper_trading_returns(days=30)
+        assert "2026-07-19" in returns
+        assert abs(returns["2026-07-19"]["daily_return"] - (-0.0005)) < 1e-12
+        assert "2026-07-18" in returns
+
+    def test_daily_pnl_preferred_over_performance_jsonl(self, tmpdir):
+        data_dir = Path(tmpdir) / "data"
+        data_dir.mkdir()
+        (data_dir / "daily_pnl.jsonl").write_text(
+            '{"date":"2026-07-20","daily_return":-0.0002}\n',
+            encoding="utf-8",
+        )
+        (data_dir / "performance.jsonl").write_text(
+            '{"date":"2026-07-20","daily_return":-3e-8}\n',
+            encoding="utf-8",
+        )
+        attributor = PerformanceAttribution(data_dir=data_dir)
+        returns = attributor._get_paper_trading_returns(days=30)
+        assert abs(returns["2026-07-20"]["daily_return"] - (-0.0002)) < 1e-12
 
     def test_corrupt_json_performance_file(self, tmpdir):
         """Corrupt JSON file should be handled gracefully."""
@@ -2003,3 +2071,21 @@ class TestSourceAttributionMetrics:
         expected = 0.75 * 4.0 / 100
         assert sa.efficiency_ratio == expected
 
+
+
+class TestAttributionNoDataHonesty:
+    def test_vacuous_report_status_no_data(self, tmp_path):
+        """When no source joins returns (active_days=0), status is no_data and hit rates null."""
+        from src.monitor.performance_attribution import PerformanceAttribution, AttributionReport
+
+        attrib = PerformanceAttribution(data_dir=tmp_path)
+        # Force empty history / empty returns path
+        report = attrib.generate_report(days=30)
+        assert isinstance(report, AttributionReport)
+        # Empty ensemble DB → no sources or all zero active
+        if report.total_sources_tracked == 0 or all(
+            (s.active_days if hasattr(s, "active_days") else report.sources[s].active_days) == 0
+            for s in (report.sources if isinstance(report.sources, dict) else [])
+        ):
+            assert report.status == "no_data"
+            assert report.avg_hit_rate is None

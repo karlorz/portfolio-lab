@@ -180,6 +180,28 @@ describe('market data fetcher source provenance', () => {
     ]);
   });
 
+  it('treats endDate as an inclusive calendar day in Yahoo period2', async () => {
+    // Yahoo chart period2 is exclusive of bars at/after the boundary. Requesting
+    // endDate at UTC midnight drops same-day session bars (notably ^VIX3M).
+    let requestedUrl = '';
+    const fetchImpl = async (input: RequestInfo | URL) => {
+      requestedUrl = String(input);
+      return new Response(JSON.stringify(yahooPayload(100)), { status: 200 });
+    };
+
+    await fetchYahooV8('^VIX3M', '2005-01-01', '2026-07-17', {
+      fetchImpl,
+      maxAttempts: 1,
+      backoffMs: 0,
+    });
+
+    const period2 = Number(new URL(requestedUrl).searchParams.get('period2'));
+    const endMidnightUtc = Math.floor(Date.parse('2026-07-17T00:00:00.000Z') / 1000);
+    expect(Number.isFinite(period2)).toBe(true);
+    // Must request through end of endDate UTC day (exclusive next midnight).
+    expect(period2).toBeGreaterThanOrEqual(endMidnightUtc + 86_400);
+  });
+
   it('classifies malformed Yahoo payloads without live network calls', async () => {
     const fetchImpl = async () => new Response('not-json', { status: 200 });
 
@@ -334,6 +356,8 @@ describe('market data fetcher source provenance', () => {
     expect(report).toEqual({
       schema_version: PRICE_DATA_QUALITY_SCHEMA_VERSION,
       generated_at: '2026-06-12T00:00:00Z',
+      generator_git_sha: expect.any(String),
+      generator_git_sha_status: 'full_generate',
       overall_status: 'ok',
       issue_counts: {
         duplicate_dates: 0,
@@ -361,7 +385,7 @@ describe('market data fetcher source provenance', () => {
           internal_gaps: [],
           invalid_dates: [],
           invalid_prices: [],
-          latest_lag_days: 0,
+          latest_lag_days: 1,
           missing_required_keys: [],
           non_monotonic_rows: [],
           non_object_records: [],
@@ -380,7 +404,7 @@ describe('market data fetcher source provenance', () => {
           internal_gaps: [],
           invalid_dates: [],
           invalid_prices: [],
-          latest_lag_days: 0,
+          latest_lag_days: 1,
           missing_required_keys: [],
           non_monotonic_rows: [],
           non_object_records: [],
@@ -392,7 +416,7 @@ describe('market data fetcher source provenance', () => {
     });
   });
 
-  it('keeps aligned cross-sections ok and does not treat weekends as missing trading days', () => {
+  it('keeps aligned cross-sections ok and counts only the weekday since the latest bar', () => {
     const report = buildPriceDataQualityReport(
       {
         SPY: [
@@ -415,7 +439,7 @@ describe('market data fetcher source provenance', () => {
     expect(report.issue_counts.internal_gaps).toBe(0);
     expect(report.issue_counts.stale_latest_dates).toBe(0);
     expect(report.symbols.every((symbol) => symbol.internal_gaps.length === 0)).toBe(true);
-    expect(report.symbols.every((symbol) => symbol.latest_lag_days === 0)).toBe(true);
+    expect(report.symbols.every((symbol) => symbol.latest_lag_days === 1)).toBe(true);
   });
 
   it('flags symbols whose latest date lags the reference calendar beyond threshold', () => {
@@ -438,7 +462,7 @@ describe('market data fetcher source provenance', () => {
     });
   });
 
-  it('flags bounded samples of internal reference-calendar gaps', () => {
+  it('flags bounded samples of internal reference-calendar gaps as advisory warn', () => {
     const report = buildPriceDataQualityReport(
       internalGapCompactPrices(),
       '2026-06-13T00:00:00Z',
@@ -446,16 +470,114 @@ describe('market data fetcher source provenance', () => {
     );
 
     const tlt = report.symbols.find((symbol) => symbol.symbol === 'TLT');
-    expect(report.overall_status).toBe('fail');
+    // Sparse / lagging mid-history holes must not fail-close the data job when
+    // the series is otherwise valid (see ^VIX3M vs SPY calendar).
+    expect(report.overall_status).toBe('warn');
     expect(report.issue_counts.internal_gaps).toBe(1);
     expect(tlt).toMatchObject({
-      status: 'fail',
+      status: 'warn',
       internal_gaps: [
         {
           missing_count: 1,
           sample_missing_dates: ['2026-06-11'],
         },
       ],
+    });
+  });
+
+  it('keeps sparse index series current when latest matches SPY despite mid-history holes', () => {
+    const report = buildPriceDataQualityReport(
+      {
+        SPY: [
+          { d: '2026-07-10', p: 740 },
+          { d: '2026-07-13', p: 742 },
+          { d: '2026-07-14', p: 743 },
+          { d: '2026-07-15', p: 744 },
+          { d: '2026-07-16', p: 750 },
+          { d: '2026-07-17', p: 743 },
+        ],
+        '^VIX3M': [
+          { d: '2026-07-10', p: 18.57 },
+          // Yahoo often omits mid-week bars for VIX indices while still publishing
+          // the latest session — not a staleness failure once latest matches SPY.
+          { d: '2026-07-17', p: 20.35 },
+        ],
+      },
+      '2026-07-18T00:00:00Z',
+    );
+
+    const vix = report.symbols.find((symbol) => symbol.symbol === '^VIX3M');
+    expect(report.issue_counts.stale_latest_dates).toBe(0);
+    expect(report.overall_status).not.toBe('fail');
+    expect(vix).toMatchObject({
+      latest_date: '2026-07-17',
+      latest_lag_days: 0,
+      stale_latest_date: null,
+    });
+    expect(vix?.internal_gaps.length ?? 0).toBeGreaterThan(0);
+    expect(vix?.status).toBe('warn');
+  });
+
+  it('treats sparse-index latest lag as advisory when Yahoo null-pads after last real bar', () => {
+    // Live Yahoo chart returns calendar timestamps through SPY's latest day with
+    // null closes for ^VIX3M after 2026-07-10; fetcher keeps last non-null bar.
+    // That lag must not fail-closed the whole data job / SLO.
+    const report = buildPriceDataQualityReport(
+      {
+        SPY: [
+          { d: '2026-07-10', p: 740 },
+          { d: '2026-07-13', p: 742 },
+          { d: '2026-07-14', p: 743 },
+          { d: '2026-07-15', p: 744 },
+          { d: '2026-07-16', p: 750 },
+          { d: '2026-07-17', p: 743 },
+        ],
+        '^VIX3M': [
+          { d: '2026-07-08', p: 19.46 },
+          { d: '2026-07-09', p: 18.99 },
+          { d: '2026-07-10', p: 18.57 },
+        ],
+      },
+      '2026-07-18T00:00:00Z',
+    );
+
+    const vix = report.symbols.find((symbol) => symbol.symbol === '^VIX3M');
+    expect(vix).toMatchObject({
+      latest_date: '2026-07-10',
+      latest_lag_days: 5,
+    });
+    // Visibility retained, but not a blocking stale_latest_dates count.
+    expect(vix?.stale_latest_date).toEqual({
+      reference_date: '2026-07-17',
+      latest_date: '2026-07-10',
+    });
+    expect(report.issue_counts.stale_latest_dates).toBe(0);
+    expect(report.overall_status).toBe('warn');
+    expect(vix?.status).toBe('warn');
+  });
+
+  it('still fails equity symbols that lag the reference calendar', () => {
+    const report = buildPriceDataQualityReport(
+      {
+        SPY: [
+          { d: '2026-07-15', p: 744 },
+          { d: '2026-07-16', p: 750 },
+          { d: '2026-07-17', p: 743 },
+        ],
+        GLD: [
+          { d: '2026-07-15', p: 220 },
+        ],
+      },
+      '2026-07-18T00:00:00Z',
+    );
+
+    const gld = report.symbols.find((symbol) => symbol.symbol === 'GLD');
+    expect(report.issue_counts.stale_latest_dates).toBe(1);
+    expect(report.overall_status).toBe('fail');
+    expect(gld?.status).toBe('fail');
+    expect(gld?.stale_latest_date).toEqual({
+      reference_date: '2026-07-17',
+      latest_date: '2026-07-15',
     });
   });
 
@@ -631,6 +753,34 @@ describe('market data fetcher source provenance', () => {
       return_anomaly_count: 0,
       return_anomalies: [],
     });
+  });
+
+  it('skips split_like equity gates on VIX-family crisis jumps (Batch BG)', () => {
+    const report = buildPriceDataQualityReport(
+      {
+        SPY: [
+          { d: '2018-02-02', p: 100 },
+          { d: '2018-02-05', p: 98 },
+        ],
+        '^VIX3M': [
+          { d: '2018-02-02', p: 17 },
+          { d: '2018-02-05', p: 37 }, // ~+118% regime jump, not a split
+        ],
+      },
+      '2018-02-06T00:00:00Z',
+      {
+        criticalReturnPct: 90,
+        maxLatestLagDays: Number.POSITIVE_INFINITY,
+        splitLikeReturnPct: 40,
+      },
+    );
+
+    expect(report.overall_status).toBe('ok');
+    expect(report.issue_counts.split_like_returns).toBe(0);
+    expect(report.issue_counts.extreme_returns).toBe(0);
+    const vix = report.symbols.find((s) => s.symbol === '^VIX3M');
+    expect(vix?.status).toBe('ok');
+    expect(vix?.return_anomaly_count).toBe(0);
   });
 
   it('keeps price data quality reports deterministic and compact', () => {

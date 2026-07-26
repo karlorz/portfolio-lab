@@ -38,6 +38,14 @@ _DATA_QUALITY_ISSUE_PRIORITY = (
     "extreme_returns",
     "split_like_returns",
 )
+# Align with price_quality.ts updateStatus: internal calendar gaps and
+# split-like/extreme return anomalies are advisory (overall_status=warn only).
+# They must not keep data_pipeline_slo top_dimension stuck on data_quality.
+_ADVISORY_DATA_QUALITY_ISSUES = frozenset({
+    "internal_gaps",
+    "extreme_returns",
+    "split_like_returns",
+})
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -72,29 +80,91 @@ def load_rebalance_health(public_dir: Path) -> dict[str, Any]:
 
 
 def _scheduler_dimension(health_data: Mapping[str, Any]) -> dict[str, Any]:
+    from src.monitor.hermes_cron import is_health_self_job, rollup_failed_cron_jobs
+
     scheduler = health_data.get("scheduler_status")
     scheduler_status = scheduler.get("status") if isinstance(scheduler, Mapping) else "unknown"
     cron_jobs = health_data.get("cron_jobs")
     jobs = cron_jobs if isinstance(cron_jobs, list) else []
-    failed_jobs = [job for job in jobs if isinstance(job, Mapping) and job.get("status") == "error"]
+    # Exclude portfolio-lab-health self-errors (sticky tasker mirror of prior exits).
+    failed_jobs = rollup_failed_cron_jobs(jobs)
+
+    # If scheduler_status is degraded solely because of the self-job, treat as ok
+    # for the dimension severity when no other failures remain.
+    self_only_error = (
+        not failed_jobs
+        and any(
+            isinstance(job, Mapping)
+            and job.get("status") == "error"
+            and is_health_self_job(job)
+            for job in jobs
+        )
+    )
+    effective_scheduler_status = scheduler_status
+    if self_only_error and scheduler_status in {"degraded", "warning"}:
+        effective_scheduler_status = "ok"
+
     if len(failed_jobs) > 2:
         status = "critical"
-    elif failed_jobs or scheduler_status in {"degraded", "error", "warning", "unavailable"}:
+    elif failed_jobs or effective_scheduler_status in {
+        "degraded",
+        "error",
+        "warning",
+        "unavailable",
+    }:
         status = "warning"
-    elif scheduler_status == "unknown":
+    elif effective_scheduler_status == "unknown":
         status = "unknown"
     else:
         status = "ok"
     return {
         "status": status,
-        "scheduler_status": scheduler_status,
+        "scheduler_status": effective_scheduler_status,
         "failed_jobs": len(failed_jobs),
         "message": (
             f"{len(failed_jobs)} scheduler job(s) failed"
             if failed_jobs
-            else f"scheduler {scheduler_status}"
+            else f"scheduler {effective_scheduler_status}"
         ),
     }
+
+
+def _is_price_quality_warn_only_row(row: Mapping[str, Any]) -> bool:
+    """True when live fetch succeeded and only nested price-quality is warn.
+
+    fetch-data marks prices.json / prices_compact.json status=degraded when
+    overall_status=warn. That is an advisory quality signal already covered by
+    the data_quality SLO dimension — not a provider outage/fallback.
+    """
+    if str(row.get("source_mode") or "") != "live":
+        return False
+    if str(row.get("status") or "") not in {"degraded", "warning", "warn"}:
+        return False
+    if row.get("failure_reason") not in (None, "", "null"):
+        return False
+    if row.get("fallback_reason") not in (None, "", "null"):
+        return False
+    quality = row.get("data_quality")
+    if not isinstance(quality, Mapping):
+        return False
+    return str(quality.get("status") or "").lower() in {"warn", "warning"}
+
+
+def _is_intentional_lab_provider_gap_row(row: Mapping[str, Any]) -> bool:
+    """True for known non-outage lab gaps that have their own SLO dimensions.
+
+    - Live prices degraded solely from quality warn → data_quality dimension
+    - yields.json synthetic + missing_api_key → fred_readiness / FRED lab gap
+    """
+    if _is_price_quality_warn_only_row(row):
+        return True
+    artifact = str(row.get("artifact") or "")
+    if artifact != "yields.json":
+        return False
+    if str(row.get("source_mode") or "") != "synthetic":
+        return False
+    reason = str(row.get("failure_reason") or row.get("fallback_reason") or "")
+    return reason in {"missing_api_key", "missing_fred_api_key"}
 
 
 def _provider_dimension(source_manifest: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -112,8 +182,20 @@ def _provider_dimension(source_manifest: Mapping[str, Any] | None) -> dict[str, 
             "message": "source manifest stale" if manifest_degraded else "source manifest missing or empty",
         }
     degraded_rows = [
-        row for row in rows
-        if row.get("status") != "success" or row.get("source_mode") != "live"
+        row
+        for row in rows
+        if (row.get("status") != "success" or row.get("source_mode") != "live")
+        and not _is_intentional_lab_provider_gap_row(row)
+    ]
+    quality_warn_only = [
+        str(row.get("artifact"))
+        for row in rows
+        if _is_price_quality_warn_only_row(row)
+    ]
+    lab_gap_artifacts = [
+        str(row.get("artifact"))
+        for row in rows
+        if _is_intentional_lab_provider_gap_row(row)
     ]
     degraded = [str(row.get("artifact")) for row in degraded_rows]
     degraded_reasons = {
@@ -130,7 +212,7 @@ def _provider_dimension(source_manifest: Mapping[str, Any] | None) -> dict[str, 
         for artifact, details in degraded_reasons.items()
     ]
     status = "warning" if degraded or manifest_degraded else "ok"
-    return {
+    payload: dict[str, Any] = {
         "status": status,
         "manifest_status": manifest_status,
         "manifest_failure_reason": manifest_failure_reason,
@@ -145,6 +227,11 @@ def _provider_dimension(source_manifest: Mapping[str, Any] | None) -> dict[str, 
             else "providers live"
         ),
     }
+    if quality_warn_only:
+        payload["quality_warn_only_artifacts"] = quality_warn_only
+    if lab_gap_artifacts:
+        payload["intentional_lab_gap_artifacts"] = lab_gap_artifacts
+    return payload
 
 
 def _parse_generated_at(value: Any) -> datetime | None:
@@ -206,8 +293,16 @@ def _artifact_dimension(
 ) -> dict[str, Any]:
     data_freshness = health_data.get("data_freshness")
     freshness = data_freshness if isinstance(data_freshness, Mapping) else {}
-    critical = [name for name, row in freshness.items() if isinstance(row, Mapping) and row.get("status") == "critical"]
-    stale = [name for name, row in freshness.items() if isinstance(row, Mapping) and row.get("status") == "stale"]
+    critical = [
+        name
+        for name, row in freshness.items()
+        if isinstance(row, Mapping) and row.get("status") == "critical"
+    ]
+    stale = [
+        name
+        for name, row in freshness.items()
+        if isinstance(row, Mapping) and row.get("status") == "stale"
+    ]
 
     entries = public_index.get("entries") if isinstance(public_index, Mapping) else None
     missing_market_entries = [
@@ -221,25 +316,28 @@ def _artifact_dimension(
     source_index_freshness = _source_manifest_index_freshness(source_manifest, public_index)
     source_index_status = source_index_freshness.get("status")
 
-    if len(critical) > 10 or missing_market_entries:
+    # Highest-severity rollup: any critical data_freshness child makes the
+    # artifact dimension critical (no silent count-threshold downgrade).
+    if critical or missing_market_entries:
         status = "critical"
     elif stale or source_index_status == "warning":
-        status = "warning"
-    elif critical:
         status = "warning"
     else:
         status = "ok"
     message = (
         source_index_freshness["message"]
-        if source_index_status == "warning"
+        if source_index_status == "warning" and not critical and not missing_market_entries
         else f"{len(critical)} critical, {len(stale)} stale artifacts"
         if critical or stale
         else "artifacts fresh"
+        if not missing_market_entries
+        else f"{len(missing_market_entries)} missing market-data index entries"
     )
     return {
         **source_index_freshness,
         "status": status,
         "critical_count": len(critical),
+        "critical_artifacts": critical[:10],
         "stale_count": len(stale),
         "stale_artifacts": stale[:10],
         "missing_market_entries": missing_market_entries,
@@ -247,23 +345,93 @@ def _artifact_dimension(
     }
 
 
+def _actionable_unavailable_signals(
+    signal_staleness: Mapping[str, Any],
+    unavailable_signals: list[str],
+) -> tuple[list[str], int]:
+    """Split unavailable signals into actionable vs intentional lab gaps.
+
+    Matches ``classify_signal_staleness``: FRED-unconfigured / ML-off gaps must
+    not keep the signal SLO dimension in permanent warning.
+    """
+    ownership = signal_staleness.get("unavailable_ownership")
+    if not (isinstance(ownership, list) and ownership):
+        try:
+            from src.monitor.signal_ownership import annotate_unavailable_signals
+
+            ownership = annotate_unavailable_signals(unavailable_signals)
+        except ImportError:
+            ownership = []
+
+    if isinstance(ownership, list) and ownership:
+        actionable = [
+            str(row.get("signal"))
+            for row in ownership
+            if isinstance(row, Mapping)
+            and not (
+                row.get("intentional_lab_gap")
+                or row.get("intentional_when_ml_off")
+            )
+        ]
+        intentional_count = max(0, len(unavailable_signals) - len(actionable))
+        return actionable, intentional_count
+
+    # No ownership metadata: treat full list as actionable (fail-closed).
+    return list(unavailable_signals), 0
+
+
 def _signal_dimension(signal_staleness: Mapping[str, Any] | None) -> dict[str, Any]:
     stale = signal_staleness.get("stale_signals") if isinstance(signal_staleness, Mapping) else None
     unavailable = signal_staleness.get("unavailable_signals") if isinstance(signal_staleness, Mapping) else None
     stale_signals = [str(item) for item in stale] if isinstance(stale, list) else []
     unavailable_signals = [str(item) for item in unavailable] if isinstance(unavailable, list) else []
-    status = "warning" if stale_signals else "ok"
-    return {
+
+    actionable_unavailable: list[str] = []
+    intentional_lab_gap_count = 0
+    if unavailable_signals and isinstance(signal_staleness, Mapping):
+        actionable_unavailable, intentional_lab_gap_count = _actionable_unavailable_signals(
+            signal_staleness, unavailable_signals
+        )
+    elif unavailable_signals:
+        actionable_unavailable = list(unavailable_signals)
+
+    # Stale or actionable unavailable → warning. Intentional lab gaps alone → ok.
+    if stale_signals or actionable_unavailable:
+        status = "warning"
+    else:
+        status = "ok"
+
+    if stale_signals and actionable_unavailable:
+        message = (
+            f"{len(stale_signals)} stale signal(s); "
+            f"{len(actionable_unavailable)} unavailable signal(s)"
+        )
+    elif stale_signals:
+        message = f"{len(stale_signals)} stale required signal(s)"
+    elif actionable_unavailable:
+        message = f"{len(actionable_unavailable)} unavailable signal(s) (not all-fresh)"
+    elif intentional_lab_gap_count:
+        message = (
+            f"required signals fresh "
+            f"({intentional_lab_gap_count} intentional lab gaps skipped)"
+        )
+    else:
+        message = "required signals fresh"
+
+    payload: dict[str, Any] = {
         "status": status,
         "stale_count": len(stale_signals),
         "unavailable_count": len(unavailable_signals),
+        "actionable_unavailable_count": len(actionable_unavailable),
+        "intentional_lab_gap_count": intentional_lab_gap_count,
         "stale_signals": stale_signals[:10],
-        "message": (
-            f"{len(stale_signals)} stale required signal(s)"
-            if stale_signals
-            else "required signals fresh"
-        ),
+        "unavailable_signals": unavailable_signals[:10],
+        "actionable_unavailable_signals": actionable_unavailable[:10],
+        "message": message,
     }
+    if intentional_lab_gap_count and not actionable_unavailable and not stale_signals:
+        payload["intentional_lab_gaps_only"] = True
+    return payload
 
 
 def _price_manifest_rows(source_manifest: Mapping[str, Any] | None) -> list[Mapping[str, Any]]:
@@ -342,6 +510,26 @@ def _manifest_symbol_count(row: Mapping[str, Any] | None) -> int:
     return 0
 
 
+def _is_advisory_only_quality_warn(quality_status: str, issue_counts: Mapping[str, int]) -> bool:
+    """True when overall_status is warn and only advisory issue counters are set.
+
+    Mirrors price_quality.ts: internal_gaps + return anomalies (split-like /
+    extreme) yield overall_status=warn without failing the data job. Those must
+    not elevate data_pipeline_slo severity above ok (runbook still lists them).
+    """
+    if quality_status not in {"warn", "warning"}:
+        return False
+    positive = {
+        key: count
+        for key, count in issue_counts.items()
+        if key != "total" and isinstance(count, int) and count > 0
+    }
+    if not positive:
+        # warn with empty counts still advisory (e.g. nested status only)
+        return True
+    return all(key in _ADVISORY_DATA_QUALITY_ISSUES for key in positive)
+
+
 def _data_quality_dimension(
     source_manifest: Mapping[str, Any] | None,
     data_quality_report: Mapping[str, Any] | None = None,
@@ -352,11 +540,25 @@ def _data_quality_dimension(
         if isinstance(quality, Mapping)
         else "missing"
     )
-    status = _data_quality_status(quality_status)
-    issue_counts = _data_quality_issue_counts(quality.get("issue_counts") if isinstance(quality, Mapping) else None)
+    issue_counts = _data_quality_issue_counts(
+        quality.get("issue_counts") if isinstance(quality, Mapping) else None
+    )
     top_issue = _top_data_quality_issue(issue_counts)
     affected_issue_count = issue_counts.get(top_issue, 0) if top_issue else 0
-    affected_symbol_count = _manifest_symbol_count(row) if status != "ok" else 0
+    advisory_only = _is_advisory_only_quality_warn(quality_status, issue_counts)
+
+    if advisory_only:
+        # Keep quality_status=warn for operators; SLO severity stays ok so
+        # top_dimension can surface real outages / missing reports instead.
+        status = "ok"
+    else:
+        status = _data_quality_status(quality_status)
+
+    affected_symbol_count = (
+        _manifest_symbol_count(row)
+        if status != "ok" or advisory_only
+        else 0
+    )
     artifact = quality.get("artifact") if isinstance(quality, Mapping) else None
     artifact_name = str(artifact or "data_quality.json")
     source_artifact = row.get("artifact") if isinstance(row, Mapping) else None
@@ -365,6 +567,13 @@ def _data_quality_dimension(
         message = f"price data quality report missing for {affected_symbol_count} tracked symbol(s)"
     elif quality_status == "unavailable":
         message = f"price data quality report unavailable for {affected_symbol_count} tracked symbol(s)"
+    elif advisory_only and top_issue:
+        message = (
+            f"price data quality advisory ({quality_status}): {top_issue}="
+            f"{affected_issue_count} across {affected_symbol_count} tracked symbol(s)"
+        )
+    elif advisory_only:
+        message = f"price data quality advisory ({quality_status})"
     elif status == "ok":
         message = "price data quality ok"
     elif top_issue:
@@ -375,7 +584,7 @@ def _data_quality_dimension(
     else:
         message = f"price data quality {quality_status}"
 
-    return {
+    payload: dict[str, Any] = {
         "status": status,
         "quality_status": quality_status,
         "artifact": artifact_name,
@@ -388,6 +597,10 @@ def _data_quality_dimension(
         "affected_symbol_count": affected_symbol_count,
         "message": message,
     }
+    if advisory_only:
+        payload["advisory_only"] = True
+        payload["blocking"] = False
+    return payload
 
 
 def _provider_reconciliation_dimension(provider_reconciliation: Mapping[str, Any]) -> dict[str, Any]:
@@ -416,9 +629,42 @@ def _provider_reconciliation_dimension(provider_reconciliation: Mapping[str, Any
 
 
 def _fred_readiness_dimension(fred_readiness: Mapping[str, Any]) -> dict[str, Any]:
+    """Map FRED credential readiness into SLO severity.
+
+    Non-blocking lab/paper gaps (``ready=True``, ``blocking=False``) — e.g.
+    missing_fred_api_key under lab/local modes — are intentional research-host
+    posture. Keep dimension ok + intentional_lab_gap so they do not pin
+    top_dimension/system_status warning. Live fail (blocking) stays critical.
+    """
     readiness_status = str(fred_readiness.get("status", "unknown"))
     readiness = str(fred_readiness.get("readiness", "unknown"))
-    if readiness == "fail":
+    ready = fred_readiness.get("ready")
+    blocking = fred_readiness.get("blocking")
+    reason = fred_readiness.get("reason")
+    safe_reason = _safe_reason(reason)
+
+    # Intentional lab gap: assess_fred_readiness marks non-live modes ready and
+    # non-blocking while still surfacing status/readiness warn for operators.
+    intentional_lab_gap = (
+        ready is True
+        and blocking is False
+        and readiness in {"pass", "warn"}
+        and safe_reason in {
+            "missing_fred_api_key",
+            "invalid_fred_api_key",
+            "fred_data_unavailable",
+            None,
+        }
+        and readiness != "fail"
+    )
+    # Missing key is always a lab gap when non-blocking; other reasons only when
+    # explicitly non-blocking ready.
+    if ready is True and blocking is False and safe_reason == "missing_fred_api_key":
+        intentional_lab_gap = True
+
+    if intentional_lab_gap:
+        status = "ok"
+    elif readiness == "fail" or blocking is True:
         status = "critical"
     elif readiness == "warn":
         status = "warning"
@@ -434,25 +680,58 @@ def _fred_readiness_dimension(fred_readiness: Mapping[str, Any]) -> dict[str, An
         status = "unknown"
 
     message = fred_readiness.get("remediation") or fred_readiness.get("message") or "FRED readiness unavailable"
-    return {
+    payload: dict[str, Any] = {
         "status": status,
         "readiness": fred_readiness.get("readiness"),
         "mode": fred_readiness.get("mode"),
-        "ready": fred_readiness.get("ready"),
-        "blocking": fred_readiness.get("blocking"),
-        "reason": fred_readiness.get("reason"),
+        "ready": ready,
+        "blocking": blocking,
+        "reason": safe_reason,
         "source_mode": fred_readiness.get("source_mode"),
         "message": str(message),
     }
+    if intentional_lab_gap:
+        payload["intentional_lab_gap"] = True
+        payload["blocking"] = False
+    return payload
 
 
 def _alpaca_feed_entitlement_dimension(feed_entitlement: Mapping[str, Any]) -> dict[str, Any]:
+    """Map feed entitlement into an SLO dimension.
+
+    ``missing_entitlement`` is an intentional lab gap in local/lab/paper modes
+    (same posture as missing FRED_API_KEY / alpaca_not_configured consistency):
+    dimension status ok + intentional_lab_gap. Live mode and delayed/insufficient
+    feeds stay fail-closed.
+    """
     policy_decision = str(feed_entitlement.get("policy_decision", "unknown"))
     acceptable_for_live = feed_entitlement.get("acceptable_for_live")
     delayed = bool(feed_entitlement.get("delayed", False))
     reason = feed_entitlement.get("reason")
-    if policy_decision == "accept" or acceptable_for_live is True:
+    safe_reason = _safe_reason(reason)
+
+    # Shared portfolio operating-mode resolver (FRED readiness uses the same keys).
+    try:
+        from src.monitor.fred_readiness import resolve_fred_operating_mode
+
+        operating_mode = resolve_fred_operating_mode()
+    except ImportError:
+        operating_mode = "local"
+
+    # Modes where live broker feed entitlement is not a hard gate.
+    _LAB_GAP_MODES = {"local", "test", "lab", "paper", "staging", "dev", "development"}
+    intentional_lab_gap = False
+
+    if policy_decision in {"accept", "allow"} or acceptable_for_live is True:
         status = "ok"
+    elif (
+        safe_reason == "missing_entitlement"
+        and operating_mode in _LAB_GAP_MODES
+        and not delayed
+    ):
+        # IEX configured without ALPACA_FEED_ENTITLEMENT — expected on research hosts.
+        status = "ok"
+        intentional_lab_gap = True
     elif policy_decision == "reject" or acceptable_for_live is False or delayed:
         status = "critical"
     elif policy_decision in {"warn", "warning"}:
@@ -460,8 +739,20 @@ def _alpaca_feed_entitlement_dimension(feed_entitlement: Mapping[str, Any]) -> d
     else:
         status = "unknown"
 
-    safe_reason = _safe_reason(reason)
-    return {
+    if intentional_lab_gap:
+        message = (
+            f"Alpaca feed entitlement not declared for {operating_mode} mode "
+            f"({safe_reason}); set ALPACA_FEED_ENTITLEMENT before live operation"
+        )
+    elif status == "ok":
+        message = "Alpaca feed entitlement acceptable for live operation"
+    else:
+        message = (
+            f"Alpaca feed entitlement {policy_decision}: "
+            f"{safe_reason or 'review required'}"
+        )
+
+    payload: dict[str, Any] = {
         "status": status,
         "configured_feed": feed_entitlement.get("configured_feed"),
         "effective_feed": feed_entitlement.get("effective_feed"),
@@ -470,17 +761,43 @@ def _alpaca_feed_entitlement_dimension(feed_entitlement: Mapping[str, Any]) -> d
         "acceptable_for_live": acceptable_for_live,
         "policy_decision": policy_decision,
         "reason": safe_reason,
-        "message": (
-            "Alpaca feed entitlement acceptable for live operation"
-            if status == "ok"
-            else f"Alpaca feed entitlement {policy_decision}: {safe_reason or 'review required'}"
-        ),
+        "operating_mode": operating_mode,
+        "message": message,
     }
+    if intentional_lab_gap:
+        payload["intentional_lab_gap"] = True
+        payload["blocking"] = False
+    return payload
 
 
 def _market_data_consistency_dimension(market_data_consistency: Mapping[str, Any]) -> dict[str, Any]:
+    """Map broker/local consistency into SLO severity.
+
+    ``alpaca_not_configured`` is an intentional lab gap on research hosts without
+    broker credentials (same posture as missing feed entitlement). Live mode
+    still fails closed as warning/unavailable so promotion cannot ignore it.
+    """
     consistency_status = str(market_data_consistency.get("status", "unknown"))
-    if consistency_status in {"critical", "error", "failed"}:
+    reason = market_data_consistency.get("reason")
+    safe_reason = _safe_reason(reason)
+
+    try:
+        from src.monitor.fred_readiness import resolve_fred_operating_mode
+
+        operating_mode = resolve_fred_operating_mode()
+    except ImportError:
+        operating_mode = "local"
+
+    _LAB_GAP_MODES = {"local", "test", "lab", "paper", "staging", "dev", "development"}
+    intentional_lab_gap = (
+        safe_reason == "alpaca_not_configured"
+        and operating_mode in _LAB_GAP_MODES
+        and consistency_status in {"unavailable", "warning", "degraded"}
+    )
+
+    if intentional_lab_gap:
+        status = "ok"
+    elif consistency_status in {"critical", "error", "failed"}:
         status = "critical"
     elif consistency_status in {"warning", "degraded", "unavailable"}:
         status = "warning"
@@ -493,20 +810,124 @@ def _market_data_consistency_dimension(market_data_consistency: Mapping[str, Any
     warning_rows = [str(item) for item in warnings] if isinstance(warnings, list) else []
     rows = market_data_consistency.get("rows")
     checked_rows = [row for row in rows if isinstance(row, Mapping)] if isinstance(rows, list) else []
-    reason = market_data_consistency.get("reason")
-    safe_reason = _safe_reason(reason)
-    return {
+
+    if intentional_lab_gap:
+        message = (
+            f"broker consistency check skipped ({safe_reason}) in {operating_mode} mode; "
+            "configure Alpaca before live broker/local parity checks"
+        )
+    elif status == "ok":
+        message = "broker/local market data consistency ok"
+    else:
+        message = (
+            f"broker/local market data consistency {consistency_status}: "
+            f"{safe_reason or 'review required'}"
+        )
+
+    payload: dict[str, Any] = {
         "status": status,
         "consistency_status": consistency_status,
         "reason": safe_reason,
         "checked_at": market_data_consistency.get("checked_at"),
         "row_count": len(checked_rows),
         "warning_count": len(warning_rows),
-        "message": (
-            "broker/local market data consistency ok"
-            if status == "ok"
-            else f"broker/local market data consistency {consistency_status}: {safe_reason or 'review required'}"
-        ),
+        "operating_mode": operating_mode,
+        "message": message,
+    }
+    if intentional_lab_gap:
+        payload["intentional_lab_gap"] = True
+        payload["blocking"] = False
+    return payload
+
+
+# Curated derived market-data artifacts that are NOT in source_manifest.json
+# (which only tracks prices/prices_compact/yields). These are rebuilt from
+# market.db / prices.json by standalone scripts; if a generator is unwired
+# (the vix_term_structure bug, 2026-07-24) the file freezes while the source
+# stays fresh and no other dimension surfaces it. Thresholds in hours.
+DERIVED_ARTIFACT_SLO: tuple[tuple[str, int, str], ...] = (
+    # vix_term_structure.json: rebuilt from market.db by update_vix_term_structure.py
+    # (now wired into fetch-data). Cron is hourly; allow 6h slack.
+    ("vix_term_structure.json", 6, "vix_term_structure"),
+    # garch_cvar.json: rebuilt from market.db by compute_garch_risk.py (hourly cron).
+    ("garch_cvar.json", 6, "garch_risk"),
+    # risk_metrics.json: same producer / cadence.
+    ("risk_metrics.json", 6, "garch_risk"),
+)
+
+
+def _derived_artifact_dimension(
+    data_dir: Path,
+    public_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Freshness-check derived artifacts that generators rebuild from market.db.
+
+    Uses mtime age (hours) against per-artifact thresholds. Missing files are
+    critical (generator never ran or was deleted); stale files are warning.
+
+    Searches both the private ``data_dir`` and the public data dir (some
+    artifacts like garch_cvar.json are dual-written or only public).
+
+    When none of the curated artifacts exist (isolated/test environments where
+    the data dir is not the production tree), the dimension is "unknown" rather
+    than critical-all-missing, so it does not false-alarm outside production.
+    """
+    search_dirs = [Path(data_dir)]
+    if public_dir is not None:
+        search_dirs.append(Path(public_dir))
+    else:
+        from src.paths import PUBLIC_DATA_DIR
+
+        search_dirs.append(Path(PUBLIC_DATA_DIR))
+    now = datetime.now(timezone.utc)
+    stale: list[dict[str, Any]] = []
+    missing: list[str] = []
+    checked: list[dict[str, Any]] = []
+    any_present = False
+    for filename, max_age_hours, producer in DERIVED_ARTIFACT_SLO:
+        path = None
+        for d in search_dirs:
+            candidate = d / filename
+            if candidate.exists():
+                path = candidate
+                break
+        if path is None:
+            missing.append(filename)
+            checked.append({"artifact": filename, "producer": producer, "status": "missing"})
+            continue
+        any_present = True
+        age_hours = (now - datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)).total_seconds() / 3600.0
+        entry = {
+            "artifact": filename,
+            "producer": producer,
+            "age_hours": round(age_hours, 2),
+            "max_age_hours": max_age_hours,
+            "status": "stale" if age_hours > max_age_hours else "ok",
+            "path": str(path),
+        }
+        if age_hours > max_age_hours:
+            stale.append({"artifact": filename, "age_hours": round(age_hours, 2), "max_age_hours": max_age_hours})
+        checked.append(entry)
+
+    if not any_present:
+        status = "unknown"
+        message = "derived artifacts not checked (data dir has no curated artifacts)"
+    elif missing:
+        status = "critical"
+        message = f"{len(missing)} missing derived artifacts: {', '.join(missing)}"
+    elif stale:
+        status = "warning"
+        message = f"{len(stale)} stale derived artifacts: {', '.join(a['artifact'] for a in stale)}"
+    else:
+        status = "ok"
+        message = "derived artifacts fresh"
+    return {
+        "status": status,
+        "checked_count": len(checked),
+        "stale_artifacts": stale[:10],
+        "missing_artifacts": missing[:10],
+        "checked": checked,
+        "message": message,
     }
 
 
@@ -586,6 +1007,46 @@ def _provider_runbook_entries(provider_dimension: Mapping[str, Any]) -> list[dic
             reason=provider_dimension.get("manifest_failure_reason") or provider_dimension.get("manifest_status"),
         ))
 
+    # Intentional lab gaps are excluded from degraded_artifacts / provider status
+    # but still need operator runbook hints (e.g. synthetic FRED without key).
+    # Tag advisory/lab_gap so runbook top_cause ranking ignores them.
+    lab_gaps = provider_dimension.get("intentional_lab_gap_artifacts")
+    if isinstance(lab_gaps, list):
+        for artifact in lab_gaps:
+            artifact_name = str(artifact)
+            if artifact_name == "yields.json":
+                entry = _runbook_entry(
+                    dimension="provider",
+                    code="fred_synthetic_fallback",
+                    severity="warning",
+                    action=(
+                        "Set or verify FRED_API_KEY, rerun the data fetch, and treat "
+                        "yield data as synthetic until FRED returns live or cached "
+                        "observations."
+                    ),
+                    artifact=artifact_name,
+                    provider="FRED",
+                    reason="missing_api_key",
+                )
+                entry["lab_gap"] = True
+                entry["advisory"] = True
+                entries.append(entry)
+            elif artifact_name.startswith("prices"):
+                entry = _runbook_entry(
+                    dimension="data_quality",
+                    code="price_quality_advisory",
+                    severity="warning",
+                    action=(
+                        "Review data_quality.json advisory issues (internal gaps / "
+                        "split-like returns); provider fetch is live — no Yahoo outage."
+                    ),
+                    artifact=artifact_name,
+                    provider="Yahoo Finance",
+                    reason="price_quality_warn",
+                )
+                entry["advisory"] = True
+                entries.append(entry)
+
     degraded_reasons = provider_dimension.get("degraded_reasons")
     if not isinstance(degraded_reasons, Mapping):
         return entries
@@ -631,7 +1092,9 @@ def _provider_runbook_entries(provider_dimension: Mapping[str, Any]) -> list[dic
 
 def _artifact_runbook_entries(artifact_dimension: Mapping[str, Any]) -> list[dict[str, Any]]:
     severity = str(artifact_dimension.get("status", "unknown"))
-    if artifact_dimension.get("source_manifest_index_status") == "stale_index":
+    if artifact_dimension.get("source_manifest_index_status") == "stale_index" and not (
+        artifact_dimension.get("critical_count") or artifact_dimension.get("critical_artifacts")
+    ):
         return [_runbook_entry(
             dimension="artifact",
             code="stale_public_data_index",
@@ -640,7 +1103,9 @@ def _artifact_runbook_entries(artifact_dimension: Mapping[str, Any]) -> list[dic
             artifact="index.json",
             reason="stale_index",
         )]
-    if artifact_dimension.get("source_manifest_index_status") == "unknown_timestamp":
+    if artifact_dimension.get("source_manifest_index_status") == "unknown_timestamp" and not (
+        artifact_dimension.get("critical_count") or artifact_dimension.get("critical_artifacts")
+    ):
         return [_runbook_entry(
             dimension="artifact",
             code="public_data_timestamp_unparseable",
@@ -648,6 +1113,28 @@ def _artifact_runbook_entries(artifact_dimension: Mapping[str, Any]) -> list[dic
             action="Regenerate source_manifest.json and public/data/index.json so generated_at timestamps are parseable before publishing.",
             artifact="index.json",
             reason="unknown_timestamp",
+        )]
+    critical_artifacts = artifact_dimension.get("critical_artifacts")
+    critical_names = (
+        [str(name) for name in critical_artifacts]
+        if isinstance(critical_artifacts, list)
+        else []
+    )
+    critical_count = int(artifact_dimension.get("critical_count") or 0)
+    if critical_count > 0 or critical_names:
+        sample = ", ".join(critical_names[:5]) if critical_names else "critical symbols"
+        if critical_names and len(critical_names) > 5:
+            sample = f"{sample} (+{len(critical_names) - 5} more)"
+        return [_runbook_entry(
+            dimension="artifact",
+            code="critical_data_freshness",
+            severity="critical" if severity == "critical" else severity,
+            action=(
+                f"Refresh market data for critical freshness symbols ({sample}); "
+                "verify market_lag_days and regenerate public price artifacts before live routing."
+            ),
+            artifact=critical_names[0] if critical_names else "data_freshness",
+            reason="critical_freshness",
         )]
     if artifact_dimension.get("stale_count", 0):
         return [_runbook_entry(
@@ -701,60 +1188,112 @@ def _provider_reconciliation_runbook_entries(reconciliation_dimension: Mapping[s
 
 def _fred_readiness_runbook_entries(fred_dimension: Mapping[str, Any]) -> list[dict[str, Any]]:
     severity = str(fred_dimension.get("status", "unknown"))
+    lab_gap = bool(fred_dimension.get("intentional_lab_gap"))
+    if severity == "ok" and not lab_gap:
+        return []
     reason = fred_dimension.get("reason")
     if reason == "missing_fred_api_key":
         code = "fred_missing_api_key"
-        action = "Set FRED_API_KEY in the deployment environment, rerun the data fetch, and confirm FRED readiness returns pass before paper or live operation."
+        action = (
+            "Research host: set FRED_API_KEY before paper/live; missing key is expected "
+            "in local/lab modes and does not block operational readiness."
+            if lab_gap
+            else (
+                "Set FRED_API_KEY in the deployment environment, rerun the data fetch, "
+                "and confirm FRED readiness returns pass before paper or live operation."
+            )
+        )
     else:
         code = "fred_readiness_failure"
         action = "Verify fredapi availability, FRED_API_KEY validity, and the local FRED cache before relying on macro or yield signals."
-    return [_runbook_entry(
+    entry = _runbook_entry(
         dimension="fred_readiness",
         code=code,
-        severity=severity,
+        severity="warning" if lab_gap and severity == "ok" else severity,
         action=action,
         provider="FRED",
         reason=reason,
-    )]
+    )
+    if lab_gap:
+        entry["lab_gap"] = True
+        entry["advisory"] = True
+    return [entry]
 
 
 def _alpaca_feed_entitlement_runbook_entries(feed_dimension: Mapping[str, Any]) -> list[dict[str, Any]]:
     severity = str(feed_dimension.get("status", "unknown"))
-    if severity == "ok":
+    lab_gap = bool(feed_dimension.get("intentional_lab_gap"))
+    if severity == "ok" and not lab_gap:
         return []
-    return [_runbook_entry(
+    entry = _runbook_entry(
         dimension="alpaca_feed_entitlement",
-        code="alpaca_feed_entitlement_rejected",
-        severity=severity,
-        action="Verify Alpaca market-data feed entitlement, confirm delayed feeds are not used for live order sizing, and rerun rebalance health before trading.",
+        code=(
+            "alpaca_feed_entitlement_lab_gap"
+            if lab_gap
+            else "alpaca_feed_entitlement_rejected"
+        ),
+        severity="warning" if lab_gap and severity == "ok" else severity,
+        action=(
+            "Research host: set ALPACA_FEED_ENTITLEMENT before live order sizing; "
+            "IEX without declared entitlement is expected in local/lab mode."
+            if lab_gap
+            else (
+                "Verify Alpaca market-data feed entitlement, confirm delayed feeds "
+                "are not used for live order sizing, and rerun rebalance health before trading."
+            )
+        ),
         provider="Alpaca",
         reason=feed_dimension.get("reason") or feed_dimension.get("policy_decision"),
-    )]
+    )
+    if lab_gap:
+        entry["lab_gap"] = True
+        entry["advisory"] = True
+    return [entry]
 
 
 def _market_data_consistency_runbook_entries(consistency_dimension: Mapping[str, Any]) -> list[dict[str, Any]]:
     severity = str(consistency_dimension.get("status", "unknown"))
-    if severity == "ok":
+    lab_gap = bool(consistency_dimension.get("intentional_lab_gap"))
+    if severity == "ok" and not lab_gap:
         return []
     code = (
-        "market_data_consistency_unavailable"
-        if consistency_dimension.get("consistency_status") == "unavailable"
-        else "market_data_consistency_degraded"
+        "market_data_consistency_lab_gap"
+        if lab_gap
+        else (
+            "market_data_consistency_unavailable"
+            if consistency_dimension.get("consistency_status") == "unavailable"
+            else "market_data_consistency_degraded"
+        )
     )
-    return [_runbook_entry(
+    entry = _runbook_entry(
         dimension="market_data_consistency",
         code=code,
-        severity=severity,
-        action="Run rebalance health after broker data access is configured; compare broker quotes against local market data before live order sizing.",
+        severity="warning" if lab_gap and severity == "ok" else severity,
+        action=(
+            "Research host without Alpaca credentials: broker/local parity checks are skipped; "
+            "configure Alpaca before live order sizing."
+            if lab_gap
+            else (
+                "Run rebalance health after broker data access is configured; "
+                "compare broker quotes against local market data before live order sizing."
+            )
+        ),
         provider="Alpaca",
         reason=consistency_dimension.get("reason") or consistency_dimension.get("consistency_status"),
-    )]
+    )
+    if lab_gap:
+        entry["lab_gap"] = True
+        entry["advisory"] = True
+    return [entry]
 
 
 def _data_quality_runbook_entries(data_quality_dimension: Mapping[str, Any]) -> list[dict[str, Any]]:
     severity = str(data_quality_dimension.get("status", "unknown"))
-    if severity == "ok":
+    advisory_only = bool(data_quality_dimension.get("advisory_only"))
+    # Advisory-only warn is status=ok but still needs operator runbook hints.
+    if severity == "ok" and not advisory_only:
         return []
+    runbook_severity = "warning" if advisory_only and severity == "ok" else severity
 
     top_issue = data_quality_dimension.get("top_issue")
     quality_status = data_quality_dimension.get("quality_status")
@@ -776,7 +1315,11 @@ def _data_quality_runbook_entries(data_quality_dimension: Mapping[str, Any]) -> 
         reason = top_issue
     elif top_issue == "internal_gaps":
         code = "price_quality_internal_gaps"
-        action = f"Inspect missing trading dates against the reference calendar, refill or document source gaps, and rerun the quality audit ({issue_count} gap issue(s))."
+        action = (
+            f"Inspect missing trading dates against the reference calendar "
+            f"(sparse indexes like ^VIX3M may legitimately omit SPY days); "
+            f"document or refill source gaps ({issue_count} gap issue(s))."
+        )
         reason = top_issue
     elif top_issue in {"extreme_returns", "split_like_returns"}:
         code = "price_quality_anomalous_returns"
@@ -798,15 +1341,18 @@ def _data_quality_runbook_entries(data_quality_dimension: Mapping[str, Any]) -> 
         action = "Inspect data_quality.json issue_counts, repair the public price artifact, and rerun the market-data fetch before promotion."
         reason = quality_status or top_issue
 
-    return [_runbook_entry(
+    entry = _runbook_entry(
         dimension="data_quality",
         code=code,
-        severity=severity,
+        severity=runbook_severity,
         action=action,
         artifact=artifact,
         provider="Yahoo Finance",
         reason=reason,
-    )]
+    )
+    if advisory_only:
+        entry["advisory"] = True
+    return [entry]
 
 
 def _build_runbook(dimensions: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
@@ -834,10 +1380,24 @@ def _build_runbook(dimensions: Mapping[str, Mapping[str, Any]]) -> dict[str, Any
         actions.extend(_market_data_consistency_runbook_entries(market_consistency))
 
     active_actions = [action for action in actions if action.get("severity") not in {"ok", None}]
+    # top_cause must reflect real SLO severity, not advisory/lab-gap hints that
+    # keep status=ok on the dimension (otherwise overall ok still looks "top=warn").
+    failing_dims = {
+        name
+        for name, row in dimensions.items()
+        if isinstance(row, Mapping) and row.get("status") not in {"ok", None}
+    }
+    ranked_actions = [
+        action
+        for action in active_actions
+        if action.get("dimension") in failing_dims
+        and not action.get("advisory")
+        and not action.get("lab_gap")
+    ]
     top_cause = None
-    if active_actions:
+    if ranked_actions:
         top_cause = sorted(
-            active_actions,
+            ranked_actions,
             key=lambda action: _STATUS_RANK.get(str(action.get("severity", "unknown")), 1),
             reverse=True,
         )[0]
@@ -859,6 +1419,7 @@ def build_data_pipeline_slo(
     fred_readiness: Mapping[str, Any] | None = None,
     alpaca_feed_entitlement: Mapping[str, Any] | None = None,
     market_data_consistency: Mapping[str, Any] | None = None,
+    data_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Build a compact SLO summary from already-generated dashboard artifacts."""
     dimensions = {
@@ -868,6 +1429,11 @@ def build_data_pipeline_slo(
         "signal": _signal_dimension(signal_staleness),
         "data_quality": _data_quality_dimension(source_manifest, data_quality_report),
     }
+    # Derived-artifact freshness is only checked when the caller opts in with
+    # an explicit data_dir (production). Unit tests construct synthetic SLOs
+    # and must not read real on-disk files (non-hermetic / flaky).
+    if data_dir is not None:
+        dimensions["derived_artifact"] = _derived_artifact_dimension(data_dir)
     reconciliation = provider_reconciliation
     if reconciliation is None:
         health_reconciliation = health_data.get("provider_reconciliation")

@@ -40,6 +40,18 @@ DEFAULT_TAU: float = 0.15
 # Default BL symbols aligned with the 3-asset champion portfolio
 DEFAULT_SYMBOLS: List[str] = ["SPY", "GLD", "TLT"]
 
+# Champion baseline prior (advisory reference SPY/GLD/TLT 46/38/16)
+CHAMPION_PRIOR_WEIGHTS: Dict[str, float] = {
+    "SPY": 0.46,
+    "GLD": 0.38,
+    "TLT": 0.16,
+}
+
+# Floor so max_sharpe + clean_weights cannot zero a champion sleeve under
+# mild views (corner solutions BL exists to avoid). Relative to champion prior.
+CHAMPION_MIN_WEIGHT_SCALE: float = 0.25  # e.g. GLD floor = 0.38 * 0.25 = 0.095
+CHAMPION_ABSOLUTE_MIN_WEIGHT: float = 0.05  # never below 5% when in book
+
 # Market caps (approximate, 2026) — used for market-implied prior
 DEFAULT_MARKET_CAPS: Dict[str, float] = {
     "SPY": 400e9,
@@ -499,7 +511,56 @@ def run_black_litterman(
         posterior_dict = {s: round(float(posterior_rets[s]), 6) for s in symbols}
     else:
         posterior_dict = {s: round(float(posterior_rets[i]), 6) for i, s in enumerate(symbols)}
-    weights_dict = {k: v for k, v in cleaned.items() if v > 0.001}
+
+    # Champion min-weight floor: max_sharpe + clean_weights can zero GLD/TLT
+    # under near-flat mild views. Re-introduce a prior-scaled floor for any
+    # champion sleeve present in the symbol universe (not explicitly excluded).
+    weights_full = {s: float(cleaned.get(s, 0.0) or 0.0) for s in symbols}
+    zeroed_before = [s for s, w in weights_full.items() if w <= 0.001]
+    floor_applied: list[str] = []
+    for sym in symbols:
+        if sym not in CHAMPION_PRIOR_WEIGHTS:
+            continue
+        prior_w = CHAMPION_PRIOR_WEIGHTS[sym]
+        floor = max(
+            CHAMPION_ABSOLUTE_MIN_WEIGHT,
+            prior_w * CHAMPION_MIN_WEIGHT_SCALE,
+        )
+        if weights_full[sym] < floor - 1e-12:
+            weights_full[sym] = floor
+            floor_applied.append(sym)
+    if floor_applied:
+        total = sum(weights_full.values())
+        if total > 0:
+            weights_full = {k: v / total for k, v in weights_full.items()}
+        # If still zero after renorm (shouldn't), fall back to HRP / prior blend
+        still_zero = [s for s, w in weights_full.items() if w <= 0.001]
+        if still_zero and optimization_method == "bl_max_sharpe":
+            hrp_weights = _run_hrp_fallback(cov_matrix, symbols)
+            if hrp_weights:
+                weights_full = {s: float(hrp_weights.get(s, 0.0)) for s in symbols}
+                optimization_method = "bl_hrp_after_zero_weight"
+                logger.info(
+                    "BL cascade: HRP after champion zero_weight under mild views (%s)",
+                    still_zero,
+                )
+            else:
+                # Blend toward champion prior for zeroed sleeves only
+                for s in still_zero:
+                    weights_full[s] = CHAMPION_PRIOR_WEIGHTS.get(s, 1.0 / len(symbols))
+                total = sum(weights_full.values())
+                weights_full = {k: v / total for k, v in weights_full.items()}
+                optimization_method = "bl_champion_floor"
+        logger.info(
+            "BL champion min-weight floor applied to %s (pre-floor zeros=%s)",
+            floor_applied,
+            zeroed_before,
+        )
+
+    weights_dict = {
+        k: round(v, 6) for k, v in weights_full.items() if v > 0.001
+    }
+    zero_weight_assets = [s for s in symbols if s not in weights_dict]
 
     return BLResult(
         posterior_returns=posterior_dict,
@@ -517,6 +578,9 @@ def run_black_litterman(
             "turnover_penalty_applied": turnover_applied,
             "turnover_penalty_lambda": turnover_lambda,
             "turnover_bps": _compute_turnover_bps(weights_dict, current_weights, symbols) if turnover_applied else 0,
+            "champion_min_weight_applied": floor_applied,
+            "zero_weight_assets": zero_weight_assets,
+            "champion_prior": dict(CHAMPION_PRIOR_WEIGHTS),
         },
     )
 

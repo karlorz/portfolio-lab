@@ -46,17 +46,26 @@ class TaskerService:
             fired_key = (task.id, minute_key)
             if fired_key in self._last_fired:
                 continue
-            state = self.store.get_task(task.id, self.registry)["state"]
-            if state["paused"]:
-                continue
             try:
-                self.runner.start_task(task.id, trigger="scheduled")
-                self._last_fired.add(fired_key)
-            except RuntimeError as exc:
-                logger.warning("Tasker skipped %s: %s", task.id, exc)
+                state = self.store.get_task(task.id, self.registry)["state"]
+                if state["paused"]:
+                    continue
+                try:
+                    self.runner.start_task(task.id, trigger="scheduled")
+                    self._last_fired.add(fired_key)
+                except RuntimeError as exc:
+                    logger.warning("Tasker skipped %s: %s", task.id, exc)
+            except Exception as exc:  # noqa: BLE001 - isolate per-task failures
+                # A single task's DB/read error must not kill the scheduler
+                # loop (which would silently skip every later job until a
+                # service restart). Log and keep ticking.
+                logger.exception("Tasker tick failed for %s: %s", task.id, exc)
         if len(self._last_fired) > 5000:
             self._last_fired = set(list(self._last_fired)[-1000:])
-        self.store.write_status_mirrors(self.registry)
+        try:
+            self.store.write_status_mirrors(self.registry)
+        except Exception as exc:  # noqa: BLE001 - mirror writes must not kill the loop
+            logger.exception("Tasker status mirror write failed: %s", exc)
 
 
 def build_service() -> tuple[TaskerService, object]:

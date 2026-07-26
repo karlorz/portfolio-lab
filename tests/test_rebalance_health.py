@@ -211,8 +211,10 @@ class TestGenerateExtended:
                 result = generate()
         finally:
             rh.ORDERS_DIR = original_dir
-        # Same-day entries deduped → only 2 compliance-interval pairs, 1 checkable
-        assert result["total_executions"] == 3  # History has all 3
+        # Batch EG: total_executions = unique event days; raw kept separately
+        assert result["total_executions"] == 2
+        assert result["canonical_execution_days"] == 2
+        assert result.get("raw_history_entries", 0) == 3
         # Compliance should count 1 interval (April 1 → May 1)
         assert result["schedule_compliance"]["total"] == 1
 
@@ -291,6 +293,34 @@ class TestGenerateExtended:
             rh.DATA_DIR = original_data_dir
         assert result["next_rebalance"]["date"] == "2026-06-09"
         assert result["next_rebalance"]["frequency"] == "monthly (~30 days)"
+        # Last rebalance May 10 → next Jun 9 is in the past vs 2026-07 wall clock
+        assert result["next_rebalance"]["days_until"] < 0
+        assert result["next_rebalance"]["status"] == "overdue"
+        assert result["next_rebalance"]["overdue"] is True
+        assert result["next_rebalance"].get("status_reason")
+
+    def test_next_rebalance_discloses_overdue_when_past(self):
+        """Negative days_until must not look like a future schedule."""
+        import src.monitor.rebalance_health as rh
+        original_dir = rh.ORDERS_DIR
+        original_data_dir = rh.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                data_dir = Path(d)
+                rh.DATA_DIR = data_dir
+                rh.ORDERS_DIR = data_dir / "historical_orders"
+                rh.ORDERS_DIR.mkdir()
+                orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+                # Last exec ~60 days before "today" (2026-07-20 era)
+                _make_order_file(rh.ORDERS_DIR, "order_history_20260501_120000_aaa", orders)
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+            rh.DATA_DIR = original_data_dir
+        nr = result["next_rebalance"]
+        assert nr["days_until"] < 0
+        assert nr["status"] == "overdue"
+        assert nr["overdue"] is True
 
     def test_root_daily_order_history_is_canonical_when_newer(self):
         """Root order-history daily summaries should advance rebalance freshness."""
@@ -565,17 +595,18 @@ class TestGenerateEdge:
         assert result["schedule_compliance"]["compliance_pct"] == 0.0
 
     def test_more_than_ten_executions(self):
-        """With 12 executions, recent should show only the last 10."""
+        """With 12 unique event days, recent timeline shows only the last 10."""
         import src.monitor.rebalance_health as rh
         original_dir = rh.ORDERS_DIR
         try:
             with tempfile.TemporaryDirectory() as d:
                 rh.ORDERS_DIR = Path(d)
                 orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
-                # Create 12 order files spaced 30 days apart
+                # 12 distinct calendar days (YYYYMMDD) so event-day dedupe keeps all
+                base = datetime(2025, 1, 15, tzinfo=timezone.utc)
                 for i in range(12):
-                    day = 1 + i * 31  # ~monthly spacing
-                    date_str = f"2026{day:03d}"
+                    dt = base + timedelta(days=i * 30)
+                    date_str = dt.strftime("%Y%m%d")
                     _make_order_file(
                         Path(d),
                         f"order_history_{date_str}_120000_{i:03d}",
@@ -584,20 +615,24 @@ class TestGenerateEdge:
                 result = generate()
         finally:
             rh.ORDERS_DIR = original_dir
+        # Batch EG: operator total = unique event days; raw may equal when no rewrites
         assert result["total_executions"] == 12
+        assert result["canonical_execution_days"] == 12
+        assert result.get("raw_history_entries", 12) == 12
         assert len(result["execution_history"]) == 10  # Only last 10
 
     def test_exactly_ten_executions(self):
-        """With exactly 10 executions, recent should show all 10."""
+        """With exactly 10 unique event days, timeline shows all 10."""
         import src.monitor.rebalance_health as rh
         original_dir = rh.ORDERS_DIR
         try:
             with tempfile.TemporaryDirectory() as d:
                 rh.ORDERS_DIR = Path(d)
                 orders = [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}]
+                base = datetime(2025, 2, 1, tzinfo=timezone.utc)
                 for i in range(10):
-                    day = 1 + i * 31
-                    date_str = f"2026{day:03d}"
+                    dt = base + timedelta(days=i * 30)
+                    date_str = dt.strftime("%Y%m%d")
                     _make_order_file(
                         Path(d),
                         f"order_history_{date_str}_120000_{i:03d}",
@@ -607,6 +642,8 @@ class TestGenerateEdge:
         finally:
             rh.ORDERS_DIR = original_dir
         assert result["total_executions"] == 10
+        assert result["canonical_execution_days"] == 10
+        assert result.get("raw_history_entries", 10) == 10
         assert len(result["execution_history"]) == 10  # All 10
 
     def test_compliance_25_days_boundary(self):
@@ -760,7 +797,10 @@ class TestGenerateEdge:
                 result = generate()
         finally:
             rh.ORDERS_DIR = original_dir
-        assert result["total_executions"] == 4  # All 4 in history
+        # Batch EG: unique event days (Apr 1 + May 1); 3 same-day files → raw=4
+        assert result["total_executions"] == 2
+        assert result["canonical_execution_days"] == 2
+        assert result.get("raw_history_entries", 0) == 4
         # 1 compliance pair (Apr 1 → May 1), deduped from 3 same-day entries
         assert result["schedule_compliance"]["total"] == 1
 
@@ -932,3 +972,98 @@ class TestMain:
         with open(output_path) as f:
             data = json.load(f)
         assert data["total_executions"] == 0
+
+
+class TestBatchDRRecentOrdersDailySummary:
+    """Batch DR/DS: live order-history uses recent_orders; schedule uses event clock."""
+
+    def test_recent_orders_key_parsed_uses_event_clock_not_write_day(self):
+        """Batch DS: write_day=2026-07-22 with May fills must not advance schedule."""
+        import src.monitor.rebalance_health as rh
+        from src.monitor.rebalance_health import generate
+
+        original_dir = rh.ORDERS_DIR
+        original_data_dir = rh.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                data_dir = Path(d)
+                rh.DATA_DIR = data_dir
+                rh.ORDERS_DIR = data_dir / "historical_orders"
+                rh.ORDERS_DIR.mkdir()
+                _make_order_file(
+                    rh.ORDERS_DIR,
+                    "order_history_20260512_120000_aaa",
+                    [{"symbol": "SPY", "side": "buy", "estimated_value": 1000, "reason": "rebalance"}],
+                )
+                # Snapshot rewrite: file date today, fills are May (orders.jsonl tail)
+                (data_dir / "order-history-2026-07-22.json").write_text(json.dumps({
+                    "date": "2026-07-22",
+                    "total_orders": 6,
+                    "recent_shown": 6,
+                    "recent_orders": [
+                        {
+                            "symbol": "SPY",
+                            "side": "buy",
+                            "estimated_value": 46000,
+                            "reason": "rebalance_up",
+                            "timestamp": "2026-05-11T03:20:31.447694",
+                        },
+                        {
+                            "symbol": "GLD",
+                            "side": "buy",
+                            "estimated_value": 38000,
+                            "reason": "rebalance_up",
+                            "timestamp": "2026-05-11T03:20:31.447694",
+                        },
+                    ],
+                    "statistics": {},
+                }))
+                result = generate()
+        finally:
+            rh.ORDERS_DIR = original_dir
+            rh.DATA_DIR = original_data_dir
+
+        # Event clock = 2026-05-12 hist or 2026-05-11 daily max → not write day
+        assert result["execution_history"][0]["date"] != "2026-07-22" or (
+            result["execution_history"][0].get("clock_source") == "order_event_timestamp"
+            and result["execution_history"][0]["date"] == "2026-05-11"
+        )
+        # Prefer newest event among hist May-12 and daily May-11 → May-12
+        last_exec = result["next_rebalance"]["last_execution_at"]
+        assert last_exec is not None
+        assert last_exec.startswith("2026-05-1")
+        assert result["next_rebalance"]["date"].startswith("2026-06-1")
+        assert result["canonical_order_history_source"] == "combined_order_history"
+        assert result.get("snapshot_rewrite_files", 0) >= 1
+
+    def test_parse_daily_uses_max_order_event_not_payload_date(self):
+        from src.monitor.rebalance_health import _parse_daily_order_summary
+
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "order-history-2026-07-20.json"
+            path.write_text(json.dumps({
+                "date": "2026-07-20",
+                "total_orders": 2,
+                "recent_orders": [
+                    {
+                        "symbol": "SPY",
+                        "side": "buy",
+                        "estimated_value": 1000,
+                        "timestamp": "2026-05-11T00:00:00",
+                    },
+                    {
+                        "symbol": "GLD",
+                        "side": "buy",
+                        "estimated_value": 1000,
+                        "timestamp": "2026-07-11T00:20:02",
+                    },
+                ],
+            }))
+            entry = _parse_daily_order_summary(path)
+        assert entry is not None
+        assert entry["date"] == "2026-07-11"
+        assert entry["timestamp"].startswith("2026-07-11")
+        assert entry["clock_source"] == "order_event_timestamp"
+        assert entry["summary_file_date"] == "2026-07-20"
+        assert entry.get("snapshot_rewrite") is True
+        assert entry.get("snapshot_rewrite_lag_days") == 9

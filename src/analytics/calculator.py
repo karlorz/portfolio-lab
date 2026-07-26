@@ -4,9 +4,9 @@ Performance analytics calculations: drawdown, rolling metrics, benchmarks.
 import json
 import logging
 import numpy as np
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from src.paths import DATA_DIR
@@ -53,6 +53,29 @@ class CrisisPeriod:
     description: str
     spy_return: float
     portfolio_return: Optional[float]
+
+
+def classify_crisis_periods_availability(
+    crisis_rows: List[Dict],
+) -> Tuple[str, Optional[str]]:
+    """Return (status, reason) for crisis-period portfolio comparison section.
+
+    status:
+      - success: every row has a numeric portfolio_return
+      - partial: some rows have portfolio returns, others null
+      - unavailable: no rows have portfolio returns (historical sim not run)
+    """
+    if not crisis_rows:
+        return "unavailable", "no_crisis_periods"
+    available = [
+        row for row in crisis_rows
+        if isinstance(row.get("portfolio_return"), (int, float))
+    ]
+    if len(available) == len(crisis_rows):
+        return "success", None
+    if len(available) == 0:
+        return "unavailable", "historical_simulation_unavailable"
+    return "partial", "historical_simulation_incomplete"
 
 
 class AnalyticsCalculator:
@@ -328,21 +351,164 @@ class AnalyticsCalculator:
         dd_series = self.calculate_drawdown_series(performance_data)
         max_dd = self.calculate_max_drawdown(dd_series)
         
-        result = {
-            "portfolio": {
+        # Full-period Sharpe from NAV day-over-day returns (same series as vol)
+        sharpe = None
+        sharpe_reason = None
+        cagr = None
+        if len(returns) >= 5 and np.std(returns) > 1e-12:
+            sharpe = float(np.mean(returns) / np.std(returns) * np.sqrt(252))
+        elif len(returns) < 5:
+            sharpe_reason = "insufficient_return_observations"
+        elif returns:
+            sharpe_reason = "zero_return_variance"
+        else:
+            sharpe_reason = "no_returns"
+
+        # Simple CAGR from calendar span when dates parse
+        try:
+            from datetime import date as _date
+            d0 = _date.fromisoformat(str(start_date)[:10])
+            d1 = _date.fromisoformat(str(end_date)[:10])
+            years = max((d1 - d0).days / 365.25, 1 / 365.25)
+            if start_value > 0 and end_value > 0:
+                cagr = float((end_value / start_value) ** (1 / years) - 1) * 100
+        except (TypeError, ValueError, ZeroDivisionError):
+            cagr = None
+
+        portfolio_block = {
+            "start_date": start_date,
+            "end_date": end_date,
+            "start_value": start_value,
+            "end_value": end_value,
+            "total_return": round(portfolio_return * 100, 2),
+            "cagr": round(cagr, 2) if cagr is not None else None,
+            "volatility": round(portfolio_vol, 2),
+            "max_drawdown": max_dd.get("max_drawdown", 0),
+            "sharpe": round(sharpe, 2) if sharpe is not None else None,
+        }
+        if sharpe_reason:
+            portfolio_block["sharpe_reason"] = sharpe_reason
+        result: Dict[str, Dict] = {"portfolio": portfolio_block}
+
+        # SPY buy-hold peer over the same calendar window (true "benchmark")
+        spy_block = self._spy_buy_hold_block(
+            start_date=str(start_date)[:10],
+            end_date=str(end_date)[:10],
+            start_value=float(start_value or 0),
+            db_path=db_path,
+        )
+        if spy_block:
+            result["spy"] = spy_block
+            # Relative return vs SPY when both available
+            try:
+                port_ret = float(portfolio_block["total_return"])
+                spy_ret = float(spy_block.get("total_return") or 0)
+                spy_block["relative_return"] = round(port_ret - spy_ret, 2)
+                portfolio_block["relative_return_vs_spy"] = spy_block["relative_return"]
+            except (TypeError, ValueError):
+                pass
+
+        return result
+
+    def _spy_buy_hold_block(
+        self,
+        *,
+        start_date: str,
+        end_date: str,
+        start_value: float,
+        db_path: str | None = None,
+    ) -> Optional[Dict]:
+        """SPY buy-hold total return over [start_date, end_date] for peer comparison."""
+        try:
+            from src.paths import MARKET_DB, sqlite_connect
+        except ImportError:
+            return None
+        path = Path(db_path) if db_path else MARKET_DB
+        if not path.exists():
+            return {
+                "status": "unavailable",
+                "reason": "market_db_missing",
                 "start_date": start_date,
                 "end_date": end_date,
-                "start_value": start_value,
-                "end_value": end_value,
-                "total_return": round(portfolio_return * 100, 2),
-                "cagr": None,  # Would need to calculate based on actual days
-                "volatility": round(portfolio_vol, 2),
-                "max_drawdown": max_dd.get("max_drawdown", 0),
-                "sharpe": None,  # Full period Sharpe
             }
+        try:
+            with sqlite_connect(str(path)) as conn:
+                row0 = conn.execute(
+                    """
+                    SELECT date(date), close FROM prices
+                    WHERE symbol = 'SPY' AND date(date) >= date(?)
+                    ORDER BY date(date) ASC LIMIT 1
+                    """,
+                    (start_date,),
+                ).fetchone()
+                row1 = conn.execute(
+                    """
+                    SELECT date(date), close FROM prices
+                    WHERE symbol = 'SPY' AND date(date) <= date(?)
+                    ORDER BY date(date) DESC LIMIT 1
+                    """,
+                    (end_date,),
+                ).fetchone()
+                # Daily closes for vol/sharpe in window
+                rows = conn.execute(
+                    """
+                    SELECT close FROM prices
+                    WHERE symbol = 'SPY'
+                      AND date(date) >= date(?)
+                      AND date(date) <= date(?)
+                    ORDER BY date(date) ASC
+                    """,
+                    (start_date, end_date),
+                ).fetchall()
+        except (OSError, Exception) as exc:  # noqa: BLE001
+            logger.warning("SPY benchmark query failed: %s", exc)
+            return {
+                "status": "unavailable",
+                "reason": "query_failed",
+                "start_date": start_date,
+                "end_date": end_date,
+            }
+        if not row0 or not row1:
+            return {
+                "status": "unavailable",
+                "reason": "insufficient_spy_bars",
+                "start_date": start_date,
+                "end_date": end_date,
+            }
+        p0 = float(row0[1])
+        p1 = float(row1[1])
+        if p0 <= 0:
+            return {
+                "status": "unavailable",
+                "reason": "invalid_spy_price",
+                "start_date": start_date,
+                "end_date": end_date,
+            }
+        total_return = (p1 / p0 - 1.0) * 100
+        spy_returns = []
+        closes = [float(r[0]) for r in rows if r and r[0] is not None]
+        for i in range(1, len(closes)):
+            if closes[i - 1] > 0:
+                spy_returns.append((closes[i] / closes[i - 1]) - 1.0)
+        spy_vol = float(np.std(spy_returns) * np.sqrt(252) * 100) if spy_returns else 0.0
+        spy_sharpe = None
+        if len(spy_returns) >= 5 and np.std(spy_returns) > 1e-12:
+            spy_sharpe = float(np.mean(spy_returns) / np.std(spy_returns) * np.sqrt(252))
+        end_value_scaled = start_value * (p1 / p0) if start_value > 0 else p1
+        return {
+            "status": "ok",
+            "symbol": "SPY",
+            "start_date": str(row0[0]),
+            "end_date": str(row1[0]),
+            "start_price": round(p0, 4),
+            "end_price": round(p1, 4),
+            "start_value": round(start_value, 2) if start_value > 0 else None,
+            "end_value": round(end_value_scaled, 2) if start_value > 0 else None,
+            "total_return": round(total_return, 2),
+            "volatility": round(spy_vol, 2),
+            "sharpe": round(spy_sharpe, 2) if spy_sharpe is not None else None,
+            "role": "benchmark",
         }
-        
-        return result
     
     def generate_analytics_report(self) -> Dict:
         """Generate complete analytics report."""
@@ -352,7 +518,7 @@ class AnalyticsCalculator:
             return {
                 "status": "no_data",
                 "message": "No performance data available",
-                "generated_at": datetime.now().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
             }
         
         # Calculate all metrics
@@ -374,7 +540,9 @@ class AnalyticsCalculator:
             for d in drawdown_series
         ]
         
-        # Crisis period performance (would need historical backtest data)
+        # Crisis period performance (would need historical backtest data).
+        # Emit explicit section availability so UI does not treat all-null
+        # portfolio returns as a complete comparison under status=success.
         crisis_summary = []
         for crisis in self.CRISIS_PERIODS:
             crisis_summary.append({
@@ -383,11 +551,16 @@ class AnalyticsCalculator:
                 "description": crisis.description,
                 "spy_return": round(crisis.spy_return * 100, 1),
                 "portfolio_return": None,  # Would require historical simulation
+                "portfolio_return_available": False,
+                "availability": "unavailable",
             })
-        
+        crisis_periods_status, crisis_periods_reason = classify_crisis_periods_availability(
+            crisis_summary
+        )
+
         return {
             "status": "success",
-            "generated_at": datetime.now().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "data_points": len(perf_data),
             "date_range": {
                 "start": perf_data[0].get('timestamp', '')[:10] if perf_data else None,
@@ -400,6 +573,8 @@ class AnalyticsCalculator:
             "rolling_metrics": rolling_metrics,
             "benchmark_comparison": benchmark_comparison,
             "crisis_periods": crisis_summary,
+            "crisis_periods_status": crisis_periods_status,
+            "crisis_periods_reason": crisis_periods_reason,
         }
 
 

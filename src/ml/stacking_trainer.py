@@ -713,7 +713,29 @@ class StackingTrainer:
         logger.info("Saved %s predictions to database", n_preds)
 
 
+# Only `list` is safe under ML-disabled stubs; any other command fails closed.
+_ML_SAFE_CLI_COMMANDS = frozenset({"list"})
+
+
+def _fail_closed(message: str, exit_code: int = 1) -> None:
+    """Print an operator-facing error and exit non-zero (fail-closed CLI)."""
+    import sys
+
+    print(message, file=sys.stderr)
+    logger.error(message)
+    raise SystemExit(exit_code)
+
+
 def main():
+    """CLI entry for stacking trainer.
+
+    Safe-mode contract (PORTFOLIO_LAB_ENABLE_ML=0):
+    - train / evaluate / backfill fail closed with non-zero exit before any
+      training, model load, or synthetic-sample path.
+    - list remains a read-only success path (exit 0) even with zero models.
+
+    When ML is enabled, missing --model / missing artifacts also exit non-zero.
+    """
     parser = argparse.ArgumentParser(description="Stacking Ensemble Trainer")
     parser.add_argument(
         'command',
@@ -724,42 +746,49 @@ def main():
     parser.add_argument('--end-date', help='End date')
     parser.add_argument('--model', help='Model path for evaluation')
     parser.add_argument('--dry-run', action='store_true', help='Dry run mode')
-    
+
     args = parser.parse_args()
-    
-    trainer = StackingTrainer()
-    
-    if args.command == 'train':
-        result = trainer.train(args.start_date, args.end_date)
-        print(json.dumps(asdict(result), indent=2))
-        
-    elif args.command == 'evaluate':
-        if not args.model:
-            print("Error: --model required for evaluate")
-            return
-        success = trainer.load_model(args.model)
-        if not success:
-            return
-        print(f"Model {trainer.model_version} loaded successfully")
-        
-    elif args.command == 'backfill':
-        if not trainer.model:
-            # Try to load latest model
-            model_files = sorted(trainer.model_dir.glob("signal_stacker_v*.pkl"))
-            if model_files:
-                trainer.load_model(str(model_files[-1]))
-            else:
-                print("No model found for backfill")
-                return
-        
-        stats = trainer.backfill_predictions(args.start_date, args.dry_run)
-        print(json.dumps(stats, indent=2))
-        
-    elif args.command == 'list':
+
+    # Fail closed before constructing trainer / loading data when ML is off.
+    # Allowlist (not denylist) so new ML commands cannot fail open later.
+    if not _ML_ENABLED and args.command not in _ML_SAFE_CLI_COMMANDS:
+        _fail_closed(
+            "PORTFOLIO_LAB_ENABLE_ML=0 disables stacking_trainer "
+            f"'{args.command}'; set PORTFOLIO_LAB_ENABLE_ML=1 to run ML "
+            "train/evaluate/backfill. 'list' remains available in safe mode."
+        )
+
+    if args.command == 'list':
+        # Read-only inventory — no StackingTrainer / feature-engine construction.
         model_files = sorted(Path(PROJECT_ROOT / 'models').glob("signal_stacker_*.pkl"))
         print(f"Available models ({len(model_files)}):")
         for mf in model_files:
             print(f"  {mf.name}")
+        return
+
+    trainer = StackingTrainer()
+
+    if args.command == 'train':
+        result = trainer.train(args.start_date, args.end_date)
+        print(json.dumps(asdict(result), indent=2))
+
+    elif args.command == 'evaluate':
+        if not args.model:
+            _fail_closed("Error: --model required for evaluate")
+        if not trainer.load_model(args.model):
+            _fail_closed(f"Model not found: {args.model}")
+        print(f"Model {trainer.model_version} loaded successfully")
+
+    elif args.command == 'backfill':
+        if not trainer.model:
+            model_files = sorted(trainer.model_dir.glob("signal_stacker_v*.pkl"))
+            if not model_files or not trainer.load_model(str(model_files[-1])):
+                _fail_closed("No model found for backfill")
+
+        stats = trainer.backfill_predictions(args.start_date, args.dry_run)
+        if isinstance(stats, dict) and stats.get("error"):
+            _fail_closed(f"Backfill failed: {stats['error']}")
+        print(json.dumps(stats, indent=2))
 
 
 if __name__ == '__main__':

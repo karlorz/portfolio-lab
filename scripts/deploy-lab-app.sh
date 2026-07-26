@@ -47,6 +47,7 @@ SKIP_BUILD="0"
 SKIP_SERVICE="0"
 SKIP_CADDY="0"
 SKIP_UPDATE_COMMAND="0"
+SKIP_MIRROR="0"
 DRY_RUN="0"
 PRINT_CADDY="0"
 
@@ -82,6 +83,7 @@ Options:
   --skip-service               Do not install/restart tasker systemd service
   --skip-caddy                 Do not write/reload Caddy config
   --skip-update-command        Do not install the in-container update command
+  --skip-mirror                Do not mirror live public data → checkout public/data
   --print-caddy                Print the managed Caddy site block and exit
   --dry-run                    Print actions without changing the host
   -h, --help                   Show help
@@ -150,6 +152,7 @@ while [ $# -gt 0 ]; do
     --skip-service) SKIP_SERVICE="1"; shift ;;
     --skip-caddy) SKIP_CADDY="1"; shift ;;
     --skip-update-command) SKIP_UPDATE_COMMAND="1"; shift ;;
+    --skip-mirror) SKIP_MIRROR="1"; shift ;;
     --print-caddy) PRINT_CADDY="1"; shift ;;
     --dry-run) DRY_RUN="1"; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -270,7 +273,39 @@ check_public_data_consistency() {
   if [ "$SKIP_DATA" = "1" ]; then
     warn "--skip-data set; validating existing public/data and dist/data artifacts"
   fi
-  run_app_cmd ./scripts/python_runtime.sh scripts/check_public_data_consistency.py --app-dir "$APP_DIR"
+  # Checkout public/data is intentional here (pre-publish). Live WWW SSOT is
+  # separate; ops audits must set PUBLIC_DATA_DIR or --public-dir.
+  run_app_cmd ./scripts/python_runtime.sh scripts/check_public_data_consistency.py \
+    --app-dir "$APP_DIR" --allow-repo-public-data
+}
+
+mirror_repo_public_data_from_live() {
+  # Batch BX: soft-gate static mirror of live PUBLIC_ROOT → checkout public/data.
+  # Never fails deploy (ops runbook: soft gate + monitoring for mirror lag).
+  [ "$SKIP_MIRROR" = "0" ] || return 0
+  log "Mirroring live public data into checkout public/data (soft gate)"
+  local live_src="${PUBLIC_ROOT}/data"
+  if [ ! -d "$live_src" ]; then
+    # WEB_ROOT often is /var/www/portfolio-lab with data/ nested
+    if [ -d "${WEB_ROOT}/data" ]; then
+      live_src="${WEB_ROOT}/data"
+    else
+      warn "No live public data dir at ${PUBLIC_ROOT}/data or ${WEB_ROOT}/data; skip mirror"
+      return 0
+    fi
+  fi
+  if [ "$DRY_RUN" = "1" ]; then
+    log "[dry-run] Would mirror ${live_src} → ${APP_DIR}/public/data"
+    return 0
+  fi
+  if ! (
+    cd "$APP_DIR" &&
+      ./scripts/python_runtime.sh scripts/mirror_repo_public_data.py \
+        --source "$live_src" \
+        --dest "${APP_DIR}/public/data"
+  ); then
+    warn "mirror_repo_public_data soft-failed (non-blocking); run make mirror-repo-public-data later"
+  fi
 }
 
 publish_dist() {
@@ -444,6 +479,11 @@ main() {
   install_dependencies
   check_fred_readiness
   refresh_dashboard_data
+  # Mirror live WWW data into checkout public/data BEFORE the frontend build
+  # (so dist/data captures the fresh mirror) and before the consistency check
+  # (so index entries resolve). Files the operator tree has but the repo
+  # mirror lacked otherwise false-fail the pre-publish gate.
+  mirror_repo_public_data_from_live
   build_frontend
   check_public_data_consistency
   publish_dist

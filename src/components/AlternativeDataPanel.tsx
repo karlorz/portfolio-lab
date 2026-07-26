@@ -23,6 +23,15 @@ interface AlternativeDataProps {
 }
 
 const COMPONENT_LABELS: Record<string, string> = {
+  // Current seven-component producer
+  treasury_curve: 'Treasury Curve',
+  sector_rotation: 'Sector Rotation',
+  credit_spread: 'Credit Spread',
+  tail_risk: 'Tail Risk',
+  broad_momentum: 'Broad Momentum',
+  crypto_sentiment: 'Crypto Sentiment',
+  crypto_fg: 'Crypto F&G',
+  // Legacy flat keys (fallback projection)
   earnings: 'Earnings',
   news: 'News',
   jobs: 'Jobs',

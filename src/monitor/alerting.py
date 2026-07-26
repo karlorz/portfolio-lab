@@ -41,6 +41,7 @@ class AlertLevel(str, Enum):
 class AlertChannel(str, Enum):
     """Alert categories for different pipeline events."""
     SIGNAL_STALENESS = "signal_staleness"
+    SIGNAL_RECOVERY = "signal_recovery"
     EVALUATOR_ERROR = "evaluator_error"
     PORTFOLIO_DRIFT = "portfolio_drift"
     CRON_FAILURE = "cron_failure"
@@ -88,8 +89,15 @@ def _should_suppress(key: str) -> bool:
 
 
 def _record_alert(key: str) -> None:
-    """Record that an alert was just sent for this key."""
+    """Record that an alert was just processed for this key (lifecycle + webhook)."""
     _last_alert_time[key] = datetime.now(timezone.utc)
+
+
+def _clear_channel_dedup(channel: AlertChannel) -> None:
+    """Drop all dedup keys for a channel so a fresh open can fire after PASS."""
+    prefix = f"{channel.value}:"
+    for key in [k for k in _last_alert_time if k.startswith(prefix)]:
+        del _last_alert_time[key]
 
 
 def send_alert(
@@ -109,18 +117,42 @@ def send_alert(
     Returns:
         True if alert was sent (or alerting is disabled), False on send failure.
     """
-    _record_incident_transition(channel, level, message, details)
+    # PASS always resolves lifecycle and clears channel dedup so a later
+    # WARN/HALT can open a new incident immediately.
+    if level == AlertLevel.PASS:
+        _record_incident_transition(channel, level, message, details)
+        _clear_channel_dedup(channel)
+        if not ALERT_WEBHOOK_URL:
+            logger.debug("Alerting disabled — no ALERT_WEBHOOK_URL configured")
+            return True
+        # PASS notifications are not deduped; still best-effort webhook.
+        return _post_webhook(channel, level, message, details)
 
-    if not ALERT_WEBHOOK_URL:
-        logger.debug("Alerting disabled — no ALERT_WEBHOOK_URL configured")
-        return True
-
-    # Dedup: suppress repeated alerts within min interval
+    # Dedup applies to both lifecycle and webhook for non-PASS levels so
+    # dashboard regen cannot ratchet alert_count while notifications are
+    # suppressed (default ALERT_MIN_INTERVAL_SECONDS).
     dedup_key = f"{channel.value}:{level.value}"
     if _should_suppress(dedup_key):
         logger.debug("Alert suppressed (dedup): %s", dedup_key)
         return True
 
+    _record_incident_transition(channel, level, message, details)
+    _record_alert(dedup_key)
+
+    if not ALERT_WEBHOOK_URL:
+        logger.debug("Alerting disabled — no ALERT_WEBHOOK_URL configured")
+        return True
+
+    return _post_webhook(channel, level, message, details)
+
+
+def _post_webhook(
+    channel: AlertChannel,
+    level: AlertLevel,
+    message: str,
+    details: Optional[Dict],
+) -> bool:
+    """POST webhook payload; returns False on transport/HTTP failure."""
     payload = {
         "channel": channel.value,
         "level": level.value,
@@ -142,7 +174,6 @@ def send_alert(
             if resp.status >= 400:
                 logger.warning("Alert webhook returned HTTP %d", resp.status)
                 return False
-        _record_alert(dedup_key)
         logger.info("Alert sent: [%s] %s — %s", level.value, channel.value, message)
         return True
     except urllib.error.URLError as e:
@@ -153,42 +184,365 @@ def send_alert(
         return False
 
 
+# Batch IM DP: signals that are advisory_shadow / non-routed must not sole-drive
+# WARN→kill escalation. alternative_data is the primary thrash source in lab.
+_DEFAULT_ADVISORY_STALE_SIGNALS = frozenset({"alternative_data"})
+
+
+def _is_advisory_stale_signal(name: str, signal_roles: Optional[Dict] = None) -> bool:
+    """True when a stale signal is advisory-only and must not sole-page kill."""
+    key = str(name)
+    if signal_roles and isinstance(signal_roles, dict):
+        role = str(signal_roles.get(key) or "").lower()
+        if role in {
+            "advisory_shadow",
+            "advisory_non_routed",
+            "advisory_sleeve",
+            "advisory",
+        }:
+            return True
+        if role in {"execution_routed", "required", "authoritative"}:
+            return False
+    return key in _DEFAULT_ADVISORY_STALE_SIGNALS
+
+
+def classify_signal_staleness(
+    staleness_data: Dict,
+) -> Optional[tuple[AlertLevel, str, Dict]]:
+    """Classify signal staleness into PASS/WARN/HALT (pure; no I/O).
+
+    Returns ``(level, message, details)`` or ``None`` when there is nothing
+    to report (``total_count == 0``).
+
+    Policy:
+        - Stale signals drive WARN/HALT as before.
+        - Non-empty ``unavailable_signals`` (list) must not produce an
+          all-fresh PASS even when ``stale_signals`` is empty.
+        - When both stale and unavailable, prioritise stale in the message
+          but keep unavailable in details.
+        - Batch IM DP: sole stale advisory_shadow (e.g. alternative_data) is
+          PASS — advisory cannot sole-escalate kill. Required stale still WARN.
+    """
+    stale_raw = staleness_data.get("stale_signals") or []
+    stale_signals = [str(x) for x in stale_raw] if isinstance(stale_raw, list) else []
+    unavailable_raw = staleness_data.get("unavailable_signals") or []
+    unavailable_signals = (
+        [str(x) for x in unavailable_raw] if isinstance(unavailable_raw, list) else []
+    )
+    unavailable_count = len(unavailable_signals)
+    healthy_count = int(staleness_data.get("healthy_count") or 0)
+    total_count = int(staleness_data.get("total_count") or 0)
+    signal_roles = staleness_data.get("signal_roles")
+    if not isinstance(signal_roles, dict):
+        signal_roles = {}
+
+    if total_count == 0:
+        return None
+
+    details: Dict = {
+        "stale_signals": stale_signals,
+        "healthy_count": healthy_count,
+        "total_count": total_count,
+        "unavailable_count": unavailable_count,
+    }
+    if unavailable_signals:
+        details["unavailable_signals"] = unavailable_signals
+    projection_lag_raw = staleness_data.get("projection_lag_signals") or []
+    projection_lag_signals = (
+        [str(x) for x in projection_lag_raw] if isinstance(projection_lag_raw, list) else []
+    )
+    if projection_lag_signals:
+        details["projection_lag_signals"] = projection_lag_signals
+        details["policy_note"] = (
+            "projection_lag: producer fresher than embedded signals; "
+            "not treated as producer-stale for kill escalation"
+        )
+
+    # Split actionable vs advisory stale before level decision (Batch IM DP).
+    advisory_stale = [
+        s for s in stale_signals if _is_advisory_stale_signal(s, signal_roles)
+    ]
+    actionable_stale = [
+        s for s in stale_signals if not _is_advisory_stale_signal(s, signal_roles)
+    ]
+    if advisory_stale:
+        details["advisory_stale"] = advisory_stale
+    if actionable_stale != stale_signals:
+        details["actionable_stale"] = actionable_stale
+
+    if not actionable_stale and unavailable_count == 0:
+        if advisory_stale:
+            details["policy"] = "advisory_shadow_stale_only_pass"
+            return (
+                AlertLevel.PASS,
+                (
+                    f"All required signals fresh "
+                    f"({len(advisory_stale)} advisory-only stale skipped: "
+                    f"{', '.join(advisory_stale[:4])})"
+                ),
+                details,
+            )
+        if projection_lag_signals:
+            return (
+                AlertLevel.PASS,
+                (
+                    f"All {total_count} signals producer-fresh "
+                    f"({len(projection_lag_signals)} projection lag)"
+                ),
+                details,
+            )
+        return (
+            AlertLevel.PASS,
+            f"All {total_count} signals fresh",
+            details,
+        )
+
+    if not actionable_stale and unavailable_count > 0:
+        # Intentional lab gaps (ML-off research, FRED key absent) must not block
+        # all-fresh PASS / sticky warning kill. Prefer ownership annotation when
+        # present; otherwise treat full unavailable list as actionable.
+        ownership = staleness_data.get("unavailable_ownership")
+        actionable_unavailable = unavailable_signals
+        intentional_count = 0
+        if isinstance(ownership, list) and ownership:
+            actionable_unavailable = [
+                str(r.get("signal"))
+                for r in ownership
+                if isinstance(r, dict)
+                and not (
+                    r.get("intentional_lab_gap")
+                    or r.get("intentional_when_ml_off")
+                    or r.get("intentional_when_fred_unconfigured")
+                )
+            ]
+            intentional_count = max(0, unavailable_count - len(actionable_unavailable))
+            details["actionable_unavailable"] = actionable_unavailable
+            details["intentional_lab_gap_count"] = intentional_count
+
+        if not actionable_unavailable:
+            details["policy"] = (
+                "advisory_or_intentional_only_pass"
+                if advisory_stale
+                else "intentional_lab_gaps_only_pass"
+            )
+            return (
+                AlertLevel.PASS,
+                (
+                    f"All required signals fresh "
+                    f"({intentional_count} intentional lab gaps skipped"
+                    + (
+                        f"; {len(advisory_stale)} advisory-only stale"
+                        if advisory_stale
+                        else ""
+                    )
+                    + ")"
+                    if intentional_count or advisory_stale
+                    else f"All {total_count} signals fresh"
+                ),
+                details,
+            )
+
+        names = ", ".join(actionable_unavailable[:8])
+        suffix = f": {names}" if names else ""
+        if len(actionable_unavailable) > 8:
+            suffix += f" (+{len(actionable_unavailable) - 8} more)"
+        details["policy"] = "unavailable_signals_nonempty_blocks_all_fresh_pass"
+        return (
+            AlertLevel.WARN,
+            (
+                f"{len(actionable_unavailable)}/{total_count} signals unavailable "
+                f"(partial availability; not all-fresh){suffix}"
+            ),
+            details,
+        )
+
+    # Actionable stale remains → WARN/HALT using actionable list only.
+    # HALT when no healthy signals remain (pipeline down for required set),
+    # even if some of the stale list is advisory-only noise.
+    if healthy_count == 0 and actionable_stale:
+        return (
+            AlertLevel.HALT,
+            f"ALL {total_count} signals stale — pipeline may be down",
+            details,
+        )
+
+    extra = ""
+    if unavailable_count:
+        extra = f"; {unavailable_count} unavailable"
+    if advisory_stale:
+        extra += f"; {len(advisory_stale)} advisory-only stale skipped"
+    return (
+        AlertLevel.WARN,
+        f"{len(actionable_stale)}/{total_count} signals stale: "
+        f"{', '.join(actionable_stale)}{extra}",
+        details,
+    )
+
+
 def check_staleness_and_alert(staleness_data: Dict) -> None:
     """Check signal staleness data and fire alerts on state transitions.
 
     Args:
         staleness_data: Output from DashboardGenerator._check_signal_staleness()
     """
-    stale_signals = staleness_data.get("stale_signals", [])
-    healthy_count = staleness_data.get("healthy_count", 0)
-    total_count = staleness_data.get("total_count", 0)
+    # Annotate ownership for operator recovery (does not change level policy).
+    try:
+        from src.monitor.signal_ownership import annotate_unavailable_signals, recovery_summary
 
-    if total_count == 0:
+        ml_on = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+        ownership = annotate_unavailable_signals(
+            staleness_data.get("unavailable_signals") or [],
+            ml_enabled=ml_on,
+        )
+        if ownership:
+            staleness_data = dict(staleness_data)
+            staleness_data["unavailable_ownership"] = ownership
+            staleness_data["recovery"] = recovery_summary(ownership)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Signal ownership annotation skipped: %s", exc)
+
+    classified = classify_signal_staleness(staleness_data)
+    if classified is None:
         return
+    level, message, details = classified
+    if details is not None and isinstance(staleness_data, dict):
+        if staleness_data.get("unavailable_ownership"):
+            details = dict(details)
+            details["unavailable_ownership"] = staleness_data["unavailable_ownership"]
+            details["recovery"] = staleness_data.get("recovery")
+    send_alert(
+        AlertChannel.SIGNAL_STALENESS,
+        level,
+        message,
+        details=details if level != AlertLevel.PASS else None,
+    )
+    # Distinct recovery channel when unavailability is sustained under kill halt.
+    try:
+        check_sustained_unavailability_and_alert(staleness_data)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Sustained unavailability recovery check skipped: %s", exc)
 
-    if len(stale_signals) == 0:
-        # All signals healthy — PASS state
-        send_alert(
-            AlertChannel.SIGNAL_STALENESS,
-            AlertLevel.PASS,
-            f"All {total_count} signals fresh",
-        )
-    elif healthy_count > 0:
-        # Some signals stale — WARN state
-        send_alert(
-            AlertChannel.SIGNAL_STALENESS,
-            AlertLevel.WARN,
-            f"{len(stale_signals)}/{total_count} signals stale: {', '.join(stale_signals)}",
-            details={"stale_signals": stale_signals, "healthy_count": healthy_count},
-        )
+
+def check_sustained_unavailability_and_alert(
+    staleness_data: Dict,
+    *,
+    data_dir: Optional[str] = None,
+    min_unavailable: int | None = None,
+    min_hours: float | None = None,
+) -> bool:
+    """Fire SIGNAL_RECOVERY WARN when unavailability persists under kill halt.
+
+    Does **not** clear kill_switch. Returns True when a recovery alert was sent.
+    """
+    from pathlib import Path
+
+    from src.paths import DATA_DIR as _DEFAULT_DATA
+
+    root = Path(data_dir) if data_dir is not None else Path(_DEFAULT_DATA)
+    threshold = min_unavailable
+    if threshold is None:
+        try:
+            threshold = int(os.environ.get("SIGNAL_RECOVERY_MIN_UNAVAILABLE", "5"))
+        except ValueError:
+            threshold = 5
+    hours_needed = min_hours
+    if hours_needed is None:
+        try:
+            hours_needed = float(os.environ.get("SIGNAL_RECOVERY_MIN_HOURS", "2"))
+        except ValueError:
+            hours_needed = 2.0
+
+    unavailable = staleness_data.get("unavailable_signals") or []
+    if not isinstance(unavailable, list):
+        unavailable = []
+    ownership = staleness_data.get("unavailable_ownership")
+    if not ownership:
+        try:
+            from src.monitor.signal_ownership import annotate_unavailable_signals, recovery_summary
+
+            ml_on = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+            ownership = annotate_unavailable_signals(unavailable, ml_enabled=ml_on)
+            recovery = recovery_summary(ownership)
+        except Exception:
+            ownership = []
+            recovery = {}
     else:
-        # All signals stale — HALT state
-        send_alert(
-            AlertChannel.SIGNAL_STALENESS,
-            AlertLevel.HALT,
-            f"ALL {total_count} signals stale — pipeline may be down",
-            details={"stale_signals": stale_signals},
+        recovery = staleness_data.get("recovery") or {}
+
+    actionable = [
+        r
+        for r in (ownership or [])
+        if isinstance(r, dict)
+        and not (
+            r.get("intentional_lab_gap")
+            or r.get("intentional_when_ml_off")
+            or r.get("intentional_when_fred_unconfigured")
         )
+    ]
+    if len(actionable) < threshold:
+        return False
+
+    # Require active kill authority (sustained under halt / restrict)
+    kill_path = root / "kill_switch.json"
+    kill_level = None
+    kill_enabled = False
+    kill_age_hours = None
+    if kill_path.exists():
+        try:
+            kill = json.loads(kill_path.read_text(encoding="utf-8"))
+            if isinstance(kill, dict):
+                kill_enabled = bool(kill.get("enabled"))
+                kill_level = kill.get("level")
+                ts = kill.get("timestamp")
+                if isinstance(ts, str) and ts:
+                    try:
+                        kt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                        if kt.tzinfo is None:
+                            kt = kt.replace(tzinfo=timezone.utc)
+                        kill_age_hours = (
+                            datetime.now(timezone.utc) - kt.astimezone(timezone.utc)
+                        ).total_seconds() / 3600.0
+                    except ValueError:
+                        kill_age_hours = None
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            kill_enabled = False
+
+    if not kill_enabled:
+        return False
+    # Only under execution-blocking kill levels. WARNING-level kill often comes
+    # from this same SIGNAL_RECOVERY channel (WARN→p2→kill warning), which would
+    # re-fire forever under its own advisory authority.
+    level_norm = str(kill_level or "").strip().lower()
+    if level_norm not in {"halt", "restrict"}:
+        return False
+    if kill_age_hours is not None and kill_age_hours < hours_needed:
+        return False
+    # If no kill timestamp, still fire when threshold met (fail-visible)
+
+    jobs = recovery.get("jobs_to_rerun") if isinstance(recovery, dict) else None
+    targets = recovery.get("make_targets") if isinstance(recovery, dict) else None
+    message = (
+        f"Sustained overlay unavailability under kill "
+        f"(level={kill_level}): {len(actionable)} actionable signals unavailable. "
+        f"Re-run producers then make ops-regen; do not auto-clear kill."
+    )
+    details = {
+        "unavailable_ownership": ownership,
+        "recovery": recovery,
+        "actionable_unavailable_count": len(actionable),
+        "kill_level": kill_level,
+        "kill_age_hours": round(kill_age_hours, 2) if kill_age_hours is not None else None,
+        "jobs_to_rerun": jobs,
+        "make_targets": targets,
+        "policy": "recovery_advisory_only_no_kill_clear",
+    }
+    send_alert(
+        AlertChannel.SIGNAL_RECOVERY,
+        AlertLevel.WARN,
+        message,
+        details=details,
+    )
+    return True
 
 
 def check_drift_and_alert(drift_pct: float, symbol: str = "") -> None:
@@ -239,8 +593,11 @@ def check_ic_decay_and_alert(ic_decay_data: Dict) -> None:
     warning_signals = []
     critical_signals = []
     healthy_count = 0
+    insufficient_count = 0
 
     for signal_name, data in ic_decay_data.items():
+        if not isinstance(data, dict):
+            continue
         status = data.get("status", "unknown")
         if status == "critical":
             critical_signals.append(signal_name)
@@ -248,17 +605,38 @@ def check_ic_decay_and_alert(ic_decay_data: Dict) -> None:
             warning_signals.append(signal_name)
         elif status == "healthy":
             healthy_count += 1
+        elif status == "insufficient_data":
+            insufficient_count += 1
 
     total = len(ic_decay_data)
     if total == 0:
         return
 
     if not warning_signals and not critical_signals:
-        send_alert(
-            AlertChannel.IC_DECAY,
-            AlertLevel.PASS,
-            f"All {total} signals have healthy IC",
-        )
+        # PASS clears prior false HALT from thin-history critical misclassification.
+        # Warm-up (all insufficient_data) is not an operational failure.
+        if healthy_count == 0 and insufficient_count > 0:
+            send_alert(
+                AlertChannel.IC_DECAY,
+                AlertLevel.PASS,
+                (
+                    f"IC monitor warming up: {insufficient_count} signal(s) below "
+                    f"min observations for status (no kill escalation)"
+                ),
+                details={
+                    "insufficient_count": insufficient_count,
+                    "policy": "thin_history_no_kill",
+                },
+            )
+        elif healthy_count > 0:
+            send_alert(
+                AlertChannel.IC_DECAY,
+                AlertLevel.PASS,
+                f"All {healthy_count} resolved signals have healthy IC"
+                + (f" ({insufficient_count} warming up)" if insufficient_count else ""),
+            )
+        else:
+            return
     elif critical_signals:
         send_alert(
             AlertChannel.IC_DECAY,

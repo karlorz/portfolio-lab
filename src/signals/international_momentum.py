@@ -97,10 +97,12 @@ class InternationalMomentumSignal:
             },
             regime_fit="all",
             is_active=self.is_active(),
+            # efa_vs_spy / eem_vs_spy are already percentage points (e.g. -3.0),
+            # not unit fractions — do not use % format (Batch CV display fix).
             explanation=f"Intl Momentum: {self.signal_type}, "
                         f"conf={self.confidence_level}, "
-                        f"EFA/SPY={self.efa_vs_spy:+.2%}, "
-                        f"EEM/SPY={self.eem_vs_spy:+.2%}, "
+                        f"EFA/SPY={self.efa_vs_spy:+.2f}pp, "
+                        f"EEM/SPY={self.eem_vs_spy:+.2f}pp, "
                         f"VIX_filter={self.vix_filter_active}",
             metadata={
                 "signal_type": self.signal_type,

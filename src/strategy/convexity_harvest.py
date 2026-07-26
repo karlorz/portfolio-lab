@@ -10,7 +10,7 @@ import json
 import logging
 import sys
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -27,9 +27,9 @@ class ConvexityPosition:
     date: str
     allocation_pct: float        # Portfolio allocation (0-5%)
     position_type: str           # 'short_vix', 'long_vix', 'flat'
-    vix_level: float
-    contango_pct: float
-    expected_roll_yield: float
+    vix_level: Optional[float]   # None when VIX feed unavailable (not 0.0)
+    contango_pct: Optional[float]
+    expected_roll_yield: Optional[float]
     risk_score: float            # 0-1 risk assessment
     exit_triggered: bool
     exit_reason: Optional[str]
@@ -66,6 +66,7 @@ class ConvexityHarvestStrategy:
         self.consecutive_backwardation_days = 0
         self.last_vix_level = None
         self.last_allocation = 0.0
+        self._last_resolve_meta: Dict = {}
     
     def calculate_position_size(
         self,
@@ -141,27 +142,66 @@ class ConvexityHarvestStrategy:
 
         return False, None
     
+    def _resolve_contango_signal(self, date: str) -> Optional[Dict]:
+        """Resolve contango/VIX for date, falling back to latest futures cache day.
+
+        Live dashboard often asks for *today* while the futures proxy cache
+        lags (ends weeks/months earlier). Prefer exact date; else last
+        available cache bar so we never publish vix_level=0 while term data
+        exists.
+        """
+        signal_data = self.vix_manager.get_contango_signal(date)
+        if signal_data:
+            signal_data = dict(signal_data)
+            signal_data.setdefault("vix_source", "futures_cache")
+            signal_data.setdefault("asof", date)
+            return signal_data
+
+        try:
+            data_range = self.vix_manager.get_data_range()
+        except Exception:  # noqa: BLE001 — empty/mock managers
+            data_range = None
+        end = None
+        if isinstance(data_range, (list, tuple)) and len(data_range) >= 2:
+            end = data_range[1] or None
+        elif isinstance(data_range, (list, tuple)) and len(data_range) == 1:
+            end = data_range[0] or None
+        if end:
+            fallback = self.vix_manager.get_contango_signal(end)
+            if fallback:
+                out = dict(fallback)
+                out["vix_source"] = "futures_cache_last_available"
+                out["asof"] = end
+                out["requested_date"] = date
+                return out
+        return None
+
     def generate_signal(self, date: str) -> ConvexityPosition:
         """
         Generate convexity harvest signal for a given date.
         
         This is the main entry point for daily signal generation.
         """
-        # Get VIX term structure for date
-        signal_data = self.vix_manager.get_contango_signal(date)
+        signal_data = self._resolve_contango_signal(date)
+        self._last_resolve_meta = {
+            k: signal_data.get(k)
+            for k in ("asof", "vix_source", "requested_date")
+            if signal_data and signal_data.get(k) is not None
+        } if signal_data else {}
         
         if not signal_data:
-            # No data available - flat position
+            # Truly unavailable — null levels (not 0.0) so dashboards cannot
+            # mistake missing futures cache for a measured flat VIX reading.
             return ConvexityPosition(
                 date=date,
                 allocation_pct=0.0,
                 position_type='flat',
-                vix_level=0.0,
-                contango_pct=0.0,
-                expected_roll_yield=0.0,
+                vix_level=None,
+                contango_pct=None,
+                expected_roll_yield=None,
                 risk_score=1.0,
                 exit_triggered=False,
-                exit_reason='No VIX data available'
+                exit_reason='unavailable: no VIX futures cache'
             )
         
         vix_level = signal_data['vix_level']
@@ -250,9 +290,10 @@ class ConvexityHarvestStrategy:
             
             # Simplified P&L calculation
             # In reality, this would use actual VIX futures prices
-            if position.allocation_pct > 0 and position.expected_roll_yield > 0:
+            roll = position.expected_roll_yield
+            if position.allocation_pct > 0 and roll is not None and roll > 0:
                 # Assume capturing ~1/12 of annualized roll yield per month
-                monthly_yield = position.expected_roll_yield / 12
+                monthly_yield = roll / 12
                 daily_return = monthly_yield / 21  # ~21 trading days
                 
                 # Apply some random noise and occasional VIX spikes
@@ -319,9 +360,56 @@ class ConvexityHarvestStrategy:
     
     def get_current_signal(self) -> Dict:
         """Get current convexity harvest signal for today's date"""
-        today = datetime.now().strftime('%Y-%m-%d')
+        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        now_ts = datetime.now(timezone.utc).isoformat()
         position = self.generate_signal(today)
-        return position.to_dict()
+        payload = position.to_dict()
+        # Staleness TTL requires generated_at; always stamp wall-clock produce time.
+        payload["generated_at"] = now_ts
+        payload["timestamp"] = now_ts
+        # Honesty fields for dashboard consumers
+        if position.exit_reason and str(position.exit_reason).startswith("unavailable"):
+            payload["status"] = "unavailable"
+            payload["runtime_status"] = "unavailable"
+            payload["vix_source"] = "unavailable"
+            # Honesty: missing futures → null levels, never silent 0.0
+            payload["vix_level"] = None
+            payload["contango_pct"] = None
+            payload["expected_roll_yield"] = None
+        else:
+            payload.update(self._last_resolve_meta)
+            # Stale futures-cache fallback is not a live "ok" reading.
+            # asof << requested_date (or last_available source) → degraded.
+            asof = payload.get("asof")
+            requested = payload.get("requested_date") or today
+            vix_source = payload.get("vix_source") or ""
+            lag_days = None
+            if asof and requested and str(asof) != str(requested):
+                try:
+                    d_asof = datetime.strptime(str(asof)[:10], "%Y-%m-%d")
+                    d_req = datetime.strptime(str(requested)[:10], "%Y-%m-%d")
+                    lag_days = (d_req - d_asof).days
+                except ValueError:
+                    lag_days = None
+            stale_fallback = (
+                vix_source == "futures_cache_last_available"
+                or (lag_days is not None and lag_days > 0)
+            )
+            if stale_fallback:
+                payload["status"] = "degraded"
+                payload["runtime_status"] = "stale_futures_cache"
+                payload["freshness_status"] = "stale"
+                if lag_days is not None:
+                    payload["asof_lag_days"] = lag_days
+                payload["status_reason"] = (
+                    f"VIX futures cache asof={asof} for requested={requested}"
+                    + (f" ({lag_days}d lag)" if lag_days is not None else "")
+                    + "; not a same-day live contango reading"
+                )
+            else:
+                payload["status"] = "ok"
+                payload["freshness_status"] = "fresh"
+        return payload
 
 
 def main():
@@ -367,10 +455,13 @@ def main():
         for date in test_dates:
             pos = strategy.generate_signal(date)
             logger.info("\n%s: %s", date, pos.position_type.upper())
-            logger.info("  VIX: %.2f", pos.vix_level)
-            logger.info("  Contango: %.2f%%", pos.contango_pct)
+            vix_s = "n/a" if pos.vix_level is None else f"{pos.vix_level:.2f}"
+            ctg_s = "n/a" if pos.contango_pct is None else f"{pos.contango_pct:.2f}%"
+            roll_s = "n/a" if pos.expected_roll_yield is None else f"{pos.expected_roll_yield:.1f}%"
+            logger.info("  VIX: %s", vix_s)
+            logger.info("  Contango: %s", ctg_s)
             logger.info("  Allocation: %.1f%%", pos.allocation_pct)
-            logger.info("  Expected Roll Yield: %.1f%%", pos.expected_roll_yield)
+            logger.info("  Expected Roll Yield: %s", roll_s)
             if pos.exit_triggered:
                 logger.info("  EXIT TRIGGERED: %s", pos.exit_reason)
 

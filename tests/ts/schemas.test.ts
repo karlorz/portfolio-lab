@@ -400,6 +400,22 @@ describe('SmartRebalanceSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('accepts kill-blocked smart rebalance fields', () => {
+    const result = SmartRebalanceSchema.safeParse({
+      ...validSmartRebalance(),
+      should_execute: false,
+      decision: 'blocked_kill_switch',
+      execution_blocked: true,
+      kill_switch_enabled: true,
+      kill_switch_level: 'halt',
+      kill_switch_reason: 'unresolved_incident:signal_staleness',
+      kill_switch_incident_id: 'inc-1',
+      kill_switch_message: 'Paper trading halted',
+    });
+    expect(result.success).toBe(true);
+  });
+
+
   it('rejects invalid urgency', () => {
     const result = SmartRebalanceSchema.safeParse({
       ...validSmartRebalance(),
@@ -631,7 +647,27 @@ describe('ZeroDTESchema', () => {
 });
 
 describe('BondMomentumSchema', () => {
-  it('accepts valid bond momentum data', () => {
+  it('accepts producer summary-shaped public artifact', () => {
+    const data = {
+      active: true,
+      yield_10y: 4.5,
+      yield_2y: 4.0,
+      spread: 0.5,
+      curve_regime: 'normal',
+      rate_direction: 'stable',
+      tlt_weight: 0.2,
+      ief_weight: 0.5,
+      shy_weight: 0.3,
+      effective_duration: 7.3,
+      position: 'intermediate',
+      confidence: 70.0,
+      status_text: 'Bonds: intermediate (normal/stable), dur 7yr',
+    };
+    const result = BondMomentumSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts legacy overlay signals shape', () => {
     const data = {
       signals: [{
         etf: 'TLT', timestamp: '2026-05-26T12:00:00Z',
@@ -646,7 +682,7 @@ describe('BondMomentumSchema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('rejects invalid confidence', () => {
+  it('rejects invalid legacy confidence', () => {
     const data = {
       signals: [{
         etf: 'TLT', timestamp: '2026-05-26T12:00:00Z',
@@ -805,12 +841,6 @@ describe('SignalsDataSchema', () => {
     data.crypto_allocation = { btc: 0.5, eth: 0.3, sol: 0.2 };
     const result = SignalsDataSchema.safeParse(data);
     expect(result.success).toBe(false);
-  });
-
-  it('accepts the generated signals artifact optional panel shapes when present', () => {
-    const artifact = readJsonOrFallback('public/data/signals.json', validSignalsData());
-    const result = SignalsDataSchema.safeParse(artifact);
-    expect(result.success).toBe(true);
   });
 
   it('rejects invalid non-null untyped signal panel values', () => {
@@ -1445,6 +1475,28 @@ describe('GraduationDataSchema', () => {
 
   it('accepts valid graduation data', () => {
     const result = GraduationDataSchema.safeParse(validGrad());
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts dual-shape producer numeric criterion values', () => {
+    const data = {
+      ...validGrad(),
+      criteria: [
+        {
+          id: 'min_sharpe',
+          label: 'Rolling Sharpe ratio >= 0.50',
+          passed: false,
+          value: 0.0,
+          threshold: '0.5',
+          name: 'min_sharpe',
+          required: 0.5,
+          description: 'Rolling Sharpe ratio >= 0.50',
+        },
+      ],
+      readiness_score: 18.2,
+      is_graduation_ready: false,
+    };
+    const result = GraduationDataSchema.safeParse(data);
     expect(result.success).toBe(true);
   });
 

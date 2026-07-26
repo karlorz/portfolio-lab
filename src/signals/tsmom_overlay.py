@@ -41,7 +41,11 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 
 from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION, VOL_TARGET, MAX_DEVIATION, MIN_WEIGHT, REBALANCE_FREQ
-from src.backtest.metrics import save_results_json
+from src.backtest.metrics import (
+    build_profitability_evidence,
+    compute_one_way_turnover,
+    save_results_json,
+)
 from src.data.price_cache import get_prices, get_prices_df
 
 
@@ -484,8 +488,17 @@ class TSMOMBacktester:
         """
         # Load all price data
         prices_df = self._load_all_prices()
+        if getattr(self, "_missing_assets", None):
+            return {
+                "error": "Missing required real price data",
+                "status": "failed",
+                "missing_assets": self._missing_assets,
+            }
         if prices_df is None or len(prices_df) < LOOKBACK_DAYS + SKIP_DAYS + 100:
-            return {"error": "Insufficient price data"}
+            return {
+                "error": "Insufficient aligned real price data",
+                "status": "failed",
+            }
         
         # Filter dates
         if self.start_date:
@@ -494,16 +507,35 @@ class TSMOMBacktester:
             prices_df = prices_df[prices_df.index <= self.end_date]
         
         if len(prices_df) < 100:
-            return {"error": "Insufficient data after date filtering"}
+            return {
+                "error": "Insufficient data after date filtering",
+                "status": "failed",
+            }
         
         # Initialize portfolio
-        portfolio_values = [100000.0]
         current_weights = self.base_allocation.copy()
         rebalance_dates = []
+        evidence_dates = []
+        gross_returns = []
+        turnovers = []
         
         # Run simulation
         for i in range(LOOKBACK_DAYS + SKIP_DAYS, len(prices_df)):
             date = prices_df.index[i]
+            turnover = 0.0
+
+            # Earn today's close-to-close return using weights that were
+            # knowable before today's close. Any signal computed below is
+            # traded at this close and only affects subsequent returns.
+            daily_return = 0
+            for ticker in self.tickers:
+                ticker_return = (
+                    prices_df.iloc[i][ticker]
+                    / prices_df.iloc[i - 1][ticker]
+                    - 1
+                )
+                daily_return += current_weights.get(ticker, 0) * ticker_return
+            daily_return += current_weights.get('CASH', 0) * 0.0
             
             # Check if rebalance needed
             if (i - LOOKBACK_DAYS - SKIP_DAYS) % rebalance_freq == 0:
@@ -513,67 +545,60 @@ class TSMOMBacktester:
                     new_weights = self._weights_from_signals(signals)
                     
                     # Calculate turnover
-                    turnover = sum(abs(new_weights.get(t, 0) - current_weights.get(t, 0))
-                                 for t in self.tickers + ['CASH']) / 2
-                    
-                    # Apply transaction costs
-                    cost = turnover * self.transaction_cost * 2  # Both legs
-                    portfolio_values[-1] *= (1 - cost)
-                    
+                    turnover = compute_one_way_turnover(
+                        current_weights,
+                        new_weights,
+                    )
+
                     current_weights = new_weights
                     rebalance_dates.append({
                         'date': date.isoformat(),
                         'turnover': turnover,
                         'weights': new_weights.copy()
                     })
-            
-            # Calculate daily return
-            daily_return = 0
-            for ticker in self.tickers:
-                if ticker in prices_df.columns:
-                    ticker_return = prices_df.iloc[i][ticker] / prices_df.iloc[i-1][ticker] - 1
-                    daily_return += current_weights.get(ticker, 0) * ticker_return
-            
-            # Cash return (assume 0 for simplicity, or add T-bill rates)
-            daily_return += current_weights.get('CASH', 0) * 0.0
-            
-            new_value = portfolio_values[-1] * (1 + daily_return)
-            portfolio_values.append(new_value)
-        
-        # Calculate metrics
-        returns = pd.Series(portfolio_values).pct_change().dropna()
 
-        if len(returns) < 1:
+            evidence_dates.append(date.isoformat())
+            gross_returns.append(float(daily_return))
+            turnovers.append(float(turnover))
+
+        if not gross_returns:
             return {"strategy": "TSMOM Overlay Backtest v2.52",
                     "cagr": 0, "volatility": 0, "sharpe": 0,
                     "max_drawdown": 0, "calmar": 0}
 
-        cagr = (portfolio_values[-1] / portfolio_values[0]) ** (252 / len(returns)) - 1
-        volatility = returns.std() * np.sqrt(252)
-        sharpe = cagr / volatility if volatility > 0 else 0
-        
-        # Max drawdown
-        peak = np.maximum.accumulate(portfolio_values)
-        drawdowns = (peak - portfolio_values) / peak
-        max_dd = drawdowns.max()
-        
-        # Calmar
-        calmar = cagr / max_dd if max_dd > 0 else 0
+        evidence = build_profitability_evidence(
+            dates=evidence_dates,
+            gross_returns=gross_returns,
+            turnovers=turnovers,
+            assets=self.tickers,
+            data_mode="real",
+            provenance={
+                "source": "src.data.price_cache.get_prices_df",
+                "path": str(PRICES_PATH),
+            },
+            transaction_cost_bps=self.transaction_cost * 10000,
+            initial_capital=100000.0,
+            point_in_time=True,
+            require_real_data=True,
+        )
+        metrics = evidence["metrics"]["net"]
+        end_value = evidence["trace"][-1]["net_equity"]
         
         return {
             "strategy": "TSMOM Overlay Backtest v2.52",
-            "start_date": prices_df.index[LOOKBACK_DAYS + SKIP_DAYS].isoformat(),
-            "end_date": prices_df.index[-1].isoformat(),
-            "trading_days": len(returns),
+            "start_date": evidence["coverage"]["start_date"],
+            "end_date": evidence["coverage"]["end_date"],
+            "trading_days": evidence["coverage"]["observations"],
             "rebalances": len(rebalance_dates),
-            "start_value": portfolio_values[0],
-            "end_value": portfolio_values[-1],
-            "cagr": round(cagr, 4),
-            "volatility": round(volatility, 4),
-            "sharpe_ratio": round(sharpe, 4),
-            "max_drawdown": round(max_dd, 4),
-            "calmar_ratio": round(calmar, 4),
+            "start_value": 100000.0,
+            "end_value": end_value,
+            "cagr": metrics["cagr"] / 100,
+            "volatility": metrics["volatility"] / 100,
+            "sharpe_ratio": metrics["sharpe_ratio"],
+            "max_drawdown": abs(metrics["max_drawdown"]) / 100,
+            "calmar_ratio": metrics["calmar_ratio"],
             "rebalance_history": rebalance_dates[-10:],  # Last 10
+            "profitability_evidence": evidence,
             "parameters": {
                 "lookback_days": LOOKBACK_DAYS,
                 "skip_days": SKIP_DAYS,
@@ -586,13 +611,16 @@ class TSMOMBacktester:
     def _load_all_prices(self) -> Optional[pd.DataFrame]:
         """Load and align price data for all tickers."""
         all_prices = {}
+        self._missing_assets = []
         
         for ticker in self.tickers:
             df = self.overlay.load_prices(ticker)
             if df is not None:
                 all_prices[ticker] = df['close']
+            else:
+                self._missing_assets.append(ticker)
         
-        if not all_prices:
+        if self._missing_assets or not all_prices:
             return None
         
         # Combine into single DataFrame

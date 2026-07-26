@@ -222,9 +222,14 @@ class TestSignalGeneration:
     def test_generate_default_signal(self, generator):
         signal = generator.generate_signal()
         assert isinstance(signal, BondDurationSignal)
-        assert signal.is_valid
         assert signal.yield_10y > 0
         assert signal.yield_2y > 0
+        # Live SSOT / DB → valid; pure textbook defaults → not valid
+        if signal.using_defaults:
+            assert signal.is_valid is False
+            assert signal.source_status == "degraded"
+        else:
+            assert signal.is_valid is True
 
     def test_generate_with_explicit_params(self, generator):
         signal = generator.generate_signal(
@@ -322,7 +327,7 @@ class TestBondDurationSignalDataclass:
     """Area 1: to_dict() field completeness and enum values."""
 
     def test_to_dict_all_fields(self):
-        """to_dict() should contain all 17 BondDurationSignal fields."""
+        """to_dict() should contain all BondDurationSignal fields incl. provenance."""
         signal = generate_bond_duration_signal(yield_10y=4.5, yield_2y=4.0)
         d = signal.to_dict()
         expected_keys = {
@@ -332,6 +337,7 @@ class TestBondDurationSignalDataclass:
             "tlt_weight", "ief_weight", "shy_weight",
             "effective_duration", "position", "confidence", "is_valid",
             "reason",
+            "using_defaults", "source_mode", "source_status",
         }
         assert set(d.keys()) == expected_keys, f"Missing keys: {expected_keys - set(d.keys())}"
 
@@ -701,22 +707,57 @@ class TestGenerateSignalEdgeCases:
         assert signal.is_valid
 
     def test_generate_partial_params_none_2y(self, generator):
-        """When yield_2y is None, generator falls back to default."""
+        """When yield_2y is None, missing leg falls back; defaults demote is_valid."""
         signal = generator.generate_signal(
             yield_10y=5.0, yield_2y=None, real_rate=2.0, rate_change_6m=0.1
         )
         assert isinstance(signal, BondDurationSignal)
         assert signal.yield_10y == 5.0
-        assert signal.is_valid
+        # Honesty: any defaulted yield leg marks using_defaults / degraded
+        if signal.using_defaults:
+            assert signal.is_valid is False
+            assert signal.source_status == "degraded"
+        else:
+            assert signal.is_valid is True
 
     def test_generate_all_defaults(self, generator):
-        """Call with no arguments uses built-in defaults."""
-        signal = generator.generate_signal()
+        """When SSOT and market DB unavailable, textbook defaults are disclosed as degraded."""
+        from unittest.mock import patch
+
+        with patch.object(generator, "_fetch_yield_data", return_value={
+            "yield_10y": 4.50,
+            "yield_2y": 4.00,
+            "using_defaults": True,
+            "source_mode": "defaults",
+            "source_status": "degraded",
+        }):
+            signal = generator.generate_signal()
         assert isinstance(signal, BondDurationSignal)
-        assert signal.is_valid
-        # Default: yield_10y=4.50, yield_2y=4.00, real_rate=2.00, rate_change_6m=0.15
         assert signal.yield_10y == 4.50
         assert signal.yield_2y == 4.00
+        assert signal.using_defaults is True
+        assert signal.source_mode == "defaults"
+        assert signal.source_status == "degraded"
+        assert signal.is_valid is False
+        assert signal.confidence <= 40.0
+
+    def test_yields_ssot_preferred_over_defaults(self, generator):
+        """yields.json SSOT levels must drive bond_momentum when available."""
+        from unittest.mock import patch
+
+        with patch.object(generator, "_fetch_yield_data", return_value={
+            "yield_10y": 4.1839,
+            "yield_2y": 3.8049,
+            "using_defaults": False,
+            "source_mode": "yields_ssot",
+            "source_status": "ok",
+        }):
+            signal = generator.generate_signal()
+        assert signal.using_defaults is False
+        assert signal.source_mode == "yields_ssot"
+        assert signal.is_valid is True
+        assert abs(signal.yield_10y - 4.18) < 0.02
+        assert abs(signal.yield_2y - 3.80) < 0.02
 
     def test_generate_with_only_real_rate(self, generator):
         """real_rate overrides auto-estimate when real_rate is 0.0 (falsy!)."""

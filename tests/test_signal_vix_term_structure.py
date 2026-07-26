@@ -561,10 +561,12 @@ class TestSignalGenerator:
             gen = VIXTermStructureSignalGenerator()
         assert isinstance(gen.calculator, VIXTermStructureCalculator)
 
-    def test_load_vix_data_missing_file(self):
+    def test_load_vix_data_missing_file(self, tmp_path):
         with _patch_ensure_dirs():
-            gen = VIXTermStructureSignalGenerator()
-            gen.VIX_DATA_PATH = Path("/nonexistent/file.json")
+            gen = VIXTermStructureSignalGenerator(
+                data_dir=tmp_path, db_path=tmp_path / "missing.db"
+            )
+            gen.VIX_DATA_PATH = tmp_path / "no_such_vix_term_structure.json"
             data = gen.load_vix_data()
         assert data == {}
 
@@ -588,13 +590,17 @@ class TestSignalGenerator:
         assert signal.vix3m == 19.5
         assert signal.regime in [r.value for r in VIXRegime]
 
-    def test_generate_signal_no_data(self):
+    def test_generate_signal_no_data(self, tmp_path):
         with _patch_ensure_dirs():
-            gen = VIXTermStructureSignalGenerator()
-            gen.VIX_DATA_PATH = Path("/nonexistent/file.json")
+            # Isolate from host market.db so empty JSON truly means no levels
+            gen = VIXTermStructureSignalGenerator(
+                data_dir=tmp_path, db_path=tmp_path / "missing.db"
+            )
+            gen.VIX_DATA_PATH = tmp_path / "no_such_vix_term_structure.json"
             signal = gen.generate_signal(date="2026-01-01")
         assert signal.is_valid is False
-        assert signal.signal_state == "neutral"
+        # Enum .name is uppercase (NEUTRAL); accept either form
+        assert signal.signal_state.lower() == "neutral"
         assert signal.signal_value == 0.0
 
     def test_generate_signal_risk_on(self):
@@ -700,10 +706,12 @@ class TestSignalGenerator:
         assert current is not None
         assert "vix_spot" in current
 
-    def test_fetch_current_vix_empty(self):
+    def test_fetch_current_vix_empty(self, tmp_path):
         with _patch_ensure_dirs():
-            gen = VIXTermStructureSignalGenerator()
-            gen.VIX_DATA_PATH = Path("/nonexistent/file.json")
+            gen = VIXTermStructureSignalGenerator(
+                data_dir=tmp_path, db_path=tmp_path / "missing.db"
+            )
+            gen.VIX_DATA_PATH = tmp_path / "no_such_vix_term_structure.json"
             current = gen.fetch_current_vix()
         assert current is None
 

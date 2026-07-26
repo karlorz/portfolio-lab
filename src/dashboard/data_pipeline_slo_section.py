@@ -38,10 +38,12 @@ def build_data_pipeline_slo_section(
     *,
     health_data: dict[str, Any],
     public_dir: Path,
+    data_dir: Path | None = None,
     log_error: Callable[[str, Exception], None] | None = None,
 ) -> dict[str, Any]:
     """Assemble the data pipeline SLO summary from dashboard artifacts."""
     try:
+        from src.paths import DATA_DIR as DEFAULT_DATA_DIR
         from src.monitor.data_pipeline_slo import (
             build_data_pipeline_slo,
             load_data_quality_report,
@@ -61,6 +63,7 @@ def build_data_pipeline_slo_section(
             signal_staleness=load_signal_staleness(public_dir),
             alpaca_feed_entitlement=rebalance_health.get("alpaca_feed_entitlement"),
             market_data_consistency=rebalance_health.get("market_data_consistency"),
+            data_dir=data_dir if data_dir is not None else DEFAULT_DATA_DIR,
         )
     except DATA_PIPELINE_SLO_EXCEPTIONS as exc:
         if log_error:

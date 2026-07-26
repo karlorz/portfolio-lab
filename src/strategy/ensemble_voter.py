@@ -38,7 +38,7 @@ import random
 import sqlite3
 import numpy as np
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -56,6 +56,7 @@ from src.paths import (
 from src.data.price_cache import get_prices, get_prices_df
 from src.utils import safe_get
 from src.utils.computation_cache import get_realized_volatility
+from src.strategy.signal_aggregator import SignalAggregator
 
 
 __all__ = ['Regime', 'SignalSource', 'SignalReading', 'EnsembleVote', 'REGIME_WEIGHTS', 'REGIME_CONDITIONAL_WEIGHTS', 'REGIME_CONSENSUS_THRESHOLDS', 'DEFAULT_DIVERSITY_FLOOR', 'BanditWeighter', 'SignalAggregator', 'EnsembleVoter', 'compute_signal_correlation_matrix']
@@ -66,6 +67,12 @@ logger = logging.getLogger(__name__)
 # Starts 100% static, shifts to (1-BANDIT_MAX_BLEND)/BANDIT_MAX_BLEND after warmup
 BANDIT_MAX_BLEND: float = float(os.environ.get("ENSEMBLE_BANDIT_MAX_BLEND", "0.7"))
 BANDIT_WARMUP_DAYS: int = int(os.environ.get("ENSEMBLE_BANDIT_WARMUP_DAYS", "252"))
+# Skip apply_daily_bandit_rewards when |daily_return| is below this floor so
+# flat-NAV micro-noise (~1e-8 from performance.jsonl) does not advance
+# observations/reward_days or pollute arm history (sleeping-experts / noise floor).
+BANDIT_REWARD_NOISE_FLOOR: float = float(
+    os.environ.get("ENSEMBLE_BANDIT_REWARD_NOISE_FLOOR", "1e-6")
+)
 
 # Diversity floor — minimum weight for each active signal to prevent
 # weight concentration. Improves N_eff (effective signal count) by ensuring
@@ -109,7 +116,6 @@ class Regime(Enum):
 
 
 from src.signals.signal_source import SignalSource  # canonical, consolidated May 2026
-from src.strategy.signal_aggregator import SignalAggregator
 
 
 @dataclass
@@ -131,6 +137,10 @@ class SignalReading:
     
     # Reasoning
     explanation: str = ""
+    # Batch CV: inactive readings are kept for disclosure but vote weight forced 0
+    is_active: bool = True
+    # Batch DF: provenance for health tracker (pattern, polarity_policy, composite, …)
+    metadata: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -167,6 +177,14 @@ class EnsembleVote:
 
     # Runtime disclosure for adaptive-learning branches.
     adaptive_learning: Dict[str, Any] = field(default_factory=dict)
+
+    # Batch CW: health-gate sleep map (source → reason) for dashboard disclosure
+    health_gate_slept: Optional[Dict[str, str]] = None
+    health_gate_freeze: bool = False
+    # Batch CX: regime-gate map (source → reason) — intentional OFF regimes
+    regime_gated: Optional[Dict[str, str]] = None
+    # Batch DU: unhealthy/degraded soft-floor arms still contributing (disclosure)
+    health_gate_soft_floor: Optional[Dict[str, str]] = None
 
 
 # Regime-dependent weights (6 active signals, renormalized per regime)
@@ -270,6 +288,9 @@ def _load_regime_weights() -> Dict[Regime, Dict[SignalSource, float]]:
 
     regime_weights: Dict[Regime, Dict[SignalSource, float]] = {}
     for regime_name, sources in raw.items():
+        # Batch CS: skip _meta / underscore metadata keys without warning noise
+        if str(regime_name).startswith("_"):
+            continue
         try:
             regime = Regime(regime_name)
         except ValueError:
@@ -667,6 +688,47 @@ class BanditWeighter:
             sharpes[sig] = self._rolling_sharpe(sig, regime)
         return self._softmax(sharpes)
 
+    def get_state(self) -> dict:
+        """Serialize bandit history for durable persistence."""
+        # Copy nested lists so callers cannot mutate internal state
+        history = {
+            regime: {sig: list(returns) for sig, returns in signals.items()}
+            for regime, signals in self._history.items()
+        }
+        return {
+            "schema_version": "bandit-weighter/v1",
+            "signals": list(self.signals),
+            "epsilon": self.epsilon,
+            "window": self.window,
+            "temperature": self.temperature,
+            "history": history,
+        }
+
+    def load_state(self, state: dict) -> None:
+        """Restore bandit history from get_state() payload."""
+        if not isinstance(state, dict):
+            return
+        history = state.get("history")
+        if not isinstance(history, dict):
+            return
+        restored: dict = {}
+        for regime, signals in history.items():
+            if not isinstance(signals, dict):
+                continue
+            restored[str(regime)] = {}
+            for sig, returns in signals.items():
+                if not isinstance(returns, list):
+                    continue
+                cleaned = []
+                for r in returns[-self.window :]:
+                    try:
+                        cleaned.append(float(r))
+                    except (TypeError, ValueError):
+                        continue
+                if cleaned:
+                    restored[str(regime)][str(sig)] = cleaned
+        self._history = restored
+
     def _rolling_sharpe(self, signal: str, regime: str) -> float:
         """Compute rolling Sharpe ratio for a signal in a regime."""
         hist = safe_get(self._history, regime, signal, default=[])
@@ -729,11 +791,6 @@ class EnsembleVoter:
         self.current_readings: Dict[SignalSource, SignalReading] = {}
         self.current_regime: Regime = Regime.NORMAL
         self.current_regime_confidence: float = 0.5
-        # Lambda so instance patches of _load_price_data still apply.
-        self.signal_aggregator = SignalAggregator(
-            load_price_data=lambda: self._load_price_data(),
-            regime_weights=REGIME_WEIGHTS,
-        )
 
         # Bandit weighter for dynamic signal weight adaptation
         self.bandit = BanditWeighter(
@@ -742,6 +799,10 @@ class EnsembleVoter:
             window=252,
         )
         self.bandit_observations: int = 0
+        # Calendar reward steps for warmup blend (not arm×day updates)
+        self.bandit_days: int = 0
+        self.bandit_state_path = self.data_path / "ensemble_bandit_state.json"
+        self._load_bandit_state()
 
         # Online IC weighter for IC-based ensemble weight learning
         # Gated by ENSEMBLE_USE_IC_WEIGHTS env var (default: off)
@@ -782,16 +843,12 @@ class EnsembleVoter:
         self._prev_regime: Optional[str] = None
         self._days_in_regime: int = 999  # Start assuming stable regime
 
-    def _get_signal_aggregator(self) -> SignalAggregator:
-        """Return the signal collection collaborator, including __new__ test fixtures."""
-        aggregator = getattr(self, "signal_aggregator", None)
-        if aggregator is None:
-            aggregator = SignalAggregator(
-                load_price_data=lambda: self._load_price_data(),
-                regime_weights=REGIME_WEIGHTS,
-            )
-            self.signal_aggregator = aggregator
-        return aggregator
+        # Signal collection collaborator (extractable / injectable for tests)
+        self.signal_aggregator = SignalAggregator(
+            # Lambda so instance patches of _load_price_data still apply.
+            load_price_data=lambda: self._load_price_data(),
+            regime_weights=REGIME_WEIGHTS,
+        )
 
     def _init_db(self):
         """Initialize signal history database."""
@@ -908,20 +965,281 @@ class EnsembleVoter:
         - Cross-asset regime arbitrage (divergence detection)
         - Unified overlay (collar + bond + crypto + calendar)
         - Multi-timeframe fusion (v806 redo — timeframe decomposition)
+
+        Collection is delegated to ``self.signal_aggregator`` so the collaborator
+        can be injected or stubbed without rewriting vote logic.
         """
-        readings = self._get_signal_aggregator().collect(date=date, regime=regime)
+        aggregator = self._ensure_signal_aggregator()
+        readings = aggregator.collect(date=date, regime=regime)
         self.current_readings = readings
         return readings
 
+    def _ensure_signal_aggregator(self):
+        """Return the signal aggregator, creating a default if missing.
+
+        Fixtures that construct via ``EnsembleVoter.__new__`` never run
+        ``__init__``; keep collection working for those paths and for
+        intentional late injection.
+        """
+        aggregator = getattr(self, "signal_aggregator", None)
+        if aggregator is None:
+            aggregator = SignalAggregator(
+                load_price_data=lambda: self._load_price_data(),
+                regime_weights=REGIME_WEIGHTS,
+            )
+            self.signal_aggregator = aggregator
+        return aggregator
+
     def _should_skip(self, source: SignalSource, active_sources, regime: Optional[Regime]) -> bool:
         """Check if a signal source should be skipped for the current regime."""
-        return self._get_signal_aggregator().should_skip(source, active_sources, regime)
+        return self._ensure_signal_aggregator().should_skip(source, active_sources, regime)
+
+    def _collect_msm_signal(self, readings: Dict, active_sources, regime: Optional[Regime], date: Optional[str]) -> None:
+        """Collect multi-speed momentum signal (compat wrapper over aggregator)."""
+        self._ensure_signal_aggregator()._collect_msm_signal(readings, active_sources, regime, date)
+
+    def _collect_cross_asset_rv_signal(
+        self, readings: Dict, active_sources, regime: Optional[Regime],
+    ) -> None:
+        """Collect cross-asset relative value signal (compat wrapper over aggregator)."""
+        self._ensure_signal_aggregator()._collect_cross_asset_rv_signal(readings, active_sources, regime)
+
+    def _collect_intl_momentum_signal(
+        self, readings: Dict, active_sources, regime: Optional[Regime],
+    ) -> None:
+        """Collect international equity momentum signal (compat wrapper over aggregator)."""
+        self._ensure_signal_aggregator()._collect_intl_momentum_signal(readings, active_sources, regime)
+
+    def _collect_alt_data_signal(
+        self, readings: Dict, active_sources, regime: Optional[Regime],
+    ) -> None:
+        """Collect alternative data signal (compat wrapper over aggregator)."""
+        self._ensure_signal_aggregator()._collect_alt_data_signal(readings, active_sources, regime)
+
+    def _collect_regime_arb_signal(self, readings: Dict, active_sources, regime: Optional[Regime]) -> None:
+        """Collect cross-asset regime arbitrage signal (compat wrapper over aggregator)."""
+        self._ensure_signal_aggregator()._collect_regime_arb_signal(readings, active_sources, regime)
+
+    def _collect_unified_overlay_signal(
+        self, readings: Dict, active_sources, regime: Optional[Regime],
+    ) -> None:
+        """Collect unified overlay signal (compat wrapper over aggregator)."""
+        self._ensure_signal_aggregator()._collect_unified_overlay_signal(readings, active_sources, regime)
+
+    def _collect_mtf_signal(
+        self, readings: Dict, active_sources, regime: Optional[Regime],
+        date: Optional[str] = None,
+    ) -> None:
+        """Collect multi-timeframe fusion signal (compat wrapper over aggregator)."""
+        self._ensure_signal_aggregator()._collect_mtf_signal(readings, active_sources, regime, date)
+
+    def _collect_google_trends(
+        self, readings: dict, active_sources: set, regime, date: str
+    ) -> None:
+        """Collect Google Trends sentiment signal (compat wrapper over aggregator)."""
+        self._ensure_signal_aggregator()._collect_google_trends(readings, active_sources, regime)
+
+    def _collect_vix_term_structure_signal(self, readings: dict, active_sources: set, regime) -> None:
+        """Collect VIX term structure signal (compat wrapper over aggregator)."""
+        self._ensure_signal_aggregator()._collect_vix_term_structure_signal(readings, active_sources, regime)
+
+    @staticmethod
+    def _static_zero_baseline_sources(regime_name: str) -> set:
+        """SignalSource keys with intentional REGIME_WEIGHTS soft-delete (weight 0).
+
+        Soft-delete is economic/ADR policy — bandit blend, adaptive floors,
+        exploration noise, and diversity floors must not reinflate these arms
+        until a human promotes non-zero static weights.
+        """
+        regime_enum = getattr(Regime, str(regime_name).upper(), Regime.NORMAL)
+        static = REGIME_WEIGHTS.get(regime_enum, {}) or {}
+        zeros: set = set()
+        for src, w in static.items():
+            try:
+                if float(w or 0.0) <= 0.0:
+                    zeros.add(src)
+            except (TypeError, ValueError):
+                zeros.add(src)
+        return zeros
+
+    @staticmethod
+    def _pin_zero_baseline_weights(weights: Dict, regime_name: str) -> Dict:
+        """Force soft-delete arms to 0 and renormalize remaining mass.
+
+        Batch DK: bandit ε-mass + adaptive min_weight + Dirichlet exploration
+        previously reinflated multi_speed_momentum (~5–13% vote mass) despite
+        REGIME_WEIGHTS soft-delete. Pin after each reinflation-capable stage.
+        """
+        if not weights:
+            return weights
+        zeros = EnsembleVoter._static_zero_baseline_sources(regime_name)
+        if not zeros:
+            return weights
+        pinned = dict(weights)
+        changed = False
+        for src in zeros:
+            if src in pinned and float(pinned.get(src) or 0.0) != 0.0:
+                pinned[src] = 0.0
+                changed = True
+            elif src in pinned:
+                pinned[src] = 0.0
+        if not changed and all(
+            float(pinned.get(s) or 0.0) == 0.0 for s in zeros if s in pinned
+        ):
+            # Still renorm if zeros already 0 but total drifted
+            total = sum(float(v or 0.0) for v in pinned.values())
+            if total > 0 and abs(total - 1.0) > 1e-9:
+                return {k: float(v or 0.0) / total for k, v in pinned.items()}
+            return pinned
+        total = sum(float(v or 0.0) for v in pinned.values())
+        if total > 0:
+            pinned = {k: float(v or 0.0) / total for k, v in pinned.items()}
+        return pinned
+
+    # Batch DN: documented max per-signal cap (vault query + OnlineICWeighter default).
+    # Health-gate renorm after mass dropout previously left CAR at ~85% with n_eff~1.8.
+    DEFAULT_PER_SIGNAL_WEIGHT_CAP = 0.50
+
+    @staticmethod
+    def _apply_per_signal_weight_cap(
+        weights: Dict,
+        *,
+        max_weight: float = DEFAULT_PER_SIGNAL_WEIGHT_CAP,
+        soft_delete: Optional[set] = None,
+    ) -> Dict:
+        """Clip each arm to ``max_weight`` then water-fill redistrib excess.
+
+        Soft-delete / zero arms stay at 0. When only one positive arm remains,
+        concentration is unavoidable — leave at 1.0 (cap cannot diversify).
+        """
+        if not weights:
+            return weights
+        try:
+            cap = float(max_weight)
+        except (TypeError, ValueError):
+            cap = EnsembleVoter.DEFAULT_PER_SIGNAL_WEIGHT_CAP
+        if cap <= 0.0 or cap >= 1.0:
+            return weights
+
+        soft = soft_delete or set()
+        out = {k: max(0.0, float(v or 0.0)) for k, v in weights.items()}
+        for src in soft:
+            if src in out:
+                out[src] = 0.0
+
+        total0 = sum(out.values())
+        if total0 <= 0:
+            return out
+        # Normalize first so mass is a probability simplex
+        out = {k: v / total0 for k, v in out.items()}
+
+        max_iter = 16
+        for _ in range(max_iter):
+            positive = [k for k, v in out.items() if v > 1e-12 and k not in soft]
+            if len(positive) <= 1:
+                break
+            over = [k for k in positive if out[k] > cap + 1e-12]
+            if not over:
+                break
+            excess = 0.0
+            for k in over:
+                excess += out[k] - cap
+                out[k] = cap
+            under = [k for k in positive if out[k] < cap - 1e-12]
+            if not under:
+                # Everyone at/above cap — equal-share residual among positive
+                # (feasible only if n*cap >= 1)
+                n = len(positive)
+                if n * cap + 1e-12 < 1.0:
+                    # Impossible to satisfy: keep equal 1/n (may exceed cap)
+                    share = 1.0 / n
+                    for k in positive:
+                        out[k] = share
+                break
+            under_sum = sum(out[k] for k in under)
+            if under_sum <= 0:
+                # Degenerate under-set: distribute excess equally among under
+                share = excess / len(under)
+                for k in under:
+                    out[k] = min(cap, out[k] + share)
+            else:
+                scale = (under_sum + excess) / under_sum
+                for k in under:
+                    out[k] = min(cap, out[k] * scale)
+
+        # Final soft-delete pin + renorm of non-soft mass
+        for src in soft:
+            if src in out:
+                out[src] = 0.0
+        total = sum(out.values())
+        if total > 0 and abs(total - 1.0) > 1e-9:
+            out = {k: v / total for k, v in out.items()}
+        return out
+
+    def _cap_per_signal_weights(
+        self,
+        weights: Dict,
+        regime_name: str,
+        *,
+        max_weight: Optional[float] = None,
+    ) -> Dict:
+        """Instance wrapper: apply cap, pin soft-delete, record disclosure."""
+        env_cap = os.environ.get("ENSEMBLE_PER_SIGNAL_WEIGHT_CAP", "").strip()
+        if env_cap:
+            try:
+                cap = float(env_cap)
+            except (TypeError, ValueError):
+                cap = (
+                    float(max_weight)
+                    if max_weight is not None
+                    else self.DEFAULT_PER_SIGNAL_WEIGHT_CAP
+                )
+        else:
+            cap = (
+                float(max_weight)
+                if max_weight is not None
+                else self.DEFAULT_PER_SIGNAL_WEIGHT_CAP
+            )
+        soft = self._static_zero_baseline_sources(regime_name)
+        before = {k: float(v or 0.0) for k, v in weights.items()}
+        capped = self._apply_per_signal_weight_cap(
+            weights, max_weight=cap, soft_delete=soft
+        )
+        capped = self._pin_zero_baseline_weights(capped, regime_name)
+        max_before = max(before.values()) if before else 0.0
+        max_after = max((float(v or 0.0) for v in capped.values()), default=0.0)
+        breached = [
+            (k.value if hasattr(k, "value") else str(k))
+            for k, v in before.items()
+            if float(v or 0.0) > cap + 1e-12
+        ]
+        self._last_per_signal_cap = {
+            "cap": cap,
+            "applied": bool(breached) or max_before > cap + 1e-12,
+            "breached_before": breached,
+            "max_weight_before": round(max_before, 5),
+            "max_weight_after": round(max_after, 5),
+            "policy": "clip_renorm_iterative_soft_delete_pinned",
+        }
+        if breached:
+            logger.info(
+                "Per-signal weight cap %.0f%% applied (Batch DN): max %.1f%% → %.1f%%; "
+                "breached=%s",
+                cap * 100,
+                max_before * 100,
+                max_after * 100,
+                ",".join(breached),
+            )
+        return capped
 
     def get_blended_weights(self, regime_name: str) -> dict:
         """Get regime weights blended between static REGIME_WEIGHTS and bandit.
 
         Starts 100% static (bandit_blend=0.0), gradually shifts toward
         up to 70% bandit after 252 days of observations.
+
+        Batch DK: static-zero soft-delete arms stay at 0 after blend+renorm
+        (bandit posterior must not reintroduce vote mass).
         """
         regime_enum = getattr(Regime, regime_name, Regime.NORMAL)
         static = dict(REGIME_WEIGHTS.get(regime_enum, {}))
@@ -936,7 +1254,12 @@ class EnsembleVoter:
             return static  # Cold start: 100% static
 
         # Blend: starts 100% static, shifts to (1-MAX_BLEND)/MAX_BLEND after warmup
-        blend = min(BANDIT_MAX_BLEND, self.bandit_observations / BANDIT_WARMUP_DAYS * BANDIT_MAX_BLEND)
+        day_steps = int(getattr(self, "bandit_days", 0) or 0)
+        if day_steps <= 0 and int(getattr(self, "bandit_observations", 0) or 0) > 0:
+            # Legacy states without bandit_days: approximate days from arm updates
+            n_sources = max(1, len(list(SignalSource)))
+            day_steps = max(1, int(self.bandit_observations) // n_sources)
+        blend = min(BANDIT_MAX_BLEND, day_steps / BANDIT_WARMUP_DAYS * BANDIT_MAX_BLEND)
 
         # Convert static keys from SignalSource enum to string values for matching
         static_by_value = {k.value: v for k, v in static.items()}
@@ -945,7 +1268,11 @@ class EnsembleVoter:
         for sig_value in static_by_value:
             bandit_w = bandit.get(sig_value, 0.0)
             static_w = static_by_value[sig_value]
-            blended[sig_value] = static_w * (1 - blend) + bandit_w * blend
+            # Hard-pin soft-delete: never mix bandit mass into static-zero arms
+            if float(static_w or 0.0) <= 0.0:
+                blended[sig_value] = 0.0
+            else:
+                blended[sig_value] = static_w * (1 - blend) + bandit_w * blend
 
         # Normalize to sum=1.0
         total = sum(blended.values())
@@ -954,7 +1281,8 @@ class EnsembleVoter:
 
         # Convert back to SignalSource keys
         value_to_source = {s.value: s for s in SignalSource}
-        return {value_to_source[k]: v for k, v in blended.items() if k in value_to_source}
+        out = {value_to_source[k]: v for k, v in blended.items() if k in value_to_source}
+        return self._pin_zero_baseline_weights(out, regime_name)
 
     def get_adaptive_learning_status(self, regime_name: Optional[str] = None) -> Dict[str, Any]:
         """Disclose adaptive-learning branch status without changing weights."""
@@ -963,11 +1291,17 @@ class EnsembleVoter:
             regime_name = current.name if hasattr(current, "name") else str(current)
 
         observations = int(getattr(self, "bandit_observations", 0) or 0)
+        reward_days = int(getattr(self, "bandit_days", 0) or 0)
+        if reward_days <= 0 and observations > 0:
+            n_sources = max(1, len(list(SignalSource)))
+            reward_days = max(1, observations // n_sources)
         bandit = getattr(self, "bandit", None)
         bandit_status: Dict[str, Any] = {
             "status": "unavailable",
             "enabled": False,
             "observations": observations,
+            "reward_days": reward_days,
+            "days": reward_days,
             "warmup_days": BANDIT_WARMUP_DAYS,
             "max_blend": BANDIT_MAX_BLEND,
             "current_blend": 0.0,
@@ -985,7 +1319,7 @@ class EnsembleVoter:
                 if bandit_weights is not None:
                     blend = min(
                         BANDIT_MAX_BLEND,
-                        observations / BANDIT_WARMUP_DAYS * BANDIT_MAX_BLEND,
+                        reward_days / BANDIT_WARMUP_DAYS * BANDIT_MAX_BLEND,
                     )
                     bandit_status["current_blend"] = round(blend, 4)
                     if blend > 0:
@@ -1059,6 +1393,669 @@ class EnsembleVoter:
         """Update bandit with observed return for a signal in a regime."""
         self.bandit.update(signal_value, regime_name, daily_return)
         self.bandit_observations += 1
+
+    def _load_bandit_state(self) -> bool:
+        """Load bandit history + observation count from data_path if present."""
+        path = getattr(self, "bandit_state_path", None) or (
+            self.data_path / "ensemble_bandit_state.json"
+        )
+        if not path.exists():
+            return False
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            if not isinstance(state, dict):
+                return False
+            bandit_state = state.get("bandit") or state
+            if hasattr(self.bandit, "load_state"):
+                self.bandit.load_state(bandit_state)
+            obs = state.get("observations")
+            if obs is None:
+                # Derive from history length if missing
+                hist = getattr(self.bandit, "_history", {}) or {}
+                obs = sum(
+                    len(returns)
+                    for signals in hist.values()
+                    if isinstance(signals, dict)
+                    for returns in signals.values()
+                    if isinstance(returns, list)
+                )
+            self.bandit_observations = int(obs or 0)
+            days = state.get("reward_days", state.get("bandit_days", state.get("days")))
+            if days is None:
+                if self.bandit_observations > 0:
+                    n_sources = max(1, len(list(SignalSource)))
+                    days = max(1, self.bandit_observations // n_sources)
+                else:
+                    days = 0
+            self.bandit_days = int(days or 0)
+            logger.info(
+                "Loaded ensemble bandit state from %s (observations=%s, reward_days=%s)",
+                path,
+                self.bandit_observations,
+                self.bandit_days,
+            )
+            return True
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            logger.warning("Failed to load ensemble bandit state: %s", exc)
+            return False
+
+    def save_bandit_state(self) -> bool:
+        """Persist bandit history + observation count atomically."""
+        path = getattr(self, "bandit_state_path", None) or (
+            self.data_path / "ensemble_bandit_state.json"
+        )
+        payload = {
+            "schema_version": "ensemble-bandit-state/v1",
+            "observations": int(self.bandit_observations),
+            "reward_days": int(getattr(self, "bandit_days", 0) or 0),
+            "bandit_days": int(getattr(self, "bandit_days", 0) or 0),
+            "bandit": self.bandit.get_state() if hasattr(self.bandit, "get_state") else {},
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = path.with_suffix(path.suffix + ".tmp")
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+                f.write("\n")
+            tmp_path.replace(path)
+            return True
+        except (OSError, TypeError, ValueError) as exc:
+            logger.warning("Failed to save ensemble bandit state: %s", exc)
+            return False
+
+    @staticmethod
+    def contribution_reward_decimal(
+        daily_return: float,
+        *,
+        value: float,
+        weight: float,
+    ) -> float:
+        """Map one signal reading + portfolio daily return → arm reward (decimal).
+
+        Batch BR: same credit formula as ``PerformanceAttribution._compute_source_attribution``
+        (directional: ``ret * |value|``; neutral ``|value|<=0.05``: ``ret * weight * 2``),
+        returned in decimal return units (not bps) for bandit updates.
+        """
+        ret = float(daily_return)
+        val = float(value)
+        w = float(weight)
+        if abs(val) > 0.05:
+            return ret * abs(val)
+        return ret * w * 2.0
+
+    @staticmethod
+    def compute_daily_contribution_rewards(
+        signals: List[Dict[str, Any]],
+        daily_return: float,
+        *,
+        min_spread: float = 1e-12,
+    ) -> Optional[Dict[str, float]]:
+        """Build identifying per-source rewards for one calendar day.
+
+        Uses the latest reading per source in ``signals``. Returns None when
+        fewer than two sources or zero reward spread (non-identification).
+        """
+        try:
+            ret = float(daily_return)
+        except (TypeError, ValueError):
+            return None
+        by_source: Dict[str, Dict[str, Any]] = {}
+        for sig in signals:
+            if not isinstance(sig, dict):
+                continue
+            name = sig.get("source")
+            if name is None:
+                continue
+            src = str(name)
+            # Last write wins (callers should pass chronological order)
+            by_source[src] = sig
+        if len(by_source) < 2:
+            return None
+        rewards: Dict[str, float] = {}
+        for src, sig in by_source.items():
+            try:
+                value = float(sig.get("value", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            try:
+                weight = float(sig.get("weight", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                weight = 0.0
+            rewards[src] = EnsembleVoter.contribution_reward_decimal(
+                ret, value=value, weight=weight
+            )
+        if len(rewards) < 2:
+            return None
+        vals = list(rewards.values())
+        if max(vals) - min(vals) < min_spread:
+            return None
+        return rewards
+
+    @staticmethod
+    def load_daily_contribution_source_rewards(
+        data_dir: Optional[Path] = None,
+        *,
+        lookback_days: int = 14,
+    ) -> Optional[Tuple[Dict[str, float], Dict[str, Any]]]:
+        """Load per-source rewards from *one* recent day of signal × PnL credit.
+
+        Batch BR (B1): prefers true daily contribution over windowed
+        ``avg_return_bps`` (Batch BQ). Joins ``source_readings`` (latest per
+        source/day) with paper daily returns; walks newest dates first until
+        an identifying multi-arm map is found.
+
+        Returns ``(rewards, meta)`` or None. Meta includes ``as_of_date``,
+        ``reward_mode``, ``live_authoritative: false``. Hermetic when
+        ``data_dir`` is an explicit tmp path (no live DATA_DIR leak).
+        """
+        root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+        lookback = max(int(lookback_days), 2)
+
+        # Lazy import avoids pulling attribution/numpy heavy paths at module load
+        try:
+            from src.monitor.performance_attribution import PerformanceAttribution
+        except ImportError:
+            logger.debug("PerformanceAttribution unavailable for daily contribution rewards")
+            return None
+
+        try:
+            pa = PerformanceAttribution(data_dir=root)
+            history = pa._get_signal_history(days=lookback)
+            daily_returns = pa._get_paper_trading_returns(days=lookback)
+        except (OSError, TypeError, ValueError, AttributeError, RuntimeError) as exc:
+            logger.debug("Daily contribution load failed: %s", exc)
+            return None
+
+        if not history or not daily_returns:
+            return None
+
+        # Group source readings by calendar date (latest timestamp per source/day)
+        by_day: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        for row in history:
+            if not isinstance(row, dict) or row.get("type") == "ensemble_vote":
+                continue
+            ts = row.get("timestamp")
+            src = row.get("source")
+            if not ts or not src:
+                continue
+            day = str(ts)[:10]
+            if len(day) < 10:
+                continue
+            bucket = by_day.setdefault(day, {})
+            # history is DESC by timestamp; first seen wins as latest
+            if str(src) not in bucket:
+                bucket[str(src)] = row
+
+        # Newest return dates first
+        for day in sorted(daily_returns.keys(), reverse=True):
+            ret_entry = daily_returns.get(day) or {}
+            try:
+                ret = float(ret_entry.get("daily_return"))
+            except (TypeError, ValueError):
+                continue
+            day_sources = by_day.get(day)
+            if not day_sources or len(day_sources) < 2:
+                continue
+            signals = list(day_sources.values())
+            rewards = EnsembleVoter.compute_daily_contribution_rewards(
+                signals, daily_return=ret
+            )
+            if rewards is None:
+                continue
+            meta: Dict[str, Any] = {
+                "reward_mode": "daily_contribution_source_rewards",
+                "as_of_date": day,
+                "arms": len(rewards),
+                "reward_spread": max(rewards.values()) - min(rewards.values()),
+                "live_authoritative": False,
+                "portfolio_daily_return": ret,
+            }
+            logger.debug(
+                "Loaded daily contribution rewards for %s (%d arms, spread=%.6f)",
+                day,
+                len(rewards),
+                meta["reward_spread"],
+            )
+            return rewards, meta
+        return None
+
+    @staticmethod
+    def load_preferred_source_rewards(
+        data_dir: Optional[Path] = None,
+    ) -> Tuple[Optional[Dict[str, float]], str]:
+        """Prefer daily contribution rewards; fall back to windowed attribution.
+
+        Batch BR: ``(rewards, reward_mode)``. Mode is one of
+        ``daily_contribution_source_rewards``, ``attribution_source_rewards``,
+        or ``none``.
+        """
+        daily = EnsembleVoter.load_daily_contribution_source_rewards(data_dir)
+        if daily is not None:
+            rewards, meta = daily
+            return rewards, str(meta.get("reward_mode") or "daily_contribution_source_rewards")
+        windowed = EnsembleVoter.load_attribution_source_rewards(data_dir)
+        if windowed is not None:
+            return windowed, "attribution_source_rewards"
+        return None, "none"
+
+    @staticmethod
+    def load_attribution_source_rewards(
+        data_dir: Optional[Path] = None,
+        *,
+        max_age_days: Optional[float] = None,
+    ) -> Optional[Dict[str, float]]:
+        """Load per-source pseudo-rewards from performance attribution.
+
+        Batch BQ: maps ``avg_return_bps / 1e4`` into decimal return units so
+        multi-arm bandit updates can differentiate signals. Windowed attribution
+        is a *proxy* for true daily credit assignment (linear/contextual bandit
+        ideal); still identifying vs identical portfolio PnL broadcast.
+
+        Batch BR prefers :meth:`load_daily_contribution_source_rewards` via
+        :meth:`load_preferred_source_rewards` when a single-day join is available.
+
+        Preference order (when ``data_dir`` is None → default DATA_DIR):
+          1. ``{data_dir}/attribution/latest.json``
+          2. Newest ``{data_dir}/attribution/attribution_*.json``
+          3. Global ``ATTRIBUTION_DIR`` only when ``data_dir`` is default DATA_DIR
+             (never leaks live attribution into hermetic tests that pass tmp paths)
+
+        Returns None when missing/empty/unparseable. Never invents zeros for
+        unknown sources — callers apply only keys present.
+        """
+        explicit_dir = data_dir is not None
+        root = Path(data_dir) if explicit_dir else Path(DATA_DIR)
+        attr_dir = root / "attribution"
+        candidates: List[Path] = []
+        latest = attr_dir / "latest.json"
+        if latest.exists():
+            candidates.append(latest)
+        if attr_dir.exists():
+            dated = sorted(attr_dir.glob("attribution_*.json"), reverse=True)
+            for p in dated:
+                if p not in candidates:
+                    candidates.append(p)
+        # Live default only: also search ATTRIBUTION_DIR when distinct
+        if not explicit_dir:
+            try:
+                global_attr = Path(ATTRIBUTION_DIR)
+                if global_attr.exists() and global_attr.resolve() != attr_dir.resolve():
+                    g_latest = global_attr / "latest.json"
+                    if g_latest.exists() and g_latest not in candidates:
+                        candidates.insert(0, g_latest)
+                    for p in sorted(global_attr.glob("attribution_*.json"), reverse=True)[:3]:
+                        if p not in candidates:
+                            candidates.append(p)
+            except (OSError, TypeError, ValueError):
+                pass
+
+        for path in candidates:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            sources_block = payload.get("sources")
+            if not isinstance(sources_block, dict) or not sources_block:
+                continue
+            rewards: Dict[str, float] = {}
+            for name, meta in sources_block.items():
+                if not isinstance(meta, dict):
+                    continue
+                bps = meta.get("avg_return_bps")
+                if bps is None:
+                    continue
+                try:
+                    rewards[str(name)] = float(bps) / 10000.0
+                except (TypeError, ValueError):
+                    continue
+            if len(rewards) >= 2:
+                # Distinct values required for identification
+                vals = list(rewards.values())
+                spread = max(vals) - min(vals)
+                if spread < 1e-12:
+                    logger.info(
+                        "Attribution rewards non-identifying (zero spread) from %s",
+                        path,
+                    )
+                    continue
+                logger.debug(
+                    "Loaded %d attribution source rewards from %s (spread=%.6f)",
+                    len(rewards),
+                    path,
+                    spread,
+                )
+                return rewards
+        return None
+
+    @staticmethod
+    def _soft_delete_source_names(regime_name: str) -> set:
+        """String names of REGIME_WEIGHTS soft-delete arms for a regime."""
+        zeros = EnsembleVoter._static_zero_baseline_sources(regime_name)
+        names: set = set()
+        for src in zeros:
+            names.add(src.value if hasattr(src, "value") else str(src))
+        return names
+
+    def apply_daily_bandit_rewards(
+        self,
+        daily_return: float,
+        regime_name: Optional[str] = None,
+        sources: Optional[List[str]] = None,
+        *,
+        persist: bool = True,
+        noise_floor: Optional[float] = None,
+        source_rewards: Optional[Dict[str, float]] = None,
+        reward_mode: Optional[str] = None,
+        include_soft_delete_arms: bool = False,
+    ) -> Dict[str, Any]:
+        """Apply one day of portfolio return as reward to ensemble bandit sources.
+
+        Production training step: maps paper/portfolio daily return into
+        ``update_bandit`` for each active signal source so observations leave
+        cold_start. Bandit remains advisory (not live target_allocations).
+
+        Near-zero rewards (|r| < noise_floor, default
+        ``ENSEMBLE_BANDIT_REWARD_NOISE_FLOOR`` / 1e-6) are skipped entirely —
+        no arm history append, no observation increment, no reward_days step —
+        so flat paper NAV / floating-point dust cannot ramp blend.
+
+        Batch BO: multi-arm *identical* portfolio reward broadcast is skipped
+        (non-identification). Batch BQ: when ``source_rewards`` maps arms to
+        *differentiated* per-source returns (e.g. attribution avg_return_bps),
+        multi-arm updates proceed with per-arm credit assignment.
+        Batch BR: prefer daily contribution ``source_rewards`` and pass
+        ``reward_mode='daily_contribution_source_rewards'`` for honesty tags.
+
+        Batch DL: static soft-delete arms (REGIME_WEIGHTS weight 0) are excluded
+        from reward updates by default — sleeping/non-voting experts must not
+        train the posterior (Thompson sampling / sleeping-experts hygiene).
+        Pass ``include_soft_delete_arms=True`` for explicit shadow learning.
+
+        Returns summary with updates count and observation total.
+        """
+        try:
+            reward = float(daily_return)
+        except (TypeError, ValueError):
+            return {
+                "updates": 0,
+                "observations": int(self.bandit_observations),
+                "reward_days": int(getattr(self, "bandit_days", 0) or 0),
+                "skipped": True,
+                "reason": "invalid_daily_return",
+            }
+
+        floor = (
+            float(noise_floor)
+            if noise_floor is not None
+            else float(BANDIT_REWARD_NOISE_FLOOR)
+        )
+        if floor < 0:
+            floor = 0.0
+
+        if regime_name is None:
+            current = getattr(self, "current_regime", Regime.NORMAL)
+            regime_name = current.name if hasattr(current, "name") else str(current)
+        regime_name = str(regime_name).upper()
+
+        # Normalize optional per-arm rewards (Batch BQ)
+        per_arm: Optional[Dict[str, float]] = None
+        if source_rewards:
+            cleaned: Dict[str, float] = {}
+            for k, v in source_rewards.items():
+                try:
+                    cleaned[str(k)] = float(v)
+                except (TypeError, ValueError):
+                    continue
+            if cleaned:
+                per_arm = cleaned
+
+        if sources is None:
+            if per_arm is not None:
+                sources = list(per_arm.keys())
+            else:
+                sources = [s.value for s in SignalSource]
+        sources = [str(s) for s in sources]
+
+        # Batch DL: drop soft-delete / non-voting arms from reward training
+        soft_delete_excluded: List[str] = []
+        if not include_soft_delete_arms:
+            soft_names = self._soft_delete_source_names(regime_name)
+            if soft_names:
+                kept: List[str] = []
+                for s in sources:
+                    if s in soft_names:
+                        soft_delete_excluded.append(s)
+                    else:
+                        kept.append(s)
+                sources = kept
+                if per_arm is not None:
+                    per_arm = {
+                        k: v for k, v in per_arm.items() if k not in soft_names
+                    }
+                    if not per_arm:
+                        per_arm = None
+                if not sources:
+                    return {
+                        "updates": 0,
+                        "observations": int(self.bandit_observations),
+                        "reward_days": int(getattr(self, "bandit_days", 0) or 0),
+                        "days": int(getattr(self, "bandit_days", 0) or 0),
+                        "bandit_days": int(getattr(self, "bandit_days", 0) or 0),
+                        "regime": regime_name,
+                        "daily_return": reward,
+                        "noise_floor": floor,
+                        "skipped": True,
+                        "reason": "all_arms_soft_delete_or_empty",
+                        "soft_delete_excluded": soft_delete_excluded,
+                        "live_authoritative": False,
+                    }
+
+        # Multi-arm identical portfolio broadcast guard (Batch BO)
+        if len(sources) > 1 and per_arm is None:
+            # Still respect noise floor for the scalar portfolio return path
+            if abs(reward) < floor:
+                logger.info(
+                    "Skipping bandit reward update: |daily_return|=%.3e < noise_floor=%.3e",
+                    abs(reward),
+                    floor,
+                )
+                return {
+                    "updates": 0,
+                    "observations": int(self.bandit_observations),
+                    "reward_days": int(getattr(self, "bandit_days", 0) or 0),
+                    "days": int(getattr(self, "bandit_days", 0) or 0),
+                    "bandit_days": int(getattr(self, "bandit_days", 0) or 0),
+                    "daily_return": reward,
+                    "noise_floor": floor,
+                    "skipped": True,
+                    "reason": "reward_below_noise_floor",
+                }
+            logger.info(
+                "Skipping bandit multi-arm identical reward broadcast: "
+                "daily_return=%.6f across %d arms (non-identification guard; "
+                "use per-source attribution rewards when available)",
+                reward,
+                len(sources),
+            )
+            return {
+                "updates": 0,
+                "observations": int(self.bandit_observations),
+                "reward_days": int(getattr(self, "bandit_days", 0) or 0),
+                "days": int(getattr(self, "bandit_days", 0) or 0),
+                "bandit_days": int(getattr(self, "bandit_days", 0) or 0),
+                "regime": regime_name,
+                "daily_return": reward,
+                "noise_floor": floor,
+                "skipped": True,
+                "reason": "identical_portfolio_reward_all_arms",
+                "arms_considered": len(sources),
+            }
+
+        # Build (source, reward) pairs
+        pairs: List[Tuple[str, float]] = []
+        if per_arm is not None:
+            for src in sources:
+                if src not in per_arm:
+                    continue
+                r = float(per_arm[src])
+                if abs(r) < floor:
+                    continue
+                pairs.append((src, r))
+            if not pairs:
+                return {
+                    "updates": 0,
+                    "observations": int(self.bandit_observations),
+                    "reward_days": int(getattr(self, "bandit_days", 0) or 0),
+                    "days": int(getattr(self, "bandit_days", 0) or 0),
+                    "bandit_days": int(getattr(self, "bandit_days", 0) or 0),
+                    "daily_return": reward,
+                    "noise_floor": floor,
+                    "skipped": True,
+                    "reason": "attribution_rewards_below_noise_floor",
+                    "arms_considered": len(sources),
+                }
+            # Non-identification if multi-arm but all remaining rewards equal
+            if len(pairs) > 1:
+                rs = [r for _, r in pairs]
+                if max(rs) - min(rs) < 1e-12:
+                    return {
+                        "updates": 0,
+                        "observations": int(self.bandit_observations),
+                        "reward_days": int(getattr(self, "bandit_days", 0) or 0),
+                        "days": int(getattr(self, "bandit_days", 0) or 0),
+                        "bandit_days": int(getattr(self, "bandit_days", 0) or 0),
+                        "regime": regime_name,
+                        "daily_return": reward,
+                        "noise_floor": floor,
+                        "skipped": True,
+                        "reason": "identical_attribution_rewards_all_arms",
+                        "arms_considered": len(pairs),
+                    }
+        else:
+            # Single-arm explicit path (or sources already len==1)
+            if abs(reward) < floor:
+                logger.info(
+                    "Skipping bandit reward update: |daily_return|=%.3e < noise_floor=%.3e",
+                    abs(reward),
+                    floor,
+                )
+                return {
+                    "updates": 0,
+                    "observations": int(self.bandit_observations),
+                    "reward_days": int(getattr(self, "bandit_days", 0) or 0),
+                    "days": int(getattr(self, "bandit_days", 0) or 0),
+                    "bandit_days": int(getattr(self, "bandit_days", 0) or 0),
+                    "daily_return": reward,
+                    "noise_floor": floor,
+                    "skipped": True,
+                    "reason": "reward_below_noise_floor",
+                }
+            pairs = [(src, reward) for src in sources]
+
+        updates = 0
+        applied: Dict[str, float] = {}
+        for src, r in pairs:
+            self.update_bandit(str(src), regime_name, r)
+            updates += 1
+            applied[src] = r
+
+        # One calendar reward day per apply, independent of arm count
+        self.bandit_days = int(getattr(self, "bandit_days", 0) or 0) + 1
+
+        if persist:
+            self.save_bandit_state()
+
+        summary: Dict[str, Any] = {
+            "updates": updates,
+            "observations": int(self.bandit_observations),
+            "days": int(self.bandit_days),
+            "bandit_days": int(self.bandit_days),
+            "regime": regime_name,
+            "daily_return": reward,
+            "noise_floor": floor,
+            "skipped": False,
+            "live_authoritative": False,
+        }
+        if soft_delete_excluded:
+            summary["soft_delete_excluded"] = soft_delete_excluded
+        if per_arm is not None:
+            mode = (
+                str(reward_mode)
+                if reward_mode
+                else "attribution_source_rewards"
+            )
+            summary["reward_mode"] = mode
+            summary["arms_updated"] = list(applied.keys())
+            summary["reward_spread"] = (
+                max(applied.values()) - min(applied.values()) if applied else 0.0
+            )
+        else:
+            summary["reward_mode"] = (
+                str(reward_mode) if reward_mode else "single_arm_or_scalar"
+            )
+            if applied:
+                summary["arms_updated"] = list(applied.keys())
+        return summary
+
+    @staticmethod
+    def load_latest_daily_return_from_performance(
+        performance_path: Optional[Path] = None,
+        *,
+        max_lines: int = 200,
+        prefer_daily_pnl: bool = True,
+        data_dir: Optional[Path] = None,
+    ) -> Optional[float]:
+        """Read newest non-null daily_return for bandit training.
+
+        Prefer ``daily_pnl_latest.json`` (capture_daily_pnl SSOT) when present
+        and |return| is finite — avoids replaying flat-NAV micro-noise rows
+        that historically polluted performance.jsonl. Falls back to
+        performance.jsonl tail.
+        """
+        root = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+        if prefer_daily_pnl:
+            pnl_path = root / "daily_pnl_latest.json"
+            if pnl_path.exists():
+                try:
+                    payload = json.loads(pnl_path.read_text(encoding="utf-8"))
+                    if isinstance(payload, dict) and "daily_return" in payload:
+                        return float(payload["daily_return"])
+                except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                    logger.debug("daily_pnl_latest read failed: %s", exc)
+
+        path = Path(performance_path) if performance_path is not None else root / "performance.jsonl"
+        if not path.exists():
+            return None
+        try:
+            # Efficient-ish tail for moderate files
+            with open(path, "rb") as f:
+                f.seek(0, 2)
+                size = f.tell()
+                block = min(size, 64 * 1024)
+                f.seek(max(0, size - block))
+                chunk = f.read().decode("utf-8", errors="replace")
+            lines = [ln for ln in chunk.splitlines() if ln.strip()][-max_lines:]
+            for line in reversed(lines):
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(row, dict):
+                    continue
+                if "daily_return" not in row:
+                    continue
+                try:
+                    return float(row["daily_return"])
+                except (TypeError, ValueError):
+                    continue
+            return None
+        except OSError as exc:
+            logger.debug("performance.jsonl read failed: %s", exc)
+            return None
 
     def apply_goal_risk_budget(self, base_allocation: dict) -> dict:
         """Scale allocation weights based on investment goals from goals.json.
@@ -1135,8 +2132,13 @@ class EnsembleVoter:
         weights = self.get_blended_weights(regime.name)
         weights = self._apply_regime_gating(weights, regime.name, regime_confidence)
         weights = self._apply_adaptive_weights(weights, regime)
+        # Batch DK: adaptive may receive non-zero base if blend leaked; re-pin
+        weights = self._pin_zero_baseline_weights(weights, regime.name)
         weights = self._apply_ic_weights(weights, regime)
+        weights = self._pin_zero_baseline_weights(weights, regime.name)
         weights = self._apply_health_weights(weights)
+        # Batch DN: health renorm concentrates mass — enforce documented 50% cap
+        weights = self._cap_per_signal_weights(weights, regime.name)
         weights = self._apply_correlation_penalty(weights)
         if os.environ.get("ENSEMBLE_DISABLE_REGIME_WEIGHTS", "").lower() not in ("1", "true"):
             weights = self._apply_regime_weights(weights, regime)
@@ -1144,27 +2146,43 @@ class EnsembleVoter:
             weights = self._apply_mdp_constraint(weights)
         weights = self._apply_utility_reweighting(weights, regime)
         weights = self._apply_exploration_noise(weights, regime)
+        weights = self._pin_zero_baseline_weights(weights, regime.name)
         weights = self._apply_diversity_floor(weights)
+        weights = self._pin_zero_baseline_weights(weights, regime.name)
         weights = self._apply_turnover_validation(weights, readings, regime)
+        weights = self._pin_zero_baseline_weights(weights, regime.name)
+        # Final cap after any reinflation-capable stages
+        weights = self._cap_per_signal_weights(weights, regime.name)
+
+        # Soft-delete static zeros — exclude from analysis equal-weight floors
+        soft_delete = self._static_zero_baseline_sources(regime.name)
 
         # Safety fallback: when explicit readings are provided for analysis/tests,
         # avoid degenerate outcomes where static regime weights entirely mute
-        # one or more provided sources.
+        # one or more provided sources. Soft-delete arms stay excluded.
         active_weights = {
             source: max(0.0, weights.get(source, 0.0))
             for source in readings
+            if source not in soft_delete
         }
         active_weight_sum = sum(active_weights.values())
         nonzero_sources = [source for source, weight in active_weights.items() if weight > 0]
+        floor_eligible = [s for s in readings if s not in soft_delete]
 
         if readings and active_weight_sum <= 0:
-            if caller_supplied_readings and regime == Regime.NORMAL:
-                fallback_weight = 1.0 / len(readings)
-                weights = {source: fallback_weight for source in readings}
+            if caller_supplied_readings and regime == Regime.NORMAL and floor_eligible:
+                fallback_weight = 1.0 / len(floor_eligible)
+                weights = {
+                    source: (fallback_weight if source in floor_eligible else 0.0)
+                    for source in readings
+                }
+                # Preserve any non-reading keys at 0
+                for src in soft_delete:
+                    weights[src] = 0.0
                 logger.info(
                     "All active ensemble weights were zero after adjustments; "
-                    "falling back to equal-weight over %d readings",
-                    len(readings),
+                    "falling back to equal-weight over %d readings (soft-delete pinned)",
+                    len(floor_eligible),
                 )
             else:
                 logger.info(
@@ -1174,22 +2192,37 @@ class EnsembleVoter:
                 )
         elif (
             caller_supplied_readings
-            and readings
+            and floor_eligible
             and regime == Regime.NORMAL
-            and 0 < len(nonzero_sources) < len(readings)
+            and 0 < len(nonzero_sources) < len(floor_eligible)
         ):
-            floor_weight = 0.05 / len(readings)  # 5% total floor spread across provided readings.
+            floor_weight = 0.05 / len(floor_eligible)  # 5% total floor; soft-delete excluded
             blended = {}
             for source in readings:
-                blended[source] = max(active_weights.get(source, 0.0), floor_weight)
+                if source in soft_delete:
+                    blended[source] = 0.0
+                else:
+                    blended[source] = max(active_weights.get(source, 0.0), floor_weight)
             total = sum(blended.values())
             if total > 0:
                 weights = {source: weight / total for source, weight in blended.items()}
                 logger.info(
-                    "Applied small analysis floor to %d/%d zero-weight provided signals",
-                    len(readings) - len(nonzero_sources),
-                    len(readings),
+                    "Applied small analysis floor to %d/%d zero-weight provided signals "
+                    "(soft-delete arms pinned at 0)",
+                    len(floor_eligible) - len(nonzero_sources),
+                    len(floor_eligible),
                 )
+            weights = self._pin_zero_baseline_weights(weights, regime.name)
+
+        # Batch DO: analysis-floor / equal-weight fallback renorm can breach the
+        # 50% per-signal cap — re-apply after those paths (and pin soft-delete).
+        weights = self._cap_per_signal_weights(weights, regime.name)
+
+        # Batch DP: inactive_signal arms (e.g. intl RS neutral) still held pipeline
+        # mass after DN cap; _apply_weights_to_readings zeroed them without renorm,
+        # so dashboard active_weights rollup re-concentrated CAR past 50%.
+        # Zero inactive mass, renorm, re-cap before assign.
+        weights = self._zero_inactive_and_recap(weights, readings, regime.name)
 
         # Apply weights to readings
         weighted_signals = self._apply_weights_to_readings(readings, weights)
@@ -1248,6 +2281,8 @@ class EnsembleVoter:
         Uses confidence-weighted gating (v3.26) to defer gating when regime confidence is low,
         preventing premature switching on uncertain regime classification.
         """
+        # Batch CX: reset disclosure map each vote
+        self._regime_gated: Dict[str, str] = {}
         if hasattr(self, 'regime_gate') and self.regime_gate is not None:
             # Get active signals based on confidence and hysteresis
             active_signal_names = self.regime_gate.gate_with_confidence(
@@ -1266,7 +2301,18 @@ class EnsembleVoter:
                     explicit_gate_rules is None or source_name in explicit_gate_rules
                 )
                 is_active = source_name in active_signal_set or not has_explicit_gate
-                gated_weights[source] = weight if is_active else 0.0
+                if is_active:
+                    gated_weights[source] = weight
+                else:
+                    gated_weights[source] = 0.0
+                    if float(weight or 0.0) > 0.0 or has_explicit_gate:
+                        off_regimes = set()
+                        if isinstance(explicit_gate_rules, dict):
+                            off_regimes = set(explicit_gate_rules.get(source_name) or [])
+                        self._regime_gated[source_name] = (
+                            f"regime_gate_off({regime_name}"
+                            f"{'; off=' + ','.join(sorted(off_regimes)) if off_regimes else ''})"
+                        )
             
             total = sum(gated_weights.values())
             if total > 0:
@@ -1466,30 +2512,166 @@ class EnsembleVoter:
         return weights
 
     def _apply_health_weights(self, weights: Dict) -> Dict:
-        """Apply health-adjusted weighting (v3.12) — reduce weight for poor health scores."""
+        """Apply health-adjusted weighting (v3.12) — soft floor + hard-zero gates.
+
+        ADR-006 residual honesty:
+        - require the configured minimum labeled daily cohorts before hard-zero
+        - hard-zero non-healthy sleeves with negative IC
+        - hard-zero unhealthy sleeves with unknown IC or IC below the approved
+          minimum (0.08 by default)
+        - otherwise soft floor max(0.2, health_score) for graceful degrade
+        - if all arms hard-gated: freeze adaptive blend (all-zero mass, do not
+          reinflate toxic arms via renorm)
+        """
+        self._health_gate_freeze = False
+        self._health_gate_slept: list[str] = []
+        # Batch CW: source → reason (and optional diagnostics) for disclosure
+        self._health_gate_sleep_reasons: Dict[str, str] = {}
+        # Batch DU: unhealthy/degraded arms still voting under soft floor
+        self._health_gate_soft_floor: Dict[str, str] = {}
         try:
-            from src.signals.health_tracker import SignalHealthTracker
+            from src.signals.health_tracker import SignalHealthTracker, SignalHealthStatus
             health_tracker = SignalHealthTracker()
             health_scores = health_tracker.calculate_all_health_scores()
 
             if not health_scores:
                 return weights
 
+            from src.strategy.health_gate_policy import (
+                minimum_labeled_daily_cohorts,
+                unhealthy_min_ic as resolve_unhealthy_min_ic,
+            )
+
+            # ADR-006: health hard-zero is advisory-only and requires a
+            # sufficiently labeled daily cohort before excluding vote mass.
+            unhealthy_min_ic = resolve_unhealthy_min_ic()
+            hard_zero_min_cohorts = minimum_labeled_daily_cohorts()
+
             adjusted_weights = {}
+            slept: list[str] = []
+            sleep_reasons: Dict[str, str] = {}
+            soft_floor: Dict[str, str] = {}
             for source_enum, base_weight in weights.items():
                 source_str = source_enum.value
                 if source_str in health_scores:
                     health = health_scores[source_str]
-                    multiplier = max(0.2, min(1.0, health.health_score))
+                    status = str(getattr(health, "status", "") or "").lower()
+                    hs = float(getattr(health, "health_score", 0.0) or 0.0)
+                    ic_raw = getattr(health, "ic", None)
+                    try:
+                        ic_val = float(ic_raw) if ic_raw is not None else None
+                    except (TypeError, ValueError):
+                        ic_val = None
+                    cohorts_raw = getattr(
+                        health,
+                        "predictions_count",
+                        0,
+                    )
+                    try:
+                        labeled_cohorts = int(cohorts_raw)
+                    except (TypeError, ValueError):
+                        labeled_cohorts = 0
+                    cohort_eligible = labeled_cohorts >= hard_zero_min_cohorts
+
+                    # Batch CY hybrid (evolves BH/CN) + Batch DU min-IC for unhealthy:
+                    # - hard sleep toxic arms: IC < 0 (any non-healthy status), or
+                    #   unhealthy with unknown IC (fail-closed without IC evidence)
+                    # - hard sleep unhealthy with weak IC < UNHEALTHY_MIN_IC
+                    # - soft floor max(0.2, hs) when quality is poor but IC ≥ min
+                    hard_zero_candidate = False
+                    candidate_reason = None
+                    if (
+                        status != SignalHealthStatus.HEALTHY.value
+                        and ic_val is not None
+                        and ic_val < 0.0
+                    ):
+                        hard_zero_candidate = True
+                        candidate_reason = (
+                            f"negative_ic({ic_val:.3f})"
+                            if status != SignalHealthStatus.DEGRADED.value
+                            else f"degraded_negative_ic({ic_val:.3f})"
+                        )
+                    elif status == SignalHealthStatus.UNHEALTHY.value:
+                        if ic_val is None:
+                            hard_zero_candidate = True
+                            candidate_reason = "unhealthy_ic_unknown"
+                        elif ic_val < unhealthy_min_ic:
+                            hard_zero_candidate = True
+                            candidate_reason = (
+                                f"unhealthy_weak_ic({ic_val:.3f}<{unhealthy_min_ic:.2f})"
+                            )
+                        # else: unhealthy + IC≥min → soft floor below
+                    hard_zero = hard_zero_candidate and cohort_eligible
+                    insufficient_reason = None
+                    if hard_zero_candidate and not cohort_eligible:
+                        insufficient_reason = (
+                            "insufficient_cohorts("
+                            f"{labeled_cohorts}<{hard_zero_min_cohorts};"
+                            f"{candidate_reason or 'hard_zero'})"
+                        )
+
+                    if hard_zero:
+                        multiplier = 0.0
+                        slept.append(source_str)
+                        reason = candidate_reason or "hard_zero"
+                        sleep_reasons[source_str] = reason
+                        logger.info(
+                            "Health-gated %s: weight %.2f%% → 0%% (%s, score=%.2f, ic=%s)",
+                            source_str,
+                            base_weight * 100,
+                            reason,
+                            hs,
+                            ic_val,
+                        )
+                    else:
+                        multiplier = max(0.2, min(1.0, hs))
+                        # Batch DU: only disclose soft-floor when arm still has
+                        # vote mass (skip zero-baseline / already-zero weight).
+                        still_votes = float(base_weight or 0.0) > 1e-12
+                        if still_votes and insufficient_reason:
+                            soft_floor[source_str] = insufficient_reason
+                        elif still_votes and status == SignalHealthStatus.UNHEALTHY.value:
+                            soft_floor[source_str] = (
+                                f"unhealthy_soft_floor(score={hs:.2f},ic={ic_val})"
+                            )
+                        elif (
+                            still_votes
+                            and status == SignalHealthStatus.DEGRADED.value
+                            and hs < 0.55
+                        ):
+                            soft_floor[source_str] = (
+                                f"degraded_soft_floor(score={hs:.2f},ic={ic_val})"
+                            )
+                        if hs < 0.5 or status == SignalHealthStatus.UNHEALTHY.value:
+                            logger.info(
+                                "Health-adjusted %s: weight %.2f%% → %.2f%% "
+                                "(status=%s, health=%.2f, ic=%s)",
+                                source_str,
+                                base_weight * 100,
+                                base_weight * multiplier * 100,
+                                status,
+                                hs,
+                                ic_val,
+                            )
                     adjusted_weights[source_enum] = base_weight * multiplier
-                    if health.health_score < 0.5:
-                        logger.info("Health-adjusted %s: weight %.2f%% → %.2f%% (health=%.2f)", source_str, base_weight * 100, adjusted_weights[source_enum] * 100, health.health_score)
                 else:
                     adjusted_weights[source_enum] = base_weight
 
+            self._health_gate_slept = slept
+            self._health_gate_sleep_reasons = sleep_reasons
+            self._health_gate_soft_floor = soft_floor
             total = sum(adjusted_weights.values())
             if total > 0:
                 weights = {k: v / total for k, v in adjusted_weights.items()}
+            else:
+                # All arms unhealthy / zero — freeze; do not reinflate via renorm
+                self._health_gate_freeze = True
+                weights = {k: 0.0 for k in weights}
+                logger.warning(
+                    "Health gate freeze: all ensemble arms hard-zeroed (%s); "
+                    "adaptive blend contributes zero mass",
+                    ", ".join(slept) if slept else "no sources",
+                )
         except (KeyError, ValueError, TypeError, AttributeError, OSError) as e:
             logger.warning("Could not apply health-adjusted weights: %s", e)
         return weights
@@ -1711,13 +2893,23 @@ class EnsembleVoter:
         if n < 2:
             return weights
 
-        # Dirichlet alpha: concentration * current weight for each component
-        alpha = [max(0.1, alpha_base * w) for w in weight_values]
+        # Dirichlet alpha: concentration * current weight for each component.
+        # Soft-delete arms (static zero) get tiny alpha so samples stay ~0, then
+        # Batch DK pin zeros them hard after sampling.
+        regime_name = regime.name if hasattr(regime, "name") else str(regime)
+        soft_delete = self._static_zero_baseline_sources(regime_name)
+        alpha = []
+        for k, w in zip(weights.keys(), weight_values):
+            if k in soft_delete or float(w or 0.0) <= 0.0:
+                alpha.append(1e-9)  # near-zero mass; pin finishes the job
+            else:
+                alpha.append(max(0.1, alpha_base * w))
 
         # Sample from Dirichlet
         try:
             sampled = np.random.dirichlet(alpha)
             result = {k: float(sampled[i]) for i, k in enumerate(weights)}
+            result = self._pin_zero_baseline_weights(result, regime_name)
             logger.info("Exploration noise applied: epsilon=%.2f, regime=%s", epsilon, regime.value)
             return result
         except (ValueError, FloatingPointError) as e:
@@ -1739,32 +2931,61 @@ class EnsembleVoter:
         The floor is applied as a lower bound, not an equalizer: signals
         with higher quality still get proportionally more weight.
 
+        Batch BM: never raise or reinflate arms hard-zeroed by the health
+        gate (``_health_gate_slept``). Soft floors must not undo quality sleep.
+
         Args:
             weights: Current weight dict {SignalSource: weight}.
             floor: Minimum weight fraction per active signal. If None,
                 uses DEFAULT_DIVERSITY_FLOOR.
 
         Returns:
-            Adjusted weights dict summing to 1.0.
+            Adjusted weights dict summing to 1.0 (or all-zero if freeze).
         """
         if floor is None:
             floor = DEFAULT_DIVERSITY_FLOOR
         if floor <= 0:
             return weights
 
-        # Only apply to signals that were active (weight > 0) before this step
-        active = {k: v for k, v in weights.items() if v > 0}
+        slept_names = {
+            str(s) for s in (getattr(self, "_health_gate_slept", None) or [])
+        }
+
+        def _src_name(source) -> str:
+            return source.value if hasattr(source, "value") else str(source)
+
+        # Only apply to signals that were active (weight > 0) and not health-slept
+        active = {
+            k: v
+            for k, v in weights.items()
+            if v > 0 and _src_name(k) not in slept_names
+        }
         if len(active) <= 1:
+            # Still force slept arms to zero if somehow positive
+            if slept_names:
+                cleaned = dict(weights)
+                for k in list(cleaned):
+                    if _src_name(k) in slept_names:
+                        cleaned[k] = 0.0
+                total_c = sum(cleaned.values())
+                if total_c > 0:
+                    return {k: v / total_c for k, v in cleaned.items()}
+                return cleaned
             return weights
 
         total = sum(weights.values())
         if total <= 0:
             return weights
 
-        # Normalize to get fractional weights
-        frac = {k: v / total for k, v in weights.items()}
+        # Normalize to get fractional weights; keep slept at 0
+        frac = {}
+        for k, v in weights.items():
+            if _src_name(k) in slept_names:
+                frac[k] = 0.0
+            else:
+                frac[k] = v / total
 
-        # Identify signals below the floor
+        # Identify signals below the floor (never raise slept)
         adjusted = dict(frac)
         raised_count = 0
         for source in active:
@@ -1772,18 +2993,30 @@ class EnsembleVoter:
                 adjusted[source] = floor
                 raised_count += 1
 
-        if raised_count == 0:
+        if raised_count == 0 and not slept_names:
             return weights  # No adjustment needed
 
-        # Re-normalize so weights sum to 1.0
+        # Re-normalize so weights sum to 1.0 (slept stay 0)
         new_total = sum(adjusted.values())
         if new_total > 0:
             adjusted = {k: v / new_total for k, v in adjusted.items()}
+            for k in adjusted:
+                if _src_name(k) in slept_names:
+                    adjusted[k] = 0.0
+            # Renorm once more if slept zeros left a hole (shouldn't)
+            nt = sum(adjusted.values())
+            if nt > 0 and abs(nt - 1.0) > 1e-9:
+                adjusted = {k: v / nt for k, v in adjusted.items()}
 
-        logger.info(
-            "Diversity floor applied: raised %d/%d active signals (floor=%.1f%%)",
-            raised_count, len(active), floor * 100,
-        )
+        if raised_count:
+            logger.info(
+                "Diversity floor applied: raised %d/%d active signals (floor=%.1f%%); "
+                "health-slept excluded=%d",
+                raised_count,
+                len(active),
+                floor * 100,
+                len(slept_names),
+            )
 
         return adjusted
 
@@ -1887,6 +3120,48 @@ class EnsembleVoter:
             logger.warning("Could not apply turnover-aware weights: %s", e)
         return weights
 
+    def _zero_inactive_and_recap(
+        self,
+        weights: Dict,
+        readings: Dict[SignalSource, SignalReading],
+        regime_name: str,
+    ) -> Dict:
+        """Zero inactive_signal mass, renorm awake arms, re-apply per-signal cap.
+
+        Batch DP: sleeping-expert style — only awake (is_active) arms keep vote
+        mass. Soft-delete stays pinned at 0. Re-cap after renorm so no arm
+        exceeds DEFAULT_PER_SIGNAL_WEIGHT_CAP once inactive mass is dropped.
+        """
+        if not weights or not readings:
+            return weights
+        out = {k: float(v or 0.0) for k, v in weights.items()}
+        soft = self._static_zero_baseline_sources(regime_name)
+        inactive: list = []
+        for source, reading in readings.items():
+            if source in soft:
+                out[source] = 0.0
+                continue
+            if not getattr(reading, "is_active", True):
+                if float(out.get(source, 0.0) or 0.0) > 1e-12:
+                    inactive.append(
+                        source.value if hasattr(source, "value") else str(source)
+                    )
+                out[source] = 0.0
+        for src in soft:
+            if src in out:
+                out[src] = 0.0
+        total = sum(max(0.0, v) for v in out.values())
+        if total > 0 and abs(total - 1.0) > 1e-9:
+            out = {k: max(0.0, float(v or 0.0)) / total for k, v in out.items()}
+        out = self._cap_per_signal_weights(out, regime_name)
+        if inactive:
+            logger.info(
+                "Batch DP: redistributed mass from %d inactive_signal arm(s): %s",
+                len(inactive),
+                ",".join(inactive),
+            )
+        return out
+
     def _apply_weights_to_readings(
         self,
         readings: Dict[SignalSource, SignalReading],
@@ -1896,18 +3171,35 @@ class EnsembleVoter:
         weighted_signals = []
         for source, reading in readings.items():
             if source in weights:
-                reading.weight = weights[source]
+                # Batch CV: inactive snapshots stay in the vote trail for
+                # disclosure (source_breakdown) but must not move consensus.
+                # Batch DP: pipeline already zeroed+renormed inactive mass.
+                if getattr(reading, "is_active", True):
+                    reading.weight = weights[source]
+                else:
+                    reading.weight = 0.0
                 weighted_signals.append(reading)
 
-        # Log signal predictions for health tracking (v3.12)
+        # Log signal predictions for health tracking (v3.12 / Batch DF provenance)
         try:
             tracker = _get_health_tracker()
             if tracker is not None:
                 for reading in weighted_signals:
+                    meta = getattr(reading, "metadata", None)
+                    if not isinstance(meta, dict):
+                        meta = {}
+                    else:
+                        meta = dict(meta)
+                    # Compact provenance always stamped for post-fix IC cohorts
+                    meta.setdefault("provenance_batch", "df")
+                    if getattr(reading, "explanation", None):
+                        meta.setdefault("explanation", str(reading.explanation)[:200])
+                    meta.setdefault("is_active", bool(getattr(reading, "is_active", True)))
                     tracker.log_prediction_simple(
                         source=reading.source.value,
                         signal_value=reading.value,
                         confidence=reading.confidence,
+                        metadata=meta,
                     )
         except (KeyError, ValueError, TypeError, AttributeError, OSError, sqlite3.Error) as e:
             logger.warning("Health tracking log failed: %s", e)
@@ -1969,7 +3261,10 @@ class EnsembleVoter:
         elif equity_bias < -0.3 and agreement > threshold:
             return "decrease_equity", agreement * abs(equity_bias)
         else:
-            return "neutral", 0.5
+            # Neutral hold conviction tracks agreement × regime confidence —
+            # do not hardcode 0.5 (high-agreement hold looked identical to uncertain).
+            conf = float(max(0.0, min(1.0, agreement * regime_confidence)))
+            return "neutral", conf
 
     def _compute_consensus(
         self,
@@ -2040,16 +3335,31 @@ class EnsembleVoter:
         for r in weighted_signals[:3]:
             reasons.append(f"  {r.source.value}: {r.value:+.3f} (w={r.weight:.2f}, conf={r.confidence:.1%})")
 
-        # Compute effective signal count (N_eff) and Shannon entropy
-        weights_arr = np.array([r.weight for r in weighted_signals])
-        weights_arr = weights_arr[weights_arr > 0]
-        if len(weights_arr) > 0:
-            weight_entropy = float(-np.sum(weights_arr * np.log(weights_arr)))
+        # Compute effective signal count (N_eff) and Shannon entropy on
+        # *renormalized* positive weights so incomplete collection does not
+        # understate diversification (sleeping-experts: active set sums to 1).
+        weights_arr = np.array([r.weight for r in weighted_signals], dtype=float)
+        weights_arr = weights_arr[np.isfinite(weights_arr) & (weights_arr > 0)]
+        active_weight_mass = float(np.sum(weights_arr)) if len(weights_arr) else 0.0
+        if len(weights_arr) > 0 and active_weight_mass > 0:
+            w_norm = weights_arr / active_weight_mass
+            weight_entropy = float(-np.sum(w_norm * np.log(w_norm)))
             n_eff = float(np.exp(weight_entropy))
         else:
             weight_entropy = 0.0
             n_eff = 0.0
+            active_weight_mass = 0.0
 
+        sleep_reasons = dict(getattr(self, "_health_gate_sleep_reasons", None) or {})
+        regime_gated = dict(getattr(self, "_regime_gated", None) or {})
+        soft_floor = dict(getattr(self, "_health_gate_soft_floor", None) or {})
+        adaptive_learning = dict(self.get_adaptive_learning_status(regime.name) or {})
+        # Batch DN: disclose final per-signal weight cap application
+        cap_info = getattr(self, "_last_per_signal_cap", None)
+        if isinstance(cap_info, dict) and cap_info:
+            adaptive_learning["per_signal_weight_cap"] = cap_info
+        if soft_floor:
+            adaptive_learning["health_gate_soft_floor"] = soft_floor
         return EnsembleVote(
             timestamp=str(datetime.now()),
             regime=regime,
@@ -2066,7 +3376,11 @@ class EnsembleVoter:
             source_votes=weighted_signals,
             n_eff=round(n_eff, 2),
             weight_entropy=round(weight_entropy, 4),
-            adaptive_learning=self.get_adaptive_learning_status(regime.name),
+            adaptive_learning=adaptive_learning,
+            health_gate_slept=sleep_reasons or None,
+            health_gate_freeze=bool(getattr(self, "_health_gate_freeze", False)),
+            regime_gated=regime_gated or None,
+            health_gate_soft_floor=soft_floor or None,
         )
 
     def _persist_vote(self, vote: EnsembleVote, weighted_consensus: float) -> None:

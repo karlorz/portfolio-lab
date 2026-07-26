@@ -14,13 +14,22 @@ Target: 40%+ cost reduction vs calendar rebalancing.
 
 import json
 import logging
+import os
+import tempfile
 import yaml
-from src.paths import BASE_ALLOCATION
+from src.paths import BASE_ALLOCATION, DATA_DIR
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
 from enum import Enum
+from zoneinfo import ZoneInfo
+
+# Durable controller state (YTD costs + last_rebalance) across process restarts.
+SMART_REBALANCE_STATE_FILENAME = "smart_rebalance_state.json"
+
+# Optimal timing window is defined in America/New_York wall clock (not host local).
+_ET = ZoneInfo("America/New_York")
 
 
 class RebalanceDecision(Enum):
@@ -76,10 +85,65 @@ class CostBudgetTracker:
     annual_limit_pct: float = 0.005     # 0.5% default
     warning_threshold_pct: float = 0.004  # Alert at 80%
     ytd_costs: List[Dict] = field(default_factory=list)
+    # Calendar year for YTD view (Batch DY); None → datetime.now().year
+    ytd_year: Optional[int] = None
+    # Batch DZ: single-trade cap; None = disabled (unit tests / raw tracker).
+    # Controller wires safety.max_single_trade_cost_bps (default 15).
+    max_single_trade_cost_bps: Optional[float] = None
+    # Outliers kept for audit but excluded from YTD budget sum
+    quarantined_costs: List[Dict] = field(default_factory=list)
+
+    @staticmethod
+    def _entry_year(date_val: Any) -> Optional[int]:
+        text = str(date_val or "").strip()
+        if len(text) >= 4 and text[:4].isdigit():
+            try:
+                return int(text[:4])
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
+    def _entry_day_key(date_val: Any) -> str:
+        """Normalize date to YYYY-MM-DD for dedupe (strip time suffix)."""
+        text = str(date_val or "").strip()
+        if not text:
+            return ""
+        # ISO with T → date part; bare date ok
+        if "T" in text:
+            return text.split("T", 1)[0][:10]
+        return text[:10]
+
+    @staticmethod
+    def _symbols_key(symbols: Any) -> Tuple[str, ...]:
+        if not symbols:
+            return tuple()
+        try:
+            return tuple(sorted(str(s) for s in symbols))
+        except TypeError:
+            return tuple()
+
+    def _active_year(self) -> int:
+        if self.ytd_year is not None:
+            return int(self.ytd_year)
+        return datetime.now().year
+
+    def _costs_in_year(self, year: Optional[int] = None) -> List[Dict]:
+        y = int(year) if year is not None else self._active_year()
+        out: List[Dict] = []
+        for c in self.ytd_costs:
+            if not isinstance(c, dict):
+                continue
+            cy = self._entry_year(c.get("date"))
+            # Missing year → include (legacy / fail-open into current window)
+            if cy is None or cy == y:
+                out.append(c)
+        return out
 
     @property
     def ytd_total_bps(self) -> float:
-        return sum(c.get('cost_bps', 0) for c in self.ytd_costs)
+        # Batch DY: year-scoped sum (calendar YTD view)
+        return sum(float(c.get("cost_bps", 0) or 0) for c in self._costs_in_year())
 
     @property
     def ytd_total_pct(self) -> float:
@@ -89,12 +153,199 @@ class CostBudgetTracker:
     def remaining_budget_pct(self) -> float:
         return max(0, self.annual_limit_pct - self.ytd_total_pct)
 
+    def _is_outlier_bps(self, bps: float) -> bool:
+        cap = self.max_single_trade_cost_bps
+        if cap is None:
+            return False
+        try:
+            return float(bps) > float(cap) + 1e-12
+        except (TypeError, ValueError):
+            return False
+
+    def _quarantine_key(self, bps: float, day: str, syms: Any) -> Tuple:
+        return (round(float(bps), 4), day, self._symbols_key(syms))
+
+    def _already_quarantined(self, key: Tuple) -> bool:
+        for existing in self.quarantined_costs:
+            if not isinstance(existing, dict):
+                continue
+            try:
+                ek = self._quarantine_key(
+                    float(existing.get("cost_bps", 0) or 0),
+                    self._entry_day_key(existing.get("date")),
+                    existing.get("symbols"),
+                )
+            except (TypeError, ValueError):
+                continue
+            if ek == key:
+                return True
+        return False
+
     def add_cost(self, cost_bps: float, date: str, symbols: List[str]):
+        """Append a cost row with composite-key idempotency (Batch DY/DZ).
+
+        Exact duplicate of (rounded cost_bps, calendar day, sorted symbols)
+        is skipped so re-runs / double record_rebalance do not inflate YTD.
+        Rows above max_single_trade_cost_bps are quarantined (audit only).
+        """
+        try:
+            bps = float(cost_bps)
+        except (TypeError, ValueError):
+            return
+        day = self._entry_day_key(date)
+        syms = list(symbols or [])
+        key = (round(bps, 4), day, self._symbols_key(syms))
+
+        if self._is_outlier_bps(bps):
+            if not self._already_quarantined(key):
+                self.quarantined_costs.append(
+                    {
+                        "cost_bps": bps,
+                        "date": date,
+                        "symbols": syms,
+                        "reason": "above_max_single_trade_cost_bps",
+                        "cap_bps": self.max_single_trade_cost_bps,
+                    }
+                )
+            return
+
+        for existing in self.ytd_costs:
+            if not isinstance(existing, dict):
+                continue
+            try:
+                ek = (
+                    round(float(existing.get("cost_bps", 0) or 0), 4),
+                    self._entry_day_key(existing.get("date")),
+                    self._symbols_key(existing.get("symbols")),
+                )
+            except (TypeError, ValueError):
+                continue
+            if ek == key:
+                return  # idempotent no-op
         self.ytd_costs.append({
-            'cost_bps': cost_bps,
+            'cost_bps': bps,
             'date': date,
-            'symbols': symbols,
+            'symbols': syms,
         })
+
+    def sanitize_ledger(
+        self,
+        *,
+        as_of_year: Optional[int] = None,
+        drop_prior_years_from_storage: bool = False,
+        drop_zero_cost: bool = True,
+    ) -> Dict[str, Any]:
+        """Dedupe, zero-drop, and quarantine single-trade outliers (DY/DZ).
+
+        Composite key: (cost_bps rounded 4dp, calendar day, sorted symbols).
+        Outliers above max_single_trade_cost_bps move to quarantined_costs
+        (audit trail) and are excluded from ytd_total_bps.
+        """
+        year = int(as_of_year) if as_of_year is not None else self._active_year()
+        before = list(self.ytd_costs)
+        before_count = len(before)
+        dropped_zero = 0
+        dropped_duplicate = 0
+        dropped_prior_year = 0
+        quarantined_outlier = 0
+        quarantined_bps = 0.0
+        seen: set = set()
+        cleaned: List[Dict] = []
+        # Preserve prior quarantines; re-scan may re-add from ytd_costs
+        prior_q = list(self.quarantined_costs)
+
+        for entry in before:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                bps = float(entry.get("cost_bps", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            day = self._entry_day_key(entry.get("date"))
+            syms = list(entry.get("symbols") or [])
+            cy = self._entry_year(entry.get("date"))
+
+            if drop_prior_years_from_storage and cy is not None and cy < year:
+                dropped_prior_year += 1
+                continue
+            if drop_zero_cost and abs(bps) < 1e-12:
+                dropped_zero += 1
+                continue
+
+            key = (round(bps, 4), day, self._symbols_key(syms))
+            if self._is_outlier_bps(bps):
+                if not self._already_quarantined(key):
+                    self.quarantined_costs.append(
+                        {
+                            "cost_bps": bps,
+                            "date": entry.get("date") if entry.get("date") is not None else day,
+                            "symbols": syms,
+                            "reason": "above_max_single_trade_cost_bps",
+                            "cap_bps": self.max_single_trade_cost_bps,
+                        }
+                    )
+                quarantined_outlier += 1
+                quarantined_bps += bps
+                continue
+
+            if key in seen:
+                dropped_duplicate += 1
+                continue
+            seen.add(key)
+            cleaned.append(
+                {
+                    "cost_bps": bps,
+                    "date": entry.get("date") if entry.get("date") is not None else day,
+                    "symbols": syms,
+                }
+            )
+
+        # Dedupe quarantine list itself (same composite key)
+        q_seen: set = set()
+        q_clean: List[Dict] = []
+        for entry in self.quarantined_costs:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                bps = float(entry.get("cost_bps", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            qk = self._quarantine_key(
+                bps,
+                self._entry_day_key(entry.get("date")),
+                entry.get("symbols"),
+            )
+            if qk in q_seen:
+                continue
+            q_seen.add(qk)
+            q_clean.append(entry)
+        self.quarantined_costs = q_clean
+
+        self.ytd_costs = cleaned
+        after_count = len(cleaned)
+        changed = (
+            dropped_zero > 0
+            or dropped_duplicate > 0
+            or dropped_prior_year > 0
+            or quarantined_outlier > 0
+            or after_count != before_count
+            or len(self.quarantined_costs) != len(prior_q)
+        )
+        return {
+            "changed": changed,
+            "before_count": before_count,
+            "after_count": after_count,
+            "kept": after_count,
+            "dropped_zero": dropped_zero,
+            "dropped_duplicate": dropped_duplicate,
+            "dropped_prior_year": dropped_prior_year,
+            "quarantined_outlier": quarantined_outlier,
+            "quarantined_bps": round(quarantined_bps, 4),
+            "quarantined_total": len(self.quarantined_costs),
+            "max_single_trade_cost_bps": self.max_single_trade_cost_bps,
+            "as_of_year": year,
+            "ytd_total_bps": self.ytd_total_bps,
+        }
 
     def is_over_budget(self) -> bool:
         return self.ytd_total_pct >= self.annual_limit_pct
@@ -103,12 +354,190 @@ class CostBudgetTracker:
         return self.ytd_total_pct >= self.warning_threshold_pct
 
 
-from src.costs.etf_cost_table import ETF_COST_BPS, DEFAULT_COST_BPS as _DEFAULT_COST_BPS
+from src.costs.etf_cost_table import (
+    ETF_COST_BPS,
+    DEFAULT_COST_BPS as _DEFAULT_COST_BPS,
+    get_cost_bps as _get_etf_cost_bps,
+)
 
 logger = logging.getLogger(__name__)
 
 
-__all__ = ['RebalanceDecision', 'UrgencyLevel', 'PortfolioSnapshot', 'MarketConditions', 'RebalanceDecisionResult', 'CostBudgetTracker', 'SmartRebalancingController', 'create_sample_portfolio']
+__all__ = [
+    'RebalanceDecision',
+    'UrgencyLevel',
+    'PortfolioSnapshot',
+    'MarketConditions',
+    'RebalanceDecisionResult',
+    'CostBudgetTracker',
+    'SmartRebalancingController',
+    'create_sample_portfolio',
+    'collect_unique_order_fills',
+    'estimate_day_cost_bps_from_fills',
+    'rebuild_ytd_costs_from_order_fills',
+]
+
+
+def _fill_notional(order: Dict[str, Any]) -> float:
+    for key in ("fill_value", "estimated_value", "value", "notional"):
+        if order.get(key) is not None:
+            try:
+                return abs(float(order.get(key)))
+            except (TypeError, ValueError):
+                continue
+    # qty * price fallback
+    try:
+        qty = float(order.get("fill_shares") or order.get("shares") or 0)
+        px = float(order.get("fill_price") or order.get("estimated_price") or 0)
+        return abs(qty * px)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def collect_unique_order_fills(
+    data_dir: str | Path,
+    *,
+    year: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """Collect unique fills from order-history-*.json (dedupe snapshot rewrites).
+
+    Daily files rewrite the same orders.jsonl tail with file date=today (Batch DS).
+    Composite key: (event timestamp, symbol, side, notional rounded 2dp).
+    """
+    root = Path(data_dir)
+    seen: set = set()
+    fills: List[Dict[str, Any]] = []
+    for path in sorted(root.glob("order-history-*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        orders = payload.get("recent_orders")
+        if not isinstance(orders, list) or not orders:
+            orders = payload.get("orders")
+        if not isinstance(orders, list):
+            continue
+        for order in orders:
+            if not isinstance(order, dict):
+                continue
+            ts_raw = order.get("timestamp")
+            if not ts_raw:
+                continue
+            ts_text = str(ts_raw).strip().replace("Z", "+00:00")
+            try:
+                if "T" in ts_text:
+                    dt = datetime.fromisoformat(ts_text)
+                else:
+                    dt = datetime.strptime(ts_text[:10], "%Y-%m-%d")
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                else:
+                    dt = dt.astimezone(timezone.utc)
+            except (TypeError, ValueError):
+                continue
+            if year is not None and dt.year != int(year):
+                continue
+            symbol = str(order.get("symbol") or "?").upper()
+            side = str(order.get("side") or "").lower()
+            notional = _fill_notional(order)
+            if notional <= 0:
+                continue
+            key = (dt.isoformat(), symbol, side, round(notional, 2))
+            if key in seen:
+                continue
+            seen.add(key)
+            fills.append(
+                {
+                    "timestamp": dt.isoformat(),
+                    "date": dt.strftime("%Y-%m-%d"),
+                    "symbol": symbol,
+                    "side": side,
+                    "fill_value": notional,
+                    "reason": order.get("reason"),
+                    "source_file": path.name,
+                }
+            )
+    fills.sort(key=lambda f: f["timestamp"])
+    return fills
+
+
+def estimate_day_cost_bps_from_fills(
+    fills: List[Dict[str, Any]],
+    *,
+    portfolio_value: float = 100_000.0,
+) -> float:
+    """Estimate portfolio-level cost bps for one rebalance day from fills.
+
+    Per-fill: portfolio_bps += (notional / portfolio_value) * etf_one_way_bps.
+    Uses centralized ETF cost table (SPY 2 / GLD 5 / TLT 8).
+    """
+    if portfolio_value <= 0:
+        portfolio_value = 100_000.0
+    total = 0.0
+    for fill in fills:
+        if not isinstance(fill, dict):
+            continue
+        try:
+            notional = abs(float(fill.get("fill_value") or 0))
+        except (TypeError, ValueError):
+            continue
+        if notional <= 0:
+            continue
+        sym = str(fill.get("symbol") or "")
+        one_way = float(_get_etf_cost_bps(sym))
+        total += (notional / portfolio_value) * one_way
+    return round(total, 4)
+
+
+def rebuild_ytd_costs_from_order_fills(
+    data_dir: str | Path,
+    *,
+    year: Optional[int] = None,
+    portfolio_value: float = 100_000.0,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Project YTD cost rows from unique order fills grouped by event day.
+
+    Returns (rows, meta). Rows are suitable for CostBudgetTracker.ytd_costs.
+    Does not invent costs beyond ETF table × notional share of portfolio.
+    """
+    y = int(year) if year is not None else datetime.now().year
+    fills = collect_unique_order_fills(data_dir, year=y)
+    by_day: Dict[str, List[Dict[str, Any]]] = {}
+    for fill in fills:
+        by_day.setdefault(fill["date"], []).append(fill)
+
+    rows: List[Dict[str, Any]] = []
+    for day in sorted(by_day.keys()):
+        day_fills = by_day[day]
+        symbols = sorted({f["symbol"] for f in day_fills})
+        bps = estimate_day_cost_bps_from_fills(
+            day_fills, portfolio_value=portfolio_value
+        )
+        if bps <= 0:
+            continue
+        rows.append(
+            {
+                "cost_bps": bps,
+                "date": day,
+                "symbols": symbols,
+                "source": "order_fill_rebuild",
+                "fill_count": len(day_fills),
+                "fill_notional": round(
+                    sum(float(f.get("fill_value") or 0) for f in day_fills), 2
+                ),
+            }
+        )
+    meta = {
+        "year": y,
+        "unique_fills": len(fills),
+        "event_days": len(rows),
+        "portfolio_value": portfolio_value,
+        "ytd_total_bps": round(sum(r["cost_bps"] for r in rows), 4),
+        "source": "order_fill_rebuild",
+    }
+    return rows, meta
 
 class SmartRebalancingController:
     """
@@ -159,14 +588,45 @@ class SmartRebalancingController:
         },
     }
 
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(
+        self,
+        config_path: Optional[str] = None,
+        state_path: Optional[str | Path] = None,
+        data_dir: Optional[str | Path] = None,
+        load_state: bool = True,
+    ):
         self.config = self._load_config(config_path)
+        safety = self.config.get("safety") if isinstance(self.config.get("safety"), dict) else {}
+        max_single = safety.get("max_single_trade_cost_bps", 15)
+        try:
+            max_single_f = float(max_single) if max_single is not None else 15.0
+        except (TypeError, ValueError):
+            max_single_f = 15.0
         self.cost_tracker = CostBudgetTracker(
             annual_limit_pct=self.config['cost_budget']['annual_limit'],
             warning_threshold_pct=self.config['cost_budget']['warning_threshold'],
+            max_single_trade_cost_bps=max_single_f,
         )
         self.deferred_until: Optional[datetime] = None
         self.last_rebalance: Optional[datetime] = None
+        # Batch DX: provenance when last_rebalance was advanced from order events
+        self.last_rebalance_clock_source: Optional[str] = None
+        self.last_rebalance_reconciled: bool = False
+        self.last_rebalance_reconciled_from: Optional[str] = None
+        # Batch DY: ledger sanitize meta
+        self.ledger_sanitized: bool = False
+        self.ledger_sanitize_report: Optional[Dict[str, Any]] = None
+        # Batch EA: ledger provenance from order-fill rebuild
+        self.ledger_source: Optional[str] = None
+        self.ledger_rebuild_meta: Optional[Dict[str, Any]] = None
+        self.ytd_costs_superseded: Optional[List[Dict]] = None
+        self.data_dir = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
+        if state_path is not None:
+            self.state_path = Path(state_path)
+        else:
+            self.state_path = self.data_dir / SMART_REBALANCE_STATE_FILENAME
+        if load_state:
+            self.load_state()
 
     def _load_config(self, config_path: Optional[str]) -> Dict:
         """Load config from YAML file or use defaults."""
@@ -226,12 +686,11 @@ class SmartRebalancingController:
         vpin_mult = max(1.0, 1.0 + (vpin - 0.30) * 2.0)
         vpin_mult = min(vpin_mult, 2.0)
 
-        # Time multiplier: outside optimal window = higher cost
+        # Time multiplier: outside optimal window = higher cost (ET wall clock)
         if in_optimal_window:
             time_mult = 1.0
         else:
-            now = datetime.now()
-            hour = now.hour
+            hour = self._et_now().hour
             if hour < 10:
                 time_mult = 1.25   # Opening volatility
             elif hour >= 15.5:
@@ -261,12 +720,11 @@ class SmartRebalancingController:
         vpin_mult = max(1.0, 1.0 + (vpin - 0.30) * 2.0)
         vpin_mult = min(vpin_mult, 2.0)
 
-        # Time multiplier (same logic as estimate_cost_bps)
+        # Time multiplier (same logic as estimate_cost_bps; ET wall clock)
         if in_optimal_window:
             time_mult = 1.0
         else:
-            now = datetime.now()
-            hour = now.hour
+            hour = self._et_now().hour
             if hour < 10:
                 time_mult = 1.25
             elif hour >= 15.5:
@@ -300,11 +758,24 @@ class SmartRebalancingController:
                 total += symbol_cost * drift
         return round(total, 2)
 
+    @staticmethod
+    def _et_now(now: Optional[datetime] = None) -> datetime:
+        """Resolve clock to America/New_York wall time for timing gates.
+
+        - ``now is None`` → current time in ET (not host-local).
+        - aware datetimes → converted to ET.
+        - naive datetimes → treated as ET wall clock (documented contract).
+        """
+        if now is None:
+            return datetime.now(_ET)
+        if now.tzinfo is None:
+            return now.replace(tzinfo=_ET)
+        return now.astimezone(_ET)
+
     def _in_optimal_window(self, now: Optional[datetime] = None) -> bool:
         """Check if current time is in optimal execution window (11am-2pm ET)."""
-        if now is None:
-            now = datetime.now()
-        hour = now.hour
+        et_now = self._et_now(now)
+        hour = et_now.hour
         start = self.config['timing']['optimal_start']
         end = self.config['timing']['optimal_end']
         return start <= hour < end
@@ -332,8 +803,7 @@ class SmartRebalancingController:
                      'crisis'). When provided, overrides drift_threshold with
                      the regime-specific value from drift_threshold_by_regime.
         """
-        if now is None:
-            now = datetime.now()
+        now = self._et_now(now)
 
         # Resolve regime-adaptive drift threshold
         regime_thresholds = self.config.get('drift_threshold_by_regime', {})
@@ -353,7 +823,7 @@ class SmartRebalancingController:
                 max_drift=max_drift,
                 drift_details=drift_details,
                 vpin=market.vpin,
-                estimated_cost_bps=0,
+                estimated_cost_bps=0.0,
                 reason=f"drift_below_threshold ({max_drift:.1%} < {drift_threshold:.1%})",
             )
 
@@ -399,7 +869,7 @@ class SmartRebalancingController:
                 max_drift=max_drift,
                 drift_details=drift_details,
                 vpin=vpin,
-                estimated_cost_bps=0,
+                estimated_cost_bps=0.0,
                 reason=f"high_toxicity_defer (VPIN={vpin:.2f} > {vpin_threshold}, defer #{self.consecutive_deferrals})",
             )
         else:
@@ -416,7 +886,7 @@ class SmartRebalancingController:
                 max_drift=max_drift,
                 drift_details=drift_details,
                 vpin=vpin,
-                estimated_cost_bps=0,
+                estimated_cost_bps=0.0,
                 reason=f"wait_for_optimal_window (next: {self.config['timing']['optimal_start']}:00 ET)",
             )
 
@@ -429,7 +899,7 @@ class SmartRebalancingController:
                     max_drift=max_drift,
                     drift_details=drift_details,
                     vpin=vpin,
-                    estimated_cost_bps=0,
+                    estimated_cost_bps=0.0,
                     reason=f"cost_budget_exceeded (YTD: {self.cost_tracker.ytd_total_bps:.1f} bps)",
                 )
 
@@ -458,10 +928,377 @@ class SmartRebalancingController:
         )
 
     def record_rebalance(self, cost_bps: float, date: str, symbols: List[str]):
-        """Record a completed rebalance for budget tracking."""
+        """Record a completed rebalance for budget tracking and persist state."""
         self.cost_tracker.add_cost(cost_bps, date, symbols)
         self.last_rebalance = datetime.fromisoformat(date) if 'T' in date else datetime.strptime(date, '%Y-%m-%d')
         self.deferred_until = None
+        # Explicit record path is authoritative (not a lag reconcile)
+        self.last_rebalance_clock_source = "record_rebalance"
+        self.last_rebalance_reconciled = False
+        self.last_rebalance_reconciled_from = None
+        self.save_state()
+
+    @staticmethod
+    def _parse_event_clock(value: Any) -> Optional[datetime]:
+        """Parse order-event / ISO timestamps as timezone-aware UTC."""
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            if "T" in text:
+                dt = datetime.fromisoformat(text)
+            else:
+                dt = datetime.strptime(text[:10], "%Y-%m-%d")
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    def reconcile_last_rebalance_from_event(
+        self,
+        event_ts: Any,
+        *,
+        source: str = "order_event_timestamp",
+        persist: bool = True,
+    ) -> Dict[str, Any]:
+        """Advance ``last_rebalance`` from order-event time when controller lags.
+
+        Event-sourcing practice (Batch DX / DW dual-clock): treat fill /
+        rebalance_health ``last_execution_at`` as authoritative for the
+        business clock. Does **not** invent YTD cost rows — budget tracking
+        still requires ``record_rebalance`` / explicit cost ingress.
+        """
+        event_dt = self._parse_event_clock(event_ts)
+        if event_dt is None:
+            return {
+                "reconciled": False,
+                "advanced": False,
+                "reason": "invalid_event_ts",
+                "event_ts": str(event_ts) if event_ts is not None else None,
+            }
+
+        prior = self._as_utc(self.last_rebalance)
+        # Advance when missing or strictly behind event clock (1s tolerance)
+        if prior is not None and (event_dt - prior).total_seconds() <= 1.0:
+            return {
+                "reconciled": False,
+                "advanced": False,
+                "reason": "controller_not_behind",
+                "controller_last_rebalance": prior.isoformat(),
+                "event_ts": event_dt.isoformat(),
+                "source": source,
+            }
+
+        prior_iso = prior.isoformat() if prior else None
+        self.last_rebalance = event_dt
+        self.last_rebalance_clock_source = source
+        self.last_rebalance_reconciled = True
+        self.last_rebalance_reconciled_from = prior_iso
+        if persist:
+            self.save_state()
+        return {
+            "reconciled": True,
+            "advanced": True,
+            "reason": "advanced_from_order_event",
+            "controller_last_rebalance_before": prior_iso,
+            "controller_last_rebalance": event_dt.isoformat(),
+            "event_ts": event_dt.isoformat(),
+            "source": source,
+        }
+
+    def rebuild_cost_ledger_from_order_history(
+        self,
+        *,
+        year: Optional[int] = None,
+        portfolio_value: Optional[float] = None,
+        data_dir: Optional[str | Path] = None,
+        persist: bool = True,
+        only_if_polluted: bool = False,
+    ) -> Dict[str, Any]:
+        """Replace YTD costs with event-sourced estimate from order fills (Batch EA).
+
+        Archives prior ``ytd_costs`` under ``ytd_costs_superseded`` for audit.
+        Order log is SSOT; polluted manual/test rows are not invented costs.
+        """
+        root = Path(data_dir) if data_dir is not None else self.data_dir
+        y = int(year) if year is not None else datetime.now().year
+        pv = float(portfolio_value) if portfolio_value is not None else 100_000.0
+
+        if only_if_polluted:
+            # Heuristic: many same-day synthetic rows or already over budget with
+            # no order_fill_rebuild source → rebuild
+            sources = {
+                str(c.get("source") or "")
+                for c in self.cost_tracker.ytd_costs
+                if isinstance(c, dict)
+            }
+            if "order_fill_rebuild" in sources and not self.cost_tracker.is_over_budget():
+                return {
+                    "rebuilt": False,
+                    "reason": "already_fill_sourced_and_under_budget",
+                    "ytd_total_bps": self.cost_tracker.ytd_total_bps,
+                }
+
+        rows, meta = rebuild_ytd_costs_from_order_fills(
+            root, year=y, portfolio_value=pv
+        )
+        if not rows and not list(root.glob("order-history-*.json")):
+            return {
+                "rebuilt": False,
+                "reason": "no_order_history_files",
+                "ytd_total_bps": self.cost_tracker.ytd_total_bps,
+            }
+
+        prior = list(self.cost_tracker.ytd_costs)
+        prior_total = self.cost_tracker.ytd_total_bps
+        self.ytd_costs_superseded = prior
+        self.cost_tracker.ytd_costs = rows
+        # Clear quarantine of synthetic pollution; re-sanitize under cap
+        self.cost_tracker.quarantined_costs = []
+        san = self.cost_tracker.sanitize_ledger(as_of_year=y)
+        self.ledger_sanitized = bool(san.get("changed") or self.ledger_sanitized)
+        self.ledger_sanitize_report = san
+        self.ledger_source = "order_fill_rebuild"
+        self.ledger_rebuild_meta = {
+            **meta,
+            "prior_ytd_total_bps": prior_total,
+            "prior_entries": len(prior),
+            "after_ytd_total_bps": self.cost_tracker.ytd_total_bps,
+            "after_entries": len(self.cost_tracker.ytd_costs),
+        }
+        if persist:
+            self.save_state()
+        return {
+            "rebuilt": True,
+            "reason": "rebuilt_from_order_fills",
+            "event_days": meta.get("event_days"),
+            "unique_fills": meta.get("unique_fills"),
+            "ytd_total_bps": self.cost_tracker.ytd_total_bps,
+            "prior_ytd_total_bps": prior_total,
+            "ledger_source": self.ledger_source,
+        }
+
+    def reconcile_from_rebalance_health(
+        self,
+        rebalance_health: Optional[Dict[str, Any]] = None,
+        *,
+        health_path: Optional[str | Path] = None,
+        persist: bool = True,
+    ) -> Dict[str, Any]:
+        """Read ``rebalance_health`` next_rebalance last_execution and reconcile."""
+        payload = rebalance_health
+        if payload is None:
+            path = Path(health_path) if health_path is not None else (
+                self.data_dir / "rebalance_health.json"
+            )
+            if not path.exists():
+                return {
+                    "reconciled": False,
+                    "advanced": False,
+                    "reason": "rebalance_health_missing",
+                }
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+            except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                logger.warning("rebalance_health load for reconcile failed: %s", exc)
+                return {
+                    "reconciled": False,
+                    "advanced": False,
+                    "reason": "rebalance_health_unreadable",
+                }
+        if not isinstance(payload, dict):
+            return {
+                "reconciled": False,
+                "advanced": False,
+                "reason": "rebalance_health_invalid",
+            }
+        next_reb = payload.get("next_rebalance")
+        if not isinstance(next_reb, dict):
+            return {
+                "reconciled": False,
+                "advanced": False,
+                "reason": "next_rebalance_missing",
+            }
+        event_ts = next_reb.get("last_execution_at")
+        source = (
+            str(next_reb.get("last_execution_clock") or "order_event_timestamp")
+        )
+        return self.reconcile_last_rebalance_from_event(
+            event_ts, source=source, persist=persist
+        )
+
+    def state_to_dict(self) -> Dict[str, Any]:
+        """Serialize durable controller fields for disk."""
+        return {
+            "schema_version": "smart-rebalance-state/v1",
+            "ytd_costs": list(self.cost_tracker.ytd_costs),
+            "last_rebalance": (
+                self.last_rebalance.isoformat() if self.last_rebalance else None
+            ),
+            "last_rebalance_clock_source": self.last_rebalance_clock_source,
+            "last_rebalance_reconciled": bool(self.last_rebalance_reconciled),
+            "last_rebalance_reconciled_from": self.last_rebalance_reconciled_from,
+            "ledger_sanitized": bool(self.ledger_sanitized),
+            "ledger_sanitize_report": self.ledger_sanitize_report,
+            "ledger_source": self.ledger_source,
+            "ledger_rebuild_meta": self.ledger_rebuild_meta,
+            "ytd_costs_superseded": self.ytd_costs_superseded,
+            "quarantined_costs": list(self.cost_tracker.quarantined_costs),
+            "max_single_trade_cost_bps": self.cost_tracker.max_single_trade_cost_bps,
+            "deferred_until": (
+                self.deferred_until.isoformat() if self.deferred_until else None
+            ),
+            "updated_at": datetime.now().isoformat(),
+        }
+
+    def load_state(self, path: Optional[str | Path] = None) -> bool:
+        """Load YTD costs and last_rebalance from JSON. Returns True if loaded."""
+        state_file = Path(path) if path is not None else self.state_path
+        if not state_file.exists():
+            return False
+        try:
+            with open(state_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            logger.warning("smart_rebalance state load failed (%s): %s", state_file, exc)
+            return False
+
+        if not isinstance(data, dict):
+            return False
+
+        costs = data.get("ytd_costs")
+        if isinstance(costs, list):
+            # Keep only well-formed entries
+            cleaned = []
+            for entry in costs:
+                if not isinstance(entry, dict):
+                    continue
+                try:
+                    cleaned.append(
+                        {
+                            "cost_bps": float(entry.get("cost_bps", 0)),
+                            "date": str(entry.get("date", "")),
+                            "symbols": list(entry.get("symbols") or []),
+                        }
+                    )
+                except (TypeError, ValueError):
+                    continue
+            self.cost_tracker.ytd_costs = cleaned
+
+        # Batch DZ: restore prior quarantine audit trail
+        q_costs = data.get("quarantined_costs")
+        if isinstance(q_costs, list):
+            q_cleaned = []
+            for entry in q_costs:
+                if not isinstance(entry, dict):
+                    continue
+                try:
+                    q_cleaned.append(
+                        {
+                            "cost_bps": float(entry.get("cost_bps", 0)),
+                            "date": str(entry.get("date", "")),
+                            "symbols": list(entry.get("symbols") or []),
+                            "reason": str(
+                                entry.get("reason")
+                                or "above_max_single_trade_cost_bps"
+                            ),
+                            "cap_bps": entry.get("cap_bps"),
+                        }
+                    )
+                except (TypeError, ValueError):
+                    continue
+            self.cost_tracker.quarantined_costs = q_cleaned
+
+        lr = data.get("last_rebalance")
+        if lr:
+            try:
+                self.last_rebalance = (
+                    datetime.fromisoformat(lr)
+                    if "T" in str(lr)
+                    else datetime.strptime(str(lr)[:10], "%Y-%m-%d")
+                )
+            except (TypeError, ValueError):
+                self.last_rebalance = None
+
+        src = data.get("last_rebalance_clock_source")
+        self.last_rebalance_clock_source = str(src) if src else None
+        self.last_rebalance_reconciled = bool(data.get("last_rebalance_reconciled"))
+        rf = data.get("last_rebalance_reconciled_from")
+        self.last_rebalance_reconciled_from = str(rf) if rf else None
+        self.ledger_sanitized = bool(data.get("ledger_sanitized"))
+        rep = data.get("ledger_sanitize_report")
+        self.ledger_sanitize_report = rep if isinstance(rep, dict) else None
+        src = data.get("ledger_source")
+        self.ledger_source = str(src) if src else None
+        rb = data.get("ledger_rebuild_meta")
+        self.ledger_rebuild_meta = rb if isinstance(rb, dict) else None
+        supers = data.get("ytd_costs_superseded")
+        self.ytd_costs_superseded = supers if isinstance(supers, list) else None
+
+        du = data.get("deferred_until")
+        if du:
+            try:
+                self.deferred_until = datetime.fromisoformat(str(du))
+            except (TypeError, ValueError):
+                self.deferred_until = None
+
+        # Batch DY/DZ: dedupe + quarantine outliers on load; persist if changed
+        try:
+            report = self.cost_tracker.sanitize_ledger()
+            if report.get("changed"):
+                self.ledger_sanitized = True
+                self.ledger_sanitize_report = report
+                self.save_state()
+            elif data.get("ledger_sanitized"):
+                self.ledger_sanitized = True
+        except Exception as exc:  # noqa: BLE001 — never fail load on sanitize
+            logger.warning("cost ledger sanitize on load skipped: %s", exc)
+
+        return True
+
+    def save_state(self, path: Optional[str | Path] = None) -> bool:
+        """Atomically persist controller state to JSON. Returns True on success."""
+        state_file = Path(path) if path is not None else self.state_path
+        payload = self.state_to_dict()
+        try:
+            state_file.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_name = tempfile.mkstemp(
+                prefix=".smart_rebalance_state.",
+                suffix=".tmp",
+                dir=str(state_file.parent),
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as tmp:
+                    json.dump(payload, tmp, indent=2)
+                    tmp.write("\n")
+                os.replace(tmp_name, state_file)
+            except Exception as write_exc:
+                try:
+                    os.unlink(tmp_name)
+                except OSError:
+                    pass
+                # Surface unexpected errors; serialize/IO failures stay soft
+                if isinstance(write_exc, (OSError, TypeError, ValueError, AttributeError)):
+                    raise write_exc
+                raise
+            return True
+        except (OSError, TypeError, ValueError, AttributeError) as exc:
+            logger.warning("smart_rebalance state save failed (%s): %s", state_file, exc)
+            return False
 
     def get_status(self) -> Dict[str, Any]:
         """Get current controller status for dashboard/monitoring."""
@@ -470,15 +1307,38 @@ class SmartRebalancingController:
             'ytd_cost_pct': round(self.cost_tracker.ytd_total_pct * 100, 3),
             'remaining_budget_pct': round(self.cost_tracker.remaining_budget_pct * 100, 3),
             'remaining_budget_ratio': round(self.cost_tracker.remaining_budget_pct, 6),
+            # Unit honesty: pct is percent-of-portfolio (0.5 means 0.5%),
+            # ratio is portfolio fraction (0.005 means 0.5%).
+            'remaining_budget_pct_unit': 'percent_of_portfolio',
+            'remaining_budget_ratio_unit': 'portfolio_fraction',
             'is_over_budget': self.cost_tracker.is_over_budget(),
             'is_warning': self.cost_tracker.is_warning(),
+            'ytd_cost_entries': len(self.cost_tracker._costs_in_year()),
+            'ledger_sanitized': bool(self.ledger_sanitized),
+            'ledger_sanitize_report': self.ledger_sanitize_report,
+            'ledger_source': self.ledger_source,
+            'ledger_rebuild_meta': self.ledger_rebuild_meta,
+            'max_single_trade_cost_bps': self.cost_tracker.max_single_trade_cost_bps,
+            'ytd_outlier_quarantined_count': len(self.cost_tracker.quarantined_costs),
+            'ytd_outlier_quarantined_bps': round(
+                sum(
+                    float(c.get("cost_bps", 0) or 0)
+                    for c in self.cost_tracker.quarantined_costs
+                    if isinstance(c, dict)
+                ),
+                4,
+            ),
             'last_rebalance': self.last_rebalance.isoformat() if self.last_rebalance else None,
+            'last_rebalance_clock_source': self.last_rebalance_clock_source,
+            'last_rebalance_reconciled': bool(self.last_rebalance_reconciled),
+            'last_rebalance_reconciled_from': self.last_rebalance_reconciled_from,
             'deferred_until': self.deferred_until.isoformat() if self.deferred_until else None,
             'config': {
                 'drift_threshold': self.config['drift_threshold'],
                 'vpin_threshold': self.config['vpin']['threshold'],
                 'optimal_window': f"{self.config['timing']['optimal_start']}:00-{self.config['timing']['optimal_end']}:00 ET",
                 'annual_cost_limit': f"{self.config['cost_budget']['annual_limit'] * 100:.1f}%",
+                'max_single_trade_cost_bps': self.cost_tracker.max_single_trade_cost_bps,
             },
         }
 
@@ -498,8 +1358,10 @@ def create_sample_portfolio() -> PortfolioSnapshot:
 
 
 def demo():
-    """Demonstrate the smart rebalancing controller."""
-    controller = SmartRebalancingController()
+    """Demonstrate the smart rebalancing controller (no durable state I/O)."""
+    controller = SmartRebalancingController(load_state=False)
+    # Avoid writing into shared DATA_DIR during CLI demos
+    controller.state_path = Path(os.devnull)
 
     # Scenario 1: No drift — skip
     portfolio = create_sample_portfolio()

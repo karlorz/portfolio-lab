@@ -309,10 +309,14 @@ class TestCombinedPipeline:
             readings=readings, regime=Regime.NORMAL, regime_confidence=0.7)
 
         assert vote.num_sources == 6
-        # No signals gated in NORMAL, all weights positive
+        # Soft-delete static-zero arms stay pinned at 0 (Batch DK); others positive
         weights = voter.get_blended_weights("NORMAL")
+        soft_delete = EnsembleVoter._static_zero_baseline_sources("NORMAL")
         for source in weights:
-            assert weights[source] > 0
+            if source in soft_delete:
+                assert weights[source] == 0.0
+            else:
+                assert weights[source] > 0
 
     def test_high_vol_gated_plus_bandit(self, tmp_path):
         """HIGH_VOL: MSM gated off, bandit optimizes among survivors."""

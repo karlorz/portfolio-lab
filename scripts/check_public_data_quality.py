@@ -55,8 +55,25 @@ def _positive_float(value: str) -> float:
     return parsed
 
 
-def _prices_path(app_dir: Path, prices: Path | None) -> Path:
-    return prices if prices is not None else app_dir / "public" / "data" / "prices.json"
+def _prices_path(
+    app_dir: Path,
+    prices: Path | None,
+    *,
+    public_dir: Path | None = None,
+    allow_repo_public_data: bool = False,
+    env: dict[str, str] | None = None,
+) -> Path:
+    if prices is not None:
+        return prices
+    from src.paths import resolve_ops_public_data_dir
+
+    public_data = resolve_ops_public_data_dir(
+        app_dir,
+        public_dir,
+        env=env,
+        allow_repo_public_data=allow_repo_public_data,
+    )
+    return public_data / "prices.json"
 
 
 def _latest_valid_date(records: list[dict[str, Any]]) -> str | None:
@@ -226,6 +243,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app-dir", type=Path, default=Path.cwd(), help="Portfolio Lab checkout directory")
     parser.add_argument("--prices", type=Path, help="Explicit public/data/prices.json path")
+    parser.add_argument(
+        "--public-dir",
+        type=Path,
+        default=None,
+        help="Public data tree (default: PUBLIC_DATA_DIR or app-dir/public/data)",
+    )
+    parser.add_argument(
+        "--allow-repo-public-data",
+        action="store_true",
+        help="Allow auditing app-dir/public/data even when live WWW public data exists",
+    )
     parser.add_argument("--json-report", type=Path, help="Write the full machine-readable audit report to this path")
     parser.add_argument("--reference-date", type=_parse_iso_date, help="YYYY-MM-DD date for stale latest-date checks")
     parser.add_argument(
@@ -248,7 +276,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    prices_path = _prices_path(args.app_dir, args.prices)
+    try:
+        prices_path = _prices_path(
+            args.app_dir,
+            args.prices,
+            public_dir=args.public_dir,
+            allow_repo_public_data=args.allow_repo_public_data,
+        )
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
     report = audit_public_prices(
         prices_path,
         reference_date=args.reference_date,

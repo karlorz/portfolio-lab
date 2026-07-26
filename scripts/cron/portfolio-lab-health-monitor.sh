@@ -1,11 +1,12 @@
 #!/bin/bash
 # cron-health-monitor.sh - Monitor system health and escalate issues
-# Protected by cron_guard: load-gate (max 5), flock, 60s timeout, 1GB ulimit
+# Protected by cron_guard: load-gate (max 5), flock, 120s timeout, 1GB ulimit
+# Batch JO HT1: 60→120 to match Makefile `timeout 120` / tasker timeout_seconds
 PROJECT_DIR="${PORTFOLIO_LAB_PROJECT_DIR:-/root/projects/portfolio-lab}"
 CRON_GUARD_MEMORY_MB=1024 source "$PROJECT_DIR/scripts/cron_guard.sh"
 source "$PROJECT_DIR/scripts/cron/hermes_status.sh"
 
-if cron_guard_start "pf-health" 60; then
+if cron_guard_start "pf-health" 120; then
     START=$(date +%s)
     cd "$PROJECT_DIR"
     PYTHON_RUNTIME="${PYTHON_RUNTIME:-$PROJECT_DIR/scripts/python_runtime.sh}"

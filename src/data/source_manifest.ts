@@ -3,6 +3,7 @@ import type {
   PriceDataQualityStatus,
   PriceIssueCounts,
 } from './price_quality';
+import { generatorGitShaShort } from './price_quality';
 
 export const MARKET_DATA_SOURCE_MANIFEST_SCHEMA_VERSION = 'market-data-source-manifest/v1';
 export const MARKET_DATA_SOURCE_MANIFEST_FILENAME = 'source_manifest.json';
@@ -43,18 +44,27 @@ export interface MarketDataSourceManifest {
   generated_at: string;
   symbol_universe: typeof SYMBOL_UNIVERSE_METADATA;
   artifacts: MarketDataSourceRow[];
+  /** Short HEAD when producer could resolve git (operator lag detection). */
+  generator_git_sha?: string | null;
+  generator_git_sha_status?: string;
 }
 
 export function buildMarketDataSourceManifest(
   artifacts: MarketDataSourceRow[],
   generatedAt: string = new Date().toISOString(),
 ): MarketDataSourceManifest {
-  return {
+  const manifest: MarketDataSourceManifest = {
     schema_version: MARKET_DATA_SOURCE_MANIFEST_SCHEMA_VERSION,
     generated_at: generatedAt,
     symbol_universe: SYMBOL_UNIVERSE_METADATA,
     artifacts,
   };
+  const sha = generatorGitShaShort();
+  if (sha) {
+    manifest.generator_git_sha = sha;
+    manifest.generator_git_sha_status = 'full_generate';
+  }
+  return manifest;
 }
 
 export function latestObservationFromRows(rows: Array<{ date?: string }>): string | null {

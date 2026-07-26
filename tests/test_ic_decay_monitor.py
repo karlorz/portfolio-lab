@@ -150,15 +150,15 @@ class TestICMonitor:
 
     def test_decay_report_status_healthy(self):
         """High IC signal should get 'healthy' status."""
-        monitor = ICMonitor(window_size=30, stable_min=0.05)
+        monitor = ICMonitor(window_size=30, stable_min=0.05, min_obs_for_status=10)
         for i in range(15):
             monitor.record("healthy_sig", float(i), float(i) * 0.01)
         report = monitor.compute_decay_report()
         assert report["healthy_sig"]["status"] == "healthy"
 
     def test_decay_report_status_critical(self):
-        """Very low IC should get 'critical' status."""
-        monitor = ICMonitor(window_size=30, decay_threshold=0.5)
+        """Very low IC should get 'critical' status once min_obs is met."""
+        monitor = ICMonitor(window_size=30, decay_threshold=0.5, min_obs_for_status=10)
         # Random predictions — low correlation
         import random
         random.seed(123)
@@ -166,6 +166,17 @@ class TestICMonitor:
             monitor.record("weak_sig", random.random(), random.random())
         report = monitor.compute_decay_report()
         assert report["weak_sig"]["status"] in ("critical", "warning")
+
+    def test_thin_history_is_insufficient_not_critical(self):
+        """n≈6 resolved pairs must not escalate critical (noisy Spearman)."""
+        monitor = ICMonitor(window_size=30, decay_threshold=0.05, min_obs_for_status=20)
+        # Strongly anti-correlated but thin — would be critical if allowed.
+        for i in range(6):
+            monitor.record("thin_sig", float(i), -float(i) * 0.01)
+        report = monitor.compute_decay_report()
+        assert report["thin_sig"]["status"] == "insufficient_data"
+        assert report["thin_sig"]["observations"] == 6
+        assert report["thin_sig"]["ic_rolling"] is not None
 
     def test_get_signals_needing_attention(self):
         """Should return only signals with warning/critical status."""
@@ -350,3 +361,31 @@ class TestComputeICDecayReport:
         assert report["staged_date"] == "2026-07-02"
         assert report["signals"] == {}
         assert "__staged__" not in report["signals"]
+
+
+def test_ic_decay_report_tags_pending_scopes(tmp_path, monkeypatch):
+    from src.monitor import ic_decay_monitor as icm
+
+    monkeypatch.setattr(icm, "_signal_prediction_backlog", lambda db_path=None: {
+        "pending_rows": 100,
+        "pending_dates": 5,
+        "oldest_unresolved_date": "2020-01-01",
+        "total_predictions": 200,
+        "resolved_predictions": 100,
+        "pending_semantics": "test",
+    })
+    class FakeMon:
+        def load_state(self):
+            return None
+        def compute_decay_report(self):
+            return {}
+        def get_staged_prediction_count(self):
+            return 6
+        def get_staged_date(self):
+            return "2026-07-20"
+    monkeypatch.setattr(icm, "ICMonitor", FakeMon)
+    report = icm.compute_ic_decay_report()
+    assert report["pending_predictions"] == 6
+    assert report["pending_scope"] == "ic_staged_date_window"
+    assert report["pending_rows"] == 100
+    assert report["pending_rows_scope"] == "historical_db_unlabeled_rows"

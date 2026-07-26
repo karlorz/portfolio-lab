@@ -1,11 +1,12 @@
 #!/bin/bash
 # cron-dashboard-generator.sh - Generate dashboard JSON files for Vite app
-# Protected by cron_guard: load-gate (max 5), flock, 120s timeout, 3GB ulimit
+# Protected by cron_guard: load-gate (max 5), flock, 180s timeout, 3GB ulimit
+# Batch II/IU DF3+DT2: align shell guard with Makefile + tasker + cron_compat (180s)
 PROJECT_DIR="${PORTFOLIO_LAB_PROJECT_DIR:-/root/projects/portfolio-lab}"
 source "$PROJECT_DIR/scripts/cron_guard.sh"
 source "$PROJECT_DIR/scripts/cron/hermes_status.sh"
 
-if cron_guard_start "pf-dashboard" 120; then
+if cron_guard_start "pf-dashboard" 180; then
     START=$(date +%s)
     cd "$PROJECT_DIR"
     PYTHON_RUNTIME="${PYTHON_RUNTIME:-$PROJECT_DIR/scripts/python_runtime.sh}"

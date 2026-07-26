@@ -164,6 +164,22 @@ class TestMomentumDecomposition:
         for tf, comp in components.items():
             assert -1.0 <= comp.value <= 1.0, f"{tf} value {comp.value} out of range"
 
+    def test_decompose_strong_trend_has_meaningful_magnitude(self, fusion, synthetic_prices):
+        """C1c: vol-scaling bug fix - strong trends must produce non-microscopic signals.
+
+        The synthetic SPY series is a strong uptrend (cumsum of Normal(+0.5, 2.0)).
+        Before the fix, tanh(period_return / annualized_vol) produced ~1e-4 values
+        because annualized vol (~0.13) >> period return (~0.01). The fix matches
+        the vol horizon to the return horizon so tanh(return / period_vol) yields
+        a meaningful magnitude (>= 0.05) for clear trends.
+        """
+        components = fusion._decompose_momentum("SPY", synthetic_prices["SPY"])
+        # Long timeframe over a clear 63-day uptrend should carry meaningful mass
+        assert abs(components["long"].value) >= 0.05, (
+            f"long value {components['long'].value} is microscopic; "
+            "vol-scaling likely divides by annualized instead of period-matched vol"
+        )
+
     def test_decompose_confidence_in_range(self, fusion, synthetic_prices):
         components = fusion._decompose_momentum("SPY", synthetic_prices["SPY"])
         for tf, comp in components.items():

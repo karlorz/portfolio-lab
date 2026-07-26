@@ -153,12 +153,13 @@ class SectorMomentumCalculator:
     
     def get_allocation(self, momentum_scores: List[Dict], top_n: int = 3,
                       overlay_pct: float = 0.25, spy_weight: float = 0.46,
-                      min_momentum: float = 0.0, vix: float = 0,
+                      min_momentum: float = 0.0, vix: Optional[float] = None,
                       vix_threshold: float = 30) -> Dict:
         """Generate sector overlay allocation"""
         
-        # Check VIX threshold - disable rotation in high vol
-        if vix > vix_threshold:
+        # Check VIX threshold - disable rotation in high vol.
+        # Unknown VIX (None) is not treated as zero calm — skip high-vol gate.
+        if vix is not None and vix > vix_threshold:
             return {
                 "spAllocation": spy_weight,
                 "sectorAllocations": [],
@@ -220,8 +221,16 @@ class SectorMomentumCalculator:
         }
 
 
-def generate_sector_signals(historical_path: Path, vix: float = 0, regime: str = None) -> Optional[Dict]:
-    """Generate complete sector rotation signals for dashboard"""
+def generate_sector_signals(
+    historical_path: Path,
+    vix: Optional[float] = None,
+    regime: str = None,
+) -> Optional[Dict]:
+    """Generate complete sector rotation signals for dashboard.
+
+    ``vix`` may be None when the feed is unavailable — publish null rather than
+    a fake 0.0 calm reading (data-honesty / residual honesty).
+    """
     try:
         if not historical_path.exists():
             return None
@@ -246,11 +255,16 @@ def generate_sector_signals(historical_path: Path, vix: float = 0, regime: str =
         
         # Format output
         top_sectors = momentum_scores[:5]
-        
+
+        # Batch JG DS3: dual-stamp generated_at + timestamp (same ISO). Staleness
+        # preferred field is generated_at; older consumers still read timestamp.
+        now_iso = datetime.now(timezone.utc).isoformat()
         return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": now_iso,
+            "generated_at": now_iso,
             "status": "active",
-            "vix": vix,
+            "vix": vix,  # None when unknown — never coerce to 0
+            "vix_source": "provided" if vix is not None else "unavailable",
             "regime": regime,
             "methodology": "12-month momentum lookback, top 3 sectors, quarterly rebalancing",
             "overlay_pct": 0.25,

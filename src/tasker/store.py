@@ -3,15 +3,30 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from src.paths import DATA_DIR, PUBLIC_DATA_DIR, TASKER_DB, sqlite_connect
-from src.tasker.models import RUN_CANCELLED, RUN_ERROR, RUN_SUCCESS, RUN_TIMEOUT
+from src.paths import (
+    DATA_DIR,
+    PUBLIC_DATA_DIR,
+    TASKER_DB,
+    TASKER_STATUS_JSON,
+    sqlite_connect,
+)
+from src.tasker.models import (
+    RUN_BLOCKED,
+    RUN_CANCELLED,
+    RUN_ERROR,
+    RUN_SUCCESS,
+    RUN_TIMEOUT,
+)
 from src.tasker.registry import TaskRegistry
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> str:
@@ -25,17 +40,29 @@ class TaskerStore:
         self,
         db_path: str | Path = TASKER_DB,
         public_status_path: str | Path = PUBLIC_DATA_DIR / "tasker_status.json",
+        private_status_path: str | Path | None = None,
+        repo_status_path: str | Path | None = None,
         cron_status_path: str | Path = DATA_DIR / "cron_status.json",
         log_dir: str | Path = DATA_DIR / "tasker_logs",
     ):
         self.db_path = Path(db_path)
         self.public_status_path = Path(public_status_path)
+        # Batch IB: private DATA_DIR twin + optional explicit repo soft-mirror.
+        # When repo_status_path is None, write_json_multi_dest auto-resolves
+        # checkout public/data (skipped under pytest unless ALLOW_LIVE).
+        self.private_status_path = (
+            Path(private_status_path)
+            if private_status_path is not None
+            else Path(TASKER_STATUS_JSON)
+        )
+        self.repo_status_path = (
+            Path(repo_status_path) if repo_status_path is not None else None
+        )
         self.cron_status_path = Path(cron_status_path)
         self.log_dir = Path(log_dir)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self._init_db()
-
     def sync_registry(self, registry: TaskRegistry) -> None:
         now = _utc_now()
         with self._connect() as conn:
@@ -240,11 +267,96 @@ class TaskerStore:
         }
 
     def write_status_mirrors(self, registry: TaskRegistry) -> dict[str, Any]:
+        """Publish tasker_status (+ cron_status) with multi-dest 0o644 contract.
+
+        Batch IB: serialize-once fan-out to PUBLIC_DATA_DIR, private DATA_DIR
+        twin, and repo ``public/data`` soft-mirror so satellite lag probes stop
+        reporting perpetual tasker_status churn while WWW advances on every
+        poll. Does not touch signals.json / target_allocations.
+        """
         payload = self.status_payload(registry)
-        self.public_status_path.parent.mkdir(parents=True, exist_ok=True)
         self.cron_status_path.parent.mkdir(parents=True, exist_ok=True)
-        self.public_status_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        self.cron_status_path.write_text(json.dumps(self._cron_payload(payload), indent=2), encoding="utf-8")
+
+        # Prefer multi-dest atomic writes (0o644 + soft-mirror). Fall back to
+        # bare public write only when the authority helper is unavailable.
+        multi_ok = False
+        try:
+            from src.monitor.signal_authority import (
+                _atomic_write_text,
+                write_json_multi_dest,
+            )
+
+            private_dest = self.private_status_path
+            try:
+                if private_dest.resolve() == self.public_status_path.resolve():
+                    private_dest = None  # type: ignore[assignment]
+            except OSError:
+                pass
+
+            result = write_json_multi_dest(
+                payload,
+                public_path=self.public_status_path,
+                private_path=private_dest,
+                repo_path=self.repo_status_path,
+                soft_mirror_repo=True,
+                repo_filename="tasker_status.json",
+            )
+            multi_ok = bool(
+                result.wrote_public or result.wrote_private or result.wrote_repo
+            )
+            if result.skipped_reason:
+                logger.warning(
+                    "tasker_status multi-dest partial skip: %s",
+                    result.skipped_reason,
+                )
+            # cron_status stays private DATA_DIR compatibility surface only
+            _atomic_write_text(
+                self.cron_status_path,
+                json.dumps(self._cron_payload(payload), indent=2) + "\n",
+                mode=0o644,
+            )
+        except Exception as exc:  # noqa: BLE001 — never block tasker on mirror
+            logger.warning(
+                "tasker_status multi-dest failed (%s); fallback write_text",
+                exc,
+            )
+            multi_ok = False
+
+        if not multi_ok:
+            self.public_status_path.parent.mkdir(parents=True, exist_ok=True)
+            self.public_status_path.write_text(
+                json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+            )
+            try:
+                import os
+
+                os.chmod(self.public_status_path, 0o644)
+            except OSError:
+                pass
+            self.cron_status_path.write_text(
+                json.dumps(self._cron_payload(payload), indent=2) + "\n",
+                encoding="utf-8",
+            )
+            try:
+                import os
+
+                os.chmod(self.cron_status_path, 0o644)
+            except OSError:
+                pass
+            # Best-effort private twin even on fallback
+            try:
+                priv = self.private_status_path
+                if priv.resolve() != self.public_status_path.resolve():
+                    priv.parent.mkdir(parents=True, exist_ok=True)
+                    priv.write_text(
+                        json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+                    )
+                    import os
+
+                    os.chmod(priv, 0o644)
+            except OSError:
+                pass
+
         return payload
 
     def _connect(self) -> sqlite3.Connection:
@@ -311,7 +423,8 @@ class TaskerStore:
         if status in {RUN_ERROR, RUN_TIMEOUT}:
             failure_count += 1
             consecutive += 1
-        elif status == RUN_SUCCESS:
+        elif status in {RUN_SUCCESS, RUN_BLOCKED}:
+            # Blocked is intentional no-op (exit 2) — reset consecutive failures
             consecutive = 0
         elif status == RUN_CANCELLED:
             pass

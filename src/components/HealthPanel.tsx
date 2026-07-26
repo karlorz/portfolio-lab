@@ -71,6 +71,26 @@ export function HealthPanel({ health, expanded = false, onToggleExpand }: Health
           >
             {health.system_status?.toUpperCase()}
           </span>
+          {operationsSummary.dualWrite.status !== 'absent' && (
+            <span
+              className="status-badge dual-write-badge"
+              title={operationsSummary.dualWrite.detail ?? operationsSummary.dualWrite.label}
+              style={{
+                backgroundColor: getStatusColor(
+                  operationsSummary.dualWrite.status === 'ok'
+                    ? 'healthy'
+                    : operationsSummary.dualWrite.status === 'warning'
+                      ? 'warning'
+                      : operationsSummary.dualWrite.status === 'critical'
+                        ? 'critical'
+                        : 'unknown',
+                ),
+                marginLeft: '0.4rem',
+              }}
+            >
+              {operationsSummary.dualWrite.label}
+            </span>
+          )}
         </h3>
         <button className="expand-btn">
           {expanded ? '▼' : '▶'}
@@ -102,6 +122,25 @@ export function HealthPanel({ health, expanded = false, onToggleExpand }: Health
               <span className="dot" style={{ backgroundColor: '#3b82f6' }}></span>
               <span>{operationsSummary.scheduler.totalJobs} scheduled jobs, {operationsSummary.scheduler.failedJobs} failed</span>
             </div>
+            {operationsSummary.dualWrite.status !== 'absent' && (
+              <div className="summary-item">
+                <span
+                  className="dot"
+                  style={{
+                    backgroundColor: getStatusColor(
+                      operationsSummary.dualWrite.status === 'ok'
+                        ? 'healthy'
+                        : operationsSummary.dualWrite.status === 'warning'
+                          ? 'warning'
+                          : operationsSummary.dualWrite.status === 'critical'
+                            ? 'critical'
+                            : 'unknown',
+                    ),
+                  }}
+                ></span>
+                <span>{operationsSummary.dualWrite.label}</span>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -119,6 +158,20 @@ export function HealthPanel({ health, expanded = false, onToggleExpand }: Health
                 <strong>Scheduler</strong>
                 <span>{operationsSummary.scheduler.label}</span>
               </div>
+              {operationsSummary.dualWrite.status !== 'absent' && (
+                <div
+                  className={`operations-summary-card status-${operationsSummary.dualWrite.status}`}
+                  title={operationsSummary.dualWrite.detail ?? undefined}
+                >
+                  <strong>Dual-Write</strong>
+                  <span>{operationsSummary.dualWrite.label}</span>
+                  {operationsSummary.dualWrite.detail && (
+                    <span className="operations-summary-detail">
+                      {operationsSummary.dualWrite.detail}
+                    </span>
+                  )}
+                </div>
+              )}
               {operationsSummary.dataPipelineSlo?.runbook?.topCause && (
                 <div className={`operations-summary-card status-${operationsSummary.dataPipelineSlo.runbook.topCause.severity}`}>
                   <strong>Runbook</strong>

@@ -11,7 +11,15 @@ from pathlib import Path
 from typing import Any
 
 from src.paths import PROJECT_ROOT
-from src.tasker.models import RUN_CANCELLED, RUN_ERROR, RUN_SUCCESS, RUN_TIMEOUT
+from src.tasker.models import (
+    EXIT_CODE_BLOCKED,
+    INTENTIONAL_BLOCK_TASK_IDS,
+    RUN_BLOCKED,
+    RUN_CANCELLED,
+    RUN_ERROR,
+    RUN_SUCCESS,
+    RUN_TIMEOUT,
+)
 from src.tasker.registry import TaskRegistry
 from src.tasker.store import TaskerStore
 
@@ -123,19 +131,44 @@ class TaskRunner:
                     return
 
             duration = time.monotonic() - started
+            error_msg: str | None = None
             if run_id in self._cancelled:
                 status = RUN_CANCELLED
             elif process.returncode == 0:
                 status = RUN_SUCCESS
+            elif (
+                process.returncode == EXIT_CODE_BLOCKED
+                and run["task_id"] in INTENTIONAL_BLOCK_TASK_IDS
+            ):
+                # Evaluator/control-loop intentional skip under kill — not a hard error
+                status = RUN_BLOCKED
+            elif process.returncode == EXIT_CODE_BLOCKED:
+                # Batch CE: bare exit 2 from make (recipe parse / missing separator)
+                # must not look like intentional blocked. Count as error + hint.
+                status = RUN_ERROR
+                error_msg = (
+                    "exit_code=2 from non-intentional-block task "
+                    f"{run['task_id']!r}; treat as make/recipe failure "
+                    f"(only {sorted(INTENTIONAL_BLOCK_TASK_IDS)} may use "
+                    "EXIT_BLOCKED). Check tasker log for 'missing separator' "
+                    "or other make parse errors."
+                )
             else:
                 status = RUN_ERROR
-            self.store.finish_run(run_id, status=status, exit_code=process.returncode, duration_seconds=duration)
+            self.store.finish_run(
+                run_id,
+                status=status,
+                exit_code=process.returncode,
+                duration_seconds=duration,
+                error=error_msg,
+            )
         except Exception as exc:  # pragma: no cover - defensive runtime path
             duration = time.monotonic() - started
             self.store.finish_run(run_id, status=RUN_ERROR, exit_code=None, duration_seconds=duration, error=str(exc))
         finally:
             self._processes.pop(run_id, None)
             self._cancelled.discard(run_id)
+            self._threads.pop(run_id, None)
 
     def _terminate_process_group(self, process: subprocess.Popen[Any]) -> None:
         try:

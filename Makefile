@@ -42,7 +42,14 @@ PERF_UPDATE_BASELINE ?= 0
 help:
 	@echo "Portfolio-Lab Makefile"
 	@echo ""
-	@echo "  make test         Run test suite (safe: ML disabled, 3GB memory cap)"
+	@echo "  make test-gate    DEFAULT agent gate (= test-fast; <2m ensemble/signal)"
+	@echo "  make test-fast    Ensemble/signal subset only (alias of test-gate)"
+	@echo "  make test         Full safe suite merge gate (ML off, 6GB VSZ, ~30-45m, 3600s)"
+	@echo "  make test-unit    Safe suite excluding generator + *integration* (still ~15k tests)"
+	@echo "  make test-generator  Only tests/test_generator.py (heavy dashboard path)"
+	@echo "  make test-integration  Path-selected *integration* / e2e modules (S18)"
+	@echo "  scripts/wait-test-exit.sh  Wait for make test exit stamp (max 60m; fail if dead)"
+	@echo "  S18b suite cron: OPTIONAL (commented in crontab; not in CRON_TARGETS/tasker)"
 	@echo "  make test-ml-extract  Run extracted ML-kernel tests (safe: ML disabled)"
 	@echo "  make test-ml      Run full test suite including ML (requires torch/sklearn)"
 	@echo "  make test-isolation  Run top-20 failing files individually (bypasses pollution)"
@@ -50,6 +57,7 @@ help:
 	@echo "  make dashboard    Regenerate dashboard JSON files"
 	@echo "  make health       Generate public/data/health.json system health monitor"
 	@echo "  make rebalance-health  Generate public/data/rebalance_health.json diagnostics"
+	@echo "  make ops-regen    Post-merge operator refresh: dashboard + wiki-sync + health"
 	@echo "  make eval         Run strategy evaluator (paper trading)"
 	@echo "  make research     Run research agent + regime analysis"
 	@echo "  make wiki-sync    Sync research findings to wiki vault"
@@ -59,6 +67,8 @@ help:
 	@echo "  make labs-validate  Validate existing Labs artifacts offline"
 	@echo "  make labs-smoke     Run Labs artifact generation smoke tests"
 	@echo "  make data-quality   Audit public/data/prices.json offline"
+	@echo "  make mirror-repo-public-data  Mirror live PUBLIC_DATA_DIR → repo public/data (H22b)"
+	@echo "  make mirror-repo-public-data-lag  Exit 1 if repo public/data lags live"
 	@echo "  make sync         Broker position reconciliation"
 	@echo "  make all          Run all tasks sequentially"
 	@echo "  make cron-reset   Reset cron status file to defaults"
@@ -138,48 +148,169 @@ test:
 	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
 	echo "=== Test Suite (safe mode): $$(date) ==="; \
 	echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"; \
-	echo "  Memory cap: 3GB virtual (ulimit -v 3145728)"; \
+	echo "  Memory cap: 6GB virtual (ulimit -v 6291456; raised after suite MemoryError cascade under 3GB)"; \
 	echo "  Heavy tests: excluded via collect_ignore"; \
-	echo "  Timeout: 1200s (increased from 600s to prevent false failures)"; \
+	echo "  PUBLIC_DATA_DIR: isolated mktemp (H16 — no live WWW dual-write)"; \
+	echo "  Timeout: 3600s (raised after get_bl_views isolation; full safe suite ~45m on lab hosts)"; \
 	START=$$(date +%s); \
-	bash -c 'ulimit -v 3145728; \
-		timeout 1200 uv run pytest tests/ -q --tb=short -p no:cacheprovider'; \
+	set +e; \
+	bash -c 'ulimit -v 6291456; \
+		ulimit -n 65536 2>/dev/null || true; \
+		PUBLIC_TMP=$$(mktemp -d /tmp/plab-pytest-public.XXXXXX); \
+		mkdir -p "$$PUBLIC_TMP/data"; \
+		if [ -f public/data/prices.json ]; then cp -a public/data/prices.json "$$PUBLIC_TMP/data/"; \
+		elif [ -f data/prices.json ]; then cp -a data/prices.json "$$PUBLIC_TMP/data/"; fi; \
+		export PUBLIC_DATA_DIR="$$PUBLIC_TMP/data"; \
+		export PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA=1; \
+		timeout 3600 uv run pytest tests/ -q --tb=short -p no:cacheprovider; \
+		EXIT=$$?; rm -rf "$$PUBLIC_TMP"; exit $$EXIT'; \
 	EXIT=$$?; \
+	set -e; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
 	echo ""; \
 	echo "=== Test Suite: exit $$EXIT, duration $${DUR}s ==="; \
 	if [ $$EXIT -eq 124 ]; then \
-		echo "TIMEOUT (124): Test suite exceeded 1200s limit. Check for hanging tests."; \
+		echo "TIMEOUT (124): Test suite exceeded 3600s limit. Check for hanging tests."; \
 	elif [ $$EXIT -eq 137 ]; then \
-		echo "SIGKILL (137): memory limit exceeded. Check for ML import leaks."; \
+		echo "SIGKILL (137): OOM killer / hard kill. Check for ML import leaks."; \
+	elif [ $$EXIT -eq 139 ]; then \
+		echo "SIGSEGV (139): virtual memory cap (ulimit -v / RLIMIT_AS) exceeded."; \
+	elif [ $$EXIT -ne 0 ]; then \
+		echo "Some tests failed (exit $$EXIT). Review output above."; \
+	fi; \
+	mkdir -p $(DATA_DIR) 2>/dev/null || true; \
+	printf '%s\n' "{\"exit\":$$EXIT,\"ts\":\"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"memory_class\":$$([ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ] && echo true || echo false)}" \
+		> $(DATA_DIR)/test_last_exit.json 2>/dev/null || true; \
+	exit $$EXIT
+
+.PHONY: test test-ml test-fast test-gate test-unit test-generator test-integration test-ml-extract
+
+# S18 path segments (generator is ~6.6k lines; *integration* modules host-touch).
+# test-unit = full safe suite minus those files (still ~15k tests — not a fast gate).
+# Default agent mid-session gate is test-gate (= test-fast). Full gate remains `make test`.
+TEST_GENERATOR_FILE := tests/test_generator.py
+TEST_INTEGRATION_FILES := \
+	tests/test_collect_signals_integration.py \
+	tests/test_e2e_overlay_pipeline.py \
+	tests/test_integration.py \
+	tests/test_rebalancing_integration.py \
+	tests/test_rebalancing_integration_cli.py \
+	tests/test_regime_bandit_integration.py \
+	tests/test_signal_backtest_integration.py \
+	tests/test_signal_tsmom_integration.py \
+	tests/test_tsmom_integration.py \
+	tests/test_vix_vol_targeting_integration.py
+
+# DEFAULT agent gate: alias of test-fast (<2m). Do not point agents at full `make test`.
+test-gate: test-fast
+
+test-fast:
+	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
+	echo "=== Test Suite (fast / test-gate mode): $$(date) ==="; \
+	echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"; \
+	echo "  Focus: Core signal and ensemble tests only (NOT full unit suite)"; \
+	echo "  Target: <2 minutes execution time"; \
+	echo "  Full merge gate: make test (~30-45m). Wait helper: scripts/wait-test-exit.sh"; \
+	START=$$(date +%s); \
+	bash -c 'ulimit -n 65536 2>/dev/null || true; \
+	PORTFOLIO_LAB_ENABLE_ML=0 uv run pytest tests/test_adaptive_sizing.py tests/test_adaptive_consensus.py tests/test_adaptive_ensemble_weights.py tests/test_regime_conditional_weights.py tests/test_ensemble_voter.py tests/test_regime_gate.py tests/test_ensemble_diversity_floor.py tests/test_ensemble_correlation.py tests/test_ensemble_n_eff.py tests/test_regime_bandit_integration.py -q --tb=short -p no:cacheprovider; \
+	exit $$?'; \
+	EXIT=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	echo ""; \
+	echo "=== Test Suite (fast/gate): exit $$EXIT, duration $${DUR}s ==="; \
+	if [ $$EXIT -eq 124 ]; then \
+		echo "TIMEOUT (124): Fast test suite exceeded 120s limit."; \
+	elif [ $$EXIT -eq 137 ]; then \
+		echo "SIGKILL (137): OOM killer / hard kill."; \
+	elif [ $$EXIT -eq 139 ]; then \
+		echo "SIGSEGV (139): virtual memory cap (ulimit -v) exceeded."; \
 	elif [ $$EXIT -ne 0 ]; then \
 		echo "Some tests failed (exit $$EXIT). Review output above."; \
 	fi; \
 	exit $$EXIT
 
-.PHONY: test test-ml test-fast test-ml-extract
-
-test-fast:
+# Unit segment: safe suite excluding generator + path-selected integration modules
+test-unit:
 	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
-	echo "=== Test Suite (fast mode): $$(date) ==="; \
-	echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"; \
-	echo "  Focus: Core signal and ensemble tests only"; \
-	echo "  Target: <2 minutes execution time"; \
+	echo "=== Test Suite (unit segment / S18): $$(date) ==="; \
+	echo "  ML: disabled; Memory: 6GB virtual; PUBLIC: isolated"; \
+	echo "  Excludes: test_generator.py + *integration* path list"; \
+	echo "  Timeout: 2400s (full suite uses 3600s)"; \
 	START=$$(date +%s); \
-	PORTFOLIO_LAB_ENABLE_ML=0 uv run pytest tests/test_adaptive_sizing.py tests/test_adaptive_consensus.py tests/test_adaptive_ensemble_weights.py tests/test_regime_conditional_weights.py tests/test_ensemble_voter.py tests/test_regime_gate.py tests/test_ensemble_diversity_floor.py tests/test_ensemble_correlation.py tests/test_ensemble_n_eff.py tests/test_regime_bandit_integration.py -q --tb=short -p no:cacheprovider; \
+	bash -c 'ulimit -v 6291456 2>/dev/null || true; \
+		ulimit -n 65536 2>/dev/null || true; \
+		PUBLIC_TMP=$$(mktemp -d /tmp/plab-pytest-public.XXXXXX); \
+		mkdir -p "$$PUBLIC_TMP/data"; \
+		export PUBLIC_DATA_DIR="$$PUBLIC_TMP/data"; \
+		export PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA=1; \
+		export PORTFOLIO_LAB_ENABLE_ML=0; \
+		IGNORE_ARGS="--ignore=$(TEST_GENERATOR_FILE)"; \
+		for f in $(TEST_INTEGRATION_FILES); do \
+			IGNORE_ARGS="$$IGNORE_ARGS --ignore=$$f"; \
+		done; \
+		timeout 2400 uv run pytest tests/ -q --tb=short -p no:cacheprovider $$IGNORE_ARGS; \
+		EXIT=$$?; rm -rf "$$PUBLIC_TMP"; exit $$EXIT'; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
 	echo ""; \
-	echo "=== Test Suite (fast): exit $$EXIT, duration $${DUR}s ==="; \
+	echo "=== Test Suite (unit): exit $$EXIT, duration $${DUR}s ==="; \
 	if [ $$EXIT -eq 124 ]; then \
-		echo "TIMEOUT (124): Fast test suite exceeded 120s limit."; \
+		echo "TIMEOUT (124): Unit segment exceeded 2400s."; \
 	elif [ $$EXIT -eq 137 ]; then \
-		echo "SIGKILL (137): memory limit exceeded."; \
+		echo "SIGKILL (137): OOM killer / hard kill (6GB virtual)."; \
+	elif [ $$EXIT -eq 139 ]; then \
+		echo "SIGSEGV (139): virtual memory cap (ulimit -v / RLIMIT_AS) exceeded."; \
 	elif [ $$EXIT -ne 0 ]; then \
-		echo "Some tests failed (exit $$EXIT). Review output above."; \
+		echo "Some unit-segment tests failed (exit $$EXIT)."; \
 	fi; \
+	exit $$EXIT
+
+# Generator-only segment (dashboard / public dual-write heavy)
+test-generator:
+	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
+	echo "=== Test Suite (generator segment / S18): $$(date) ==="; \
+	echo "  File: $(TEST_GENERATOR_FILE)"; \
+	echo "  Timeout: 1200s"; \
+	START=$$(date +%s); \
+	bash -c 'ulimit -v 6291456 2>/dev/null || true; \
+		PUBLIC_TMP=$$(mktemp -d /tmp/plab-pytest-public.XXXXXX); \
+		mkdir -p "$$PUBLIC_TMP/data"; \
+		export PUBLIC_DATA_DIR="$$PUBLIC_TMP/data"; \
+		export PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA=1; \
+		export PORTFOLIO_LAB_ENABLE_ML=0; \
+		timeout 1200 uv run pytest $(TEST_GENERATOR_FILE) -q --tb=short -p no:cacheprovider; \
+		EXIT=$$?; rm -rf "$$PUBLIC_TMP"; exit $$EXIT'; \
+	EXIT=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	echo ""; \
+	echo "=== Test Suite (generator): exit $$EXIT, duration $${DUR}s ==="; \
+	exit $$EXIT
+
+# Integration path segment (host-touching / multi-module flows)
+test-integration:
+	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
+	echo "=== Test Suite (integration segment / S18): $$(date) ==="; \
+	echo "  Files: path-selected *integration* + e2e modules"; \
+	echo "  Timeout: 1200s"; \
+	START=$$(date +%s); \
+	bash -c 'ulimit -v 6291456 2>/dev/null || true; \
+		PUBLIC_TMP=$$(mktemp -d /tmp/plab-pytest-public.XXXXXX); \
+		mkdir -p "$$PUBLIC_TMP/data"; \
+		export PUBLIC_DATA_DIR="$$PUBLIC_TMP/data"; \
+		export PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA=1; \
+		export PORTFOLIO_LAB_ENABLE_ML=0; \
+		timeout 1200 uv run pytest $(TEST_INTEGRATION_FILES) -q --tb=short -p no:cacheprovider; \
+		EXIT=$$?; rm -rf "$$PUBLIC_TMP"; exit $$EXIT'; \
+	EXIT=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	echo ""; \
+	echo "=== Test Suite (integration): exit $$EXIT, duration $${DUR}s ==="; \
 	exit $$EXIT
 
 test-ml-extract:
@@ -244,16 +375,34 @@ data:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-data $$STATUS $$DUR; \
-	echo "Data pipeline done ($$STATUS, $${DUR}s)"
+	$(PYTHON_RUNTIME) -c "from src.dashboard.cron_scheduler_section import refresh_public_health_cron_section; refresh_public_health_cron_section()" 2>/dev/null || true; \
+	if [ $$EXIT -eq 0 ]; then \
+	  $(MAKE) --no-print-directory mirror-repo-public-data || \
+	  echo "WARN: mirror-repo-public-data soft-failed after data (repo public lag; non-blocking)"; \
+	fi; \
+	echo "Data pipeline done ($$STATUS, $${DUR}s)"; \
+	exit $$EXIT
 
 .PHONY: data-quality
 data-quality:
 	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
 	echo "=== Public Data Quality Audit: $$(date) ==="; \
-	$(PYTHON_RUNTIME) scripts/check_public_data_quality.py --app-dir $(PROJECT_DIR) $(DATA_QUALITY_ARGS)
+	$(PYTHON_RUNTIME) scripts/check_public_data_quality.py --app-dir $(PROJECT_DIR) --allow-repo-public-data $(DATA_QUALITY_ARGS)
+
+# Batch BW / H22b: mirror operator PUBLIC_DATA_DIR → repo public/data (stale SHA fix)
+.PHONY: mirror-repo-public-data
+mirror-repo-public-data:
+	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
+	echo "=== Mirror live public data → repo public/data: $$(date) ==="; \
+	$(PYTHON_RUNTIME) scripts/mirror_repo_public_data.py $(MIRROR_REPO_PUBLIC_ARGS)
+
+.PHONY: mirror-repo-public-data-lag
+mirror-repo-public-data-lag:
+	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
+	$(PYTHON_RUNTIME) scripts/mirror_repo_public_data.py --lag-only $(MIRROR_REPO_PUBLIC_ARGS)
 
 # ── Dashboard ────────────────────────────────────────────────────────
 
@@ -261,15 +410,20 @@ data-quality:
 dashboard:
 	@echo "=== Dashboard Generator: $$(date) ==="; \
 	START=$$(date +%s); \
-	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 120 $(PYTHON_RUNTIME) -m src.dashboard.generator 2>&1 | tee -a $(DATA_DIR)/dashboard.log; \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 180 $(PYTHON_RUNTIME) -m src.dashboard.generator 2>&1 | tee -a $(DATA_DIR)/dashboard.log; \
 	EXIT=$${PIPESTATUS[0]}; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-dashboard $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-dashboard $$STATUS $$DUR; \
+	if [ $$EXIT -eq 0 ]; then \
+	  $(MAKE) --no-print-directory mirror-repo-public-data || \
+	  echo "WARN: mirror-repo-public-data soft-failed after dashboard (repo public lag; non-blocking)"; \
+	fi; \
+	exit $$EXIT
 
 # ── Strategy Evaluator ───────────────────────────────────────────────
 
@@ -282,10 +436,12 @@ eval:
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 2 ]; then STATUS="blocked"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-eval $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-eval $$STATUS $$DUR; \
+	exit $$EXIT
 
 # ── Research Agent ───────────────────────────────────────────────────
 
@@ -299,9 +455,10 @@ research:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-research $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-research $$STATUS $$DUR; \
+	exit $$EXIT
 
 # ── Wiki Sync ────────────────────────────────────────────────────────
 
@@ -315,9 +472,45 @@ wiki-sync:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-wiki-sync $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-wiki-sync $$STATUS $$DUR; \
+	exit $$EXIT
+
+# ── Post-merge operator artifact regen ────────────────────────────────
+# After kill-authority / dashboard projection / graduation / wiki-sync code
+# lands, scheduled crons can lag 15–120m. Run this before treating the fix
+# as live on WWW/operators:
+#   make ops-regen
+# Paths that need regen:
+#   - src/dashboard/**, kill projection → dashboard (+ health)
+#   - scripts/compute_garch_risk.py → garch-risk (public garch_cvar.json dual-write)
+#   - src/research/wiki_sync.py, graduation SSOT → wiki-sync
+#   - src/monitor/health_check.py → health
+#
+# LAST-WRITER CONTRACT (signals.json generator_git_sha):
+#   Full `make dashboard` stamps generator_git_sha_status=full_generate.
+#   Health kill-refresh and bounded alt-data partials intentionally clear the
+#   live sha (partial_patch) and preserve last_full_generator_git_sha.
+#   ops-regen therefore runs health BEFORE dashboard so the full generate is
+#   the last writer of signals.json after a controlled regen. Standalone
+#   health/alt-data crons may still leave partial_patch when they run later —
+#   that is documented honesty, not a bug.
+.PHONY: ops-regen
+ops-regen:
+	@echo "=== Ops regen (post-merge operator surfaces): $$(date) ==="
+	@$(MAKE) --no-print-directory garch-risk
+	@$(MAKE) --no-print-directory wiki-sync
+	@$(MAKE) --no-print-directory health
+	@# Full dashboard LAST so signals.json retains full_generate tip stamp
+	@$(MAKE) --no-print-directory dashboard
+	@# Batch BX: soft-gate repo public/data mirror (never block ops-regen)
+	@$(MAKE) --no-print-directory mirror-repo-public-data || \
+		echo "WARN: mirror-repo-public-data soft-failed (repo public lag; non-blocking)"
+	@echo "=== Ops regen complete: $$(date) ==="
+	@echo "Verify: PUBLIC_DATA_DIR signals.json generator_git_sha matches git rev-parse --short HEAD (full_generate last writer)"
+	@echo "Verify: PUBLIC_DATA_DIR/garch_cvar.json exists; garch_active honest vs coverage_pass"
+	@echo "Verify: make mirror-repo-public-data-lag → exit 0 (repo public/data vs live)"
 
 # ── App Build ────────────────────────────────────────────────────────
 
@@ -332,9 +525,10 @@ build:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-build $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-build $$STATUS $$DUR; \
+	exit $$EXIT
 
 # ── Position Sync ────────────────────────────────────────────────────
 
@@ -348,9 +542,10 @@ sync:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-position-sync $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-position-sync $$STATUS $$DUR; \
+	exit $$EXIT
 
 # ── Overlay Pipeline ──────────────────────────────────────────────────
 
@@ -368,15 +563,21 @@ overlay-signals:
 		"$$PYTHON_RUNTIME" -m src.signals.crypto_momentum --save 2>&1 | tail -1 && \
 		"$$PYTHON_RUNTIME" -m src.signals.bond_duration_signal --save 2>&1 | tail -1 && \
 		"$$PYTHON_RUNTIME" -m src.regime.kurtosis_regime --save 2>&1 | tail -1 && \
+		"$$PYTHON_RUNTIME" -m src.signals.alternative_data_signal --generate 2>&1 | tail -1 && \
 		"$$PYTHON_RUNTIME" -m src.monitor.rebalance_health 2>&1 | tail -1'; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-overlay-signals $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-overlay-signals $$STATUS $$DUR; \
+	if [ $$EXIT -eq 0 ]; then \
+	  $(MAKE) --no-print-directory mirror-repo-public-data || \
+	  echo "WARN: mirror-repo-public-data soft-failed after overlay-signals (repo public lag; non-blocking)"; \
+	fi; \
+	exit $$EXIT
 
 .PHONY: overlay-dashboard
 overlay-dashboard:
@@ -388,10 +589,19 @@ overlay-dashboard:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-overlay-dashboard $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-overlay-dashboard $$STATUS $$DUR; \
+	if [ $$EXIT -eq 0 ]; then \
+	  $(MAKE) --no-print-directory mirror-repo-public-data || \
+	  echo "WARN: mirror-repo-public-data soft-failed after overlay-dashboard (repo public lag; non-blocking)"; \
+	fi; \
+	exit $$EXIT
 
+# Health / cron exit contract (Nagios-style + tasker):
+#   0 = ok, 124 = timeout, 137 = oom, other non-zero = error.
+# Recipes record STATUS via cron_update then `exit $$EXIT` so `make health`
+# (and sibling cron targets) surface non-zero to tasker — never swallow.
 .PHONY: health
 health:
 	@echo "=== Health Monitor: $$(date) ==="; \
@@ -402,9 +612,14 @@ health:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-health $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-health $$STATUS $$DUR; \
+	if [ $$EXIT -eq 0 ]; then \
+	  $(MAKE) --no-print-directory mirror-repo-public-data || \
+	  echo "WARN: mirror-repo-public-data soft-failed after health (repo public lag; non-blocking)"; \
+	fi; \
+	exit $$EXIT
 
 .PHONY: rebalance-health
 rebalance-health:
@@ -416,9 +631,14 @@ rebalance-health:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-rebalance-health $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-rebalance-health $$STATUS $$DUR; \
+	if [ $$EXIT -eq 0 ]; then \
+	  $(MAKE) --no-print-directory mirror-repo-public-data || \
+	  echo "WARN: mirror-repo-public-data soft-failed after rebalance-health (repo public lag; non-blocking)"; \
+	fi; \
+	exit $$EXIT
 
 # ── GARCH-CVaR Risk Metrics ────────────────────────────────────────────
 
@@ -433,9 +653,10 @@ garch-risk:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-garch-risk $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-garch-risk $$STATUS $$DUR; \
+	exit $$EXIT
 
 # ── Mark-to-Market ──────────────────────────────────────────────────
 
@@ -449,9 +670,10 @@ mark-to-market:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-mark-to-market $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-mark-to-market $$STATUS $$DUR; \
+	exit $$EXIT
 
 # ── Daily P&L Capture ────────────────────────────────────────────────
 
@@ -465,9 +687,17 @@ daily-pnl: mark-to-market
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-daily-pnl $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-daily-pnl $$STATUS $$DUR; \
+	exit $$EXIT
+
+# One-shot / ops: rewrite paper history daily_return from NAV chain (Batch CG).
+# Does not stamp cron_status (not a scheduled tasker job).
+.PHONY: backfill-paper-returns
+backfill-paper-returns:
+	@echo "=== Backfill paper history returns: $$(date) ==="
+	@cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/capture_daily_pnl.py --backfill-paper-history $(if $(DRY_RUN),--dry-run,)
 
 # ── Performance Attribution ────────────────────────────────────────────
 
@@ -482,7 +712,13 @@ attribution:
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ] && [ $$EXIT2 -eq 0 ]; then STATUS="ok"; else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-attribution $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-attribution $$STATUS $$DUR; \
+	if [ $$EXIT -eq 0 ] && [ $$EXIT2 -eq 0 ]; then \
+	  $(MAKE) --no-print-directory mirror-repo-public-data || \
+	  echo "WARN: mirror-repo-public-data soft-failed after attribution (repo public lag; non-blocking)"; \
+	fi; \
+	if [ $$EXIT -ne 0 ]; then exit $$EXIT; fi; \
+	exit $$EXIT2
 
 # ── Unified Dashboard ────────────────────────────────────────────────
 
@@ -496,9 +732,14 @@ unified-dashboard:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-unified-dashboard $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-unified-dashboard $$STATUS $$DUR; \
+	if [ $$EXIT -eq 0 ]; then \
+	  $(MAKE) --no-print-directory mirror-repo-public-data || \
+	  echo "WARN: mirror-repo-public-data soft-failed after unified-dashboard (repo public lag; non-blocking)"; \
+	fi; \
+	exit $$EXIT
 
 # ── Daily Brief ──────────────────────────────────────────────────────
 
@@ -532,13 +773,36 @@ prune-logs:
 	DUR=$$((END - START)); \
 	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
 	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
-	elif [ $$EXIT -eq 137 ]; then STATUS="oom"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
 	else STATUS="error"; fi; \
-	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-prune-logs $$STATUS $$DUR
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-prune-logs $$STATUS $$DUR; \
+	exit $$EXIT
 
 .PHONY: prune-logs-dry-run
 prune-logs-dry-run:
 	@cd $(PROJECT_DIR) && $(PYTHON_RUNTIME) scripts/prune_logs.py --keep 20 --delete-dead-health-log --dry-run
+
+# ── Prod ideas (ops SSOT → machine channel delta; badge-only promote) ──
+# Hourly hybrid prod→dev capture. Never creates planned work items.
+# ML off; machine JSON under data/prod_idea_channels.json is the SSOT.
+
+.PHONY: prod-ideas
+prod-ideas:
+	@echo "=== Prod Ideas: $$(date) ==="; \
+	START=$$(date +%s); \
+	cd $(PROJECT_DIR) && \
+	  export PORTFOLIO_LAB_ENABLE_ML=0; \
+	  ulimit -v 3145728 && \
+	  timeout 60 $(PYTHON_RUNTIME) -m src.monitor.prod_ideas 2>&1; \
+	EXIT=$$?; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-prod-ideas $$STATUS $$DUR; \
+	exit $$EXIT
 
 # ── Cron Status Management ───────────────────────────────────────────
 
@@ -558,10 +822,13 @@ cron-reset:
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-overlay-signals pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-overlay-dashboard pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-garch-risk pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-mark-to-market pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-daily-pnl pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-attribution pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-unified-dashboard pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-prune-logs pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-prod-ideas pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-fetch-trends pending 0 manual
 	@echo "Cron status reset: $(CRON_STATUS)"
 
 # ── Verification ─────────────────────────────────────────────────────
@@ -604,5 +871,16 @@ audit-routing-contract:
 
 .PHONY: fetch-trends
 fetch-trends:
-	@echo "=== Google Trends: $$(date) ==="
-	cd $(PROJECT_DIR) && uv run python scripts/fetch_google_trends.py --days 90 2>&1 | tee -a $(DATA_DIR)/cron.log
+	@echo "=== Google Trends: $$(date) ==="; \
+	START=$$(date +%s); \
+	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 300 $(PYTHON_RUNTIME) scripts/fetch_google_trends.py --days 90 2>&1 | tee -a $(DATA_DIR)/cron.log; \
+	EXIT=$${PIPESTATUS[0]}; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	if [ $$EXIT -eq 0 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 3 ]; then STATUS="rate_limited"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-fetch-trends $$STATUS $$DUR; \
+	exit $$EXIT

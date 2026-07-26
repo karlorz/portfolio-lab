@@ -3,7 +3,8 @@ tasks:
     label: Health
     command: make health
     schedule: "0,30 * * * *"
-    timeout_seconds: 60
+    # Batch JO HT1: align with Makefile timeout 120 (was 60 → false timeout under load)
+    timeout_seconds: 120
 
   - id: portfolio-lab-data
     label: Data
@@ -15,7 +16,7 @@ tasks:
     label: Dashboard
     command: make dashboard
     schedule: "15 * * * *"
-    timeout_seconds: 120
+    timeout_seconds: 180
 
   - id: portfolio-lab-eval
     label: Evaluator
@@ -82,6 +83,19 @@ tasks:
     command: make prune-logs
     schedule: "3 3 * * *"
     timeout_seconds: 120
+
+  - id: portfolio-lab-prod-ideas
+    label: Prod Ideas
+    command: make prod-ideas
+    schedule: "12 * * * *"
+    timeout_seconds: 60
+
+  - id: portfolio-lab-fetch-trends
+    label: Google Trends Fetch
+    command: make fetch-trends
+    schedule: "20 4 * * 0"
+    timeout_seconds: 300
+
 
   - id: portfolio-lab-build
     label: Build

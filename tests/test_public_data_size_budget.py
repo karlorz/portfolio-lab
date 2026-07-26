@@ -153,7 +153,7 @@ def test_public_data_index_discovers_heavy_market_data_files_with_fetch_strategy
     entries = _entries_by_filename(index)
     price_entry = entries["prices.json"]
     assert price_entry["category"] == "market_data"
-    assert price_entry["schema_version"] == "prices/compact-v1"
+    assert price_entry["schema_version"] == "prices/full-v1"
     assert price_entry["status"] == "present"
     assert price_entry["size_bytes"] == prices.stat().st_size
     assert price_entry["size_budget"]["row_count"] == 1002

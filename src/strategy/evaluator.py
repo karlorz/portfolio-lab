@@ -60,8 +60,51 @@ def _resolve_target_allocation(regime: str | None) -> Dict[str, float]:
 
 # Config
 DB_PATH = MARKET_DB
-ORDERS_LOG = DATA_DIR / "orders.jsonl"
-PERFORMANCE_LOG = DATA_DIR / "performance.jsonl"
+
+
+class _DataDirLogPath:
+    """Path-like log location resolved from live ``DATA_DIR`` at use time.
+
+    Import-time ``DATA_DIR / "performance.jsonl"`` freezes the path, so tests
+    that only patch ``DATA_DIR`` still append to live ``data/performance.jsonl``
+    (phantom cash-only rows). This proxy always re-derives from ``DATA_DIR``.
+    """
+
+    __slots__ = ("_name",)
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+
+    def _path(self) -> Path:
+        return Path(DATA_DIR) / self._name
+
+    def __fspath__(self) -> str:
+        return str(self._path())
+
+    def __str__(self) -> str:
+        return str(self._path())
+
+    def __repr__(self) -> str:
+        return f"_DataDirLogPath({self._name!r} -> {self._path()!s})"
+
+    def __eq__(self, other: object) -> bool:
+        try:
+            return self._path() == Path(other)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self._name)
+
+    def exists(self) -> bool:
+        return self._path().exists()
+
+    def open(self, *args, **kwargs):
+        return self._path().open(*args, **kwargs)
+
+
+ORDERS_LOG = _DataDirLogPath("orders.jsonl")
+PERFORMANCE_LOG = _DataDirLogPath("performance.jsonl")
 
 # Max entries retained in performance log (~80 trading days at ~62/day).
 # Well above the 63-day graduation window (2× headroom).
@@ -89,6 +132,62 @@ def _prune_performance_log() -> None:
         logger.info("Pruned %d entries from performance log (retained %d)", trimmed, _MAX_PERFORMANCE_ENTRIES)
     except (OSError, IOError) as e:
         logger.warning("Failed to prune performance log: %s", e)
+
+
+def _recent_performance_had_positions(lookback: int = 20) -> bool:
+    """True when a recent performance.jsonl row reported open positions."""
+    try:
+        logfile = Path(PERFORMANCE_LOG)
+        if not logfile.exists():
+            return False
+        with open(logfile) as f:
+            lines = f.readlines()
+        for line in reversed(lines[-max(1, lookback):]):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if int(row.get("positions_count") or 0) > 0:
+                return True
+    except (OSError, TypeError, ValueError):
+        return False
+    return False
+
+
+def _is_phantom_cash_only_performance(
+    perf: dict,
+    portfolio: "Portfolio",
+    *,
+    initial_capital: float | None = None,
+) -> bool:
+    """Detect empty initial-capital snapshots that disagree with live positions.
+
+    Dual writers / failed state loads previously appended 100k/0-pos rows while
+    portfolio_paper still held SPY/GLD/TLT — contaminating graduation metrics.
+    """
+    if not isinstance(perf, dict):
+        return False
+    if int(perf.get("positions_count") or 0) != 0:
+        return False
+    if getattr(portfolio, "positions", None) and len(portfolio.positions) > 0:
+        # Perf says empty but portfolio object has positions — always phantom.
+        return True
+    capital = float(
+        initial_capital
+        if initial_capital is not None
+        else PAPER_CONFIG.get("initial_capital", 100_000)
+    )
+    total = float(perf.get("total_value") or 0.0)
+    cash = float(perf.get("cash") or 0.0)
+    near_initial = capital > 0 and abs(total - capital) <= max(1.0, capital * 0.001)
+    cash_only = capital > 0 and abs(cash - capital) <= max(1.0, capital * 0.001)
+    if not (near_initial or cash_only):
+        return False
+    # Quarantine only when journal history recently had positions (no liquidate).
+    return _recent_performance_had_positions()
 
 
 # Paper trading config (defaults — override via env vars)
@@ -377,11 +476,70 @@ class Portfolio:
         return None
 
     def _write_garch_health_report(self, metrics) -> None:
-        """Write GARCH-CVaR metrics to .health_report.json for dashboard."""
+        """Write GARCH-CVaR metrics to .health_report.json for dashboard.
+
+        Separates policy max-drawdown **limit** (config input to GARCH-CVaR)
+        from measured paper drawdown so operators do not read −15 as live DD.
+        """
         try:
             from dataclasses import asdict
             report_path = DATA_DIR / ".health_report.json"
             data = asdict(metrics) if hasattr(metrics, '__dataclass_fields__') else {}
+
+            # Policy limit from PAPER_CONFIG (was published as max_drawdown=-15)
+            policy_limit = float(PAPER_CONFIG.get("max_drawdown_pct", 0.15))
+            if "max_drawdown" in data:
+                # Rename policy input out of measured-metric slot
+                data["max_drawdown_limit"] = data.pop("max_drawdown")
+                data["max_drawdown_limit_pct"] = round(
+                    abs(float(data["max_drawdown_limit"])) * 100
+                    if abs(float(data["max_drawdown_limit"])) <= 1
+                    else abs(float(data["max_drawdown_limit"])),
+                    2,
+                )
+            else:
+                data["max_drawdown_limit"] = -policy_limit
+                data["max_drawdown_limit_pct"] = round(policy_limit * 100, 2)
+
+            # Measured paper peak-to-trough (fraction, negative) from history
+            measured_max_dd = None
+            measured_current_dd = None
+            try:
+                values = [
+                    float(h["total_value"])
+                    for h in (self.history or [])
+                    if isinstance(h, dict) and h.get("total_value") is not None
+                ]
+                if len(values) >= 2:
+                    peak = values[0]
+                    max_dd = 0.0
+                    for v in values:
+                        peak = max(peak, v)
+                        if peak > 0:
+                            max_dd = min(max_dd, (v - peak) / peak)
+                    measured_max_dd = float(max_dd)
+                    last = values[-1]
+                    measured_current_dd = float((last - peak) / peak) if peak > 0 else 0.0
+            except (AttributeError, TypeError, ValueError, ZeroDivisionError, KeyError):
+                pass
+
+            data["measured_max_drawdown"] = measured_max_dd
+            data["measured_max_drawdown_pct"] = (
+                round(abs(measured_max_dd) * 100, 2) if measured_max_dd is not None else None
+            )
+            data["measured_current_drawdown"] = measured_current_dd
+            data["measured_current_drawdown_pct"] = (
+                round(abs(measured_current_dd) * 100, 2)
+                if measured_current_dd is not None
+                else None
+            )
+            # Do not leave current_drawdown as a silent 0.0 stub without label
+            if "current_drawdown" in data and measured_current_dd is not None:
+                data["current_drawdown"] = measured_current_dd
+            data["drawdown_field_semantics"] = (
+                "max_drawdown_limit=policy input to GARCH-CVaR; "
+                "measured_max_drawdown=paper NAV peak-to-trough"
+            )
 
             # Add portfolio entropy metrics from current allocation
             data["checks"] = data.get("checks", {})
@@ -394,7 +552,16 @@ class Portfolio:
                 data["status"] = "unhealthy"
             else:
                 data["status"] = "healthy"
-            data["summary"] = {"passed": 1, "total_checks": 1}
+            data["summary"] = {
+                "passed": 1,
+                "total_checks": 1,
+                "inventory_role": "garch_risk",
+                "inventory_note": (
+                    "Not an ops multi-day health inventory; graduation multi-day "
+                    "SSOT is data/.circuit_breaker.json consecutive_ok"
+                ),
+            }
+            data["schema_version"] = data.get("schema_version") or "garch-health-report/v1"
 
             save_results_json(data, output_path=str(report_path))
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError) as e:
@@ -433,6 +600,7 @@ class Portfolio:
             "metrics": {
                 "shannon_entropy": round(shannon, 4),
                 "effective_n": round(effective_n, 2),
+                "max_possible": round(h_max, 4) if n > 1 else None,
                 "normalized_score": round(normalized_score, 1),
                 "hhi_index": round(hhi, 4),
             },
@@ -624,8 +792,52 @@ def _clear_evaluator_kill_switch_if_owned(kill_file: Path, mode: str) -> None:
     logger.info("Kill switch cleared for %s — risk limits no longer breached", mode)
 
 
-def main():
-    """Main evaluation loop."""
+def _authority_kill_blocks_paper_actions(data_dir: Path | None = None) -> tuple[bool, dict | None]:
+    """Return (blocked, payload) when kill_switch.json blocks paper fills/promote.
+
+    SSOT loader: ``src.dashboard.kill_authority.load_kill_switch_payload`` +
+    ``is_kill_execution_blocked`` (same enabled gate as order_router).
+    """
+    root = Path(data_dir) if data_dir is not None else DATA_DIR
+    try:
+        from src.dashboard.kill_authority import (
+            is_kill_execution_blocked,
+            load_kill_switch_payload,
+        )
+    except ImportError:
+        # Fail closed if authority module unavailable under live paper path
+        kill_file = root / "kill_switch.json"
+        if not kill_file.exists():
+            return False, None
+        try:
+            with open(kill_file) as f:
+                payload = json.load(f)
+        except (OSError, json.JSONDecodeError, TypeError):
+            return True, None
+        return bool(isinstance(payload, dict) and payload.get("enabled")), (
+            payload if isinstance(payload, dict) else None
+        )
+
+    payload = load_kill_switch_payload(root)
+    return is_kill_execution_blocked(payload), payload
+
+
+# Exit codes for make eval / tasker STATUS mapping.
+# 0 = ok; 2 = intentional block (kill authority) → cron/tasker status "blocked"
+# (not "error" — avoids sticky scheduler degraded / failed_cron noise).
+# Other nonzero → error.
+EXIT_OK = 0
+EXIT_BLOCKED = 2  # control loop intentionally skipped (kill / authority)
+
+
+def main() -> int:
+    """Main evaluation loop.
+
+    Returns:
+        0 on normal paper cycle completion.
+        2 when the control loop is blocked by risk-limit kill or authority kill.
+        Makefile maps 2 → STATUS=blocked; tasker maps returncode 2 → RUN_BLOCKED.
+    """
     logger.info("Strategy Evaluator Starting")
 
     # Determine mode from environment
@@ -676,11 +888,40 @@ def main():
             "position_reduction": _kill_level_reduction(kill_level),
             "source": "evaluator_risk",
         }, output_path=str(DATA_DIR / "kill_switch.json"))
-        return
+        return EXIT_BLOCKED
 
     # Clear stale kill switch if risk limits are no longer breached
     kill_file = DATA_DIR / "kill_switch.json"
     _clear_evaluator_kill_switch_if_owned(kill_file, mode)
+
+    # Authority kill (incident lifecycle / any enabled kill file) blocks paper
+    # fills and promote writes — same enabled gate as order_router.
+    authority_blocked, authority_payload = _authority_kill_blocks_paper_actions(DATA_DIR)
+    if authority_blocked:
+        level = (authority_payload or {}).get("level") if isinstance(authority_payload, dict) else None
+        reason = (authority_payload or {}).get("reason") if isinstance(authority_payload, dict) else None
+        logger.critical(
+            "PAPER CONTROL LOOP BLOCKED by kill authority: level=%s reason=%s — "
+            "no fills, no promote write",
+            level,
+            reason,
+        )
+        try:
+            from src.monitor.decision_registry import record_evaluator_cycle_decision
+
+            record_evaluator_cycle_decision(
+                mode=mode,
+                regime=regime,
+                target_alloc=_resolve_target_allocation(regime),
+                prices=prices,
+                portfolio_value=portfolio.total_value(prices),
+                current_weights=portfolio.current_weights(prices),
+                orders=None,
+                kill_reason=f"authority_kill:{reason or level or 'enabled'}",
+            )
+        except (ImportError, ValueError, OSError, TypeError) as e:
+            logger.warning("Evaluator decision registry (authority kill) skipped: %s", e)
+        return EXIT_BLOCKED
 
     # Determine target allocation
     target_alloc = _resolve_target_allocation(regime)
@@ -726,20 +967,48 @@ def main():
 
     # Update and save state
     perf = calculate_performance(portfolio, prices)
-    portfolio.history.append(perf)
-    portfolio.save_state()
-    
-    # Log performance
-    with open(PERFORMANCE_LOG, 'a') as f:
-        f.write(json.dumps(perf) + '\n')
+    if _is_phantom_cash_only_performance(perf, portfolio):
+        logger.warning(
+            "Skipping phantom cash-only performance append "
+            "(total_value=%s positions_count=%s); journal recently had positions",
+            perf.get("total_value"),
+            perf.get("positions_count"),
+        )
+    else:
+        portfolio.history.append(perf)
+        portfolio.save_state()
 
-    _prune_performance_log()
+        # Session-metrics SSOT: do not append evaluator intraday micro-noise
+        # (|daily_return| ~ 1e-8) to performance.jsonl. Material session returns
+        # (and capture_daily_pnl rows) remain the metric input path.
+        try:
+            dr = float(perf.get("daily_return") or 0.0)
+        except (TypeError, ValueError):
+            dr = 0.0
+        material = abs(dr) >= 1e-6
+        if material:
+            row = dict(perf)
+            row.setdefault("source", "evaluator_session")
+            row.setdefault("schema_version", "performance-session/v1")
+            # Stamp session date for dedup (ET when available)
+            if not row.get("date"):
+                ts = str(row.get("timestamp") or "")
+                row["date"] = ts[:10] if len(ts) >= 10 else None
+            with open(PERFORMANCE_LOG, 'a') as f:
+                f.write(json.dumps(row) + '\n')
+            _prune_performance_log()
+        else:
+            logger.debug(
+                "Skipping performance.jsonl append for micro-noise daily_return=%s",
+                dr,
+            )
     
     # Check graduation criteria (paper mode only)
     if mode == "paper":
         check_graduation_criteria(portfolio)
     
     logger.info("Evaluation complete")
+    return EXIT_OK
 
 def _deduplicate_to_daily(history: List[Dict]) -> List[Dict]:
     """Filter history to keep only the last entry per trading day.
@@ -762,42 +1031,56 @@ def _deduplicate_to_daily(history: List[Dict]) -> List[Dict]:
 
 
 def check_graduation_criteria(portfolio: Portfolio):
-    """Check if paper trading performance warrants live promotion.
+    """Assess paper→live readiness; promote writes owned by GraduationChecklist.
 
-    Uses trading-day-level data (deduplicates intra-day snapshots) and
-    includes sanity validation to prevent false positives from near-zero
-    standard deviation in intra-day return data.
+    Computes advisory portfolio-history metrics for operator logs, then
+    delegates ``.promote_to_live`` candidacy solely to
+    ``GraduationChecklist.write_promote_to_live_if_ready`` (multi-criteria SSOT).
+    Metric-only gates here never write the promote marker.
     """
+    # Refuse even advisory promote attempts while authority kill is enabled
+    blocked, payload = _authority_kill_blocks_paper_actions(DATA_DIR)
+    if blocked:
+        level = (payload or {}).get("level") if isinstance(payload, dict) else None
+        reason = (payload or {}).get("reason") if isinstance(payload, dict) else None
+        logger.info(
+            "GRADUATION BLOCKED by kill authority: level=%s reason=%s — "
+            "skipping checklist promote path",
+            level,
+            reason,
+        )
+        return
+
     MIN_DAYS = int(os.environ.get("GRADUATION_MIN_DAYS", "63"))
     MIN_SHARPE = float(os.environ.get("GRADUATION_MIN_SHARPE", "0.5"))
     MAX_DD = float(os.environ.get("GRADUATION_MAX_DD", "0.15"))
     MIN_WIN_RATE = float(os.environ.get("GRADUATION_MIN_WIN_RATE", "0.45"))
     MAX_REALISTIC_SHARPE = float(os.environ.get("GRADUATION_MAX_REALISTIC_SHARPE", "3.0"))
     MIN_DSR = float(os.environ.get("GRADUATION_MIN_DSR", "0.50"))
-    
+
     if len(portfolio.history) < MIN_DAYS:
         return
-    
+
     # Deduplicate intra-day snapshots to trading-day-level data
     daily_history = _deduplicate_to_daily(portfolio.history)
-    
+
     # Need at least MIN_DAYS trading days after dedup
     if len(daily_history) < MIN_DAYS:
         logger.info("GRADUATION DEFERRED: Only %d unique trading days (need %d), "
                      "skipping intra-day snapshots", len(daily_history), MIN_DAYS)
         return
-    
+
     recent = daily_history[-MIN_DAYS:]
     returns = [h["daily_return"] for h in recent]
-    
-    # Calculate metrics
+
+    # Advisory metrics (logging only — not promote authority)
     total_return = (recent[-1]["total_value"] - recent[0]["total_value"]) / recent[0]["total_value"]
-    
+
     # Volatility floor: prevent division-by-near-zero when intra-day return
     # data has been recorded but shows zero variation within each day
     daily_std = max(np.std(returns), 0.0001)
     sharpe = np.mean(returns) / daily_std * np.sqrt(252) if daily_std > 0 else 0
-    
+
     peak = recent[0]["total_value"]
     max_dd = 0
     for h in recent:
@@ -806,20 +1089,16 @@ def check_graduation_criteria(portfolio: Portfolio):
         dd = (peak - h["total_value"]) / peak
         if dd > max_dd:
             max_dd = dd
-    
+
     win_rate = sum(1 for r in returns if r > 0) / len(returns) if returns else 0
-    
-    # Sanity validation: reject unrealistic metrics before writing trigger
+
+    # Sanity validation: reject unrealistic metrics before promote path
     if sharpe > MAX_REALISTIC_SHARPE:
         logger.warning("Sharpe %.2f exceeds realistic maximum %.1f — likely intra-day "
-                        "snapshot contamination. Skipping promotion.", sharpe, MAX_REALISTIC_SHARPE)
+                        "snapshot contamination. Skipping promotion path.", sharpe, MAX_REALISTIC_SHARPE)
         return
-    
-    # Check criteria
-    # DSR validation: confirm Sharpe survives multiple-testing correction
-    # With 94 grid-search configs, DSR > 0.95 means the Sharpe is statistically
-    # significant, not just the best of many trials
-    # (MIN_DSR is now externalized via GRADUATION_MIN_DSR env var, set above)
+
+    # Advisory DSR / metric gates (logs only)
     try:
         from src.backtest.metrics import compute_deflated_sharpe_ratio
         dsr = compute_deflated_sharpe_ratio(
@@ -829,47 +1108,60 @@ def check_graduation_criteria(portfolio: Portfolio):
         dsr = 0.0  # If DSR can't be computed, fail closed
 
     if sharpe > MIN_SHARPE and max_dd < MAX_DD and win_rate > MIN_WIN_RATE and dsr >= MIN_DSR:
-        logger.info("GRADUATION CANDIDATE: Sharpe=%.2f, DD=%.2f%%, "
-                     "WinRate=%.2f%%, DSR=%.2f", sharpe, max_dd * 100, win_rate * 100, dsr)
+        logger.info(
+            "GRADUATION CANDIDATE (evaluator advisory metrics): Sharpe=%.2f, DD=%.2f%%, "
+            "WinRate=%.2f%%, DSR=%.2f, total_return=%.4f — promote write deferred to "
+            "GraduationChecklist SSOT",
+            sharpe, max_dd * 100, win_rate * 100, dsr, total_return,
+        )
 
-        # Create promotion trigger
-        trigger = {
-            "action": "promote_to_live",
-            "metrics": {
-                "sharpe": round(sharpe, 2),
-                "max_drawdown": round(max_dd, 4),
-                "win_rate": round(win_rate, 4),
-                "total_return": round(total_return, 6),
-                "dsr": round(dsr, 4),
-            },
-            "timestamp": datetime.now().isoformat(),
-            "requires_approval": True
-        }
-        
-        trigger_path = DATA_DIR / ".promote_to_live"
-        save_results_json(trigger, output_path=str(trigger_path))
+    # Sole promote writer: multi-criteria checklist (not metric-only gates above)
+    try:
+        from src.strategy.graduation_checklist import GraduationChecklist
 
-        try:
-            from src.monitor.decision_registry import record_backtest_experiment
+        checklist = GraduationChecklist()
+        results = checklist.check()
+        promote_path = checklist.write_promote_to_live_if_ready(results, data_dir=DATA_DIR)
+        if promote_path:
+            logger.info("Promotion trigger written by checklist SSOT: %s", promote_path)
+            try:
+                from src.monitor.decision_registry import record_backtest_experiment
 
-            record_backtest_experiment(
-                {
-                    "metrics": trigger["metrics"],
-                    "sharpe": sharpe,
-                    "max_drawdown_pct": round(max_dd * 100, 4),
-                    "win_rate": win_rate,
-                    "dsr": dsr,
-                },
-                experiment_id=f"paper-graduation-{datetime.now().strftime('%Y%m%d')}",
-                output_path=trigger_path,
-                name="paper_trading_graduation",
-                hypothesis="paper_mode_graduation_criteria_met",
-                tags=["evaluator", "graduation", "shadow"],
+                record_backtest_experiment(
+                    {
+                        "metrics": {
+                            "sharpe": round(sharpe, 2),
+                            "max_drawdown": round(max_dd, 4),
+                            "win_rate": round(win_rate, 4),
+                            "total_return": round(total_return, 6),
+                            "dsr": round(dsr, 4),
+                        },
+                        "sharpe": sharpe,
+                        "max_drawdown_pct": round(max_dd * 100, 4),
+                        "win_rate": win_rate,
+                        "dsr": dsr,
+                    },
+                    experiment_id=f"paper-graduation-{datetime.now().strftime('%Y%m%d')}",
+                    output_path=promote_path,
+                    name="paper_trading_graduation",
+                    hypothesis="paper_mode_graduation_checklist_ready",
+                    tags=["evaluator", "graduation", "checklist_ssot", "shadow"],
+                )
+            except (ImportError, ValueError, OSError, TypeError) as e:
+                logger.warning("Graduation experiment registry skipped: %s", e)
+        elif not checklist.is_graduation_ready(results):
+            logger.info(
+                "Checklist not ready (score=%.1f%%) — no .promote_to_live write "
+                "(evaluator advisory metrics are non-authoritative)",
+                checklist.readiness_score(results),
             )
-        except (ImportError, ValueError, OSError, TypeError) as e:
-            logger.warning("Graduation experiment registry skipped: %s", e)
+    except (ImportError, OSError, TypeError, ValueError) as e:
+        logger.warning(
+            "GraduationChecklist unavailable — refusing promote write (fail closed): %s", e
+        )
 
-        logger.info("Created promotion trigger: %s", trigger_path)
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    sys.exit(main())

@@ -21,6 +21,42 @@ IGNORED_UNMANAGED_PUBLIC_JSON = {
     *REQUIRED_DATA_FILES,
 }
 
+# Operator/dashboard JSON that producers stamp with generator_git_sha (Batch AO/AP).
+# Pure market blobs (prices/historical/yields) are excluded — content digests live
+# in source_manifest, not code provenance stamps.
+PROVENANCE_CONTRACT_FILES = (
+    "index.json",
+    "source_manifest.json",
+    "data_quality.json",
+    "health.json",
+    "health_ops.json",
+    "alerts.json",
+    "incidents.json",
+    "decision_registry.json",
+    "stats.json",
+    "analytics.json",
+    "graduation.json",
+    "signals.json",
+    "adaptive_sizing.json",
+    "risk_decomposition.json",
+    "overlay_dashboard.json",
+    "rebalance_health.json",
+    "labs_registry.json",
+)
+# Status values that claim a successful full stamp without null sha
+_PROVENANCE_FULL_STATUSES = frozenset({"full", "full_generate"})
+
+# Artifacts that emit provenance_completeness dual-write blocks (Batch AS/AT/AV/AW/AY)
+DUAL_WRITE_PROVENANCE_FILES = (
+    "incidents.json",
+    "health_ops.json",
+    "unified_dashboard.json",
+    "rebalance_health.json",
+    "garch_cvar.json",
+    "overlay_dashboard.json",
+    "attribution/latest.json",
+)
+
 
 @dataclass(frozen=True)
 class ConsistencyResult:
@@ -294,24 +330,373 @@ def _check_compact_prices_match_market_db(app_dir: Path, errors: list[str]) -> N
         errors.append(message)
 
 
-def check_public_data_consistency(app_dir: str | Path) -> ConsistencyResult:
-    """Return deploy-blocking public data consistency errors for an app checkout."""
+def _check_critical_health_has_slo_alert(
+    public_data: Path,
+    health: dict[str, Any] | None,
+    errors: list[str],
+) -> None:
+    """Critical health/SLO must project into alerts.json (or alerts must exist).
+
+    Kill-driven critical system_status is covered by type=kill_switch alerts
+    (enforced separately). health_slo is required when data_pipeline_slo is
+    critical, or when system_status is critical without an active kill block.
+    """
+    if health is None:
+        return
+    try:
+        from src.dashboard.health_slo_alerts import (
+            HEALTH_SLO_ALERT_TYPE,
+            critical_health_requires_alert,
+        )
+    except ImportError:
+        return
+    if not critical_health_requires_alert(health):
+        return
+
+    slo = health.get("data_pipeline_slo") if isinstance(health.get("data_pipeline_slo"), dict) else {}
+    slo_status = str(slo.get("status") or "").lower()
+    kill = health.get("kill_switch") if isinstance(health.get("kill_switch"), dict) else {}
+    kill_enabled = bool(kill.get("enabled"))
+    # Kill-only critical: kill_switch alert is the operator projection.
+    if slo_status != "critical" and kill_enabled:
+        return
+
+    alerts_path = public_data / "alerts.json"
+    if not alerts_path.exists():
+        errors.append(
+            "public/data/health.json is critical but public/data/alerts.json is missing"
+        )
+        return
+    alerts_payload = _load_json(alerts_path, errors)
+    if alerts_payload is None:
+        return
+    raw_alerts = alerts_payload.get("alerts")
+    alerts = raw_alerts if isinstance(raw_alerts, list) else []
+    has_health_slo = any(
+        isinstance(a, dict) and a.get("type") == HEALTH_SLO_ALERT_TYPE for a in alerts
+    )
+    if not has_health_slo:
+        system_status = health.get("system_status")
+        errors.append(
+            "public/data/health.json is critical "
+            f"(system_status={system_status!r}, data_pipeline_slo.status={slo_status!r}) "
+            f"but public/data/alerts.json has no type={HEALTH_SLO_ALERT_TYPE!r} alert"
+        )
+
+
+def _alert_rows(public_data: Path, errors: list[str]) -> list[dict[str, Any]]:
+    alerts_path = public_data / "alerts.json"
+    if not alerts_path.exists():
+        return []
+    payload = _load_json(alerts_path, errors)
+    if payload is None:
+        return []
+    raw = payload.get("alerts")
+    return [a for a in raw if isinstance(a, dict)] if isinstance(raw, list) else []
+
+
+def _check_kill_and_graduation_alerts(
+    app_dir: Path,
+    public_data: Path,
+    errors: list[str],
+) -> None:
+    """Require kill_switch / graduation_candidate alerts when authority files demand them."""
+    data_dir = app_dir / "data"
+    kill_path = data_dir / "kill_switch.json"
+    promote_path = data_dir / ".promote_to_live"
+
+    kill_enabled = False
+    kill_identity: dict[str, Any] | None = None
+    if kill_path.exists():
+        kill_payload = _load_json(kill_path, errors)
+        if isinstance(kill_payload, dict) and kill_payload.get("enabled"):
+            kill_enabled = True
+            kill_identity = kill_payload
+
+    # Active candidacy only — match DashboardGenerator._is_active_promote_candidacy:
+    # promote_blocked_* tombstones must not require graduation_candidate alerts.
+    promote_requires_alert = False
+    if promote_path.exists():
+        promote_payload = _load_json(promote_path, errors)
+        if isinstance(promote_payload, dict):
+            action = promote_payload.get("action")
+            if action is None:
+                # Legacy markers omit action; treat as candidacy.
+                promote_requires_alert = True
+            elif isinstance(action, str) and action == "promote_to_live":
+                promote_requires_alert = True
+            elif isinstance(action, str) and action.startswith("promote_blocked"):
+                promote_requires_alert = False
+            else:
+                promote_requires_alert = False
+        else:
+            # Unreadable/non-dict file still present: fail closed for candidacy gate.
+            promote_requires_alert = True
+
+    if not kill_enabled and not promote_requires_alert:
+        return
+
+    alerts = _alert_rows(public_data, errors)
+    types = {a.get("type") for a in alerts}
+
+    if kill_enabled:
+        kill_alerts = [a for a in alerts if a.get("type") == "kill_switch"]
+        if not kill_alerts:
+            if not (public_data / "alerts.json").exists():
+                errors.append(
+                    "data/kill_switch.json is enabled but public/data/alerts.json is missing"
+                )
+            else:
+                errors.append(
+                    "data/kill_switch.json is enabled but public/data/alerts.json has no type='kill_switch' alert"
+                )
+        elif kill_identity is not None:
+            # Multi-surface identity: alert must carry and match authority fields.
+            # Missing identity fields are failures (stale reason-only alerts).
+            alert = kill_alerts[0]
+            auth_incident = kill_identity.get("incident_id")
+            auth_level = kill_identity.get("level")
+            auth_reason = kill_identity.get("reason")
+            auth_mode = kill_identity.get("mode")
+
+            alert_incident = alert.get("incident_id")
+            if auth_incident is not None:
+                if alert_incident is None:
+                    errors.append(
+                        "public/data/alerts.json kill_switch is missing incident_id "
+                        f"required by data/kill_switch.json incident_id={auth_incident!r}"
+                    )
+                elif alert_incident != auth_incident:
+                    errors.append(
+                        "public/data/alerts.json kill_switch incident_id diverges from data/kill_switch.json "
+                        f"(alert={alert_incident!r}, authority={auth_incident!r})"
+                    )
+
+            alert_level = alert.get("kill_switch_level")
+            if auth_level is not None:
+                if alert_level is None:
+                    errors.append(
+                        "public/data/alerts.json kill_switch is missing kill_switch_level "
+                        f"required by data/kill_switch.json level={auth_level!r}"
+                    )
+                elif str(alert_level).lower() != str(auth_level).lower():
+                    errors.append(
+                        "public/data/alerts.json kill_switch level diverges from data/kill_switch.json "
+                        f"(alert={alert_level!r}, authority={auth_level!r})"
+                    )
+
+            alert_reason = alert.get("reason")
+            if auth_reason is not None:
+                if alert_reason is None:
+                    errors.append(
+                        "public/data/alerts.json kill_switch is missing reason "
+                        f"required by data/kill_switch.json reason={auth_reason!r}"
+                    )
+                elif alert_reason != auth_reason:
+                    errors.append(
+                        "public/data/alerts.json kill_switch reason diverges from data/kill_switch.json "
+                        f"(alert={alert_reason!r}, authority={auth_reason!r})"
+                    )
+
+            if auth_mode is not None:
+                title = str(alert.get("title") or "")
+                if str(auth_mode).upper() not in title.upper():
+                    errors.append(
+                        "public/data/alerts.json kill_switch title mode does not match "
+                        f"data/kill_switch.json mode={auth_mode!r}"
+                    )
+
+        # Public health must project kill_switch when authority kill is enabled.
+        health_path = public_data / "health.json"
+        health = _load_json(health_path, errors) if health_path.exists() else None
+        if health is None:
+            # _load_json already recorded missing/invalid when path exists; if absent
+            # and not already required by REQUIRED_DATA_FILES path, still require projection.
+            if not health_path.exists():
+                errors.append(
+                    "data/kill_switch.json is enabled but public/data/health.json is missing kill_switch projection"
+                )
+        elif kill_identity is not None:
+            pub_kill = health.get("kill_switch")
+            if not isinstance(pub_kill, dict):
+                errors.append(
+                    "data/kill_switch.json is enabled but public/data/health.json is missing kill_switch block"
+                )
+            else:
+                for field in ("incident_id", "level", "reason", "mode", "enabled"):
+                    auth_val = kill_identity.get(field)
+                    if field == "enabled":
+                        auth_val = True
+                    pub_val = pub_kill.get(field)
+                    if auth_val is None:
+                        continue
+                    if pub_val is None:
+                        errors.append(
+                            f"public/data/health.json kill_switch is missing {field} "
+                            f"required by data/kill_switch.json {field}={auth_val!r}"
+                        )
+                    elif field == "level" and str(pub_val).lower() != str(auth_val).lower():
+                        errors.append(
+                            "public/data/health.json kill_switch.level diverges from data/kill_switch.json "
+                            f"(public={pub_val!r}, authority={auth_val!r})"
+                        )
+                    elif field == "enabled" and bool(pub_val) is not True:
+                        errors.append(
+                            "public/data/health.json kill_switch.enabled must be true when data/kill_switch.json is enabled"
+                        )
+                    elif field not in {"level", "enabled"} and pub_val != auth_val:
+                        errors.append(
+                            f"public/data/health.json kill_switch.{field} diverges from data/kill_switch.json "
+                            f"(public={pub_val!r}, authority={auth_val!r})"
+                        )
+
+    if promote_requires_alert:
+        if "graduation_candidate" not in types:
+            if not (public_data / "alerts.json").exists():
+                errors.append(
+                    "data/.promote_to_live is present but public/data/alerts.json is missing"
+                )
+            else:
+                errors.append(
+                    "data/.promote_to_live is present but public/data/alerts.json has no type='graduation_candidate' alert"
+                )
+
+
+
+def _check_generator_git_sha_provenance(
+    public_data: Path,
+    errors: list[str],
+    warnings: list[str],
+) -> None:
+    """Canary: contract JSON has generator_git_sha or explicit unavailable status.
+
+    - Missing stamp on present contract files → warning (stale tree until regen).
+    - Dishonest stamp (status claims full* but sha null/absent) → error (fail-closed).
+    """
+    for filename in PROVENANCE_CONTRACT_FILES:
+        path = public_data / filename
+        if not path.exists():
+            continue
+        local_errors: list[str] = []
+        payload = _load_json(path, local_errors)
+        if payload is None:
+            # Malformed JSON already surfaces elsewhere; avoid double-counting
+            # hard errors when file is optional and unreadable.
+            if local_errors and filename in REQUIRED_DATA_FILES:
+                continue
+            for msg in local_errors:
+                warnings.append(f"provenance canary skipped unreadable {filename}: {msg}")
+            continue
+
+        sha = payload.get("generator_git_sha")
+        status = payload.get("generator_git_sha_status")
+        status_s = str(status).strip().lower() if status is not None else ""
+
+        if status_s in _PROVENANCE_FULL_STATUSES and not sha:
+            errors.append(
+                f"public/data/{filename} claims generator_git_sha_status={status!r} "
+                "but generator_git_sha is missing/null (dishonest provenance)"
+            )
+            continue
+
+        if sha:
+            continue
+
+        if status_s in {"unavailable", "partial_patch", "partial"}:
+            # Explicit honesty — acceptable without live sha
+            continue
+
+        # Present operator artifact without stamp: warn (do not block deploy on
+        # pre-stamp trees until producers re-run).
+        warnings.append(
+            f"public/data/{filename} missing generator_git_sha "
+            "(regenerate producer or stamp unavailable status)"
+        )
+
+
+
+def _check_dual_write_provenance_completeness(
+    public_data: Path,
+    errors: list[str],
+    warnings: list[str],
+) -> None:
+    """Warn when dual-write was attempted but dual_write_ok is false (H11)."""
+    for filename in DUAL_WRITE_PROVENANCE_FILES:
+        path = public_data / filename
+        if not path.exists():
+            continue
+        local: list[str] = []
+        payload = _load_json(path, local)
+        if payload is None:
+            continue
+        pc = payload.get("provenance_completeness")
+        if not isinstance(pc, dict):
+            continue
+        if pc.get("dual_write_attempted") and pc.get("dual_write_ok") is False:
+            warnings.append(
+                f"public/data/{filename} dual_write_attempted but dual_write_ok=false "
+                f"(note={pc.get('note')!r}; check private vs public split-brain)"
+            )
+        if pc.get("dual_write_lag_stale") is True:
+            lag = pc.get("dual_write_lag_seconds")
+            thr = pc.get("dual_write_lag_threshold_seconds")
+            warnings.append(
+                f"public/data/{filename} dual_write_lag_stale "
+                f"(lag_seconds={lag!r} threshold={thr!r}; public mtime behind private)"
+            )
+
+
+def check_public_data_consistency(
+    app_dir: str | Path,
+    *,
+    public_dir: str | Path | None = None,
+    allow_repo_public_data: bool = False,
+    env: dict[str, str] | None = None,
+    live_public_data_dir: str | Path | None = None,
+) -> ConsistencyResult:
+    """Return deploy-blocking public data consistency errors for an app checkout.
+
+    When ``public_dir`` is unset and live WWW public data exists, requires
+    ``PUBLIC_DATA_DIR`` / ``--public-dir`` (or ``allow_repo_public_data``) so
+    agents do not audit a multi-day-stale repo ``public/data`` tree.
+    """
+    from src.paths import resolve_ops_public_data_dir
+
     root = Path(app_dir)
     errors: list[str] = []
     warnings: list[str] = []
-    public_data = root / "public" / "data"
+    try:
+        public_data = resolve_ops_public_data_dir(
+            root,
+            public_dir,
+            env=env,
+            live_public_data_dir=live_public_data_dir,
+            allow_repo_public_data=allow_repo_public_data,
+        )
+    except ValueError as exc:
+        return ConsistencyResult(ok=False, errors=[str(exc)], warnings=[])
 
     source_manifest_path = public_data / "source_manifest.json"
     source_manifest = _load_json(source_manifest_path, errors)
     public_index = _load_json(public_data / "index.json", errors)
-    _load_json(public_data / "health.json", errors)
+    health = _load_json(public_data / "health.json", errors)
     _check_timestamp_order(source_manifest, public_index, errors)
     _check_source_manifest_identity(source_manifest_path, source_manifest, public_index, errors)
     _check_present_index_entries_resolve(public_data, public_index, errors)
     _check_source_manifest_quality_artifacts_are_indexed(source_manifest, public_index, errors)
     _check_public_json_artifacts_are_indexed(public_data, public_index, errors)
-    _check_dist_matches_public(root, errors)
-    _check_compact_prices_match_market_db(root, errors)
+    # dist/ vs public/ only applies when auditing the checkout public tree
+    repo_public = (root / "public" / "data").resolve()
+    try:
+        auditing_repo_tree = public_data.resolve() == repo_public
+    except OSError:
+        auditing_repo_tree = False
+    if auditing_repo_tree:
+        _check_dist_matches_public(root, errors)
+        _check_compact_prices_match_market_db(root, errors)
+    _check_critical_health_has_slo_alert(public_data, health, errors)
+    _check_kill_and_graduation_alerts(root, public_data, errors)
+    _check_generator_git_sha_provenance(public_data, errors, warnings)
 
     return ConsistencyResult(ok=not errors, errors=errors, warnings=warnings)
 
@@ -319,9 +704,24 @@ def check_public_data_consistency(app_dir: str | Path) -> ConsistencyResult:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app-dir", type=Path, default=Path.cwd(), help="Portfolio Lab checkout directory")
+    parser.add_argument(
+        "--public-dir",
+        type=Path,
+        default=None,
+        help="Public data tree to audit (default: PUBLIC_DATA_DIR or app-dir/public/data)",
+    )
+    parser.add_argument(
+        "--allow-repo-public-data",
+        action="store_true",
+        help="Allow auditing app-dir/public/data even when live WWW public data exists",
+    )
     args = parser.parse_args(argv)
 
-    result = check_public_data_consistency(args.app_dir)
+    result = check_public_data_consistency(
+        args.app_dir,
+        public_dir=args.public_dir,
+        allow_repo_public_data=args.allow_repo_public_data,
+    )
     for warning in result.warnings:
         print(f"WARN: {warning}", file=sys.stderr)
     if result.ok:

@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # run-tests-safe — guaranteed-safe test execution for low-resource hosts (sg01)
 #
-# 4-layer defense against CPU/memory exhaustion:
+# 5-layer defense against CPU/memory exhaustion + live SSOT pollution:
 #   0. pytest collect_ignore — heavy test files never opened
 #   1. PORTFOLIO_LAB_ENABLE_ML=0 — env var gate
 #   2. builtins.__import__ hook — blocks torch/sklearn/xgboost/hmmlearn
-#   3. ulimit -v 3145728 — OS kernel enforces 3GB virtual memory cap
+#   3. ulimit -v 6291456 — OS kernel enforces 6GB virtual memory cap
+#   4. PUBLIC_DATA_DIR=mktemp — dual-writes never hit live WWW (H16)
+#
+# Memory exit taxonomy (Batch BL):
+#   137 = SIGKILL (OOM killer / hard kill)
+#   139 = SIGSEGV (ulimit -v / RLIMIT_AS exceedance — common under virtual cap)
+# Capture EXIT with set +e around the suite so diagnostics always run.
 #
 # Usage:
 #   ./scripts/run-tests-safe              # safe mode (default; count from pytest output)
@@ -28,7 +34,7 @@ while [[ $# -gt 0 ]]; do
         --help|-h)
             echo "Usage: run-tests-safe [--ml-extract|--ml] [pytest args...]"
             echo ""
-            echo "  (default)    Safe mode: ML disabled, 3GB cap, count from pytest output"
+            echo "  (default)    Safe mode: ML disabled, 6GB cap, count from pytest output"
             echo "  --ml-extract Extracted ML-kernel lane: ML disabled, heavy tests skipped"
             echo "  --ml         ML mode: all tests including heavy ML"
             echo "  --help       This message"
@@ -38,61 +44,88 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+_isolate_public_data_dir() {
+    # Hermetic PUBLIC_DATA_DIR for the subprocess (skip if already set / allow live)
+    if [ "${PORTFOLIO_LAB_ALLOW_LIVE_PUBLIC:-0}" = "1" ]; then
+        return 0
+    fi
+    if [ -n "${PUBLIC_DATA_DIR:-}" ]; then
+        mkdir -p "$PUBLIC_DATA_DIR"
+        return 0
+    fi
+    PUBLIC_TMP="$(mktemp -d /tmp/plab-pytest-public.XXXXXX)"
+    mkdir -p "$PUBLIC_TMP/data"
+    export PUBLIC_DATA_DIR="$PUBLIC_TMP/data"
+    export PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA=1
+    # shellcheck disable=SC2064
+    trap 'rm -rf "$PUBLIC_TMP"' EXIT
+}
+
+_emit_memory_diagnostics() {
+    local exit_code=$1
+    if [ "$exit_code" -eq 139 ]; then
+        echo "FATAL: SIGSEGV (139) — virtual memory cap (6GB / ulimit -v / RLIMIT_AS) exceeded."
+        echo "An ML library may have loaded despite guards. Investigate immediately."
+    elif [ "$exit_code" -eq 137 ]; then
+        echo "FATAL: SIGKILL (137) — system OOM killer or hard kill. Memory use too high."
+    fi
+}
+
 if [ "$MODE" = "safe" ]; then
     echo "=== Safe Test Run ==="
     echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"
-    echo "  Memory: 3GB virtual cap (ulimit -v 3145728)"
+    echo "  Memory: 6GB virtual cap (ulimit -v 6291456)"
     echo "  Heavy tests: excluded via collect_ignore"
+    echo "  PUBLIC_DATA_DIR: isolated mktemp (no live WWW dual-write)"
     echo ""
 
     # ulimit -v sets the maximum virtual memory in KB.
-    # 3145728 KB = 3072 MB = 3 GB. If exceeded, the process gets SIGSEGV (not SIGKILL),
-    # which is cleaner than OOM-killer and protects the host.
+    # 6291456 KB = 6144 MB = 6 GB. RLIMIT_AS exceedance → often SIGSEGV (139);
+    # OOM killer → SIGKILL (137). Batch BL: capture EXIT under set +e so both
+    # diagnostic branches are reachable (set -e previously aborted before EXIT=$?).
+    set +e
     (
-        ulimit -v 3145728
+        ulimit -v 6291456
         export PORTFOLIO_LAB_ENABLE_ML=0
+        _isolate_public_data_dir
         exec uv run pytest tests/ -q --tb=short "${PYTEST_ARGS[@]}"
     )
     EXIT=$?
+    set -e
 
     echo ""
-    if [ $EXIT -eq 139 ]; then
-        echo "FATAL: SIGSEGV (139) — virtual memory cap (3GB) exceeded."
-        echo "An ML library may have loaded despite guards. Investigate immediately."
-    elif [ $EXIT -eq 137 ]; then
-        echo "FATAL: SIGKILL (137) — system OOM killer. Memory use too high."
-    elif [ $EXIT -ne 0 ]; then
+    _emit_memory_diagnostics "$EXIT"
+    if [ "$EXIT" -ne 0 ] && [ "$EXIT" -ne 137 ] && [ "$EXIT" -ne 139 ]; then
         echo "Some tests failed (exit $EXIT). See output above."
-    else
+    elif [ "$EXIT" -eq 0 ]; then
         echo "All safe tests passed."
     fi
-    exit $EXIT
+    exit "$EXIT"
 elif [ "$MODE" = "ml-extract" ]; then
     echo "=== ML Extract Test Run ==="
     echo "  ML: disabled (PORTFOLIO_LAB_ENABLE_ML=0)"
-    echo "  Memory: 3GB virtual cap (ulimit -v 3145728)"
+    echo "  Memory: 6GB virtual cap (ulimit -v 6291456)"
     echo "  Heavy tests: skipped; only ml_extract marker is included"
     echo ""
 
+    set +e
     (
-        ulimit -v 3145728
+        ulimit -v 6291456
         export PORTFOLIO_LAB_ENABLE_ML=0
+        _isolate_public_data_dir
         exec uv run pytest tests/ -q --tb=short --include-ml-extract "${PYTEST_ARGS[@]}"
     )
     EXIT=$?
+    set -e
 
     echo ""
-    if [ $EXIT -eq 139 ]; then
-        echo "FATAL: SIGSEGV (139) — virtual memory cap exceeded."
-        echo "An ML library may have loaded despite guards. Investigate immediately."
-    elif [ $EXIT -eq 137 ]; then
-        echo "FATAL: SIGKILL (137) — system OOM killer. Memory use too high."
-    elif [ $EXIT -ne 0 ]; then
+    _emit_memory_diagnostics "$EXIT"
+    if [ "$EXIT" -ne 0 ] && [ "$EXIT" -ne 137 ] && [ "$EXIT" -ne 139 ]; then
         echo "Some ml_extract tests failed (exit $EXIT). See output above."
-    else
+    elif [ "$EXIT" -eq 0 ]; then
         echo "All ml_extract tests passed."
     fi
-    exit $EXIT
+    exit "$EXIT"
 else
     echo "=== ML Test Run ==="
     echo "  ML: enabled (PORTFOLIO_LAB_ENABLE_ML=1)"

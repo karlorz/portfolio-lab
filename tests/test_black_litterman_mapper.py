@@ -1181,3 +1181,37 @@ class TestCLIGuard:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestChampionMinWeightFloor:
+    """max_sharpe must not zero champion sleeves under mild views."""
+
+    def test_negative_gold_view_keeps_gld_above_epsilon(self):
+        import numpy as np
+        from pypfopt import BlackLittermanModel, EfficientFrontier
+        import pandas as pd
+        from src.strategy.black_litterman_mapper import (
+            map_biases_to_views,
+            run_black_litterman,
+            CHAMPION_ABSOLUTE_MIN_WEIGHT,
+        )
+
+        symbols = ["SPY", "GLD", "TLT"]
+        cov = np.array([
+            [0.04, 0.0, 0.01],
+            [0.0, 0.03, 0.0],
+            [0.01, 0.0, 0.05],
+        ])
+        # View set that unconstrained max_sharpe historically zeros GLD
+        views = map_biases_to_views(
+            equity_bias=1.0, duration_bias=0.2, gold_bias=-0.5
+        )
+        # Force absolute views similar to raw EF zero case
+        views.absolute_views = {"SPY": 0.10, "GLD": -0.05, "TLT": 0.02}
+        result = run_black_litterman(cov, views, transaction_costs=False)
+        assert "GLD" in result.bl_weights
+        assert result.bl_weights["GLD"] >= CHAMPION_ABSOLUTE_MIN_WEIGHT - 1e-6
+        extras = result.extras or {}
+        assert extras.get("zero_weight_assets") == [] or "GLD" not in extras.get(
+            "zero_weight_assets", []
+        )

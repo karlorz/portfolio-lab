@@ -11,6 +11,7 @@ from scripts.capture_daily_pnl import (
     load_portfolio,
     compute_pnl_snapshot,
     save_snapshot,
+    backfill_daily_returns_from_nav,
     main,
 )
 
@@ -104,12 +105,30 @@ class TestComputePnlSnapshot:
         assert snap["total_pnl"] == -65600.0
         assert snap["total_pnl_pct"] == pytest.approx(-0.656)
 
-    def test_daily_return_from_history(self):
+    def test_daily_return_from_history_nav(self):
+        """Prefer NAV day-over-day from history total_value (not stale daily_return)."""
         pf = _make_portfolio(history=[
             {"total_value": 90000, "daily_return": 0.015},
         ])
         snap = compute_pnl_snapshot(pf)
-        assert snap["daily_return"] == 0.015
+        # portfolio total = 34400, prior history NAV = 90000
+        assert snap["daily_return"] == pytest.approx((34400 / 90000) - 1.0, abs=1e-6)
+
+    def test_daily_return_from_jsonl_prior_day(self, tmp_path):
+        jsonl = tmp_path / "daily_pnl.jsonl"
+        jsonl.write_text(
+            '{"date":"2026-07-19","total_value":100000}\n'
+            '{"date":"2026-07-18","total_value":99000}\n',
+            encoding="utf-8",
+        )
+        pf = _make_portfolio(history=[])
+        # force total_value via cash+empty positions
+        pf["positions"] = {}
+        pf["cash"] = 101000
+        snap = compute_pnl_snapshot(
+            pf, append_path=jsonl, as_of_date="2026-07-20"
+        )
+        assert snap["daily_return"] == pytest.approx(0.01, abs=1e-6)
 
     def test_daily_return_default_no_history(self):
         pf = _make_portfolio(history=[])
@@ -252,12 +271,12 @@ class TestComputePnlSnapshotEdgeCases:
         expected = (34400 - 100000) / 100000
         assert snap["drawdown"] == pytest.approx(expected, abs=0.001)
 
-    def test_daily_return_defaults_to_zero_when_key_missing(self):
+    def test_daily_return_from_history_nav_when_key_missing(self):
         pf = _make_portfolio(history=[
-            {"total_value": 90000},  # no daily_return key
+            {"total_value": 90000},  # no daily_return key — still use NAV
         ])
         snap = compute_pnl_snapshot(pf)
-        assert snap["daily_return"] == 0.0
+        assert snap["daily_return"] == pytest.approx((34400 / 90000) - 1.0, abs=1e-6)
 
     def test_daily_return_defaults_to_zero_when_history_has_no_dicts(self):
         pf = _make_portfolio(history=[{}])
@@ -454,6 +473,34 @@ class TestSaveSnapshotEdgeCases:
         assert result is True
 
 
+class TestBackfillDailyReturns:
+    def test_rewrites_zero_when_nav_moved(self, tmp_path):
+        path = tmp_path / "daily_pnl.jsonl"
+        path.write_text(
+            '{"date":"2026-07-07","total_value":95367.04,"daily_return":0.0}\n'
+            '{"date":"2026-07-08","total_value":96111.74,"daily_return":0.0}\n'
+            '{"date":"2026-07-09","total_value":95316.38,"daily_return":0.0}\n',
+            encoding="utf-8",
+        )
+        summary = backfill_daily_returns_from_nav(path, dry_run=False)
+        assert summary["rewritten"] == 2
+        rows = [json.loads(ln) for ln in path.read_text().splitlines() if ln.strip()]
+        assert rows[1]["daily_return"] == pytest.approx((96111.74 / 95367.04) - 1.0, abs=1e-6)
+        assert rows[1].get("daily_return_backfilled") is True
+
+    def test_dry_run_no_write(self, tmp_path):
+        path = tmp_path / "daily_pnl.jsonl"
+        path.write_text(
+            '{"date":"2026-07-07","total_value":100.0,"daily_return":0.0}\n'
+            '{"date":"2026-07-08","total_value":110.0,"daily_return":0.0}\n',
+            encoding="utf-8",
+        )
+        summary = backfill_daily_returns_from_nav(path, dry_run=True)
+        assert summary["rewritten"] == 1
+        row = json.loads(path.read_text().splitlines()[1])
+        assert row["daily_return"] == 0.0
+
+
 class TestMain:
     """Tests for the main() CLI entry point."""
 
@@ -486,3 +533,104 @@ class TestMain:
                 with pytest.raises(SystemExit) as excinfo:
                     main()
                 assert excinfo.value.code == 1
+
+
+class TestUsCashSessionDate:
+    """daily_pnl date keys use America/New_York, not host-local midnight."""
+
+    def test_asia_midnight_stays_on_us_session_day(self):
+        """00:10 Asia/Hong_Kong must not invent a next US calendar row early."""
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from scripts.capture_daily_pnl import us_cash_session_date, compute_pnl_snapshot
+
+        # 2026-07-22 00:10 HKT == 2026-07-21 12:10 ET (still Jul 21 session)
+        now_hkt = datetime(2026, 7, 22, 0, 10, tzinfo=ZoneInfo("Asia/Hong_Kong"))
+        assert us_cash_session_date(now_hkt) == "2026-07-21"
+
+        # Explicit override still wins
+        pf = {
+            "mode": "paper",
+            "cash": 10000,
+            "positions": {},
+            "history": [],
+        }
+        snap = compute_pnl_snapshot(pf, as_of_date="2026-07-20")
+        assert snap["date"] == "2026-07-20"
+
+    def test_default_date_uses_et_not_host_strftime(self, monkeypatch):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        import scripts.capture_daily_pnl as cap
+
+        # Freeze "now" to a known ET afternoon
+        fixed = datetime(2026, 7, 21, 15, 30, tzinfo=ZoneInfo("America/New_York"))
+
+        class _FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                if tz is None:
+                    return fixed.replace(tzinfo=None)
+                return fixed.astimezone(tz)
+
+        monkeypatch.setattr(cap, "datetime", _FixedDateTime)
+        # us_cash_session_date uses datetime.now(tz=_ET) — patch module datetime
+        assert cap.us_cash_session_date() == "2026-07-21"
+
+
+
+class TestBackfillPaperHistoryReturns:
+    """Batch CG: portfolio_paper history NAV chain rewrite."""
+
+    def test_rewrites_zero_while_nav_moved(self, tmp_path):
+        from scripts.capture_daily_pnl import backfill_paper_history_returns_from_nav
+
+        path = tmp_path / "portfolio_paper.json"
+        portfolio = {
+            "mode": "paper",
+            "cash": 0,
+            "positions": {},
+            "history": [
+                {"timestamp": "2026-07-20T23:40:00", "total_value": 100000.0, "daily_return": 0.0},
+                {"timestamp": "2026-07-21T23:40:00", "total_value": 101000.0, "daily_return": 0.0},
+                {"timestamp": "2026-07-22T03:10:00", "total_value": 101500.0, "daily_return": 0.0},
+            ],
+        }
+        path.write_text(json.dumps(portfolio))
+        summary = backfill_paper_history_returns_from_nav(path, dry_run=False)
+        assert summary["rewritten"] == 2
+        out = json.loads(path.read_text())
+        assert out["history"][1]["daily_return"] == pytest.approx(0.01, abs=1e-6)
+        assert out["history"][1]["daily_return_backfilled"] is True
+        assert out["history"][2]["daily_return"] == pytest.approx(101500 / 101000 - 1, abs=1e-6)
+
+    def test_dry_run_does_not_write(self, tmp_path):
+        from scripts.capture_daily_pnl import backfill_paper_history_returns_from_nav
+
+        path = tmp_path / "portfolio_paper.json"
+        portfolio = {
+            "history": [
+                {"total_value": 100.0, "daily_return": 0.0},
+                {"total_value": 110.0, "daily_return": 0.0},
+            ]
+        }
+        path.write_text(json.dumps(portfolio))
+        summary = backfill_paper_history_returns_from_nav(path, dry_run=True)
+        assert summary["rewritten"] == 1
+        out = json.loads(path.read_text())
+        assert out["history"][1]["daily_return"] == 0.0
+
+    def test_idempotent_second_pass(self, tmp_path):
+        from scripts.capture_daily_pnl import backfill_paper_history_returns_from_nav
+
+        path = tmp_path / "portfolio_paper.json"
+        portfolio = {
+            "history": [
+                {"total_value": 100.0, "daily_return": 0.0},
+                {"total_value": 110.0, "daily_return": 0.0},
+            ]
+        }
+        path.write_text(json.dumps(portfolio))
+        backfill_paper_history_returns_from_nav(path)
+        summary2 = backfill_paper_history_returns_from_nav(path)
+        assert summary2["rewritten"] == 0

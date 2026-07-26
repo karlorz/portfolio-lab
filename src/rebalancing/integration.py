@@ -22,8 +22,9 @@ Usage:
 import json
 import logging
 
-from src.paths import BASE_ALLOCATION
+from src.paths import BASE_ALLOCATION, DATA_DIR
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Optional, Any
 from dataclasses import dataclass
 
@@ -67,11 +68,37 @@ class SmartRebalanceGate:
     should execute now or be deferred.
     """
 
-    def __init__(self, config_path: Optional[str] = None):
-        self.controller = SmartRebalancingController(config_path)
+    def __init__(
+        self,
+        config_path: Optional[str] = None,
+        state_path: Optional[str | Path] = None,
+        data_dir: Optional[str | Path] = None,
+        load_state: bool = True,
+    ):
+        self.controller = SmartRebalancingController(
+            config_path,
+            state_path=state_path,
+            data_dir=data_dir if data_dir is not None else DATA_DIR,
+            load_state=load_state,
+        )
         self._vpin_cache: Dict[str, float] = {}
         self._regime: Optional[str] = None
         self._vpin_engine = VPINEngine(symbols=['SPY', 'GLD', 'TLT']) if _VPIN_AVAILABLE else None
+        # Batch DX: advance controller clock from order-event rebalance_health
+        # when durable last_rebalance lags fills (record_execution may be uncalled).
+        # Batch EA: if ledger still looks polluted / over budget without fill
+        # provenance, rebuild YTD costs from order-history event fills.
+        if load_state:
+            try:
+                self.controller.reconcile_from_rebalance_health(persist=True)
+            except Exception as exc:  # noqa: BLE001 — never fail gate init
+                logger.warning("smart_rebalance event-clock reconcile skipped: %s", exc)
+            try:
+                self.controller.rebuild_cost_ledger_from_order_history(
+                    only_if_polluted=True, persist=True
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("smart_rebalance fill-ledger rebuild skipped: %s", exc)
 
     def update_vpin(self, vpin: float):
         """Update current VPIN reading (from v2.65 or synthetic)."""

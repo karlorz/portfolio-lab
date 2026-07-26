@@ -115,8 +115,15 @@ class TestSnapshotToVotePipeline:
         assert result.num_sources >= 1
 
     def test_inactive_signal_excluded_from_vote(self, tmp_path):
-        """Inactive signals should be excluded from the consensus."""
+        """Inactive signals should be excluded from the consensus.
+
+        Batch HZ: isolate from live SignalHealthTracker SSOT. Production health
+        may hard-sleep alternative_data (degraded_negative_ic) which zeros all
+        vote mass and made this hermetic consensus assertion flaky under make test.
+        """
         voter = _make_voter(tmp_path)
+        voter.current_regime = Regime.NORMAL
+        voter.current_regime_confidence = 0.9
         readings = {
             SignalSource.ALTERNATIVE_DATA: _make_reading(
                 SignalSource.ALTERNATIVE_DATA, value=0.5, confidence=0.8,
@@ -125,7 +132,13 @@ class TestSnapshotToVotePipeline:
                 SignalSource.MULTI_SPEED_MOM, value=0.0, confidence=0.0,
             ),
         }
-        result = voter.compute_vote(readings=readings)
+        # Pass-through health gate so live SH scores cannot sleep ALT_DATA.
+        with patch.object(
+            EnsembleVoter, "_apply_health_weights", lambda self, w: w
+        ):
+            result = voter.compute_vote(
+                readings=readings, regime=Regime.NORMAL, regime_confidence=0.9
+            )
         # ALT_DATA should dominate; MSM has near-zero weight
         assert result.weighted_consensus > 0
 

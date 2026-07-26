@@ -10,7 +10,8 @@ describe('dashboard delivery source contracts', () => {
     const source = read('scripts/fetch-data.ts');
 
     expect(source).toContain("'prices_compact.json'");
-    expect(source).toContain('writeJsonAtomic(pricesCompactPath, compact)');
+    expect(source).toContain('writeJsonAtomic(pricesCompactPath, pricesCompactPayload)');
+    expect(source).toContain('buildLastNBarsCompact');
   });
 
   it('syncs fetched prices into market.db before regenerating dashboard health', () => {
@@ -27,6 +28,21 @@ describe('dashboard delivery source contracts', () => {
     expect(source).toContain("execFileSync(PYTHON_RUNTIME, ['-m', moduleName]");
     expect(source).not.toContain('python3 -m src.data.market_db_sync');
     expect(source).not.toContain('python3 -m src.dashboard.generator');
+  });
+
+  it('updates portfolio-lab-dashboard cron status after data-pipeline generator success', () => {
+    const source = read('scripts/fetch-data.ts');
+
+    expect(source).toContain('recordDashboardCronStatus');
+    expect(source).toContain("'portfolio-lab-dashboard'");
+    expect(source).toContain("join(PROJECT_ROOT, 'scripts', 'cron_update.py')");
+    expect(source).toContain('triggered_by=${triggeredBy}');
+    expect(source).toContain("triggeredBy: 'fetch_data'");
+    // Status update must follow successful generator, not precede it
+    const genIndex = source.indexOf("await runModule('src.dashboard.generator')");
+    const statusIndex = source.indexOf('recordStatus({');
+    expect(genIndex).toBeGreaterThan(-1);
+    expect(statusIndex).toBeGreaterThan(genIndex);
   });
 
   it('fails the data job when any configured price symbol returns no rows', () => {

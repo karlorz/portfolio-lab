@@ -23,6 +23,7 @@ def _reading(source: SignalSource) -> SignalReading:
 
 
 def test_signal_aggregator_derives_active_sources_from_regime_weights():
+    """Batch DJ: zero-weight soft-delete arms stay on the collect roster."""
     aggregator = SignalAggregator(
         load_price_data=lambda: None,
         regime_weights={
@@ -34,7 +35,8 @@ def test_signal_aggregator_derives_active_sources_from_regime_weights():
     )
 
     assert aggregator.active_sources_for(Regime.LOW_VOL) == {
-        SignalSource.CROSS_ASSET_RV
+        SignalSource.MULTI_SPEED_MOM,
+        SignalSource.CROSS_ASSET_RV,
     }
 
 

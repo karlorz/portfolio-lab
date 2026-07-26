@@ -233,29 +233,47 @@ def _execution_role_metadata() -> Dict[str, Any]:
     }
 
 
-def _ml_disabled_infer_result(
-    current_allocation: Dict[str, float],
-    portfolio_value: float,
-    requested_device: str,
+def _ml_disabled_cli_result(
+    mode: str,
+    *,
+    current_allocation: Optional[Dict[str, float]] = None,
+    portfolio_value: Optional[float] = None,
+    requested_device: str = "cpu",
+    extra: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Return deterministic fail-closed CLI infer output when ML is disabled."""
-    return {
+    """Return deterministic fail-closed CLI output when ML is disabled.
+
+    Used for modes that would otherwise enter MARL agent-graph / training
+    paths (infer, train, backtest). status remains operational under safe mode.
+    """
+    mode_verb = {
+        "infer": "inference",
+        "train": "training",
+        "backtest": "backtesting",
+    }.get(mode, mode)
+    result: Dict[str, Any] = {
         "version": VERSION,
         "timestamp": datetime.now().isoformat(),
         "status": "safe_mode",
         "error": "ml_disabled",
+        "mode": mode,
         "message": (
-            "PORTFOLIO_LAB_ENABLE_ML=0 disables MARL inference; "
+            f"PORTFOLIO_LAB_ENABLE_ML=0 disables MARL {mode_verb}; "
             "no agent graph was executed and no live order routing is authorized."
         ),
-        "portfolio_value": portfolio_value,
-        "current_allocation": current_allocation,
-        "recommended_allocation": current_allocation,
-        "should_rebalance": False,
-        "confidence": 0.0,
         "requested_device": requested_device,
         **_execution_role_metadata(),
     }
+    if current_allocation is not None:
+        result["current_allocation"] = current_allocation
+        result["recommended_allocation"] = current_allocation
+        result["should_rebalance"] = False
+        result["confidence"] = 0.0
+    if portfolio_value is not None:
+        result["portfolio_value"] = portfolio_value
+    if extra:
+        result.update(extra)
+    return result
 
 
 class AIController:
@@ -589,14 +607,23 @@ def main():
                        help='Device (cpu/cuda)')
     
     args = parser.parse_args()
-    
-    # Device
-    if args.mode == 'infer' and not _ML_ENABLED:
+
+    # Fail closed before controller/agent-graph construction when ML is off.
+    # status remains available under safe mode for dashboard MARL disclosure.
+    if not _ML_ENABLED and args.mode in ("infer", "train", "backtest"):
         allocation = parse_allocation_string(args.portfolio)
-        result = _ml_disabled_infer_result(
+        extra: Dict[str, Any] = {}
+        if args.mode == "train":
+            extra["episodes"] = args.episodes
+        elif args.mode == "backtest":
+            extra["start"] = args.start
+            extra["end"] = args.end
+        result = _ml_disabled_cli_result(
+            args.mode,
             current_allocation=allocation,
             portfolio_value=args.value,
             requested_device=args.device,
+            extra=extra or None,
         )
         print(json.dumps(result, indent=2))
         if args.output:
@@ -605,43 +632,43 @@ def main():
         return
 
     device = _resolve_device(args.device)
-    
+
     # Checkpoint
     checkpoint = None
     if args.checkpoint:
         checkpoint = Path(args.checkpoint)
-    
+
     # Initialize controller
     controller = AIController(
         device=device,
         checkpoint_path=checkpoint,
         use_signal_integrator=SIGNAL_INTEGRATOR_AVAILABLE
     )
-    
+
     # Execute mode
     if args.mode == 'status':
         result = controller.get_status()
-        
+
     elif args.mode == 'infer':
         allocation = parse_allocation_string(args.portfolio)
         result = controller.infer(
             portfolio_value=args.value,
             current_allocation=allocation
         )
-        
+
     elif args.mode == 'train':
         result = controller.train(n_episodes=args.episodes)
-        
+
     elif args.mode == 'backtest':
         result = controller.backtest(
             start_date=args.start,
             end_date=args.end,
             initial_value=args.value
         )
-    
+
     # Output
     print(json.dumps(result, indent=2))
-    
+
     if args.output:
         save_results_json(result, output_path=args.output)
         print(f"\nSaved to {args.output}")

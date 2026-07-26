@@ -42,7 +42,7 @@ def config():
 
 @pytest.fixture
 def backtester(config):
-    return UnifiedOverlayBacktester(config)
+    return UnifiedOverlayBacktester(config, allow_proxy_data=True)
 
 
 @pytest.fixture
@@ -219,6 +219,33 @@ class TestDataLoading:
         result = backtester.run()
         assert result.sharpe_ratio == 0.0
         assert result.baseline_sharpe == 0.0
+
+    def test_proxy_backtest_requires_explicit_opt_in(self, config, synthetic_prices):
+        backtester = UnifiedOverlayBacktester(config)
+        assert backtester.load_data(str(synthetic_prices)) is True
+        with pytest.raises(ValueError, match="proxy data"):
+            backtester.run()
+
+    def test_cost_is_deducted_and_evidence_reconciles(
+        self, config, synthetic_prices
+    ):
+        config.transaction_cost_bps = 100.0
+        config.rebalance_frequency_days = 1
+        backtester = UnifiedOverlayBacktester(
+            config,
+            allow_proxy_data=True,
+        )
+        assert backtester.load_data(str(synthetic_prices)) is True
+
+        result = backtester.run()
+        evidence = result.extras["profitability_evidence"]
+
+        assert evidence["data"]["mode"] == "proxy"
+        assert evidence["promotion_eligible"] is False
+        assert evidence["costs"]["total_dollars"] > 0
+        assert evidence["trace"][-1]["net_equity"] < evidence["trace"][-1]["gross_equity"]
+        assert result.total_return == evidence["metrics"]["net"]["total_return"]
+        assert evidence["costs"]["max_reconciliation_error"] < 1e-12
 
 
 # ---------------------------------------------------------------------------

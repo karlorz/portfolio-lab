@@ -42,7 +42,7 @@ function DirectionBadge({ direction }: { direction: AssetPairRV['direction'] }) 
     long_second: { label: 'Long Second', color: '#22c55e', arrow: '\u2191' },
     neutral: { label: 'Neutral', color: '#6b7280', arrow: '\u2194' },
   };
-  const c = config[direction];
+  const c = config[direction] ?? config.neutral;
   return (
     <span className="badge" style={{ backgroundColor: c.color, color: '#fff', fontSize: 11 }}>
       {c.arrow} {c.label}
@@ -65,22 +65,89 @@ function StrengthBar({ value }: { value: number }) {
   );
 }
 
-function PercentileMiniBar({ value }: { value: number }) {
-  const pct = Math.max(0, Math.min(100, value));
+function PercentileMiniBar({ value }: { value: number | null | undefined }) {
+  const safe = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  const pct = Math.max(0, Math.min(100, safe));
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
       <div style={{ flex: 1, height: 4, background: '#1e293b', borderRadius: 2, overflow: 'hidden' }}>
         <div style={{ width: `${pct}%`, height: '100%', background: '#8b5cf6', borderRadius: 2 }} />
       </div>
       <span style={{ fontSize: 10, color: '#94a3b8', minWidth: 30, textAlign: 'right' }}>
-        {value.toFixed(0)}%
+        {safe.toFixed(0)}%
       </span>
     </div>
   );
 }
 
+function StrengthBarSafe({ value }: { value: number | null | undefined }) {
+  const safe = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  return <StrengthBar value={safe} />;
+}
+
+/** Normalize producer pair rows (pair_name/conviction/…) into panel AssetPairRV. */
+export function normalizeCrossAssetRVPair(raw: unknown): AssetPairRV | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const row = raw as Record<string, unknown>;
+  const pair =
+    typeof row.pair === 'string' && row.pair.length > 0
+      ? row.pair
+      : typeof row.pair_name === 'string'
+        ? String(row.pair_name).replace(/_/g, '/').toUpperCase()
+        : typeof row.symbol_a === 'string' && typeof row.symbol_b === 'string'
+          ? `${row.symbol_a}/${row.symbol_b}`
+          : null;
+  if (!pair) return null;
+  const z = typeof row.z_score === 'number' && Number.isFinite(row.z_score) ? row.z_score : 0;
+  const percentile =
+    typeof row.percentile_1y === 'number' && Number.isFinite(row.percentile_1y)
+      ? row.percentile_1y
+      : typeof row.percentile === 'number' && Number.isFinite(row.percentile)
+        ? row.percentile
+        : Math.max(0, Math.min(100, ((z + 3) / 6) * 100));
+  const directionRaw = row.direction;
+  const direction: AssetPairRV['direction'] =
+    directionRaw === 'long_first' || directionRaw === 'long_second' || directionRaw === 'neutral'
+      ? directionRaw
+      : z < -0.5
+        ? 'long_first'
+        : z > 0.5
+          ? 'long_second'
+          : 'neutral';
+  const strength =
+    typeof row.strength === 'number' && Number.isFinite(row.strength)
+      ? row.strength
+      : typeof row.conviction === 'number' && Number.isFinite(row.conviction)
+        ? row.conviction
+        : Math.min(1, Math.abs(z) / 2);
+  return { pair, z_score: z, percentile_1y: percentile, direction, strength };
+}
+
+export function normalizeCrossAssetRVData(value: unknown): CrossAssetRVData | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.signal_value !== 'number' || !Number.isFinite(raw.signal_value)) return null;
+  const pairsRaw = Array.isArray(raw.pairs) ? raw.pairs : [];
+  const pairs = pairsRaw
+    .map(normalizeCrossAssetRVPair)
+    .filter((p): p is AssetPairRV => p !== null);
+  return {
+    signal_value: raw.signal_value,
+    pairs,
+    current_regime: typeof raw.current_regime === 'string' ? raw.current_regime : 'unknown',
+    is_gated_off: Boolean(raw.is_gated_off),
+    regime_note: typeof raw.regime_note === 'string' ? raw.regime_note : '',
+    weight_in_ensemble:
+      typeof raw.weight_in_ensemble === 'number' && Number.isFinite(raw.weight_in_ensemble)
+        ? raw.weight_in_ensemble
+        : 0,
+    generated_at: typeof raw.generated_at === 'string' ? raw.generated_at : '',
+  };
+}
+
 export function CrossAssetRVPanel({ data }: CrossAssetRVPanelProps) {
-  if (!data) {
+  const normalized = normalizeCrossAssetRVData(data);
+  if (!normalized) {
     return (
       <div className="panel">
         <h3>Cross-Asset Relative Value</h3>
@@ -88,10 +155,11 @@ export function CrossAssetRVPanel({ data }: CrossAssetRVPanelProps) {
       </div>
     );
   }
+  const dataSafe = normalized;
 
-  const signalPct = ((data.signal_value + 1) / 2) * 100;
-  const signalColor = signalValueColor(data.signal_value);
-  const weightPct = Math.max(0, Math.min(100, data.weight_in_ensemble * 100));
+  const signalPct = ((dataSafe.signal_value + 1) / 2) * 100;
+  const signalColor = signalValueColor(dataSafe.signal_value);
+  const weightPct = Math.max(0, Math.min(100, dataSafe.weight_in_ensemble * 100));
 
   return (
     <div className="panel">
@@ -120,7 +188,7 @@ export function CrossAssetRVPanel({ data }: CrossAssetRVPanelProps) {
           </div>
           <div style={{ textAlign: 'center', marginTop: 4 }}>
             <span className="value large" style={{ color: signalColor }}>
-              {data.signal_value >= 0 ? '+' : ''}{data.signal_value.toFixed(3)}
+              {dataSafe.signal_value >= 0 ? '+' : ''}{dataSafe.signal_value.toFixed(3)}
             </span>
           </div>
         </div>
@@ -130,15 +198,15 @@ export function CrossAssetRVPanel({ data }: CrossAssetRVPanelProps) {
           <div className="metric">
             <span className="label">Current Regime</span>
             <span className="badge" style={{
-              backgroundColor: data.is_gated_off ? '#dc2626' : '#1e3a5f',
+              backgroundColor: dataSafe.is_gated_off ? '#dc2626' : '#1e3a5f',
               color: '#fff',
             }}>
-              {data.current_regime}
+              {dataSafe.current_regime}
             </span>
           </div>
           <div className="metric">
             <span className="label">Gate Status</span>
-            {data.is_gated_off ? (
+            {dataSafe.is_gated_off ? (
               <span className="badge" style={{ backgroundColor: '#dc2626', color: '#fff' }}>
                 GATED OFF
               </span>
@@ -155,7 +223,7 @@ export function CrossAssetRVPanel({ data }: CrossAssetRVPanelProps) {
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
             <span className="label">Ensemble Weight</span>
             <span style={{ fontSize: 12, color: '#94a3b8' }}>
-              {(data.weight_in_ensemble * 100).toFixed(0)}%
+              {(dataSafe.weight_in_ensemble * 100).toFixed(0)}%
             </span>
           </div>
           <div style={{ height: 8, background: '#1e293b', borderRadius: 4, overflow: 'hidden' }}>
@@ -171,11 +239,11 @@ export function CrossAssetRVPanel({ data }: CrossAssetRVPanelProps) {
       {/* Asset Pair Z-Scores */}
       <div className="panel-section">
         <h4>Asset Pair Z-Scores</h4>
-        {data.pairs.length === 0 ? (
+        {dataSafe.pairs.length === 0 ? (
           <p className="muted small">No asset pair data available</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {data.pairs.map((pair) => (
+            {dataSafe.pairs.map((pair) => (
               <div key={pair.pair} style={{
                 background: 'rgba(31, 41, 55, 0.4)',
                 borderRadius: 6,
@@ -211,7 +279,7 @@ export function CrossAssetRVPanel({ data }: CrossAssetRVPanelProps) {
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
                     <span style={{ fontSize: 11, color: '#94a3b8' }}>Strength</span>
                   </div>
-                  <StrengthBar value={pair.strength} />
+                  <StrengthBarSafe value={pair.strength} />
                 </div>
               </div>
             ))}
@@ -220,7 +288,7 @@ export function CrossAssetRVPanel({ data }: CrossAssetRVPanelProps) {
       </div>
 
       {/* Regime Warning */}
-      {data.is_gated_off && (
+      {dataSafe.is_gated_off && (
         <div className="panel-section">
           <div style={{
             padding: '8px 10px', borderRadius: 6,
@@ -234,17 +302,17 @@ export function CrossAssetRVPanel({ data }: CrossAssetRVPanelProps) {
               </span>
             </div>
             <p style={{ color: '#fca5a5', fontSize: 11, margin: 0, lineHeight: 1.4 }}>
-              {data.regime_note} &mdash; mean-reversion signals fail when volatility clusters
-              (v961: -8.68 Sharpe in {data.current_regime} regime)
+              {dataSafe.regime_note} &mdash; mean-reversion signals fail when volatility clusters
+              (v961: -8.68 Sharpe in {dataSafe.current_regime} regime)
             </p>
           </div>
         </div>
       )}
 
       {/* Timestamp */}
-      {data.generated_at && (
+      {dataSafe.generated_at && (
         <div style={{ marginTop: 6, fontSize: 10, color: '#475569' }}>
-          Updated: {data.generated_at.slice(0, 19)}
+          Updated: {dataSafe.generated_at.slice(0, 19)}
         </div>
       )}
     </div>

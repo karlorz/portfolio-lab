@@ -94,6 +94,7 @@ class TestCollectSignalsMSM:
         assert r.asset_signals == {"SPY": 0.3, "TLT": -0.1, "GLD": 0.2}
 
     def test_msm_inactive_snapshot_excluded(self, tmp_path):
+        """Batch CV: inactive snapshots stay for disclosure; is_active=False."""
         voter = _make_voter(tmp_path)
         mock_snapshot = SignalSnapshot(
             source="multi_speed_momentum",
@@ -108,7 +109,11 @@ class TestCollectSignalsMSM:
             MockMSM.return_value.get_signal_snapshot.return_value = mock_snapshot
             readings = voter.collect_signals()
 
-        assert SignalSource.MULTI_SPEED_MOM not in readings
+        assert SignalSource.MULTI_SPEED_MOM in readings
+        r = readings[SignalSource.MULTI_SPEED_MOM]
+        assert r.is_active is False
+        assert r.value == 0.0
+        assert "MSM no data" in (r.explanation or "")
 
     def test_msm_import_error_graceful(self, tmp_path):
         voter = _make_voter(tmp_path)
@@ -150,6 +155,7 @@ class TestCollectSignalsCrossAssetRV:
         assert r.confidence == 0.7
 
     def test_rv_zero_signal_inactive(self, tmp_path):
+        """Batch CV: inactive RV snapshot kept for disclosure with is_active=False."""
         voter = _make_voter(tmp_path)
         mock_snapshot = SignalSnapshot(
             source="cross_asset_rv",
@@ -164,7 +170,10 @@ class TestCollectSignalsCrossAssetRV:
             MockScanner.return_value.get_signal_snapshot.return_value = mock_snapshot
             readings = voter.collect_signals()
 
-        assert SignalSource.CROSS_ASSET_RV not in readings
+        assert SignalSource.CROSS_ASSET_RV in readings
+        r = readings[SignalSource.CROSS_ASSET_RV]
+        assert r.is_active is False
+        assert r.value == 0.0
 
 
 class TestCollectSignalsInternationalMomentum:
@@ -240,6 +249,7 @@ class TestCollectSignalsAlternativeData:
         assert r.confidence == 0.65
 
     def test_alt_data_no_signal_file(self, tmp_path):
+        """Batch CV: unavailable alt-data snapshot kept inactive for disclosure."""
         voter = _make_voter(tmp_path)
         mock_snapshot = SignalSnapshot(
             source="alternative_data",
@@ -254,7 +264,10 @@ class TestCollectSignalsAlternativeData:
             MockGen.return_value.get_signal_snapshot.return_value = mock_snapshot
             readings = voter.collect_signals()
 
-        assert SignalSource.ALTERNATIVE_DATA not in readings
+        assert SignalSource.ALTERNATIVE_DATA in readings
+        r = readings[SignalSource.ALTERNATIVE_DATA]
+        assert r.is_active is False
+        assert "unavailable" in (r.explanation or "").lower()
 
 
 class TestCollectSignalsRegimeArb:
@@ -283,6 +296,7 @@ class TestCollectSignalsRegimeArb:
         assert r.confidence == 0.6
 
     def test_regime_arb_inactive_excluded(self, tmp_path):
+        """Batch CV: inactive regime-arb snapshot kept for disclosure."""
         voter = _make_voter(tmp_path)
         mock_snapshot = SignalSnapshot(
             source="cross_asset_regime_arb",
@@ -297,7 +311,10 @@ class TestCollectSignalsRegimeArb:
             MockDet.return_value.get_signal_snapshot.return_value = mock_snapshot
             readings = voter.collect_signals()
 
-        assert SignalSource.CROSS_ASSET_REGIME_ARB not in readings
+        assert SignalSource.CROSS_ASSET_REGIME_ARB in readings
+        r = readings[SignalSource.CROSS_ASSET_REGIME_ARB]
+        assert r.is_active is False
+        assert r.value == 0.0
 
 
 class TestCollectSignalsUnifiedOverlay:

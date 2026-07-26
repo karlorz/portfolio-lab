@@ -12,13 +12,78 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from src.paths import DATA_DIR
+from src.paths import DATA_DIR, PUBLIC_DATA_DIR
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_INCIDENT_LOG_PATH = DATA_DIR / "incidents.jsonl"
 DEFAULT_INCIDENT_SUMMARY_PATH = DATA_DIR / "incidents.json"
 DEFAULT_KILL_SWITCH_PATH = DATA_DIR / "kill_switch.json"
+
+
+def _is_test_isolation_path(path: Path | str | None) -> bool:
+    """True when path is under portfolio-lab pytest dual-write isolation (Batch AX / CI).
+
+    Live producers must never embed ``plab-pytest-public.*`` into production
+    ``data/incidents.json`` provenance when a test process rebinds PUBLIC_DATA_DIR
+    but still targets the real private summary path.
+
+    Only the deliberate isolation prefix is matched — generic ``/tmp/pytest-*``
+    (pytest's own tmp root) is not treated as PUBLIC isolation by itself.
+    """
+    if path is None:
+        return False
+    return "plab-pytest" in str(path)
+
+
+# Repo-private operator SSOT (not monkeypatchable via DATA_DIR rebind in tests).
+# src/monitor/incident_manager.py → parents[2] = project root.
+_OPERATOR_PRIVATE_DATA = Path(__file__).resolve().parents[2] / "data"
+_OPERATOR_WWW_DATA = Path("/var/www/portfolio-lab/data")
+
+
+def _pytest_blocks_live_incident_write(path: Path | str | None) -> bool:
+    """Refuse live incident/kill SSOT writes while a pytest test is running.
+
+    Batch JG TI1: H16 isolates PUBLIC_DATA_DIR, but private DATA_DIR stays live
+    unless each test rebinds IncidentManager paths. Under ``PYTEST_CURRENT_TEST``,
+    default managers must not open/resolve/arm kill on the **operator** tree.
+
+    Compare against fixed project/www paths only — never the import-time
+    ``DATA_DIR`` alias, which tests monkeypatch to tmp and would false-block
+    hermetic managers.
+
+    Opt-in: ``PORTFOLIO_LAB_ALLOW_LIVE_INCIDENTS=1`` (explicit live-path tests only).
+    """
+    if path is None:
+        return False
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        return False
+    if os.environ.get("PORTFOLIO_LAB_ALLOW_LIVE_INCIDENTS", "0") == "1":
+        return False
+    try:
+        target = Path(path).resolve()
+    except OSError:
+        return False
+    live_files: set[Path] = set()
+    for root in (_OPERATOR_PRIVATE_DATA, _OPERATOR_WWW_DATA):
+        try:
+            live_files.add((root / "incidents.json").resolve())
+            live_files.add((root / "incidents.jsonl").resolve())
+            live_files.add((root / "kill_switch.json").resolve())
+        except OSError:
+            continue
+    # Also block live DATA_DIR only when it still points at the real operator tree
+    # (not a test monkeypatch to tmp).
+    try:
+        data_dir_resolved = Path(DATA_DIR).resolve()
+        if data_dir_resolved == _OPERATOR_PRIVATE_DATA.resolve():
+            live_files.add((data_dir_resolved / "incidents.json").resolve())
+            live_files.add((data_dir_resolved / "incidents.jsonl").resolve())
+            live_files.add((data_dir_resolved / "kill_switch.json").resolve())
+    except OSError:
+        pass
+    return target in live_files
 
 _KILL_SWITCH_LEVEL_RANK = {
     "none": 0,
@@ -167,7 +232,22 @@ class IncidentManager:
             self._write_incident_kill_switch(incident)
 
         self.write_summary()
+        # Batch IM DN: write-through kill/open onto mon/ops/public so operators
+        # never wait for :00/:30 health cron after arm or clear.
+        self._project_disk_kill_open_surfaces()
         return incident
+
+    def _project_disk_kill_open_surfaces(self) -> None:
+        """Best-effort fan-out of kill_switch.json + incidents onto health surfaces."""
+        try:
+            from src.monitor.health_check import project_disk_kill_open_to_all_surfaces
+
+            # Prefer the directory that holds this manager's kill/summary SSOT
+            # (tmp_path in tests; DATA_DIR in production).
+            data_dir = self.kill_switch_path.parent
+            project_disk_kill_open_to_all_surfaces(data_dir=data_dir)
+        except Exception as exc:  # noqa: BLE001 — never block lifecycle
+            logger.warning("Kill/open surface fan-out skipped: %s", exc)
 
     def open_incidents(self) -> list[Incident]:
         return [
@@ -196,19 +276,248 @@ class IncidentManager:
         }
 
     def write_summary(self) -> dict[str, Any]:
-        """Write current open incidents and metrics to incidents.json."""
+        """Write current open incidents and metrics to incidents.json.
+
+        Dual-writes to ``PUBLIC_DATA_DIR/incidents.json`` when that tree is
+        distinct from the private summary path so operators never see open_count
+        split-brain (private firing vs public zero) after PASS resolve without
+        a full dashboard cycle.
+
+        Batch BI residual honesty:
+        - Private ``summary_path`` (DATA_DIR) is the open-set SSOT from this
+          process's event log.
+        - Public dual-write copies that private body atomically — never rebuilds
+          public open set from a different process view that would clobber
+          channels (e.g. evaluator_error replacing signal_staleness).
+        - After public write, refresh index digests so sha/size stay honest.
+        """
+        if _pytest_blocks_live_incident_write(self.summary_path):
+            logger.error(
+                "TI1: refusing live incidents.json write under pytest (%s); "
+                "set PORTFOLIO_LAB_ALLOW_LIVE_INCIDENTS=1 to override",
+                self.summary_path,
+            )
+            return {
+                "schema_version": "incident-lifecycle/v1",
+                "generated_at": _iso(_utc_now()),
+                "open_count": 0,
+                "incidents": [],
+                "metrics": {},
+                "open_set_ssot": "blocked_live_under_pytest",
+            }
         incidents = sorted(
             self.open_incidents(),
             key=lambda incident: (incident.created_at, incident.incident_id),
         )
         summary = {
+            "schema_version": "incident-lifecycle/v1",
             "generated_at": _iso(_utc_now()),
             "open_count": len(incidents),
             "incidents": [incident.to_dict() for incident in incidents],
             "metrics": self.metrics(),
+            "open_set_ssot": "private_summary_path",
         }
+        try:
+            from src.dashboard.generator import _stamp_generator_git_sha
+
+            summary = _stamp_generator_git_sha(summary)
+        except Exception:  # noqa: BLE001 — never block incident SSOT write
+            pass
+
+        public_summary = Path(PUBLIC_DATA_DIR) / "incidents.json"
+        dual_ok: bool | None = None
+        paths_identical = False
+        skip_dual_for_isolation = False
+        try:
+            paths_identical = public_summary.resolve() == self.summary_path.resolve()
+        except OSError:
+            paths_identical = False
+
+        # Batch CI: never contaminate production private SSOT with pytest public
+        # isolation paths (plab-pytest-public.*). Tests that dual-write both
+        # sides under tmp still work (private also under tmp / isolation).
+        #
+        # Batch JG TI1: under pytest, never rebound dual-write to live WWW when
+        # private is live DATA_DIR — that was the pollution amplifier. Skip dual
+        # entirely (private write already blocked by TI1 if summary is live).
+        private_is_live_ssot = False
+        try:
+            private_is_live_ssot = (
+                self.summary_path.resolve()
+                == (Path(DATA_DIR) / "incidents.json").resolve()
+            )
+        except OSError:
+            private_is_live_ssot = False
+
+        under_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+        allow_live_inc = os.environ.get("PORTFOLIO_LAB_ALLOW_LIVE_INCIDENTS", "0") == "1"
+
+        if (
+            not paths_identical
+            and _is_test_isolation_path(public_summary)
+            and private_is_live_ssot
+        ):
+            skip_dual_for_isolation = True
+            if under_pytest and not allow_live_inc:
+                paths_identical = True  # TI1: no live WWW dual-write under suite
+                logger.warning(
+                    "Incidents dual-write skipped under pytest (TI1): isolation "
+                    "PUBLIC (%s) vs live private (%s)",
+                    PUBLIC_DATA_DIR,
+                    self.summary_path,
+                )
+            else:
+                live_candidate = Path("/var/www/portfolio-lab/data") / "incidents.json"
+                try:
+                    if live_candidate.parent.is_dir() and not _is_test_isolation_path(
+                        live_candidate
+                    ):
+                        public_summary = live_candidate
+                        skip_dual_for_isolation = False
+                        try:
+                            paths_identical = (
+                                public_summary.resolve() == self.summary_path.resolve()
+                            )
+                        except OSError:
+                            paths_identical = False
+                        logger.warning(
+                            "Incidents dual-write: rebound pytest PUBLIC_DATA_DIR to "
+                            "live operator tree %s (private is live DATA_DIR SSOT)",
+                            public_summary,
+                        )
+                    else:
+                        paths_identical = True  # skip dual; stamp local-only
+                        logger.warning(
+                            "Incidents dual-write skipped: PUBLIC_DATA_DIR is test "
+                            "isolation (%s) while private summary is live (%s)",
+                            PUBLIC_DATA_DIR,
+                            self.summary_path,
+                        )
+                except OSError:
+                    paths_identical = True
+                    skip_dual_for_isolation = True
+        elif (
+            not paths_identical
+            and _is_test_isolation_path(public_summary)
+            and not private_is_live_ssot
+            and not _is_test_isolation_path(self.summary_path)
+        ):
+            # Private is neither live DATA_DIR nor isolation-named (odd lab
+            # path) — refuse dual-write into pytest public to avoid embedding
+            # plab-pytest into any non-test private body.
+            skip_dual_for_isolation = True
+            paths_identical = True
+            logger.warning(
+                "Incidents dual-write skipped: pytest public (%s) vs non-live "
+                "private (%s)",
+                public_summary,
+                self.summary_path,
+            )
+
+        # Stamp completeness *before* private write so both trees share metadata
+        try:
+            from src.dashboard.generator import _attach_dual_write_provenance
+
+            # dual_write_ok filled after public attempt; first pass records intent
+            summary = _attach_dual_write_provenance(
+                summary,
+                private_path=self.summary_path,
+                public_path=public_summary if not skip_dual_for_isolation else self.summary_path,
+                dual_write_attempted=not paths_identical and not skip_dual_for_isolation,
+                dual_write_ok=None if (not paths_identical and not skip_dual_for_isolation) else True,
+                paths_identical=paths_identical or skip_dual_for_isolation,
+                note=(
+                    "skipped dual-write: pytest PUBLIC_DATA_DIR isolation vs live private"
+                    if skip_dual_for_isolation
+                    else None
+                ),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+        body = json.dumps(summary, indent=2)
         self.summary_path.parent.mkdir(parents=True, exist_ok=True)
-        self.summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        self.summary_path.write_text(body, encoding="utf-8")
+        # Atomic dual-write: public is a byte-copy of private SSOT (not a second
+        # open-set derivation). Prevents secondary writers with a partial
+        # process view from inventing a divergent public open set.
+        try:
+            if not paths_identical and not skip_dual_for_isolation:
+                public_summary.parent.mkdir(parents=True, exist_ok=True)
+                tmp = public_summary.with_suffix(".json.tmp")
+                # Refresh dual_write_ok=True into body for public tree
+                try:
+                    from src.dashboard.generator import _attach_dual_write_provenance
+
+                    summary = _attach_dual_write_provenance(
+                        summary,
+                        private_path=self.summary_path,
+                        public_path=public_summary,
+                        dual_write_attempted=True,
+                        dual_write_ok=True,
+                        paths_identical=False,
+                        note=(
+                            "public incidents is dual-write copy of private "
+                            "summary_path SSOT (Batch BI)"
+                        ),
+                    )
+                    body = json.dumps(summary, indent=2)
+                    # Keep private tree in sync with final completeness block
+                    self.summary_path.write_text(body, encoding="utf-8")
+                except Exception:  # noqa: BLE001
+                    pass
+                tmp.write_text(body, encoding="utf-8")
+                tmp.replace(public_summary)
+                dual_ok = True
+                # Batch CJ: post-sync lag/hash so sticky dual_write_lag_stale clears
+                try:
+                    from src.dashboard.generator import (
+                        finalize_dual_write_provenance_after_sync,
+                    )
+
+                    summary = finalize_dual_write_provenance_after_sync(
+                        summary,
+                        private_path=self.summary_path,
+                        public_path=public_summary,
+                        dual_write_ok=True,
+                        note=(
+                            "post_sync incidents dual-write (Batch CJ); public is "
+                            "copy of private summary_path SSOT (Batch BI)"
+                        ),
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+                # Content-addressed catalog must update digests after partial write
+                try:
+                    from src.dashboard.public_data_index import (
+                        refresh_public_data_index_after_partial_write,
+                    )
+
+                    refresh_public_data_index_after_partial_write(
+                        public_dir=public_summary.parent,
+                        extra_paths=[public_summary],
+                        reason="incidents_dual_write",
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+        except OSError as exc:
+            dual_ok = False
+            logger.warning("Public incidents dual-write failed: %s", exc)
+            try:
+                from src.dashboard.generator import _attach_dual_write_provenance
+
+                summary = _attach_dual_write_provenance(
+                    summary,
+                    private_path=self.summary_path,
+                    public_path=public_summary,
+                    dual_write_attempted=True,
+                    dual_write_ok=False,
+                    paths_identical=False,
+                    note=str(exc),
+                )
+                self.summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+            except Exception:  # noqa: BLE001
+                pass
         return summary
 
     def _open_or_update(
@@ -234,7 +543,9 @@ class IncidentManager:
                 created_at=timestamp,
                 updated_at=timestamp,
             )
-            incident.kill_switch_level = self._kill_switch_level_for_count(incident.alert_count)
+            incident.kill_switch_level = self._kill_switch_level_for_count(
+                incident.alert_count, severity=severity
+            )
             self._append_event("opened", incident)
             return incident
 
@@ -249,7 +560,9 @@ class IncidentManager:
             updated_at=timestamp,
             alert_count=existing.alert_count + 1,
         )
-        incident.kill_switch_level = self._kill_switch_level_for_count(incident.alert_count)
+        incident.kill_switch_level = self._kill_switch_level_for_count(
+            incident.alert_count, severity=severity
+        )
         self._append_event("updated", incident)
         return incident
 
@@ -279,12 +592,23 @@ class IncidentManager:
         self._append_event("resolved", incident)
         return incident
 
-    def _kill_switch_level_for_count(self, alert_count: int) -> str | None:
+    def _kill_switch_level_for_count(
+        self, alert_count: int, *, severity: str | None = None
+    ) -> str | None:
+        """Map alert_count to kill stage, capped by incident severity.
+
+        p0 (classifier HALT) may escalate warning → restrict → halt.
+        Lower severities (e.g. p2 WARN) max out at ``warning`` so sustained
+        optional/sheddable alerts cannot ratchet paper trading into halt.
+        """
         if not self.escalation_enabled:
             return None
         if alert_count < self.escalation_cycles:
             return None
         stage = min(alert_count // self.escalation_cycles, 3)
+        # Only p0 may progress past advisory warning.
+        if severity != "p0":
+            stage = min(stage, 1)
         return {
             1: "warning",
             2: "restrict",
@@ -294,6 +618,12 @@ class IncidentManager:
     def _write_incident_kill_switch(self, incident: Incident) -> None:
         level = incident.kill_switch_level
         if level is None:
+            return
+        if _pytest_blocks_live_incident_write(self.kill_switch_path):
+            logger.error(
+                "TI1: refusing live kill_switch.json write under pytest (%s)",
+                self.kill_switch_path,
+            )
             return
         if not self._should_write_incident_kill_switch(level):
             return
@@ -355,6 +685,12 @@ class IncidentManager:
         return True
 
     def _clear_matching_incident_kill_switch(self, incident: Incident) -> None:
+        if _pytest_blocks_live_incident_write(self.kill_switch_path):
+            logger.error(
+                "TI1: refusing live kill_switch clear under pytest (%s)",
+                self.kill_switch_path,
+            )
+            return
         try:
             payload = json.loads(self.kill_switch_path.read_text(encoding="utf-8"))
         except FileNotFoundError:
@@ -415,6 +751,12 @@ class IncidentManager:
         return events
 
     def _append_event(self, event: str, incident: Incident) -> None:
+        if _pytest_blocks_live_incident_write(self.log_path):
+            logger.error(
+                "TI1: refusing live incidents.jsonl append under pytest (%s)",
+                self.log_path,
+            )
+            return
         payload = {
             "event": event,
             "event_timestamp": incident.updated_at,

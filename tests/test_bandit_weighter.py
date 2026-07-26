@@ -1,4 +1,6 @@
 """Tests for BanditWeighter — epsilon-greedy contextual bandit for ensemble signals."""
+import json
+
 import numpy as np
 import pytest
 from src.strategy.ensemble_voter import BanditWeighter, EnsembleVoter, Regime, SignalSource
@@ -16,17 +18,21 @@ class TestBanditWeighter:
         result = bw.get_weights("NORMAL")
         assert result is None  # No data yet
 
-    def test_select_exploit_mode_returns_best(self):
+    def test_select_exploit_mode_returns_best(self, monkeypatch):
         bw = BanditWeighter(["sig_a", "sig_b"])
-        # Feed noisy data where sig_a has higher mean
-        rng = np.random.RandomState(42)
-        for _ in range(100):
-            bw.update("sig_a", "NORMAL", rng.normal(0.002, 0.01))
-            bw.update("sig_b", "NORMAL", rng.normal(-0.001, 0.01))
-        # With enough data and epsilon = 0 (force exploit), picks sig_a
-        bw.epsilon = 0.0
-        selected = bw.select("NORMAL")
-        assert selected == "sig_a"
+        # Need n>=2 so select takes the Thompson path (not cold-start fallback)
+        for _ in range(30):
+            bw.update("sig_a", "NORMAL", 0.002)
+            bw.update("sig_b", "NORMAL", -0.001)
+        bw.epsilon = 0.0  # disable epsilon random explore
+
+        # select() ranks by sampled posterior Sharpe; pin samples so the
+        # better arm wins deterministically (Thompson sampling is stochastic).
+        def _fake_sample(sig: str, regime: str) -> float:
+            return 2.0 if sig == "sig_a" else -1.0
+
+        monkeypatch.setattr(bw, "_sample_sharpe", _fake_sample)
+        assert bw.select("NORMAL") == "sig_a"
 
     def test_select_explore_mode_can_pick_any(self):
         bw = BanditWeighter(["sig_a", "sig_b"])
@@ -197,15 +203,15 @@ class TestBanditWeighterSoftmax:
 class TestEnsembleVoterGetBlendedWeights:
     """Tests for EnsembleVoter.get_blended_weights()."""
 
-    def test_cold_start_returns_static_weights(self):
-        voter = EnsembleVoter()
+    def test_cold_start_returns_static_weights(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
         weights = voter.get_blended_weights("NORMAL")
         assert weights is not None
         total = sum(weights.values())
         assert abs(total - 1.0) < 0.01
 
-    def test_bandit_blend_increases_with_observations(self):
-        voter = EnsembleVoter()
+    def test_bandit_blend_increases_with_observations(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
         static = voter.get_blended_weights("NORMAL")
 
         # Feed 252 bandit observations
@@ -221,8 +227,8 @@ class TestEnsembleVoterGetBlendedWeights:
         total = sum(blended.values())
         assert abs(total - 1.0) < 0.01
 
-    def test_blend_zero_observations_is_pure_static(self):
-        voter = EnsembleVoter()
+    def test_blend_zero_observations_is_pure_static(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
         weights = voter.get_blended_weights("NORMAL")
         # All weights should be the static regime weights
         from src.strategy.ensemble_voter import REGIME_WEIGHTS
@@ -231,8 +237,8 @@ class TestEnsembleVoterGetBlendedWeights:
             if k in static:
                 assert abs(v - static[k]) < 0.001
 
-    def test_unknown_regime_defaults_to_normal(self):
-        voter = EnsembleVoter()
+    def test_unknown_regime_defaults_to_normal(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
         weights = voter.get_blended_weights("NONEXISTENT")
         # Should fallback to NORMAL weights
         assert weights is not None
@@ -241,18 +247,68 @@ class TestEnsembleVoterGetBlendedWeights:
 class TestEnsembleVoterUpdateBandit:
     """Tests for EnsembleVoter.update_bandit()."""
 
-    def test_increment_observations(self):
-        voter = EnsembleVoter()
+    def test_increment_observations(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
         initial = voter.bandit_observations
         voter.update_bandit("multi_speed_momentum", "NORMAL", 0.001)
         assert voter.bandit_observations == initial + 1
 
-    def test_multiple_updates_increment_count(self):
-        voter = EnsembleVoter()
+    def test_multiple_updates_increment_count(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
         voter.update_bandit("multi_speed_momentum", "NORMAL", 0.001)
         voter.update_bandit("cross_asset_rv", "NORMAL", 0.002)
         voter.update_bandit("international_momentum", "NORMAL", -0.001)
         assert voter.bandit_observations == 3
+
+
+class TestEnsembleBanditDailyRewardPersistence:
+    """Production daily reward path + durable bandit state."""
+
+    def test_apply_daily_bandit_rewards_increments_and_persists(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
+        assert voter.bandit_observations == 0
+        # Batch BO: multi-arm identical portfolio reward is skipped; use single arm
+        summary = voter.apply_daily_bandit_rewards(
+            0.001,
+            regime_name="NORMAL",
+            sources=["cross_asset_rv"],
+            persist=True,
+        )
+        assert summary["skipped"] is False
+        assert summary["updates"] >= 1
+        assert summary["observations"] == voter.bandit_observations
+        assert voter.bandit_observations == summary["updates"]
+        assert (tmp_path / "ensemble_bandit_state.json").exists()
+
+        # Cold start reloads observations
+        voter2 = EnsembleVoter(data_path=tmp_path)
+        assert voter2.bandit_observations == voter.bandit_observations
+        status = voter2.get_adaptive_learning_status("NORMAL")
+        # With history, should not stay pure cold_start zero-obs forever
+        assert status["bandit"]["observations"] == voter.bandit_observations
+
+    def test_load_latest_daily_return_from_performance(self, tmp_path):
+        perf = tmp_path / "performance.jsonl"
+        perf.write_text(
+            '{"timestamp":"2026-07-01","daily_return":0.0}\n'
+            '{"timestamp":"2026-07-02","daily_return":0.012}\n',
+            encoding="utf-8",
+        )
+        # Isolate from live DATA_DIR/daily_pnl_latest.json
+        ret = EnsembleVoter.load_latest_daily_return_from_performance(
+            perf, prefer_daily_pnl=False, data_dir=tmp_path
+        )
+        assert abs(ret - 0.012) < 1e-9
+
+    def test_bandit_get_load_state_roundtrip(self):
+        bw = BanditWeighter(["sig_a", "sig_b"])
+        bw.update("sig_a", "NORMAL", 0.01)
+        bw.update("sig_b", "NORMAL", -0.005)
+        state = bw.get_state()
+        bw2 = BanditWeighter(["sig_a", "sig_b"])
+        bw2.load_state(state)
+        assert len(bw2._history["NORMAL"]["sig_a"]) == 1
+        assert abs(bw2._history["NORMAL"]["sig_a"][0] - 0.01) < 1e-9
 
 
 class TestEnsembleVoterGoalRiskBudget:
@@ -275,3 +331,147 @@ class TestEnsembleVoterGoalRiskBudget:
         result = voter.apply_goal_risk_budget({"SPY": 0.0})
         # total=0 early return
         assert result == {"SPY": 0.0}
+
+
+class TestBanditWarmupDaySemantics:
+    """Warmup blend must use calendar reward days, not arm×day updates."""
+
+    def test_apply_daily_counts_one_warmup_day(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
+        assert getattr(voter, "bandit_days", 0) == 0
+        # Single-arm path (multi-arm identical broadcast is skipped — Batch BO)
+        summary = voter.apply_daily_bandit_rewards(
+            0.001,
+            regime_name="NORMAL",
+            sources=["cross_asset_rv"],
+            persist=True,
+        )
+        # One calendar step
+        assert summary.get("days", summary.get("bandit_days")) == 1 or voter.bandit_days == 1
+        assert voter.bandit_days == 1
+        assert summary["updates"] == 1
+        assert voter.bandit_observations == summary["updates"]
+
+    def test_multi_arm_identical_reward_skipped(self, tmp_path):
+        """Batch BO: portfolio PnL broadcast to all arms does not poison history."""
+        voter = EnsembleVoter(data_path=tmp_path)
+        summary = voter.apply_daily_bandit_rewards(
+            0.002, regime_name="NORMAL", persist=True
+        )
+        assert summary["skipped"] is True
+        assert summary["reason"] == "identical_portfolio_reward_all_arms"
+        assert summary["updates"] == 0
+        assert voter.bandit_observations == 0
+        assert voter.bandit_days == 0
+
+    def test_blend_uses_days_not_arm_observations(self, tmp_path):
+        from src.strategy.ensemble_voter import BANDIT_WARMUP_DAYS, BANDIT_MAX_BLEND
+        voter = EnsembleVoter(data_path=tmp_path)
+        # One calendar day via single-arm reward (not 9× identical broadcast)
+        voter.apply_daily_bandit_rewards(
+            0.002,
+            regime_name="NORMAL",
+            sources=["cross_asset_rv"],
+            persist=False,
+        )
+        status = voter.get_adaptive_learning_status("NORMAL")
+        bandit = status["bandit"]
+        # Day progress: 1/252 of max blend
+        expected = min(BANDIT_MAX_BLEND, 1 / BANDIT_WARMUP_DAYS * BANDIT_MAX_BLEND)
+        # status publishes current_blend rounded to 4 decimals
+        assert abs(bandit["current_blend"] - round(expected, 4)) < 1e-9
+        assert bandit["current_blend"] < min(
+            BANDIT_MAX_BLEND, 9 / BANDIT_WARMUP_DAYS * BANDIT_MAX_BLEND
+        ) - 1e-6  # must not use arm×day (9 sources)
+        # Disclose day counter
+        assert bandit.get("reward_days", bandit.get("days", voter.bandit_days)) == 1
+
+    def test_bandit_days_persist_across_reload(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
+        voter.apply_daily_bandit_rewards(
+            0.001,
+            regime_name="NORMAL",
+            sources=["cross_asset_rv"],
+            persist=True,
+        )
+        voter.apply_daily_bandit_rewards(
+            0.001,
+            regime_name="NORMAL",
+            sources=["cross_asset_rv"],
+            persist=True,
+        )
+        assert voter.bandit_days == 2
+        voter2 = EnsembleVoter(data_path=tmp_path)
+        assert voter2.bandit_days == 2
+
+
+class TestBanditRewardNoiseFloor:
+    """Near-zero rewards must not advance observations or reward_days."""
+
+    def test_skip_below_default_noise_floor(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
+        # Historical pollution magnitude from flat paper NAV
+        summary = voter.apply_daily_bandit_rewards(
+            -3.144e-8, regime_name="NORMAL", persist=True
+        )
+        assert summary["skipped"] is True
+        assert summary["reason"] == "reward_below_noise_floor"
+        assert summary["updates"] == 0
+        assert voter.bandit_observations == 0
+        assert voter.bandit_days == 0
+        # No state file write required when skipped; if written, days stay 0
+        if (tmp_path / "ensemble_bandit_state.json").exists():
+            state = json.loads((tmp_path / "ensemble_bandit_state.json").read_text())
+            assert int(state.get("observations") or 0) == 0
+
+    def test_accept_above_noise_floor(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
+        summary = voter.apply_daily_bandit_rewards(
+            -0.000207,
+            regime_name="NORMAL",
+            sources=["cross_asset_rv"],
+            persist=True,
+        )
+        assert summary["skipped"] is False
+        assert summary["updates"] >= 1
+        assert voter.bandit_days == 1
+        assert voter.bandit_observations == summary["updates"]
+
+    def test_custom_noise_floor_override(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
+        # 1bp reward below custom 10bp floor
+        summary = voter.apply_daily_bandit_rewards(
+            0.0001, regime_name="NORMAL", persist=False, noise_floor=0.001
+        )
+        assert summary["skipped"] is True
+        assert voter.bandit_observations == 0
+
+    def test_prefer_daily_pnl_latest_over_performance_jsonl(self, tmp_path):
+        (tmp_path / "performance.jsonl").write_text(
+            '{"daily_return": -3.14e-8}\n',
+            encoding="utf-8",
+        )
+        (tmp_path / "daily_pnl_latest.json").write_text(
+            json.dumps({"daily_return": -0.000207, "date": "2026-07-20"}),
+            encoding="utf-8",
+        )
+        ret = EnsembleVoter.load_latest_daily_return_from_performance(
+            data_dir=tmp_path, prefer_daily_pnl=True
+        )
+        assert abs(ret - (-0.000207)) < 1e-12
+
+
+def test_save_bandit_state_updated_at_is_utc_aware(tmp_path):
+    from datetime import datetime, timezone
+    from src.strategy.ensemble_voter import EnsembleVoter
+    import json
+
+    voter = EnsembleVoter(data_path=tmp_path)
+    assert voter.save_bandit_state() is True
+    path = tmp_path / "ensemble_bandit_state.json"
+    payload = json.loads(path.read_text())
+    ts = payload["updated_at"]
+    # Must be timezone-aware UTC (+00:00 or Z) — not naive local
+    parsed = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    assert parsed.tzinfo is not None
+    assert parsed.utcoffset() == timezone.utc.utcoffset(None)

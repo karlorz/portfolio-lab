@@ -122,7 +122,36 @@ def build_portfolio_explainability(
     signals = _normalize_sources(ensemble_signal.get("source_breakdown", []))
     top_signals = signals[:5]
     weighted_consensus = _safe_float(ensemble_signal.get("weighted_consensus"))
-    consensus_direction = _direction(weighted_consensus)
+    raw_consensus_direction = _direction(weighted_consensus)
+    action = str(ensemble_signal.get("action", "neutral"))
+    agreement = _safe_float(ensemble_signal.get("agreement_ratio"))
+
+    # Action-gated direction: do not label "bullish" when action is neutral hold
+    # (deadband / threshold band). Keep raw sign separately for audit.
+    if action in {"neutral", "hold"}:
+        consensus_direction = "neutral"
+    elif action in {"increase_equity", "risk_on"}:
+        consensus_direction = "bullish"
+    elif action in {"decrease_equity", "risk_off"}:
+        consensus_direction = "bearish"
+    else:
+        consensus_direction = raw_consensus_direction
+
+    reasoning = str(ensemble_signal.get("reasoning") or "").strip()
+    if not reasoning:
+        reasoning = (
+            f"Action={action}; raw_consensus={weighted_consensus:+.4f} "
+            f"({raw_consensus_direction}); agreement={agreement:.1%}; "
+            f"regime={ensemble_signal.get('regime', 'unknown')}."
+        )
+        if action in {"neutral", "hold"} and abs(weighted_consensus) < 0.3:
+            reasoning += " Near-zero consensus in threshold deadband → hold."
+
+    deadband = (
+        action in {"neutral", "hold"}
+        and agreement >= 0.75
+        and abs(weighted_consensus) < 0.3
+    )
 
     signal_deep_dives = {
         row["source"]: {
@@ -143,28 +172,37 @@ def build_portfolio_explainability(
         "timestamp": generated_at,
         "period": analysis_day,
         "regime": str(ensemble_signal.get("regime", "unknown")),
-        "action": str(ensemble_signal.get("action", "neutral")),
+        "action": action,
         "confidence": _normalize_confidence(ensemble_signal.get("confidence")),
-        "reasoning": str(ensemble_signal.get("reasoning", "")),
+        "reasoning": reasoning,
         "total_signals": int(_safe_float(ensemble_signal.get("num_sources"), len(signals))),
         "consensus_direction": consensus_direction,
-        "agreement_ratio": _safe_float(ensemble_signal.get("agreement_ratio")),
+        "raw_consensus_direction": raw_consensus_direction,
+        "agreement_ratio": agreement,
         "weighted_consensus": weighted_consensus,
         "signals": top_signals,
         "top_drivers": _top_rows(signals, positive=True),
         "top_opposers": _top_rows(signals, positive=False),
     }
 
+    quality: Dict[str, Any] = {
+        "status": "ok",
+        "agreement_ratio": latest_decision["agreement_ratio"],
+        "n_eff": _safe_float(ensemble_signal.get("n_eff")),
+        "weight_entropy": _safe_float(ensemble_signal.get("weight_entropy")),
+    }
+    if deadband:
+        quality["deadband"] = True
+        quality["deadband_note"] = (
+            "High agreement with near-zero weighted_consensus and neutral action "
+            "(threshold/deadband hold — not a risk-on signal)."
+        )
+
     base.update({
         "latest_decision": latest_decision,
         "signal_deep_dives": signal_deep_dives,
         "top_sources_today": [row["source"] for row in top_signals],
-        "decision_quality": {
-            "status": "ok",
-            "agreement_ratio": latest_decision["agreement_ratio"],
-            "n_eff": _safe_float(ensemble_signal.get("n_eff")),
-            "weight_entropy": _safe_float(ensemble_signal.get("weight_entropy")),
-        },
+        "decision_quality": quality,
     })
     return base
 

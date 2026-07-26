@@ -20,6 +20,7 @@ const DECISION_LABELS: Record<string, string> = {
   defer_budget: 'DEFERRED (Budget)',
   skip_low_drift: 'SKIP (Low Drift)',
   no_positions: 'NO POSITIONS',
+  blocked_kill_switch: 'BLOCKED (Kill Switch)',
 };
 
 function formatBps(v: number): string {
@@ -48,26 +49,67 @@ export function SmartRebalancePanel({ data }: SmartRebalancePanelProps) {
     );
   }
 
-  const urgencyColor = URGENCY_COLORS[data.urgency] || '#6b7280';
-  const decisionLabel = DECISION_LABELS[data.decision] || data.decision.toUpperCase();
+  const killBlocked =
+    data.execution_blocked === true
+    || data.kill_switch_enabled === true
+    || data.decision === 'blocked_kill_switch';
+
+  // Never show EXECUTE when kill blocks
+  const displayDecision = killBlocked ? 'blocked_kill_switch' : data.decision;
+
+  const urgencyColor = killBlocked
+    ? '#ef4444'
+    : (URGENCY_COLORS[data.urgency] || '#6b7280');
+  const decisionLabel =
+    DECISION_LABELS[displayDecision]
+    || (killBlocked ? DECISION_LABELS.blocked_kill_switch : data.decision.toUpperCase());
   const budgetUsedPct = data.status?.ytd_cost_pct ?? 0;
   const budgetLimit = data.status?.config?.annual_cost_limit ?? '0.5%';
   const budgetWarning = data.status?.is_warning ?? false;
   const budgetOver = data.status?.is_over_budget ?? false;
 
+  const killBannerText = (() => {
+    if (!killBlocked) return null;
+    const level = (data.kill_switch_level || 'halt').toString().toUpperCase();
+    const msg =
+      (typeof data.kill_switch_message === 'string' && data.kill_switch_message.trim())
+      || (typeof data.kill_switch_reason === 'string' && data.kill_switch_reason)
+      || data.reason
+      || 'Kill switch enabled — execution blocked';
+    return `HALT / kill switch active (${level}): ${msg}. Drift diagnostics below are non-actionable.`;
+  })();
+
   return (
-    <div className="smart-rebalance-panel">
+    <div className={`smart-rebalance-panel${killBlocked ? ' kill-blocked' : ''}`}>
       <div className="sr-header">
         <h3>Smart Rebalance Controller</h3>
         <span className="sr-version">v2.90</span>
       </div>
+
+      {killBannerText && (
+        <div
+          className="sr-kill-banner"
+          role="alert"
+          style={{
+            background: 'rgba(239, 68, 68, 0.12)',
+            border: '1px solid #ef4444',
+            borderRadius: 6,
+            padding: '8px 12px',
+            marginBottom: 12,
+            color: '#fecaca',
+            fontSize: 13,
+          }}
+        >
+          {killBannerText}
+        </div>
+      )}
 
       {/* Decision Status */}
       <div className="sr-decision-row">
         <div className="sr-decision-badge" style={{ borderColor: urgencyColor }}>
           <span className="sr-decision-label">{decisionLabel}</span>
           <span className="sr-urgency" style={{ color: urgencyColor }}>
-            {data.urgency.toUpperCase()}
+            {killBlocked ? 'BLOCKED' : data.urgency.toUpperCase()}
           </span>
         </div>
         <div className="sr-reason">{data.reason}</div>

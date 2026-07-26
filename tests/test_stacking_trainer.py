@@ -1451,8 +1451,8 @@ class TestCliMain:
         assert "signal_stacker_v1.pkl" in captured.out
         assert "signal_stacker_v2.pkl" in captured.out
 
-    def test_main_train_command(self, capsys):
-        """'train' command must output JSON result."""
+    def test_main_train_command_ml_enabled(self, capsys):
+        """'train' with ML enabled must output JSON result."""
         from src.ml.stacking_trainer import main as cli_main
 
         # Use a real TrainingResult — asdict() requires a real dataclass instance
@@ -1477,6 +1477,7 @@ class TestCliMain:
         mock_trainer.model_dir = Path("/tmp/models")
 
         with patch("sys.argv", ["stacking_trainer", "train"]), \
+             patch("src.ml.stacking_trainer._ML_ENABLED", True), \
              patch("src.ml.stacking_trainer.StackingTrainer", return_value=mock_trainer):
             cli_main()
         captured = capsys.readouterr()
@@ -1485,24 +1486,62 @@ class TestCliMain:
         assert output["model_version"] == "vtest"
         assert output["train_accuracy"] == 0.8
 
-    def test_main_evaluate_without_model_arg(self, capsys):
-        """'evaluate' without --model must print error."""
+    def test_main_train_command_ml_disabled_exits_nonzero(self, capsys):
+        """'train' under ML-disabled must fail closed without calling train()."""
         from src.ml.stacking_trainer import main as cli_main
-        with patch("sys.argv", ["stacking_trainer", "evaluate"]):
-            cli_main()
+
+        mock_trainer = MagicMock(spec=StackingTrainer)
+        with patch("sys.argv", ["stacking_trainer", "train"]), \
+             patch("src.ml.stacking_trainer._ML_ENABLED", False), \
+             patch("src.ml.stacking_trainer.StackingTrainer", return_value=mock_trainer):
+            with pytest.raises(SystemExit) as exc:
+                cli_main()
+        assert exc.value.code not in (0, None)
+        mock_trainer.train.assert_not_called()
         captured = capsys.readouterr()
-        assert "Error: --model required" in captured.out
+        combined = captured.out + captured.err
+        assert "PORTFOLIO_LAB_ENABLE_ML=0" in combined
+        assert "train" in combined.lower()
+
+    def test_main_evaluate_without_model_arg(self, capsys):
+        """'evaluate' without --model must print error and exit non-zero."""
+        from src.ml.stacking_trainer import main as cli_main
+        with patch("sys.argv", ["stacking_trainer", "evaluate"]), \
+             patch("src.ml.stacking_trainer._ML_ENABLED", True):
+            with pytest.raises(SystemExit) as exc:
+                cli_main()
+        assert exc.value.code not in (0, None)
+        captured = capsys.readouterr()
+        assert "Error: --model required" in (captured.out + captured.err)
 
     def test_main_evaluate_with_nonexistent_model(self, capsys):
-        """'evaluate' with nonexistent --model must not crash."""
+        """'evaluate' with nonexistent --model must exit non-zero."""
         from src.ml.stacking_trainer import main as cli_main
-        with patch("sys.argv", ["stacking_trainer", "evaluate", "--model", "/nonexistent.pkl"]):
-            cli_main()
+        with patch("sys.argv", ["stacking_trainer", "evaluate", "--model", "/nonexistent.pkl"]), \
+             patch("src.ml.stacking_trainer._ML_ENABLED", True):
+            with pytest.raises(SystemExit) as exc:
+                cli_main()
+        assert exc.value.code not in (0, None)
         captured = capsys.readouterr()
-        # Should print something (no crash expected)
+        combined = captured.out + captured.err
+        assert "Model not found" in combined or "not found" in combined.lower()
+
+    def test_main_evaluate_ml_disabled_exits_nonzero(self, capsys):
+        """'evaluate' under ML-disabled must fail closed before model load."""
+        from src.ml.stacking_trainer import main as cli_main
+        mock_trainer = MagicMock(spec=StackingTrainer)
+        with patch("sys.argv", ["stacking_trainer", "evaluate", "--model", "models/x.pkl"]), \
+             patch("src.ml.stacking_trainer._ML_ENABLED", False), \
+             patch("src.ml.stacking_trainer.StackingTrainer", return_value=mock_trainer):
+            with pytest.raises(SystemExit) as exc:
+                cli_main()
+        assert exc.value.code not in (0, None)
+        mock_trainer.load_model.assert_not_called()
+        captured = capsys.readouterr()
+        assert "PORTFOLIO_LAB_ENABLE_ML=0" in (captured.out + captured.err)
 
     def test_main_backfill_no_model_found(self, capsys):
-        """'backfill' without model files must print error."""
+        """'backfill' without model files must print error and exit non-zero."""
         from src.ml.stacking_trainer import main as cli_main
 
         mock_trainer = MagicMock(spec=StackingTrainer)
@@ -1511,13 +1550,16 @@ class TestCliMain:
         mock_trainer.model_dir.glob.return_value = []
 
         with patch("sys.argv", ["stacking_trainer", "backfill"]), \
+             patch("src.ml.stacking_trainer._ML_ENABLED", True), \
              patch("src.ml.stacking_trainer.StackingTrainer", return_value=mock_trainer):
-            cli_main()
+            with pytest.raises(SystemExit) as exc:
+                cli_main()
+        assert exc.value.code not in (0, None)
         captured = capsys.readouterr()
-        assert "No model found" in captured.out
+        assert "No model found" in (captured.out + captured.err)
 
     def test_main_backfill_dry_run(self, capsys):
-        """'backfill --dry-run' must output JSON stats."""
+        """'backfill --dry-run' with model must output JSON stats."""
         from src.ml.stacking_trainer import main as cli_main
 
         mock_trainer = MagicMock(spec=StackingTrainer)
@@ -1531,6 +1573,7 @@ class TestCliMain:
         }
 
         with patch("sys.argv", ["stacking_trainer", "backfill", "--dry-run"]), \
+             patch("src.ml.stacking_trainer._ML_ENABLED", True), \
              patch("src.ml.stacking_trainer.StackingTrainer", return_value=mock_trainer):
             cli_main()
         captured = capsys.readouterr()
@@ -1565,6 +1608,58 @@ class TestCliMain:
                     found = True
                     break
         assert found, "Module must have __name__ == '__main__' guard"
+
+
+class TestCliSafeModeSubprocess:
+    """Subprocess regression: fail-closed CLI under PORTFOLIO_LAB_ENABLE_ML=0."""
+
+    @staticmethod
+    def _run(*args: str):
+        import os
+        import subprocess
+        import sys
+        env = {**os.environ, "PORTFOLIO_LAB_ENABLE_ML": "0"}
+        return subprocess.run(
+            [sys.executable, "-m", "src.ml.stacking_trainer", *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+            cwd=Path(__file__).resolve().parents[1],
+        )
+
+    def test_subprocess_train_ml_disabled_exits_nonzero(self):
+        result = self._run("train", "--start-date", "2024-01-01")
+        combined = result.stdout + result.stderr
+        assert result.returncode != 0
+        assert "AttributeError" not in combined
+        assert "PORTFOLIO_LAB_ENABLE_ML=0" in combined
+        assert "split" not in combined  # must not reach TimeSeriesSplit stub crash
+
+    def test_subprocess_evaluate_missing_model_exits_nonzero(self):
+        result = self._run("evaluate", "--model", "models/missing.pkl")
+        combined = result.stdout + result.stderr
+        assert result.returncode != 0
+        assert (
+            "PORTFOLIO_LAB_ENABLE_ML=0" in combined
+            or "Model not found" in combined
+            or "not found" in combined.lower()
+        )
+
+    def test_subprocess_backfill_no_model_exits_nonzero(self):
+        result = self._run("backfill", "--dry-run", "--start-date", "2024-01-01")
+        combined = result.stdout + result.stderr
+        assert result.returncode != 0
+        assert (
+            "PORTFOLIO_LAB_ENABLE_ML=0" in combined
+            or "No model found" in combined
+        )
+
+    def test_subprocess_list_ml_disabled_exits_zero(self):
+        result = self._run("list")
+        combined = result.stdout + result.stderr
+        assert result.returncode == 0
+        assert "Available models" in combined
 
 
 # ── _create_features_from_signals edge cases ────────────────────────────

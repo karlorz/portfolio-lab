@@ -1363,3 +1363,38 @@ class TestTSMOMBacktesterRun:
         if 'error' not in res_low and 'error' not in res_high:
             # Higher costs should lead to lower end value
             assert res_low['end_value'] >= res_high['end_value']
+
+    def test_required_asset_missing_fails_closed(self, monkeypatch):
+        bt = TSMOMBacktester(tickers=['SPY', 'GLD'])
+        n = LOOKBACK_DAYS + SKIP_DAYS + 200
+        spy_prices = pd.DataFrame({
+            'close': _make_prices_series(n_days=n, seed=7),
+        })
+        monkeypatch.setattr(
+            bt.overlay,
+            "load_prices",
+            lambda ticker: spy_prices if ticker == "SPY" else None,
+        )
+
+        result = bt.run_backtest()
+
+        assert result["status"] == "failed"
+        assert result["missing_assets"] == ["GLD"]
+
+    def test_backtest_exposes_canonical_real_data_evidence(self):
+        bt = TSMOMBacktester(tickers=['SPY'], transaction_cost=0.001)
+        n = LOOKBACK_DAYS + SKIP_DAYS + 200
+        bt.overlay.price_cache['SPY'] = pd.DataFrame({
+            'close': _make_prices_series(n_days=n, drift=0.0005, seed=8),
+        })
+
+        result = bt.run_backtest(rebalance_freq=21)
+        evidence = result["profitability_evidence"]
+
+        assert evidence["data"]["mode"] == "real"
+        assert evidence["promotion_eligible"] is True
+        assert evidence["coverage"]["observations"] == result["trading_days"]
+        assert result["end_value"] == pytest.approx(
+            evidence["trace"][-1]["net_equity"]
+        )
+        assert evidence["costs"]["max_reconciliation_error"] < 1e-12

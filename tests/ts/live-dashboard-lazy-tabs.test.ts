@@ -235,7 +235,7 @@ describe('LiveDashboard lazy tab panel contract', () => {
 
   it('renders the always-visible health header from the operations summary helper', () => {
     expect(source).toContain("from './healthOperations'");
-    expect(source).toContain('const healthOperationsSummary = health ? summarizeHealthOperations(health) : null;');
+    expect(source).toContain('summarizeHealthOperations(health');
     expect(source).toContain('{healthOperationsSummary?.headerText}');
     expect(source).not.toContain('System: {health.system_status}');
     expect(source).not.toContain('${health.cron_jobs.length} jobs');

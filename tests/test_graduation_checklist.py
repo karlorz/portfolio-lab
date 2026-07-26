@@ -43,6 +43,16 @@ def _make_daily_history(n_days: int, start_val: float = 100000,
     return history
 
 
+
+import tempfile
+from pathlib import Path as _Path
+from unittest.mock import patch as _patch
+
+def _isolated_checklist(tmp_path=None):
+    """GraduationChecklist with DATA_DIR pointed at empty tmp (no host daily_pnl)."""
+    root = tmp_path if tmp_path is not None else _Path(tempfile.mkdtemp())
+    return root, _patch("src.strategy.graduation_checklist.DATA_DIR", root)
+
 def _make_state_file(tmp_path, overrides=None) -> dict:
     """Create a minimal state dict with all required keys."""
     state = {
@@ -174,7 +184,7 @@ class TestSharpeCheck:
         assert result.passed is False, f"Sharpe {result.value} should be below 0.50"
 
     def test_fails_with_unrealistic_sharpe(self):
-        # Sharpe > 3.0 should be treated as failing (intra-day artifact)
+        # Sharpe > 3.0 fails gate but keeps **raw** value (not coerced to 0.0)
         # All identical daily returns cause near-zero std -> unrealistic Sharpe
         history = [
             {"timestamp": f"2026-05-{i+1:02d}T00:00:00", "total_value": 100000, "daily_return": 0.01}
@@ -183,9 +193,11 @@ class TestSharpeCheck:
         state = _make_state_file(None, {"portfolio": {"history": history}})
         checklist = GraduationChecklist()
         result = checklist._check_sharpe(state)
-        assert result.passed is False, f"Sharpe {result.value} should cap at 3.0"
+        assert result.passed is False, f"Sharpe {result.value} should fail implausibility gate"
+        assert result.value > 3.0, f"raw implausible Sharpe must be published, got {result.value}"
+        assert "implausible" in (result.description or "").lower()
 
-    def test_insufficient_data(self):
+    def test_insufficient_data(self, tmp_path):
         state = _make_state_file(None, {"portfolio": {"history": _make_daily_history(2)}})
         checklist = GraduationChecklist()
         result = checklist._check_sharpe(state)
@@ -228,7 +240,7 @@ class TestDrawdownCheck:
 
 
 class TestWinRateCheck:
-    def test_passes_with_high_win_rate(self):
+    def test_passes_with_high_win_rate(self, tmp_path):
         # 80% win rate
         returns = [0.001] * 50 + [-0.002] * 13  # 50/63 ≈ 79%
         history = [
@@ -236,25 +248,30 @@ class TestWinRateCheck:
             for i, r in enumerate(returns)
         ]
         state = _make_state_file(None, {"portfolio": {"history": history}})
-        checklist = GraduationChecklist()
-        result = checklist._check_win_rate(state)
+        with patch("src.strategy.graduation_checklist.DATA_DIR", tmp_path):
+
+            checklist = GraduationChecklist()
+
+            result = checklist._check_win_rate(state)
         assert result.passed is True
 
-    def test_fails_with_low_win_rate(self):
+    def test_fails_with_low_win_rate(self, tmp_path):
         returns = [0.001] * 10 + [-0.002] * 53  # 10/63 ≈ 16%
         history = [
             {"timestamp": f"2026-05-{i+1:02d}T00:00:00", "total_value": 100000, "daily_return": r}
             for i, r in enumerate(returns)
         ]
         state = _make_state_file(None, {"portfolio": {"history": history}})
-        checklist = GraduationChecklist()
-        result = checklist._check_win_rate(state)
+        with patch("src.strategy.graduation_checklist.DATA_DIR", tmp_path):
+            checklist = GraduationChecklist()
+            result = checklist._check_win_rate(state)
         assert result.passed is False
 
-    def test_insufficient_data(self):
+    def test_insufficient_data(self, tmp_path):
         state = _make_state_file(None, {"portfolio": {"history": _make_daily_history(2)}})
-        checklist = GraduationChecklist()
-        result = checklist._check_win_rate(state)
+        with patch("src.strategy.graduation_checklist.DATA_DIR", tmp_path):
+            checklist = GraduationChecklist()
+            result = checklist._check_win_rate(state)
         assert result.passed is False
 
 
@@ -542,9 +559,10 @@ class TestIntegratedCheck:
 
 
 class TestEdgeCases:
-    def test_empty_state_returns_all_false(self):
-        checklist = GraduationChecklist()
-        results = checklist.check({})
+    def test_empty_state_returns_all_false(self, tmp_path):
+        with patch("src.strategy.graduation_checklist.DATA_DIR", tmp_path):
+            checklist = GraduationChecklist()
+            results = checklist.check({})
         for name, result in results.items():
             if name == "max_drawdown":
                 assert result.passed is True  # No data = no drawdown / default green CB
@@ -575,12 +593,13 @@ class TestEdgeCases:
         assert checklist.criteria["min_trading_days"]["value"] == 10
         assert checklist.criteria["min_sharpe"]["value"] == 1.0
 
-    def test_negative_daily_returns(self):
+    def test_negative_daily_returns(self, tmp_path):
         # Portfolio losing money every day
         history = [{"timestamp": f"2026-05-{i+1:02d}T00:00:00", "total_value": 100000 * (1 - 0.001) ** i, "daily_return": -0.001} for i in range(63)]
         state = _make_state_file(None, {"portfolio": {"history": history}})
-        checklist = GraduationChecklist()
-        results = checklist.check(state)
+        with patch("src.strategy.graduation_checklist.DATA_DIR", tmp_path):
+            checklist = GraduationChecklist()
+            results = checklist.check(state)
         assert results["min_sharpe"].passed is False
         assert results["min_win_rate"].passed is False
 
@@ -752,7 +771,7 @@ class TestGraduationChecklistExtended:
     # --- _check_sharpe edge cases ---
 
     def test_sharpe_with_constant_returns_fails(self):
-        """Constant returns produce infinite/undefined Sharpe → capped."""
+        """Constant returns produce inflated Sharpe → fail gate, keep raw value."""
         history = [
             {"timestamp": f"2026-05-{i+1:02d}T00:00:00", "total_value": 100000, "daily_return": 0.01}
             for i in range(63)
@@ -760,7 +779,8 @@ class TestGraduationChecklistExtended:
         state = _make_state_file(None, {"portfolio": {"history": history}})
         checklist = GraduationChecklist()
         result = checklist._check_sharpe(state)
-        assert result.passed is False  # Capped at 3.0 → set to 0.0
+        assert result.passed is False
+        assert result.value > 3.0  # never silent 0.0
 
     def test_sharpe_exactly_at_threshold(self):
         """Sharpe exactly at 0.50 should pass."""
@@ -813,18 +833,21 @@ class TestGraduationChecklistExtended:
 
     # --- _check_win_rate edge cases ---
 
-    def test_win_rate_all_positive(self):
+    def test_win_rate_all_positive(self, tmp_path):
         history = [
             {"timestamp": f"2026-05-{i+1:02d}T00:00:00", "total_value": 100000, "daily_return": 0.01}
             for i in range(63)
         ]
         state = _make_state_file(None, {"portfolio": {"history": history}})
-        checklist = GraduationChecklist()
-        result = checklist._check_win_rate(state)
+        with patch("src.strategy.graduation_checklist.DATA_DIR", tmp_path):
+
+            checklist = GraduationChecklist()
+
+            result = checklist._check_win_rate(state)
         assert result.passed is True
         assert result.value == 1.0
 
-    def test_win_rate_exactly_at_threshold(self):
+    def test_win_rate_exactly_at_threshold(self, tmp_path):
         """Exactly 40% win rate should pass (>=)."""
         n_pos = 25  # 25/63 ≈ 39.7%, just below
         n_neg = 38
@@ -834,8 +857,11 @@ class TestGraduationChecklistExtended:
             for i, r in enumerate(returns)
         ]
         state = _make_state_file(None, {"portfolio": {"history": history}})
-        checklist = GraduationChecklist()
-        result = checklist._check_win_rate(state)
+        with patch("src.strategy.graduation_checklist.DATA_DIR", tmp_path):
+
+            checklist = GraduationChecklist()
+
+            result = checklist._check_win_rate(state)
         # Win rate should be n_pos/len(returns) ≈ 0.397
         assert isinstance(result.value, float)
 
@@ -925,6 +951,7 @@ class TestAllExports:
         expected = {
             "CheckResult",
             "GraduationChecklist",
+            "is_ops_health_inventory",
             "run_check_and_exit",
             "run_report_and_exit",
             "run_progress_and_exit",
@@ -935,12 +962,14 @@ class TestAllExports:
         from src.strategy.graduation_checklist import (
             CheckResult,
             GraduationChecklist,
+            is_ops_health_inventory,
             run_check_and_exit,
             run_report_and_exit,
             run_progress_and_exit,
         )
         assert CheckResult is not None
         assert GraduationChecklist is not None
+        assert callable(is_ops_health_inventory)
         assert callable(run_check_and_exit)
         assert callable(run_report_and_exit)
         assert callable(run_progress_and_exit)
@@ -1156,7 +1185,7 @@ class TestEdgeCasesExtended:
         assert result.passed is False
         assert result.value == 0.0
 
-    def test_win_rate_no_positive_returns(self):
+    def test_win_rate_no_positive_returns(self, tmp_path):
         """Zero win rate."""
         returns = [-0.001] * 63
         history = [
@@ -1164,12 +1193,15 @@ class TestEdgeCasesExtended:
             for i, r in enumerate(returns)
         ]
         state = _make_state_file(None, {"portfolio": {"history": history}})
-        checklist = GraduationChecklist()
-        result = checklist._check_win_rate(state)
+        with patch("src.strategy.graduation_checklist.DATA_DIR", tmp_path):
+
+            checklist = GraduationChecklist()
+
+            result = checklist._check_win_rate(state)
         assert result.passed is False
         assert result.value == 0.0
 
-    def test_win_rate_all_zero_returns(self):
+    def test_win_rate_all_zero_returns(self, tmp_path):
         """Returns exactly zero → not positive → 0% win rate."""
         returns = [0.0] * 63
         history = [
@@ -1177,8 +1209,11 @@ class TestEdgeCasesExtended:
             for i, r in enumerate(returns)
         ]
         state = _make_state_file(None, {"portfolio": {"history": history}})
-        checklist = GraduationChecklist()
-        result = checklist._check_win_rate(state)
+        with patch("src.strategy.graduation_checklist.DATA_DIR", tmp_path):
+
+            checklist = GraduationChecklist()
+
+            result = checklist._check_win_rate(state)
         assert result.passed is False
         assert result.value == 0.0
 
@@ -1273,7 +1308,7 @@ class TestEdgeCasesExtended:
     # --- _check_dsr edge cases ---
 
     def test_dsr_rejects_unrealistic_sharpe(self):
-        """Sharpe > 3.0 → capped to 0.0 → DSR computed on 0 Sharpe."""
+        """Sharpe > 3.0 → DSR gate fails without feeding implausible input as skill."""
         # Build returns with std near 0 to produce inflated Sharpe
         returns = [0.001] * 63  # All same → std ~ 0 → Sharpe → inf
         history = [
@@ -1284,7 +1319,8 @@ class TestEdgeCasesExtended:
         checklist = GraduationChecklist()
         result = checklist._check_dsr(state)
         assert isinstance(result.value, float)
-        # Should not raise
+        assert result.passed is False
+        assert "implausible" in (result.description or "").lower()
 
     # --- _check_trading_days edge cases ---
 
@@ -1369,7 +1405,59 @@ class TestLoadState:
         finally:
             gc.DATA_DIR = original
 
+    def test_load_state_circuit_breaker_ssot_only_no_invent(self, tmp_path):
+        """Batch BP: legacy .circuit_breaker_state.json is NOT CB confidence SSOT."""
+        import src.strategy.graduation_checklist as gc
+        original = gc.DATA_DIR
+        gc.DATA_DIR = Path(tmp_path)
+        try:
+            # Only legacy drawdown paper file — must not invent consecutive_ok
+            with open(tmp_path / ".circuit_breaker_state.json", "w") as f:
+                json.dump({
+                    "status": "green",
+                    "last_check": "2026-05-22T22:37:01",
+                    "max_drawdown": 0.001,
+                }, f)
+            checklist = GraduationChecklist()
+            state = checklist._load_state()
+            cb = state.get("circuit_breaker") or {}
+            assert cb.get("ssot_missing") is True or cb.get("consecutive_ok") == 0
+            assert int(cb.get("consecutive_ok", 0)) == 0
+            result = checklist._check_circuit_breaker(state)
+            assert result.passed is False
+            assert result.value == 0
+        finally:
+            gc.DATA_DIR = original
+
+    def test_load_state_circuit_breaker_ssot_file(self, tmp_path):
+        """Batch BP: consecutive_ok comes only from .circuit_breaker.json."""
+        import src.strategy.graduation_checklist as gc
+        original = gc.DATA_DIR
+        gc.DATA_DIR = Path(tmp_path)
+        try:
+            with open(tmp_path / ".circuit_breaker.json", "w") as f:
+                json.dump({
+                    "status": "green",
+                    "trips": 0,
+                    "consecutive_ok": 9,
+                    "schema_version": "graduation-circuit-breaker/v1",
+                }, f)
+            # Poison legacy file with higher invented streak — must be ignored
+            with open(tmp_path / ".circuit_breaker_state.json", "w") as f:
+                json.dump({"status": "green", "max_drawdown": 0.0}, f)
+            checklist = GraduationChecklist()
+            state = checklist._load_state()
+            cb = state.get("circuit_breaker") or {}
+            assert cb.get("ssot_path") == ".circuit_breaker.json"
+            assert int(cb.get("consecutive_ok", 0)) == 9
+            result = checklist._check_circuit_breaker(state)
+            assert result.passed is True
+            assert result.value == 9
+        finally:
+            gc.DATA_DIR = original
+
     def test_load_state_malformed_performance(self, tmp_path):
+
         """Malformed JSONL lines should be gracefully skipped."""
         import src.strategy.graduation_checklist as gc
         original = gc.DATA_DIR
@@ -1426,6 +1514,32 @@ class TestJsonlTailReads:
 
         assert result.passed is True
         assert result.value == 2
+
+    def test_regime_coverage_reads_regime_state_history(self, tmp_path):
+        """Graduation counts distinct regimes from regime_state.json history."""
+        state = {
+            "regime": "NORMAL",
+            "confidence": 0.7,
+            "history": [
+                {"regime": "NORMAL", "confidence": 0.7},
+                {"regime": "HIGH_VOL", "confidence": 0.8},
+            ],
+        }
+        (tmp_path / "regime_state.json").write_text(json.dumps(state))
+
+        with patch("src.strategy.graduation_checklist.DATA_DIR", Path(tmp_path)):
+            result = GraduationChecklist()._check_regime_coverage({})
+
+        assert result.passed is True
+        assert result.value == 2
+
+    def test_regime_coverage_missing_producer_discloses_in_description(self, tmp_path):
+        with patch("src.strategy.graduation_checklist.DATA_DIR", Path(tmp_path)):
+            result = GraduationChecklist()._check_regime_coverage({})
+
+        assert result.passed is False
+        assert result.value == 0
+        assert "no producer" in result.description.lower()
 
     def test_signal_diversity_uses_bounded_tail(self, tmp_path):
         with open(tmp_path / "orders.jsonl", "w") as f:
@@ -1611,3 +1725,66 @@ class TestTradingDaysDeduplication:
         result = checklist._check_trading_days(state)
         # Summary days_tracked takes precedence
         assert result.value == 5
+
+
+class TestGraduationSsotBatchAO:
+    """Session return / ensemble voting / health SH honesty SSOT."""
+
+    def test_win_rate_prefers_daily_pnl_ssot(self, tmp_path):
+        # Host-like history is all losses; daily_pnl has real wins → win rate from pnl
+        history = [
+            {"timestamp": f"2026-05-{i+1:02d}T00:00:00", "total_value": 100000, "daily_return": 0.0}
+            for i in range(20)
+        ]
+        state = {"portfolio": {"history": history}}
+        lines = []
+        for i in range(10):
+            lines.append(json.dumps({"date": f"2026-05-{i+1:02d}", "daily_return": 0.01 if i < 8 else -0.01}))
+        (tmp_path / "daily_pnl.jsonl").write_text("\n".join(lines) + "\n")
+        with patch("src.strategy.graduation_checklist.DATA_DIR", tmp_path):
+            r = GraduationChecklist()._check_win_rate(state)
+        assert r.passed is True
+        assert r.value == 0.8
+        assert "daily_pnl" in r.description
+
+    def test_signal_diversity_from_ensemble_voting(self, tmp_path, monkeypatch):
+        signals = {
+            "ensemble_voting": {
+                "contributing_source_count": 5,
+                "active_weights": {
+                    "a": 0.2, "b": 0.2, "c": 0.2, "d": 0.2, "e": 0.2
+                },
+            }
+        }
+        sig_path = tmp_path / "signals.json"
+        sig_path.write_text(json.dumps(signals))
+        monkeypatch.setattr("src.strategy.graduation_checklist.SIGNALS_JSON", sig_path)
+        monkeypatch.setattr("src.strategy.graduation_checklist.PUBLIC_DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.strategy.graduation_checklist.DATA_DIR", tmp_path)
+        r = GraduationChecklist()._check_signal_diversity({})
+        assert r.value >= 5
+        assert r.passed is True
+        assert "ensemble_voting" in r.description
+
+    def test_health_blocked_when_signal_health_zero_of_n(self):
+        state = {
+            "health_report": {
+                "summary": {
+                    "total_checks": 9,
+                    "passed": 9,
+                    "consecutive_passing_days": 30,
+                },
+                "signal_health": {
+                    "status": "degraded",
+                    "summary": {
+                        "healthy": 0,
+                        "degraded": 8,
+                        "unhealthy": 1,
+                        "total_tracked": 9,
+                    },
+                },
+            }
+        }
+        r = GraduationChecklist()._check_health(state)
+        assert r.passed is False
+        assert "signal_health" in r.description.lower() or "blocked" in r.description.lower()

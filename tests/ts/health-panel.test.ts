@@ -171,6 +171,88 @@ describe('HealthPanel operations summary', () => {
       'artifact/index.json: Regenerate public/data/index.json after source_manifest.json changes.',
     );
   });
+
+  it('surfaces dual-write FAIL badge when dual_write_ok is false (M11)', () => {
+    const summary = summarizeHealthOperations({
+      system_status: 'warning',
+      generated_at: '2026-07-21T12:00:00Z',
+      cron_jobs: [],
+      scheduler_status: {
+        status: 'ok',
+        backends: {
+          local: { backend: 'tasker', status: 'ok', source: 'data/cron_status.json', total_jobs: 10, failed_jobs: 0 },
+        },
+      },
+      data_freshness: {
+        SPY: { last_update: '2026-07-21', days_stale: 0, status: 'fresh' },
+      },
+      provenance_completeness: {
+        dual_write_attempted: true,
+        dual_write_ok: false,
+        dual_write_lag_stale: false,
+        note: 'public write OSError',
+      },
+    } satisfies HealthData);
+
+    expect(summary.dualWrite.status).toBe('critical');
+    expect(summary.dualWrite.label).toBe('Dual-write: FAIL');
+    expect(summary.headline).toContain('dual-write fail');
+    expect(summary.topCauses[0]).toBe('Dual-write: FAIL');
+  });
+
+  it('surfaces dual-write lag warning when lag_stale (M11)', () => {
+    const summary = summarizeHealthOperations({
+      system_status: 'healthy',
+      generated_at: '2026-07-21T12:00:00Z',
+      cron_jobs: [],
+      data_freshness: {
+        SPY: { last_update: '2026-07-21', days_stale: 0, status: 'fresh' },
+      },
+      provenance_completeness: {
+        dual_write_attempted: true,
+        dual_write_ok: true,
+        dual_write_lag_seconds: -1052,
+        dual_write_lag_stale: true,
+        dual_write_lag_threshold_seconds: 120,
+      },
+    } satisfies HealthData);
+
+    expect(summary.dualWrite.status).toBe('warning');
+    expect(summary.dualWrite.label).toContain('lag');
+    expect(summary.dualWrite.dualWriteLagStale).toBe(true);
+    expect(summary.topCauses[0]).toContain('Dual-write lag');
+  });
+
+  it('accepts dual-write provenance via context when health omits block', () => {
+    const summary = summarizeHealthOperations(
+      {
+        system_status: 'healthy',
+        generated_at: '2026-07-21T12:00:00Z',
+        cron_jobs: [],
+        data_freshness: {},
+      } satisfies HealthData,
+      {
+        dualWriteProvenance: {
+          dual_write_attempted: true,
+          dual_write_ok: true,
+          dual_write_lag_seconds: -2,
+          dual_write_lag_stale: false,
+        },
+      },
+    );
+    expect(summary.dualWrite.status).toBe('ok');
+    expect(summary.dualWrite.label).toContain('OK');
+  });
+
+  it('reports dual-write absent when no provenance block', () => {
+    const summary = summarizeHealthOperations({
+      system_status: 'healthy',
+      generated_at: '2026-07-21T12:00:00Z',
+      cron_jobs: [],
+      data_freshness: {},
+    } satisfies HealthData);
+    expect(summary.dualWrite.status).toBe('absent');
+  });
 });
 
 describe('RebalanceHealthPanel live diagnostics summary', () => {

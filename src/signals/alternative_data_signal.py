@@ -19,14 +19,20 @@ which reads data/signals/alternative_data_latest.json.
 import json
 import logging
 import math
+import os
 import statistics
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 import numpy as np
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.paths import PRICES_JSON, SIGNALS_DIR, DATA_DIR
+
+
+def _utc_now_iso() -> str:
+    """UTC ISO timestamp so staleness parsers (naive→UTC) never see local wall clock."""
+    return datetime.now(timezone.utc).isoformat()
 from src.backtest.metrics import save_results_json
 from src.data.price_cache import get_prices
 from src.data.crypto_fg import get_crypto_fg, CryptoFgData
@@ -305,9 +311,10 @@ class AlternativeDataSignalGenerator:
 
         # vol_ratio > 1.0 = elevated vol = risk-off
         # vol_ratio < 1.0 = low vol = risk-on
-        # Scale: typical vol ratio ranges from 0.3 to 3.0
+        # Batch DI: tanh soft-scale (was hard clip raw*0.6) so calm markets
+        # don't pin component near +0.6–1.0 and dominate composite long-bias.
         raw_value = 1.0 - (vol_ratio - 1.0)  # inverse: low vol → positive
-        value = max(-1.0, min(1.0, raw_value * 0.6))
+        value = float(math.tanh(raw_value * 0.6))
 
         confidence = min(1.0, max(0.4, 1.0 - abs(vol_ratio - 1.0) * 0.3))
 
@@ -319,6 +326,7 @@ class AlternativeDataSignalGenerator:
                 "short_vol_21d": round(short_vol * 100, 2),
                 "long_vol_252d": round(long_vol * 100, 2),
                 "vol_ratio": round(vol_ratio, 4),
+                "scale": "tanh_0.6",
             },
         )
 
@@ -343,8 +351,10 @@ class AlternativeDataSignalGenerator:
         # Weighted blend: more weight on medium term
         blended = 0.3 * mom_1m + 0.4 * mom_3m + 0.3 * mom_6m
 
-        # Scale to -1..+1 (SPY typical 3m momentum ±5-12%)
-        value = max(-1.0, min(1.0, blended / 0.06))
+        # Batch DE: tanh soft-scale (was hard clip blended/0.06 → perpetual +1.0
+        # in moderate bull trends, dominating composite long-bias / IC collapse).
+        # Scale so ~6% blended maps near 0.76, not hard 1.0; preserves rank.
+        value = float(math.tanh(blended / 0.08))
 
         # Confidence: higher with consistent direction across timeframes
         directions = [mom_1m > 0, mom_3m > 0, mom_6m > 0]
@@ -360,6 +370,7 @@ class AlternativeDataSignalGenerator:
                 "spy_3m": round(mom_3m * 100, 2),
                 "spy_6m": round(mom_6m * 100, 2),
                 "direction_consistency": consistency,
+                "scale": "tanh_0.08",
             },
         )
 
@@ -438,10 +449,9 @@ class AlternativeDataSignalGenerator:
         value = 1.0 - (fg_data.value / 50.0)
         value = max(-1.0, min(1.0, value))
         
-        # Confidence: higher at extremes (0 or 100), lower at neutral (50)
-        # 0 or 100 -> 0.9
-        # 50 -> 0.4
-        confidence = 0.9 - 0.5 * (abs(fg_data.value - 50) / 50)
+        # Batch DE: confidence was inverted vs docstring (extremes got LOW conf).
+        # Correct: higher at extremes (0 or 100) → 0.9; neutral (50) → 0.4
+        confidence = 0.4 + 0.5 * (abs(fg_data.value - 50) / 50)
         confidence = max(0.3, min(0.9, confidence))
         
         return ComponentSignal(
@@ -452,6 +462,7 @@ class AlternativeDataSignalGenerator:
                 "fg_value": fg_data.value,
                 "fg_classification": fg_data.classification,
                 "api_timestamp": fg_data.timestamp,
+                "confidence_policy": "extremes_high_batch_de",
             },
         )
 
@@ -468,6 +479,27 @@ class AlternativeDataSignalGenerator:
         elif composite_score < -0.15:
             return "risk_off"
         return "neutral"
+
+    def _input_data_freshness_hours(
+        self,
+        components: Optional[List[ComponentSignal]] = None,
+        now_ts: Optional[datetime] = None,
+    ) -> float:
+        """Hours since producer inputs (Batch II DG3).
+
+        Prefer prices.json mtime (pipeline SoT for free alt-data components).
+        Falls back to 0.0 when the file is missing so consumers never see a
+        hardcoded 12.0 lie.
+        """
+        now = now_ts or datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        try:
+            mtime = Path(PRICES_PATH).stat().st_mtime
+            age_h = max(0.0, (now.timestamp() - float(mtime)) / 3600.0)
+            return round(age_h, 4)
+        except OSError:
+            return 0.0
 
     def calculate_composite(self, components: List[ComponentSignal]) -> AlternativeDataComposite:
         """Weighted composite from all component signals."""
@@ -498,7 +530,7 @@ class AlternativeDataSignalGenerator:
             confidence /= weight_sum
 
         return AlternativeDataComposite(
-            timestamp=datetime.now().isoformat(),
+            timestamp=_utc_now_iso(),
             composite_score=round(composite, 4),
             confidence=round(confidence, 4),
             regime=self._determine_regime(composite),
@@ -506,7 +538,7 @@ class AlternativeDataSignalGenerator:
             components=comp_values,
             component_confidences=comp_confidences,
             weights=dict(self.weights),
-            data_freshness_hours=12.0,
+            data_freshness_hours=self._input_data_freshness_hours(components),
             sources_count=len(self.weights),
             symbol_coverage=SYMBOLS_REQUIRED,
         )
@@ -561,6 +593,17 @@ class AlternativeDataSignalGenerator:
         state_file = self.state_dir / "alternative_data_state.json"
         save_results_json(state, output_path=str(state_file))
 
+        # Bounded public projection refresh so operators do not wait for the
+        # next full dashboard cron after a producer write.
+        auto_project = os.environ.get("PORTFOLIO_LAB_ALT_DATA_AUTO_PROJECT", "1")
+        if str(auto_project).strip().lower() not in {"0", "false", "no", "off"}:
+            try:
+                from src.dashboard.generator import refresh_public_alternative_data_projection
+
+                refresh_public_alternative_data_projection()
+            except Exception as exc:  # noqa: BLE001 — never fail producer on projection
+                logger.warning("Public alt-data projection refresh failed: %s", exc)
+
     def load_latest_signal(self) -> Optional[EnsembleSignal]:
         """Load most recent signal from disk."""
         latest_file = self.signals_dir / "alternative_data_latest.json"
@@ -574,8 +617,17 @@ class AlternativeDataSignalGenerator:
         """Validate signal meets quality criteria."""
         if signal.confidence < 0.3:
             return False
-        signal_time = datetime.fromisoformat(signal.timestamp)
-        age_hours = (datetime.now() - signal_time).total_seconds() / 3600
+        ts = str(signal.timestamp).replace("Z", "+00:00")
+        signal_time = datetime.fromisoformat(ts)
+        if signal_time.tzinfo is None:
+            # Naive timestamps are host wall-clock (test/common convention).
+            # Attach local timezone before converting to UTC so CST/UTC hosts
+            # do not mis-age by treating local time as UTC.
+            local_tz = datetime.now().astimezone().tzinfo or timezone.utc
+            signal_time = signal_time.replace(tzinfo=local_tz).astimezone(timezone.utc)
+        else:
+            signal_time = signal_time.astimezone(timezone.utc)
+        age_hours = (datetime.now(timezone.utc) - signal_time).total_seconds() / 3600
         if age_hours > 48:
             return False
         return True
@@ -587,17 +639,25 @@ class AlternativeDataSignalGenerator:
         if signal is None:
             return SignalSnapshot(
                 source="alternative_data",
-                timestamp=datetime.now().isoformat(),
+                timestamp=_utc_now_iso(),
                 value=0.0,
                 confidence=0.0,
                 is_active=False,
                 explanation="Alternative data signal unavailable",
             )
         composite_score = signal.raw_data.get("composite_score", 0.0) if signal.raw_data else 0.0
-        value = float(np.clip(composite_score, -1, 1)) if composite_score else 0.0
-        if value == 0.0:
+        try:
+            composite_f = float(composite_score) if composite_score is not None else 0.0
+        except (TypeError, ValueError):
+            composite_f = 0.0
+        # Batch DI: soft-scale composite for ensemble health IC (tanh) so mild
+        # risk-on doesn't log as hard-saturated near 1.0. Rank order preserved
+        # vs raw composite; reduces deadband pile-up with other long-biased arms.
+        if composite_f != 0.0:
+            value = float(math.tanh(composite_f / 0.5))
+        else:
             regime_map = {"bull": 0.4, "bear": -0.4, "neutral": 0.0, "crisis": -0.7}
-            value = regime_map.get(signal.regime, 0.0)
+            value = float(regime_map.get(signal.regime, 0.0))
         return SignalSnapshot(
             source="alternative_data",
             timestamp=signal.timestamp,
@@ -606,10 +666,16 @@ class AlternativeDataSignalGenerator:
             asset_signals={"SPY": value},
             regime_fit="all",
             is_active=True,
-            explanation=f"Alt Data: regime={signal.regime}, composite={composite_score:.4f}, "
-                        f"prob={signal.probability:.2f}, conf={signal.confidence:.2f}",
-            metadata={"regime": signal.regime, "probability": signal.probability,
-                      "raw_data": signal.raw_data},
+            explanation=f"Alt Data: regime={signal.regime}, composite={composite_f:.4f}, "
+                        f"soft={value:.4f}, prob={signal.probability:.2f}, conf={signal.confidence:.2f}",
+            metadata={
+                "regime": signal.regime,
+                "probability": signal.probability,
+                "raw_data": signal.raw_data,
+                "composite_raw": composite_f,
+                "value_scale": "tanh_0.5",
+                "soft_delete_policy": "health_gate_no_force_wake",
+            },
         )
 
     # ---- Main pipeline ----

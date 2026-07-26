@@ -5,12 +5,14 @@ classification, cost estimation, rebalance decision engine, cost budget tracking
 and status reporting.
 """
 
-import pytest
+import json
+import logging
+import inspect
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import patch
 
-import inspect
-import logging
+import pytest
 
 from src.rebalancing.smart_rebalancer import (
     RebalanceDecision,
@@ -22,6 +24,23 @@ from src.rebalancing.smart_rebalancer import (
     SmartRebalancingController,
     create_sample_portfolio,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_smart_rebalance_data_dir(tmp_path, monkeypatch):
+    """Keep default SmartRebalancingController() from loading/writing host DATA_DIR."""
+    monkeypatch.setattr(
+        "src.rebalancing.smart_rebalancer.DATA_DIR",
+        tmp_path,
+        raising=False,
+    )
+    # Also isolate integration gate default data_dir if imported in-process
+    monkeypatch.setattr(
+        "src.rebalancing.integration.DATA_DIR",
+        tmp_path,
+        raising=False,
+    )
+    yield
 
 
 # ---------------------------------------------------------------------------
@@ -296,6 +315,60 @@ class TestOptimalWindow:
         at_end = datetime(2026, 5, 14, 14, 0)
         assert ctrl._in_optimal_window(at_end) is False
 
+    def test_default_clock_uses_america_new_york_not_host_local(self, monkeypatch):
+        """When now is omitted, window membership follows America/New_York wall clock."""
+        from zoneinfo import ZoneInfo
+        from datetime import timezone
+
+        ctrl = SmartRebalancingController()
+        et = ZoneInfo("America/New_York")
+
+        # 12:00 ET is inside 11–14 ET window
+        fixed_et_noon = datetime(2026, 5, 14, 12, 0, tzinfo=et)
+
+        class _FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                if tz is None:
+                    # Host local would be wrong if we used naive UTC 16:00 as "now"
+                    return datetime(2026, 5, 14, 16, 0)  # naive host-local decoy
+                return fixed_et_noon.astimezone(tz)
+
+        monkeypatch.setattr("src.rebalancing.smart_rebalancer.datetime", _FixedDateTime)
+        assert ctrl._in_optimal_window() is True
+
+        # 08:00 ET is outside window (UTC 12:00 during EDT)
+        fixed_et_morning = datetime(2026, 5, 14, 8, 0, tzinfo=et)
+
+        class _FixedMorning(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                if tz is None:
+                    return datetime(2026, 5, 14, 12, 0)  # decoy "local" hour in-window
+                return fixed_et_morning.astimezone(tz)
+
+        monkeypatch.setattr("src.rebalancing.smart_rebalancer.datetime", _FixedMorning)
+        assert ctrl._in_optimal_window() is False
+
+    def test_aware_utc_converted_to_et_for_window(self):
+        """Timezone-aware UTC timestamps convert to ET before hour check."""
+        from zoneinfo import ZoneInfo
+        from datetime import timezone
+
+        ctrl = SmartRebalancingController()
+        # 16:00 UTC on 2026-05-14 == 12:00 EDT → in window
+        utc_noon_et = datetime(2026, 5, 14, 16, 0, tzinfo=timezone.utc)
+        assert ctrl._in_optimal_window(utc_noon_et) is True
+        # 12:00 UTC == 08:00 EDT → outside
+        utc_morning_et = datetime(2026, 5, 14, 12, 0, tzinfo=timezone.utc)
+        assert ctrl._in_optimal_window(utc_morning_et) is False
+
+    def test_naive_datetime_treated_as_et_wall_clock(self):
+        """Naive datetimes are interpreted as ET wall clock (documented contract)."""
+        ctrl = SmartRebalancingController()
+        assert ctrl._in_optimal_window(datetime(2026, 5, 14, 12, 0)) is True
+        assert ctrl._in_optimal_window(datetime(2026, 5, 14, 8, 0)) is False
+
 
 # ---------------------------------------------------------------------------
 # SmartRebalancingController — should_rebalance decision engine
@@ -345,7 +418,8 @@ class TestShouldRebalance:
 
     def test_defer_budget(self):
         ctrl = SmartRebalancingController()
-        # Exhaust budget
+        # Exhaust budget (disable single-trade cap so synthetic 60 bps counts)
+        ctrl.cost_tracker.max_single_trade_cost_bps = None
         ctrl.cost_tracker.add_cost(60, "2026-05-01", ["SPY"])
         p = _drifted_portfolio(0.15)
         m = _make_market(vpin=0.30)
@@ -355,6 +429,7 @@ class TestShouldRebalance:
 
     def test_emergency_overrides_budget(self):
         ctrl = SmartRebalancingController()
+        ctrl.cost_tracker.max_single_trade_cost_bps = None
         ctrl.cost_tracker.add_cost(60, "2026-05-01", ["SPY"])
         p = _drifted_portfolio(0.30)  # Emergency drift
         m = _make_market(vpin=0.30)
@@ -392,25 +467,71 @@ class TestShouldRebalance:
 
 class TestRecordAndStatus:
 
-    def test_record_rebalance(self):
-        ctrl = SmartRebalancingController()
+    def test_record_rebalance(self, tmp_path):
+        ctrl = SmartRebalancingController(
+            state_path=tmp_path / "s.json", data_dir=tmp_path, load_state=False
+        )
         ctrl.record_rebalance(5.0, "2026-05-14", ["SPY", "GLD"])
         assert ctrl.cost_tracker.ytd_total_bps == 5.0
         assert ctrl.last_rebalance is not None
 
-    def test_get_status(self):
-        ctrl = SmartRebalancingController()
+    def test_get_status(self, tmp_path):
+        ctrl = SmartRebalancingController(
+            state_path=tmp_path / "s.json", data_dir=tmp_path, load_state=False
+        )
         status = ctrl.get_status()
         assert 'ytd_cost_bps' in status
         assert 'remaining_budget_pct' in status
         assert 'config' in status
         assert status['is_over_budget'] is False
 
-    def test_status_after_costs(self):
-        ctrl = SmartRebalancingController()
+    def test_status_after_costs(self, tmp_path):
+        ctrl = SmartRebalancingController(
+            state_path=tmp_path / "s.json", data_dir=tmp_path, load_state=False
+        )
         ctrl.record_rebalance(10.0, "2026-05-14", ["SPY"])
         status = ctrl.get_status()
         assert status['ytd_cost_bps'] == 10.0
+
+    def test_record_rebalance_persists_state(self, tmp_path):
+        """record_rebalance writes durable state so cold start restores costs."""
+        state_path = tmp_path / "smart_rebalance_state.json"
+        ctrl = SmartRebalancingController(
+            state_path=state_path, data_dir=tmp_path, load_state=False
+        )
+        ctrl.record_rebalance(7.5, "2026-07-15", ["SPY", "GLD"])
+        assert state_path.exists()
+        raw = json.loads(state_path.read_text(encoding="utf-8"))
+        assert raw["ytd_costs"]
+        assert abs(raw["ytd_costs"][0]["cost_bps"] - 7.5) < 1e-9
+        assert raw["last_rebalance"] is not None
+
+    def test_cold_start_loads_persisted_state(self, tmp_path):
+        """Fresh controller with same state_path restores ytd cost + last_rebalance."""
+        state_path = tmp_path / "smart_rebalance_state.json"
+        first = SmartRebalancingController(
+            state_path=state_path, data_dir=tmp_path, load_state=False
+        )
+        first.record_rebalance(12.0, "2026-07-10", ["SPY"])
+        first.record_rebalance(3.0, "2026-07-12", ["TLT"])
+
+        second = SmartRebalancingController(
+            state_path=state_path, data_dir=tmp_path, load_state=True
+        )
+        assert abs(second.cost_tracker.ytd_total_bps - 15.0) < 1e-9
+        assert second.last_rebalance is not None
+        status = second.get_status()
+        assert status["ytd_cost_bps"] == 15.0
+        assert status["last_rebalance"] is not None
+
+    def test_missing_state_file_starts_clean(self, tmp_path):
+        ctrl = SmartRebalancingController(
+            state_path=tmp_path / "missing.json",
+            data_dir=tmp_path,
+            load_state=True,
+        )
+        assert ctrl.cost_tracker.ytd_total_bps == 0
+        assert ctrl.last_rebalance is None
 
 
 # ---------------------------------------------------------------------------
@@ -693,7 +814,14 @@ class TestDataclassFields:
     def test_cost_budget_tracker_has_correct_fields(self):
         import dataclasses
         fields = {f.name: f for f in dataclasses.fields(CostBudgetTracker)}
-        assert set(fields) == {'annual_limit_pct', 'warning_threshold_pct', 'ytd_costs'}
+        assert set(fields) == {
+            'annual_limit_pct',
+            'warning_threshold_pct',
+            'ytd_costs',
+            'ytd_year',  # Batch DY: calendar year for YTD view
+            'max_single_trade_cost_bps',  # Batch DZ: single-trade outlier cap
+            'quarantined_costs',  # Batch DZ: audit trail for outliers
+        }
         assert fields['annual_limit_pct'].type is float
         assert fields['annual_limit_pct'].default == 0.005
         assert fields['warning_threshold_pct'].type is float
@@ -772,6 +900,10 @@ class TestModuleExports:
             'MarketConditions', 'RebalanceDecisionResult',
             'CostBudgetTracker', 'SmartRebalancingController',
             'create_sample_portfolio',
+            # Batch EA: event-sourced cost ledger rebuild from order fills
+            'collect_unique_order_fills',
+            'estimate_day_cost_bps_from_fills',
+            'rebuild_ytd_costs_from_order_fills',
         }
         from src.rebalancing import smart_rebalancer as mod
         assert set(mod.__all__) == expected
@@ -1326,11 +1458,12 @@ class TestGetStatusEdgeCases:
 
     def test_status_cost_pct_format(self):
         ctrl = SmartRebalancingController()
-        ctrl.record_rebalance(25.0, "2026-05-14", ["SPY", "GLD"])
+        # Under single-trade cap (15) so row stays in YTD budget sum
+        ctrl.record_rebalance(12.5, "2026-05-14", ["SPY", "GLD"])
         status = ctrl.get_status()
-        # 25 bps = 0.25% of total value
-        assert status['ytd_cost_pct'] == 0.25
-        assert status['remaining_budget_pct'] == 0.25  # 0.5 - 0.25 = 0.25
+        # 12.5 bps = 0.125% of total value
+        assert status['ytd_cost_pct'] == 0.125
+        assert status['remaining_budget_pct'] == 0.375  # 0.5 - 0.125
 
 
 # ---------------------------------------------------------------------------
@@ -1545,6 +1678,7 @@ class TestShouldRebalanceEdgeCases:
     def test_defer_budget_has_non_zero_cost_in_result(self):
         """Defer_budget sets estimated_cost_bps=0."""
         ctrl = SmartRebalancingController()
+        ctrl.cost_tracker.max_single_trade_cost_bps = None
         ctrl.cost_tracker.add_cost(60, "2026-05-01", ["SPY"])
         p = _drifted_portfolio(0.15)
         m = _make_market(vpin=0.30)
@@ -1603,6 +1737,7 @@ class TestShouldRebalanceEdgeCases:
     def test_should_rebalance_high_urgency_but_over_budget_defers(self):
         """High urgency but over budget should defer unless EMERGENCY."""
         ctrl = SmartRebalancingController()
+        ctrl.cost_tracker.max_single_trade_cost_bps = None
         ctrl.cost_tracker.add_cost(60, "2026-05-01", ["SPY"])
         p = _drifted_portfolio(0.17)  # HIGH urgency (not EMERGENCY)
         m = _make_market(vpin=0.30)

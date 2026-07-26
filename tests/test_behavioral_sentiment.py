@@ -21,6 +21,22 @@ from src.data.behavioral_sentiment_fetcher import (
 # ── Fixtures ──────────────────────────────────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _isolate_named_regime_from_live_ssot(monkeypatch):
+    """Avoid live data/regime_state.json (often NORMAL) suppressing unit tests.
+
+    Production still reads regime_state; tests opt into NORMAL via explicit
+    named_regime= or by re-patching _resolve_named_regime.
+    """
+    from src.signals.behavioral_sentiment import BehavioralSentimentSignal
+
+    monkeypatch.setattr(
+        BehavioralSentimentSignal,
+        "_resolve_named_regime",
+        lambda self: "LOW_VOL",
+    )
+
+
 def _make_options(**kwargs):
     defaults = {
         "timestamp": "2026-05-14T10:00:00",
@@ -319,13 +335,13 @@ class TestZScoreComputation:
 
 
 class TestRegimeCheck:
-    """Tests for VIX-based regime gating"""
+    """Tests for VIX-based regime gating (named_regime=None → pure VIX path)."""
 
     def test_normal_vix_no_suppression(self, tmp_cache_db):
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        suppressed, reason = sig_gen._regime_check(16.0)
+        suppressed, reason = sig_gen._regime_check(16.0, named_regime=None)
         assert suppressed is False
         assert reason == ""
 
@@ -333,7 +349,7 @@ class TestRegimeCheck:
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        suppressed, reason = sig_gen._regime_check(35.0)
+        suppressed, reason = sig_gen._regime_check(35.0, named_regime=None)
         assert suppressed is True
         assert "crisis" in reason.lower()
 
@@ -341,7 +357,7 @@ class TestRegimeCheck:
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        suppressed, reason = sig_gen._regime_check(30.0)
+        suppressed, reason = sig_gen._regime_check(30.0, named_regime=None)
         assert suppressed is True
         assert "high volatility" in reason.lower()
 
@@ -349,15 +365,32 @@ class TestRegimeCheck:
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        suppressed, reason = sig_gen._regime_check(25.0)
+        suppressed, reason = sig_gen._regime_check(25.0, named_regime=None)
         assert suppressed is False
 
     def test_above_crisis_threshold(self, tmp_cache_db):
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        suppressed, _ = sig_gen._regime_check(45.0)
+        suppressed, _ = sig_gen._regime_check(45.0, named_regime=None)
         assert suppressed is True
+
+    def test_named_regime_normal_suppresses_low_vix(self, tmp_cache_db):
+        """RegimeGate OFF in NORMAL even when VIX is calm."""
+        from src.signals.behavioral_sentiment import BehavioralSentimentSignal
+
+        sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
+        suppressed, reason = sig_gen._regime_check(16.0, named_regime="NORMAL")
+        assert suppressed is True
+        assert "regimegate" in reason.lower() or "normal" in reason.lower()
+
+    def test_named_regime_low_vol_allows_low_vix(self, tmp_cache_db):
+        from src.signals.behavioral_sentiment import BehavioralSentimentSignal
+
+        sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
+        suppressed, reason = sig_gen._regime_check(16.0, named_regime="LOW_VOL")
+        assert suppressed is False
+        assert reason == ""
 
 
 # ── Circuit breaker tests ──────────────────────────────────────────────
@@ -419,8 +452,9 @@ class TestGetSignal:
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        snapshot = _make_snapshot(composite_score=0.0, signal_type="neutral", vix=16.0)
-        sig = sig_gen.get_signal(snapshot)
+        with patch.object(sig_gen, "_resolve_named_regime", return_value="LOW_VOL"):
+            snapshot = _make_snapshot(composite_score=0.0, signal_type="neutral", vix=16.0)
+            sig = sig_gen.get_signal(snapshot)
         assert sig.signal_type == "neutral"
         assert sig.equity_shift_pct == 0.0
 
@@ -428,8 +462,9 @@ class TestGetSignal:
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        snapshot = _make_snapshot(composite_score=-2.5, signal_type="extreme_fear", vix=16.0)
-        sig = sig_gen.get_signal(snapshot)
+        with patch.object(sig_gen, "_resolve_named_regime", return_value="LOW_VOL"):
+            snapshot = _make_snapshot(composite_score=-2.5, signal_type="extreme_fear", vix=16.0)
+            sig = sig_gen.get_signal(snapshot)
         assert sig.signal_type == "contrarian_buy"
         assert sig.equity_shift_pct == 5.0
 
@@ -437,8 +472,9 @@ class TestGetSignal:
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        snapshot = _make_snapshot(composite_score=-1.5, signal_type="fear", vix=16.0)
-        sig = sig_gen.get_signal(snapshot)
+        with patch.object(sig_gen, "_resolve_named_regime", return_value="LOW_VOL"):
+            snapshot = _make_snapshot(composite_score=-1.5, signal_type="fear", vix=16.0)
+            sig = sig_gen.get_signal(snapshot)
         assert sig.signal_type == "moderate_buy"
         assert sig.equity_shift_pct == 3.0
 
@@ -446,8 +482,9 @@ class TestGetSignal:
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        snapshot = _make_snapshot(composite_score=2.5, signal_type="extreme_greed", vix=14.0)
-        sig = sig_gen.get_signal(snapshot)
+        with patch.object(sig_gen, "_resolve_named_regime", return_value="LOW_VOL"):
+            snapshot = _make_snapshot(composite_score=2.5, signal_type="extreme_greed", vix=14.0)
+            sig = sig_gen.get_signal(snapshot)
         assert sig.signal_type == "contrarian_sell"
         assert sig.equity_shift_pct == -5.0
 
@@ -455,8 +492,9 @@ class TestGetSignal:
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        snapshot = _make_snapshot(composite_score=1.5, signal_type="greed", vix=14.0)
-        sig = sig_gen.get_signal(snapshot)
+        with patch.object(sig_gen, "_resolve_named_regime", return_value="LOW_VOL"):
+            snapshot = _make_snapshot(composite_score=1.5, signal_type="greed", vix=14.0)
+            sig = sig_gen.get_signal(snapshot)
         assert sig.signal_type == "moderate_sell"
         assert sig.equity_shift_pct == -3.0
 
@@ -464,8 +502,9 @@ class TestGetSignal:
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        snapshot = _make_snapshot(composite_score=-2.5, signal_type="extreme_fear", vix=32.0)
-        sig = sig_gen.get_signal(snapshot)
+        with patch.object(sig_gen, "_resolve_named_regime", return_value="LOW_VOL"):
+            snapshot = _make_snapshot(composite_score=-2.5, signal_type="extreme_fear", vix=32.0)
+            sig = sig_gen.get_signal(snapshot)
         assert sig.regime_suppressed is True
         assert sig.signal_type == "neutral"
         assert sig.equity_shift_pct == 0.0
@@ -474,8 +513,9 @@ class TestGetSignal:
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        snapshot = _make_snapshot(composite_score=2.5, signal_type="extreme_greed", vix=40.0)
-        sig = sig_gen.get_signal(snapshot)
+        with patch.object(sig_gen, "_resolve_named_regime", return_value="LOW_VOL"):
+            snapshot = _make_snapshot(composite_score=2.5, signal_type="extreme_greed", vix=40.0)
+            sig = sig_gen.get_signal(snapshot)
         assert sig.regime_suppressed is True
         assert sig.signal_type == "neutral"
 
@@ -483,9 +523,10 @@ class TestGetSignal:
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        # Fear with elevated VIX → half weight
-        snapshot = _make_snapshot(composite_score=-2.0, signal_type="extreme_fear", vix=26.0)
-        sig = sig_gen.get_signal(snapshot)
+        with patch.object(sig_gen, "_resolve_named_regime", return_value="LOW_VOL"):
+            # Fear with elevated VIX → half weight
+            snapshot = _make_snapshot(composite_score=-2.0, signal_type="extreme_fear", vix=26.0)
+            sig = sig_gen.get_signal(snapshot)
         # equity_shift should be halved from 5.0 to 2.5
         assert sig.equity_shift_pct == pytest.approx(2.5, rel=1e-2)
         # confidence should be reduced
@@ -495,23 +536,38 @@ class TestGetSignal:
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        for st, vix in [("extreme_fear", 16.0), ("neutral", 16.0), ("extreme_greed", 14.0)]:
-            snapshot = _make_snapshot(composite_score=-2.5 if "fear" in st else 2.5, signal_type=st, vix=vix)
-            sig = sig_gen.get_signal(snapshot)
-            assert sig.holding_period_days == 5
+        with patch.object(sig_gen, "_resolve_named_regime", return_value="LOW_VOL"):
+            for st, vix in [("extreme_fear", 16.0), ("neutral", 16.0), ("extreme_greed", 14.0)]:
+                snapshot = _make_snapshot(composite_score=-2.5 if "fear" in st else 2.5, signal_type=st, vix=vix)
+                sig = sig_gen.get_signal(snapshot)
+                assert sig.holding_period_days == 5
 
     def test_signal_records_score(self, tmp_cache_db):
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        snapshot = _make_snapshot(composite_score=-2.0, signal_type="fear", vix=16.0)
-        sig_gen.get_signal(snapshot)
+        with patch.object(sig_gen, "_resolve_named_regime", return_value="LOW_VOL"):
+            snapshot = _make_snapshot(composite_score=-2.0, signal_type="fear", vix=16.0)
+            sig_gen.get_signal(snapshot)
 
         conn = sqlite3.connect(str(tmp_cache_db))
         cursor = conn.execute("SELECT COUNT(*) FROM behavioral_zscore_history")
         count = cursor.fetchone()[0]
         conn.close()
         assert count >= 1
+
+    def test_normal_regime_suppresses_active_signal(self, tmp_cache_db):
+        """Producer must not publish active contrarian signals when RegimeGate is OFF."""
+        from src.signals.behavioral_sentiment import BehavioralSentimentSignal
+
+        sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
+        with patch.object(sig_gen, "_resolve_named_regime", return_value="NORMAL"):
+            snapshot = _make_snapshot(composite_score=-2.5, signal_type="extreme_fear", vix=16.0)
+            sig = sig_gen.get_signal(snapshot)
+        assert sig.regime_suppressed is True
+        assert sig.signal_type == "neutral"
+        snap = sig.to_signal_snapshot()
+        assert snap.is_active is False
 
     def test_signal_timestamp_set(self, tmp_cache_db):
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal
@@ -922,20 +978,20 @@ class TestZScoreEdgeCases:
 
 
 class TestRegimeCheckBoundaries:
-    """Tests for regime check at exact threshold boundaries"""
+    """Tests for regime check at exact threshold boundaries (VIX-only path)."""
 
     def test_elevated_exact_25_not_suppressed(self, tmp_cache_db):
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal, VIX_ELEVATED_THRESHOLD
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        suppressed, _ = sig_gen._regime_check(VIX_ELEVATED_THRESHOLD)
+        suppressed, _ = sig_gen._regime_check(VIX_ELEVATED_THRESHOLD, named_regime=None)
         assert suppressed is False
 
     def test_high_exact_30_suppressed(self, tmp_cache_db):
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal, VIX_HIGH_THRESHOLD
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        suppressed, reason = sig_gen._regime_check(VIX_HIGH_THRESHOLD)
+        suppressed, reason = sig_gen._regime_check(VIX_HIGH_THRESHOLD, named_regime=None)
         assert suppressed is True
         assert "high volatility" in reason.lower()
 
@@ -943,7 +999,7 @@ class TestRegimeCheckBoundaries:
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal, VIX_CRISIS_THRESHOLD
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        suppressed, reason = sig_gen._regime_check(VIX_CRISIS_THRESHOLD)
+        suppressed, reason = sig_gen._regime_check(VIX_CRISIS_THRESHOLD, named_regime=None)
         assert suppressed is True
         assert "crisis" in reason.lower()
 
@@ -951,21 +1007,21 @@ class TestRegimeCheckBoundaries:
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal, VIX_CRISIS_THRESHOLD
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        suppressed, _ = sig_gen._regime_check(VIX_CRISIS_THRESHOLD - 0.1)
+        suppressed, _ = sig_gen._regime_check(VIX_CRISIS_THRESHOLD - 0.1, named_regime=None)
         assert suppressed is True  # still >= VIX_HIGH_THRESHOLD
 
     def test_just_below_high_not_suppressed(self, tmp_cache_db):
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal, VIX_HIGH_THRESHOLD
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        suppressed, _ = sig_gen._regime_check(VIX_HIGH_THRESHOLD - 0.1)
+        suppressed, _ = sig_gen._regime_check(VIX_HIGH_THRESHOLD - 0.1, named_regime=None)
         assert suppressed is False
 
     def test_zero_vix_no_suppression(self, tmp_cache_db):
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal
 
         sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
-        suppressed, _ = sig_gen._regime_check(0.0)
+        suppressed, _ = sig_gen._regime_check(0.0, named_regime=None)
         assert suppressed is False
 
 
@@ -1358,3 +1414,20 @@ class TestConstants:
             assert 0.0 <= sig.confidence <= 1.0, (
                 f"confidence {sig.confidence} out of [0,1] for {sig_type}"
             )
+
+
+def test_live_payload_prefers_research_caveats_not_backtest_finding():
+    """Generator contract: live behavioral block must not ship free-text backtest_finding."""
+    import ast
+    from pathlib import Path
+
+    src = Path("src/dashboard/generator.py").read_text(encoding="utf-8")
+    # Static contract: research_caveats present; bare backtest_finding key removed from behavioral block
+    assert "research_caveats" in src
+    # The behavioral section must not assign backtest_finding= (other dashboards may still)
+    # Locate the behavioral_sentiment_data dict assignment region
+    idx = src.find("behavioral_sentiment_data = {")
+    assert idx > 0
+    chunk = src[idx : idx + 2500]
+    assert "backtest_finding" not in chunk
+    assert "research_caveats" in chunk

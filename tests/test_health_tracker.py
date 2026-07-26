@@ -825,6 +825,9 @@ class TestHealthScoreExtended:
             'source', 'timestamp', 'health_score', 'accuracy_30d',
             'accuracy_60d', 'accuracy_90d', 'decay_rate', 'predictions_count',
             'status', 'ic', 'ic_half_life_days',
+            # Batch BU multi-window honesty fields
+            'window_collapse_90_60', 'weight_scheme',
+            'weight_60d', 'weight_30d', 'weight_90d',
         }
         assert set(d.keys()) == expected_keys
 
@@ -964,6 +967,118 @@ class TestUpdateActualDirectionsExtended:
         assert isinstance(updated, int)
 
 
+class TestResolvePendingLabels:
+    """Production bounded label resolution via SPY forward returns."""
+
+    def _seed_prices(self, tracker, dates_closes):
+        import sqlite3
+        with sqlite3.connect(tracker.db_path) as conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS prices (symbol TEXT, date TEXT, close REAL)"
+            )
+            for d, c in dates_closes:
+                conn.execute(
+                    "INSERT INTO prices (symbol, date, close) VALUES (?, ?, ?)",
+                    ("SPY", d, c),
+                )
+            conn.commit()
+
+    def test_resolve_pending_labels_updates_predictions(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        # Prediction on 2026-07-10; next SPY bar 2026-07-11 up
+        pred = SignalPrediction(
+            timestamp="2026-07-10T15:00:00",
+            source="test_src",
+            signal_value=0.5,
+            confidence=0.8,
+            predicted_direction=1,
+            metadata={},
+        )
+        tracker.log_prediction(pred)
+        self._seed_prices(
+            tracker,
+            [("2026-07-10", 100.0), ("2026-07-11", 101.0)],
+        )
+
+        before = tracker.get_health_report()["summary"]["resolved_predictions"]
+        summary = tracker.resolve_pending_labels(max_days=10)
+        after = tracker.get_health_report()["summary"]["resolved_predictions"]
+
+        assert summary["predictions_updated"] >= 1
+        assert after > before
+
+    def test_resolve_pending_labels_respects_max_days(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        for i, d in enumerate(["2026-07-01", "2026-07-02", "2026-07-03"]):
+            tracker.log_prediction(
+                SignalPrediction(
+                    timestamp=f"{d}T12:00:00",
+                    source="s",
+                    signal_value=0.5,
+                    confidence=0.8,
+                    predicted_direction=1,
+                    metadata={},
+                )
+            )
+        # No prices → newest-first pass skips all; Batch DI dual-pass drains
+        # oldest-first with the same max_days bound (2 + 2 = 4 considered).
+        summary = tracker.resolve_pending_labels(max_days=2)
+        assert summary["max_days"] == 2
+        assert summary["dual_pass_oldest"] is True
+        assert summary["dates_considered"] == 4
+        assert len(summary["skipped_no_spy_return"]) >= 2
+
+    def test_spy_forward_return_anchors_weekend_to_prior_session(self, tmp_path):
+        """Weekend/holiday prediction dates must use last SPY bar ≤ date."""
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        # Fri 7/17 close 100 → Mon 7/20 close 102 (no bar Sat/Sun)
+        self._seed_prices(
+            tracker,
+            [("2026-07-17", 100.0), ("2026-07-20", 102.0)],
+        )
+        # Prediction on Saturday 7/18
+        fwd = tracker._spy_forward_return("2026-07-18")
+        assert fwd is not None
+        assert abs(fwd - 0.02) < 1e-9
+
+    def test_resolve_oldest_first_drains_tail(self, tmp_path):
+        db = tmp_path / "health.db"
+        tracker = SignalHealthTracker(db_path=db)
+        for d in ["2026-05-24", "2026-07-10", "2026-07-12"]:
+            tracker.log_prediction(
+                SignalPrediction(
+                    timestamp=f"{d}T12:00:00",
+                    source="s",
+                    signal_value=0.5,
+                    confidence=0.8,
+                    predicted_direction=1,
+                    metadata={},
+                )
+            )
+        self._seed_prices(
+            tracker,
+            [
+                ("2026-05-22", 90.0),
+                ("2026-05-26", 91.0),
+                ("2026-07-10", 100.0),
+                ("2026-07-11", 101.0),
+                ("2026-07-12", 102.0),
+                ("2026-07-13", 103.0),
+            ],
+        )
+        dates = tracker.list_unresolved_prediction_dates(limit=2, oldest_first=True)
+        assert dates[0] == "2026-05-24"
+        summary = tracker.resolve_pending_labels(max_days=1, oldest_first=True)
+        assert summary["oldest_first"] is True
+        assert summary["predictions_updated"] >= 1
+        # May 24 batch resolved
+        left = tracker.list_unresolved_prediction_dates(limit=10, oldest_first=True)
+        assert "2026-05-24" not in left
+
+
 class TestGetAdjustedWeightsExtended:
     """Extended get_adjusted_weights tests."""
 
@@ -1084,6 +1199,8 @@ class TestHealthScoreToDictEdgeCases:
             'source', 'timestamp', 'health_score', 'accuracy_30d',
             'accuracy_60d', 'accuracy_90d', 'decay_rate', 'predictions_count',
             'status', 'ic', 'ic_half_life_days',
+            'window_collapse_90_60', 'weight_scheme',
+            'weight_60d', 'weight_30d', 'weight_90d',
         }
         assert set(d.keys()) == expected
         assert d['ic'] is None
@@ -1252,15 +1369,26 @@ class TestHealthScoreBoundaries:
         assert result.status == "healthy"
 
     def test_just_below_healthy(self, tmp_path):
-        """Health just below 0.7 should be classified as degraded."""
+        """Batch CP: collapsed scheme healthy_min=0.55; full scheme uses 0.70.
+
+        Short seeds collapse 90d≡60d → collapsed_recency_40_60, so score 0.65
+        is healthy (not degraded). Assert scheme-aware classification.
+        """
         db = tmp_path / "health.db"
         tracker = SignalHealthTracker(db_path=db)
-        # 13/20 = 0.65 accuracy -> health = 0.65 < 0.7 -> degraded
+        # 13/20 = 0.65 accuracy
         self._seed_exact_accuracy(tracker, "jb_healthy", accuracy=0.65, count=20, days_ago_start=20)
         result = tracker.calculate_health_score("jb_healthy")
         assert result is not None
-        assert result.health_score < 0.7
-        assert result.status == "degraded"
+        assert result.health_score == pytest.approx(0.65, abs=0.02)
+        scheme = getattr(result, "weight_scheme", None) or ""
+        if str(scheme).startswith("collapsed") or "collapsed_recency" in str(scheme):
+            # HEALTH_THRESHOLD_HEALTHY_COLLAPSED = 0.55
+            assert result.status == "healthy"
+            assert result.health_score >= 0.55
+        else:
+            assert result.health_score < 0.7
+            assert result.status == "degraded"
 
     def test_exactly_degraded_boundary(self, tmp_path):
         """Health = 0.5 should be classified as degraded (>= 0.5)."""
@@ -1539,7 +1667,7 @@ class TestLogPredictionSimpleEdgeCases:
         assert rows[1] == (-1.0, -1)
 
     def test_exactly_at_threshold_boundaries(self, tmp_path):
-        """Signal values exactly at +/-0.2 thresholds set correct direction."""
+        """Batch DB: inclusive deadband 0.05 so clipped ±0.2 stay directional."""
         db = tmp_path / "health.db"
         tracker = SignalHealthTracker(db_path=db)
         tracker.log_prediction_simple(
@@ -1555,10 +1683,13 @@ class TestLogPredictionSimpleEdgeCases:
                 "WHERE source=? ORDER BY signal_value DESC",
                 ("thresh",),
             ).fetchall()
-        # >= 0.2 or > 0.2? Code uses: if signal_value > 0.2 -> 1
-        # 0.2 > 0.2 is False -> goes to elif < -0.2 -> 0.2 < -0.2 is False -> 0
-        assert rows[0] == (0.2, 0)
-        assert rows[1] == (-0.2, 0)
+        # direction_from_signal_value: v >= 0.05 → 1, v <= -0.05 → -1
+        assert rows[0] == (0.2, 1)
+        assert rows[1] == (-0.2, -1)
+        # Exactly at deadband edges
+        assert SignalHealthTracker.direction_from_signal_value(0.05) == 1
+        assert SignalHealthTracker.direction_from_signal_value(-0.05) == -1
+        assert SignalHealthTracker.direction_from_signal_value(0.0) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -1719,7 +1850,7 @@ class TestAllExports:
         expected = {
             'SignalSource', 'SignalHealthStatus', 'SignalPrediction',
             'HealthScore', 'DecayAlert', 'SignalHealthTracker',
-            'backfill_predictions',
+            'backfill_predictions', 'DEFAULT_RESOLVE_MAX_DAYS',
         }
         assert set(__all__) == expected
 
@@ -2354,6 +2485,8 @@ class TestDataclassFieldValidation:
             'source', 'timestamp', 'health_score', 'accuracy_30d',
             'accuracy_60d', 'accuracy_90d', 'decay_rate',
             'predictions_count', 'status', 'ic', 'ic_half_life_days',
+            'window_collapse_90_60', 'weight_scheme',
+            'weight_60d', 'weight_30d', 'weight_90d',
         }
         assert fields['health_score'].type is float
         assert fields['predictions_count'].type is int
@@ -3708,12 +3841,12 @@ class TestGetAdjustedWeightsMinMultiplier:
             adjusted_custom = tracker.get_adjusted_weights(
                 {"src_a": 1.0}, min_weight_multiplier=0.5,
             )
-        # Default min_mult=0.2: health_mult = max(0.2, 0.1) = 0.2
-        # Custom min_mult=0.5: health_mult = max(0.5, 0.1) = 0.5
-        assert abs(adjusted_custom["src_a"] - 1.0) < 0.01
-        assert abs(adjusted_default["src_a"] - 1.0) < 0.01
-        # Both normalize to 1.0 with only one source, so compare health multipler
-        # Only visible when there are multiple sources
+        # Batch BH: status=unhealthy hard-zeros arm mass (soft floor does not apply).
+        # Single-source portfolio still renormalizes empty → 0 weight for that key
+        # or drops mass; either way unhealthy is not soft-floored to min_mult.
+        assert adjusted_default.get("src_a", 0.0) == pytest.approx(0.0, abs=0.01)
+        assert adjusted_custom.get("src_a", 0.0) == pytest.approx(0.0, abs=0.01)
+        # Soft floor still matters for degraded (not unhealthy) multi-source cases.
         scores_two = {
             "src_a": HealthScore(
                 source="src_a", timestamp="2026-05-24",
@@ -3733,8 +3866,44 @@ class TestGetAdjustedWeightsMinMultiplier:
             adj_custom = tracker.get_adjusted_weights(
                 {"src_a": 0.5, "src_b": 0.5}, min_weight_multiplier=0.5,
             )
-        # With default: src_a adj = 0.5*0.2=0.1, src_b = 0.5*0.9=0.45
-        #   normalized: src_a = 0.1/0.55 ≈ 0.182, src_b = 0.45/0.55 ≈ 0.818
-        # With custom (0.5): src_a = 0.5*0.5=0.25, src_b = 0.5*0.9=0.45
-        #   normalized: src_a = 0.25/0.70 ≈ 0.357, src_b = 0.45/0.70 ≈ 0.643
-        assert adj_custom["src_a"] > adj_default["src_a"]
+        # Batch BH: unhealthy src_a is hard-zeroed; soft min_mult does not revive it.
+        # All residual mass on healthy src_b after renormalization.
+        assert adj_default.get("src_a", 0.0) == pytest.approx(0.0, abs=0.01)
+        assert adj_custom.get("src_a", 0.0) == pytest.approx(0.0, abs=0.01)
+        assert adj_default.get("src_b", 0.0) == pytest.approx(1.0, abs=0.01)
+        assert adj_custom.get("src_b", 0.0) == pytest.approx(1.0, abs=0.01)
+
+        # Soft floor still differentiates *degraded* arms (status not unhealthy).
+        scores_degraded = {
+            "src_a": HealthScore(
+                source="src_a", timestamp="2026-05-24",
+                health_score=0.10, accuracy_30d=0.10, accuracy_60d=0.10,
+                accuracy_90d=0.10, decay_rate=0.0, predictions_count=100,
+                status="degraded", ic=None,
+            ),
+            "src_b": HealthScore(
+                source="src_b", timestamp="2026-05-24",
+                health_score=0.90, accuracy_30d=0.90, accuracy_60d=0.90,
+                accuracy_90d=0.90, decay_rate=0.0, predictions_count=100,
+                status="healthy", ic=None,
+            ),
+        }
+        with patch.object(tracker, 'calculate_all_health_scores', return_value=scores_degraded):
+            deg_default = tracker.get_adjusted_weights({"src_a": 0.5, "src_b": 0.5})
+            deg_custom = tracker.get_adjusted_weights(
+                {"src_a": 0.5, "src_b": 0.5}, min_weight_multiplier=0.5,
+            )
+        # Higher soft floor → more residual mass on the weak degraded arm
+        assert deg_custom["src_a"] > deg_default["src_a"]
+
+
+def test_signal_health_summary_tags_pending_scope(tmp_path):
+    """pending_predictions on health is full-history rows, not IC staged window."""
+    from src.signals.health_tracker import SignalHealthTracker
+
+    tracker = SignalHealthTracker(db_path=tmp_path / "market.db")
+    report = tracker.get_health_report()
+    summary = report["summary"]
+    assert summary.get("pending_scope") == "historical_db_unlabeled_rows"
+    assert "pending_semantics" in summary
+    assert "staged" in summary["pending_semantics"].lower() or "IC" in summary["pending_semantics"]

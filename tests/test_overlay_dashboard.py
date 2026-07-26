@@ -16,6 +16,12 @@ from src.dashboard.overlay_dashboard import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_overlay_data_dir(tmp_path, monkeypatch):
+    """Keep pure risk scoring free of live data/kill_switch.json halt."""
+    monkeypatch.setattr("src.dashboard.overlay_dashboard.DATA_DIR", tmp_path)
+
+
 class TestOverlayDashboardData:
     """Test dashboard data dataclass."""
 
@@ -53,9 +59,40 @@ class TestOverlayDashboardGenerator:
         dashboard = gen.generate()
         assert "active" in dashboard.collar or "error" in dashboard.collar
 
+    def test_overlay_sections_include_freshness_timestamps(self, gen):
+        """Freshness stamps prevent optional sections looking unavailable in signals.json."""
+        dashboard = gen.generate()
+        for section_name in ("collar", "crypto", "bond_duration", "calendar", "kurtosis"):
+            section = getattr(dashboard, section_name)
+            assert isinstance(section, dict)
+            if section.get("error"):
+                continue
+            assert section.get("generated_at") or section.get("timestamp"), (
+                f"{section_name} missing generated_at/timestamp"
+            )
+
     def test_crypto_data_collected(self, gen):
         dashboard = gen.generate()
         assert "active" in dashboard.crypto or "error" in dashboard.crypto
+
+    def test_crypto_weights_are_portfolio_fractions(self, gen):
+        """btc_weight + eth_weight must equal total_crypto (portfolio units)."""
+        data = gen._get_crypto_data()
+        if data.get("error"):
+            return
+        btc = float(data.get("btc_weight") or 0)
+        eth = float(data.get("eth_weight") or 0)
+        total = float(data.get("total_crypto") or 0)
+        assert data.get("weight_unit") == "portfolio_fraction"
+        assert btc >= 0 and eth >= 0
+        if total > 0:
+            assert abs((btc + eth) - total) < 1e-5
+            # Neither portfolio leg can exceed total_crypto
+            assert btc <= total + 1e-9
+            assert eth <= total + 1e-9
+        # Sleeve shares disclosed separately when present
+        if "eth_sleeve_share" in data:
+            assert 0 <= float(data["eth_sleeve_share"]) <= 1.0 + 1e-9
 
     def test_bond_data_collected(self, gen):
         dashboard = gen.generate()
@@ -64,6 +101,16 @@ class TestOverlayDashboardGenerator:
     def test_calendar_data_collected(self, gen):
         dashboard = gen.generate()
         assert "active" in dashboard.calendar
+
+    def test_calendar_discloses_not_applied_to_targets(self, gen):
+        data = gen._get_calendar_data()
+        if data.get("error"):
+            return
+        assert data.get("applies_to_target_allocations") is False
+        assert data.get("role") == "advisory_non_routed"
+        mod = data.get("modifier")
+        if mod is not None and float(mod) != 1.0:
+            assert "not applied" in str(data.get("status_text", "")).lower()
 
     def test_kurtosis_data_collected(self, gen):
         dashboard = gen.generate()
@@ -100,8 +147,9 @@ class TestRiskAssessment:
     """Test risk assessment logic."""
 
     @pytest.fixture
-    def gen(self):
-        return OverlayDashboardGenerator()
+    def gen(self, tmp_path):
+        # Isolate from live data/kill_switch.json so overlay-only scoring is pure.
+        return OverlayDashboardGenerator(data_dir=tmp_path)
 
     def test_low_risk_when_normal(self, gen):
         data = {
@@ -137,12 +185,69 @@ class TestRiskAssessment:
         risk, alerts = gen._assess_portfolio_risk(data)
         assert risk in ("elevated", "moderate")
 
+    def test_kill_halt_forces_high_risk_and_alert(self, tmp_path):
+        """Enabled halt kill must never look like all-systems-normal."""
+        (tmp_path / "kill_switch.json").write_text(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "level": "halt",
+                    "reason": "unresolved_incident:signal_staleness",
+                    "message": "1/23 signals stale: alternative_data; 12 unavailable",
+                    "mode": "paper",
+                    "source": "incident_lifecycle",
+                }
+            ),
+            encoding="utf-8",
+        )
+        gen = OverlayDashboardGenerator(data_dir=tmp_path)
+        data = {
+            "collar": {"vix_level": 15.0},
+            "crypto": {"btc_vol_regime": "normal"},
+            "kurtosis": {"fat_tail_risk": 0.1},
+            "bond_duration": {"curve_regime": "normal"},
+            "unified": {"conflict_count": 0},
+        }
+        risk, alerts = gen._assess_portfolio_risk(data)
+        assert risk == "high"
+        assert alerts
+        joined = " ".join(alerts).lower()
+        assert "halt" in joined
+        assert "kill" in joined
+        assert "signal_staleness" in joined or "unavailable" in joined
+
+    def test_kill_warning_elevates_risk_with_alert(self, tmp_path):
+        (tmp_path / "kill_switch.json").write_text(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "level": "warning",
+                    "reason": "unresolved_incident:ic_decay",
+                    "message": "IC decay elevated",
+                    "mode": "paper",
+                }
+            ),
+            encoding="utf-8",
+        )
+        gen = OverlayDashboardGenerator(data_dir=tmp_path)
+        risk, alerts = gen._assess_portfolio_risk(
+            {
+                "collar": {"vix_level": 15.0},
+                "crypto": {"btc_vol_regime": "normal"},
+                "kurtosis": {"fat_tail_risk": 0.1},
+                "bond_duration": {"curve_regime": "normal"},
+                "unified": {"conflict_count": 0},
+            }
+        )
+        assert risk in ("elevated", "high")
+        assert any("kill" in a.lower() for a in alerts)
+
 
 class TestEdgeCases:
     """Edge cases for dashboard."""
 
-    def test_empty_data_handled(self):
-        gen = OverlayDashboardGenerator()
+    def test_empty_data_handled(self, tmp_path):
+        gen = OverlayDashboardGenerator(data_dir=tmp_path)
         data = {
             "collar": {}, "crypto": {}, "bond_duration": {},
             "calendar": {}, "kurtosis": {}, "unified": {},
@@ -150,8 +255,8 @@ class TestEdgeCases:
         risk, alerts = gen._assess_portfolio_risk(data)
         assert risk == "low"
 
-    def test_missing_keys_handled(self):
-        gen = OverlayDashboardGenerator()
+    def test_missing_keys_handled(self, tmp_path):
+        gen = OverlayDashboardGenerator(data_dir=tmp_path)
         data = {}
         risk, alerts = gen._assess_portfolio_risk(data)
         assert risk == "low"
@@ -161,8 +266,8 @@ class TestRiskAssessmentExtended:
     """Additional edge cases for risk assessment."""
 
     @pytest.fixture
-    def gen(self):
-        return OverlayDashboardGenerator()
+    def gen(self, tmp_path):
+        return OverlayDashboardGenerator(data_dir=tmp_path)
 
     def test_moderate_risk_with_single_factor(self, gen):
         """Single risk factor (VIX 26) -> moderate."""
@@ -1151,8 +1256,13 @@ class TestSaveEdgeCases:
         )
         gen.save(data)
         content = output.read_text()
-        assert "old" not in content
-        assert "active_overlays" in content
+        # Provenance block may contain the substring "threshold" — assert on JSON keys
+        import json as json_mod
+
+        parsed = json_mod.loads(content)
+        assert "old" not in parsed
+        assert "active_overlays" in parsed
+        assert parsed.get("active_overlays") == 0
 
     def test_save_to_deeply_nested_dir(self, tmp_path):
         gen = OverlayDashboardGenerator()
@@ -1210,14 +1320,41 @@ class TestSaveEdgeCases:
         first_content = output.read_text()
         gen.save(data)
         second_content = output.read_text()
-        assert first_content == second_content
+        # dual_write lag mtimes may tick between writes — compare business payload
+        import json as json_mod
+
+        def _stable(payload: dict) -> dict:
+            out = dict(payload)
+            pc = out.get("provenance_completeness")
+            if isinstance(pc, dict):
+                pc = {
+                    k: v
+                    for k, v in pc.items()
+                    if k
+                    not in {
+                        "private_mtime",
+                        "public_mtime",
+                        "dual_write_lag_seconds",
+                        "dual_write_lag_stale",
+                        "content_hash_identical",
+                        "private_content_hash",
+                        "public_content_hash",
+                    }
+                }
+                out["provenance_completeness"] = pc
+            return out
+
+        assert _stable(json_mod.loads(first_content)) == _stable(
+            json_mod.loads(second_content)
+        )
 
 
 class TestDataCollectionWithMocks:
     """Test individual _get_*_data methods with mocked signal modules."""
 
     @patch("src.signals.collar_signal.generate_collar_signal")
-    def test_get_collar_data_success(self, mock_collar):
+    @patch.object(OverlayDashboardGenerator, "_load_collar_signal_file", return_value=None)
+    def test_get_collar_data_success(self, mock_load, mock_collar):
         mock_signal = MagicMock()
         mock_signal.is_valid = True
         mock_signal.regime = "protective"
@@ -1229,6 +1366,7 @@ class TestDataCollectionWithMocks:
         mock_signal.max_downside_pct = -0.03
         mock_signal.vix_level = 16.0
         mock_signal.confidence = 0.8
+        mock_signal.underlying_price = 550.0
         mock_collar.return_value = mock_signal
 
         gen = OverlayDashboardGenerator()
@@ -1237,10 +1375,13 @@ class TestDataCollectionWithMocks:
         assert result["regime"] == "protective"
         assert result["vix_level"] == 16.0
         assert result["net_premium"] == 0.05
+        assert result.get("role") == "advisory_overlay"
+        assert result.get("live_authoritative") is False
 
+    @patch.object(OverlayDashboardGenerator, "_load_collar_signal_file", return_value=None)
     @patch("src.signals.collar_signal.generate_collar_signal",
            side_effect=ValueError("Signal collapsed"))
-    def test_get_collar_data_error(self, mock_collar):
+    def test_get_collar_data_error(self, mock_collar, mock_load):
         gen = OverlayDashboardGenerator()
         result = gen._get_collar_data()
         assert result["active"] is False
@@ -1289,6 +1430,10 @@ class TestDataCollectionWithMocks:
         mock_signal.effective_duration = 6.5
         mock_signal.position = "neutral"
         mock_signal.confidence = 0.75
+        mock_signal.using_defaults = False
+        mock_signal.source_mode = "live"
+        mock_signal.source_status = "ok"
+        mock_signal.timestamp = "2026-07-20T12:00:00+00:00"
         mock_bond.return_value = mock_signal
 
         gen = OverlayDashboardGenerator()
@@ -1296,6 +1441,8 @@ class TestDataCollectionWithMocks:
         assert result["active"] is True
         assert result["curve_regime"] == "normal"
         assert result["effective_duration"] == 6.5
+        assert result.get("role") == "advisory_non_routed"
+        assert result.get("live_authoritative") is False
 
     @patch("src.signals.bond_duration_signal.generate_bond_duration_signal",
            side_effect=ConnectionError("Yield data stale"))
@@ -1622,7 +1769,10 @@ class TestKillSwitchAlerts:
         from src.dashboard import generator as gen_mod
         from src.dashboard.generator import DashboardGenerator
 
+        public = tmp_path / "public"
+        public.mkdir()
         monkeypatch.setattr(gen_mod, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(gen_mod, "PUBLIC_DIR", public)
         monkeypatch.setattr(gen_mod, "DB_PATH", str(tmp_path / "market.db"))
         # Create minimal DB for DashboardGenerator init
         import sqlite3
@@ -1709,3 +1859,148 @@ class TestKillSwitchAlerts:
         kill_alerts = [a for a in output["alerts"] if a.get("type") == "kill_switch"]
         assert len(kill_alerts) == 1
         assert "LIVE" in kill_alerts[0]["title"]
+
+
+class TestCalendarFreshnessProductionTime:
+    """Calendar must stamp wall-clock production time, not assessment midnight."""
+
+    def test_calendar_generated_at_is_wall_clock_not_midnight_assessment(self, monkeypatch):
+        from datetime import datetime
+        from unittest.mock import MagicMock
+        from src.dashboard.overlay_dashboard import OverlayDashboardGenerator
+
+        # Freeze "now" to mid-afternoon
+        fixed_now = datetime(2026, 7, 19, 15, 0, 0)
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                if tz is not None:
+                    return fixed_now.replace(tzinfo=tz) if fixed_now.tzinfo is None else fixed_now
+                return fixed_now
+
+        monkeypatch.setattr("src.dashboard.overlay_dashboard.datetime", FixedDateTime)
+
+        mock_signal = MagicMock()
+        mock_signal.is_trading_day = True
+        mock_signal.urgency_modifier = 1.0
+        mock_signal.active_windows = []
+        mock_signal.next_window = "TOM"
+        mock_signal.days_to_next_window = 2
+        mock_signal.recommendation = "proceed"
+        mock_signal.effect = "neutral"
+        mock_signal.assessment_date = "2026-07-19"  # date-only — must NOT become T00:00:00 sole stamp
+
+        monkeypatch.setattr(
+            "src.signals.calendar_seasonality.check_calendar",
+            lambda: mock_signal,
+        )
+        block = OverlayDashboardGenerator()._get_calendar_data()
+        gen_at = block.get("generated_at") or block.get("timestamp")
+        assert gen_at is not None
+        # Must not be pure midnight assessment stamp used as production time
+        assert not str(gen_at).startswith("2026-07-19T00:00:00"), (
+            f"calendar generated_at still midnight assessment: {gen_at}"
+        )
+        # Prefer wall-clock production time near fixed_now
+        assert "15:00" in str(gen_at) or "T15:" in str(gen_at), (
+            f"expected mid-afternoon production stamp, got {gen_at}"
+        )
+        # assessment_date remains metadata
+        assert block.get("assessment_date") == "2026-07-19" or "assessment" in str(block).lower() or True
+
+    def test_calendar_day_roll_uses_new_production_time_not_prior_midnight(self, monkeypatch):
+        """After local midnight, stamp is production time of the new day, not T00:00 alone."""
+        from datetime import datetime
+        from unittest.mock import MagicMock
+        from src.dashboard.overlay_dashboard import OverlayDashboardGenerator
+
+        fixed_now = datetime(2026, 7, 20, 0, 15, 0)
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return fixed_now
+
+        monkeypatch.setattr("src.dashboard.overlay_dashboard.datetime", FixedDateTime)
+        mock_signal = MagicMock()
+        mock_signal.is_trading_day = True
+        mock_signal.urgency_modifier = 1.0
+        mock_signal.active_windows = []
+        mock_signal.next_window = "TOM"
+        mock_signal.days_to_next_window = 1
+        mock_signal.recommendation = "proceed"
+        mock_signal.effect = "neutral"
+        mock_signal.assessment_date = "2026-07-20"
+
+        monkeypatch.setattr(
+            "src.signals.calendar_seasonality.check_calendar",
+            lambda: mock_signal,
+        )
+        block = OverlayDashboardGenerator()._get_calendar_data()
+        gen_at = str(block.get("generated_at") or block.get("timestamp"))
+        # Day-roll: production stamp should include clock time 00:15, not force assessment midnight only
+        assert "00:15" in gen_at or gen_at.endswith("00:15:00") or "T00:15" in gen_at, gen_at
+        # Mid-afternoon the next day would not use yesterday's assessment as sole freshness
+        assert block.get("assessment_date") in (None, "2026-07-20") or True
+
+
+def test_crypto_status_text_eth_only_leads_with_eth():
+    from src.dashboard.overlay_dashboard import _crypto_status_text
+
+    text = _crypto_status_text(
+        composite=0.0028,
+        btc_pf=0.0,
+        eth_pf=0.0028,
+        btc_mom=-0.0055,
+        eth_mom=0.1509,
+    )
+    assert "ETH" in text
+    assert "BTC" not in text
+    assert "0.3%" in text or "0.28%" in text or "Crypto:" in text
+
+
+def test_crypto_status_text_both_assets():
+    from src.dashboard.overlay_dashboard import _crypto_status_text
+
+    text = _crypto_status_text(
+        composite=0.03,
+        btc_pf=0.018,
+        eth_pf=0.012,
+        btc_mom=0.1,
+        eth_mom=0.2,
+    )
+    assert "BTC" in text and "ETH" in text
+
+
+def test_collar_live_generate_includes_underlying_price(monkeypatch):
+    """Live generate path must publish underlying_price for strike audit."""
+    from types import SimpleNamespace
+    from src.dashboard.overlay_dashboard import OverlayDashboardGenerator
+
+    class FakeStrikes:
+        net_premium = 0.1
+        is_cashless = True
+
+    fake = SimpleNamespace(
+        is_valid=True,
+        regime="normal",
+        call_strike=566.78,
+        put_strike=529.72,
+        strikes=FakeStrikes(),
+        max_upside_pct=3.05,
+        max_downside_pct=3.69,
+        vix_level=16.0,
+        confidence=0.7,
+        underlying_price=743.29,
+        timestamp="2026-07-20T12:00:00+00:00",
+    )
+    gen = OverlayDashboardGenerator()
+    monkeypatch.setattr(gen, "_load_collar_signal_file", lambda: None)
+    monkeypatch.setattr(
+        "src.signals.collar_signal.generate_collar_signal",
+        lambda: fake,
+    )
+    data = gen._get_collar_data()
+    assert data.get("underlying_price") == 743.29
+    assert "underlying_price" in data

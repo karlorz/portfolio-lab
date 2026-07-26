@@ -48,6 +48,26 @@ class VIXTermStructure:
             filtered_data["third_month"] = filtered_data["second_month"]
         if filtered_data.get("days_to_expiry_front") is None:
             filtered_data["days_to_expiry_front"] = 0
+
+        # market.db / VIX3M proxy rows often omit derived contango fields —
+        # compute them so cache load does not skip every bar (empty self.data
+        # forced convexity_harvest status=unavailable and sticky kill).
+        vix_spot = float(filtered_data["vix_spot"])
+        second_month = float(filtered_data["second_month"])
+        third_month = float(filtered_data["third_month"])
+        if filtered_data.get("contango_1m_2m") is None:
+            if front_month:
+                filtered_data["contango_1m_2m"] = (second_month / front_month - 1.0) * 100.0
+            else:
+                filtered_data["contango_1m_2m"] = 0.0
+        if filtered_data.get("contango_spot_1m") is None:
+            if vix_spot:
+                filtered_data["contango_spot_1m"] = (front_month / vix_spot - 1.0) * 100.0
+            else:
+                filtered_data["contango_spot_1m"] = 0.0
+        if filtered_data.get("is_contango") is None:
+            filtered_data["is_contango"] = float(filtered_data["contango_spot_1m"]) >= 0.0
+
         for field_name in (
             "vix_spot",
             "front_month",
@@ -58,6 +78,7 @@ class VIXTermStructure:
         ):
             filtered_data[field_name] = float(filtered_data[field_name])
         filtered_data["days_to_expiry_front"] = int(filtered_data["days_to_expiry_front"])
+        filtered_data["is_contango"] = bool(filtered_data["is_contango"])
         return cls(**filtered_data)
 
 
@@ -96,8 +117,15 @@ class VIXDataManager:
                 loaded = {}
                 skipped = []
                 for date, ts in raw_data.items():
+                    # Batch BV: skip provenance meta / non-date keys
+                    if str(date).startswith("_") or str(date) in {"meta", "schema"}:
+                        continue
                     if not isinstance(ts, dict):
                         skipped.append((date, "record is not an object"))
+                        continue
+                    # Date-like keys only (YYYY-MM-DD)
+                    if len(str(date)) < 10 or str(date)[4:5] != "-":
+                        skipped.append((date, "key is not a calendar date"))
                         continue
                     try:
                         loaded[date] = VIXTermStructure.from_dict(ts)

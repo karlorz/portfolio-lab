@@ -309,8 +309,12 @@ class TestMultiSpeedMomentumBacktester:
 
     # ── Signal Computation (fallback path) ──
 
-    def test_compute_signal_insufficient_data(self):
-        """With less than 260 price entries, signal should be 0.0."""
+    def test_compute_signal_insufficient_data(self, monkeypatch):
+        """Fallback path: <260 bars → 0.0 (force engine off; primary may hit disk)."""
+        monkeypatch.setattr(
+            "src.backtest.multi_speed_momentum_backtest._MULTI_SPEED_AVAILABLE",
+            False,
+        )
         bt = MultiSpeedMomentumBacktester()
         bt.prices_raw = {
             "SPY": [{"d": f"2020-01-{d:02d}", "p": 100.0} for d in range(1, 10)],

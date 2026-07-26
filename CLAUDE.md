@@ -10,7 +10,12 @@ Keep this file short: it is always injected into agent context. **Do not re-expa
 - **Champion baseline**: SPY/GLD/TLT **46/38/16** (base-grid Sharpe 0.79; overlay research ~0.95). Challenger 44/36/20 is defensive only.
 - **Paths**: import from `src.paths` (`DATA_DIR`, `MARKET_DB`, `WIKI_DIR`, …). Metrics: `src/backtest/metrics.py`.
 - **Cron dual-mode**: when adding/changing jobs, update `Makefile` + `crontab` + `src/cron_compat.py` together; run `make verify-cron-sync`.
-- **Tests**: `make test` (safe, ML off). `make test-ml` only when user asks for ML.
+- **Tests (tiered — do not default to full suite)**:
+  - **Default agent gate**: `make test-gate` (= `make test-fast`, &lt;2m, ensemble/signal). Prefer this mid-session.
+  - **Touched files**: `PORTFOLIO_LAB_ENABLE_ML=0 uv run pytest <paths> -q --tb=short`.
+  - **Generator / dual-write edits**: also `make test-generator`. Integration paths: `make test-integration`.
+  - **Full `make test`**: merge/pre-release only (~30–45m). Never stack a second full suite; never poll with a 10m Bash timeout. Wait with `scripts/wait-test-exit.sh` (60m max) or skip if `pgrep` empty + stale `data/test_last_exit.json`.
+  - **`make test-unit`**: still ~15k tests (not a fast gate). `make test-ml` only when user asks for ML.
 - **Frontend/data**: `bun run dev` / `build` / `fetch-data`. Python: `uv sync`, `uv run python …`.
 - **Gotchas**: no `bc`; no bare `~/.hermes/` in app code (read `data/cron_status.json`); skillwiki pages need `started`/`updated`/`completed` frontmatter when validating.
 

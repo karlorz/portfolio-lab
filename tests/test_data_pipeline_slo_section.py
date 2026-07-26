@@ -28,7 +28,9 @@ def test_build_data_pipeline_slo_section_success(tmp_path: Path) -> None:
                 with patch("src.monitor.data_pipeline_slo.load_signal_staleness", return_value={}) as ss:
                     with patch("src.monitor.data_pipeline_slo.build_data_pipeline_slo", return_value=expected) as build:
                         out = build_data_pipeline_slo_section(
-                            health_data={"data_freshness": {}}, public_dir=tmp_path
+                            health_data={"data_freshness": {}},
+                            public_dir=tmp_path,
+                            data_dir=tmp_path,
                         )
     assert out is expected
     rebal.assert_called_once_with(tmp_path)
@@ -40,6 +42,7 @@ def test_build_data_pipeline_slo_section_success(tmp_path: Path) -> None:
     _, kwargs = build.call_args
     assert kwargs["alpaca_feed_entitlement"] is None
     assert kwargs["market_data_consistency"] is None
+    assert kwargs["data_dir"] == tmp_path
 
 
 def test_build_data_pipeline_slo_section_failure(tmp_path: Path) -> None:
@@ -140,7 +143,8 @@ def test_build_data_pipeline_slo_section_accepts_current_overall_status_shape(tm
     )
 
     data_quality = out["dimensions"]["data_quality"]
-    assert data_quality["status"] == "warning"
+    # split-like-only overall_status=warn is advisory (not a pipeline fail).
+    assert data_quality["status"] == "ok"
     assert data_quality["quality_status"] == "warn"
     assert data_quality["generated_at"] == "2026-07-06T11:05:20.437Z"
     assert data_quality["issue_counts"]["split_like_returns"] == 4

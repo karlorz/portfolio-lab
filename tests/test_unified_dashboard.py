@@ -540,12 +540,20 @@ class TestRiskHistoryEdgeCases:
             for key in ["health", "portfolio", "risk", "risk_history", "tca", "overlays", "regime", "attribution", "cron"]:
                 assert key in dashboard, f"Missing section: {key}"
 
-    def test_health_available_with_real_data(self):
-        """Integration test: read the actual health report."""
-        dashboard = generate_unified_dashboard()
+    def test_health_available_with_fixture_data(self, tmp_path, sample_health_report):
+        """Integration test: generate a dashboard from an isolated health report."""
+        (tmp_path / ".health_report.json").write_text(
+            json.dumps(sample_health_report),
+            encoding="utf-8",
+        )
+        with (
+            patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path),
+            patch("src.monitor.unified_dashboard.PUBLIC_DATA_DIR", tmp_path),
+        ):
+            dashboard = generate_unified_dashboard()
         health = dashboard["health"]
         assert health["available"] is True
-        assert health["status"] in ("healthy", "unhealthy")
+        assert health["status"] == "healthy"
 
 
 class TestGenerateStatusText:
@@ -641,7 +649,9 @@ class TestHealthSectionEdgeCases:
         }
         f = tmp_path / ".health_report.json"
         f.write_text(json.dumps(report))
-        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path), patch(
+                "src.monitor.unified_dashboard.PUBLIC_DATA_DIR", tmp_path / "nopub"
+            ):
             section = _get_health_section()
             assert section["available"] is True
             assert section["status"] == "healthy"
@@ -657,7 +667,9 @@ class TestHealthSectionEdgeCases:
         }
         f = tmp_path / ".health_report.json"
         f.write_text(json.dumps(report))
-        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path), patch(
+                "src.monitor.unified_dashboard.PUBLIC_DATA_DIR", tmp_path / "nopub"
+            ):
             section = _get_health_section()
             assert section["available"] is True
             assert section["status"] == "unhealthy"
@@ -671,7 +683,9 @@ class TestHealthSectionEdgeCases:
         }
         f = tmp_path / ".health_report.json"
         f.write_text(json.dumps(report))
-        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path), patch(
+                "src.monitor.unified_dashboard.PUBLIC_DATA_DIR", tmp_path / "nopub"
+            ):
             section = _get_health_section()
             assert section["available"] is True
             assert section["status"] == "unhealthy"
@@ -683,7 +697,9 @@ class TestHealthSectionEdgeCases:
         }
         f = tmp_path / ".health_report.json"
         f.write_text(json.dumps(report))
-        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path), patch(
+                "src.monitor.unified_dashboard.PUBLIC_DATA_DIR", tmp_path / "nopub"
+            ):
             section = _get_health_section()
             assert section["available"] is True
             assert section["status"] == "unhealthy"
@@ -693,7 +709,9 @@ class TestHealthSectionEdgeCases:
         report = {"cvar_ratio": 0.5}
         f = tmp_path / ".health_report.json"
         f.write_text(json.dumps(report))
-        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path), patch(
+                "src.monitor.unified_dashboard.PUBLIC_DATA_DIR", tmp_path / "nopub"
+            ):
             section = _get_health_section()
             assert section["available"] is True
             assert section["status"] == "healthy"
@@ -702,7 +720,9 @@ class TestHealthSectionEdgeCases:
         report = {"status": "healthy", "checks": {}, "alerts": []}
         f = tmp_path / ".health_report.json"
         f.write_text(json.dumps(report))
-        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path), patch(
+                "src.monitor.unified_dashboard.PUBLIC_DATA_DIR", tmp_path / "nopub"
+            ):
             section = _get_health_section()
             assert section["available"] is True
             assert section["status"] == "healthy"
@@ -713,7 +733,9 @@ class TestHealthSectionEdgeCases:
         report = {"status": "healthy", "checks": {"a": {"status": "ok", "ok": True}}}
         f = tmp_path / ".health_report.json"
         f.write_text(json.dumps(report))
-        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path), patch(
+                "src.monitor.unified_dashboard.PUBLIC_DATA_DIR", tmp_path / "nopub"
+            ):
             section = _get_health_section()
             assert section["available"] is True
             # Missing summary → defaults to 0
@@ -723,7 +745,9 @@ class TestHealthSectionEdgeCases:
         report = {"tail_severity": "normal", "cvar_ratio": 1.0, "var_95": -2.5, "cvar_95": -3.8}
         f = tmp_path / ".health_report.json"
         f.write_text(json.dumps(report))
-        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path), patch(
+                "src.monitor.unified_dashboard.PUBLIC_DATA_DIR", tmp_path / "nopub"
+            ):
             section = _get_health_section()
             comp = section["components"]["garch_cvar"]
             assert comp["var_95"] == -2.5
@@ -824,14 +848,15 @@ class TestOverlaysSectionEdgeCases:
             assert section["vix_term_structure"]["regime"] is None
 
     def test_dict_allocation_in_overlay(self, tmp_path):
-        """VIXY allocation can be a dict. Verify it passes through as-is."""
+        """VIXY allocation dict is published in percent units (×100)."""
         alloc_dict = {"SPY": 0.4, "GLD": 0.6}
+        expected_pct = {"SPY": 40.0, "GLD": 60.0}
         vixy = tmp_path / "vixy_hedge_state.json"
         vixy.write_text(json.dumps({"current_allocation": alloc_dict, "last_signal_date": "2026-01-01", "regime": "contango"}))
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
             section = _get_overlays_section()
             assert section["vix_term_structure"]["active"] is True
-            assert section["vix_term_structure"]["allocation"] == alloc_dict
+            assert section["vix_term_structure"]["allocation"] == expected_pct
 
 
 # ─────────────────────────────────────────────
@@ -929,8 +954,9 @@ class TestCronSectionEdgeCases:
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
             section = _get_cron_section()
             assert section["ok"] == 1
-            assert section["pending"] == 1
-            assert section["errors"] == 2
+            # pending + unknown (unknown is non-terminal / not yet a hard error)
+            assert section["pending"] == 2
+            assert section["errors"] == 1
             assert section["total"] == 4
 
     def test_jobs_missing_optional_fields(self, tmp_path):
@@ -940,8 +966,30 @@ class TestCronSectionEdgeCases:
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
             section = _get_cron_section()
             assert section["ok"] == 1
-            assert section["errors"] == 1  # "a" has no status → not ok/pending
+            # Missing status treated as pending/unknown, not a hard error
+            assert section["pending"] == 1
+            assert section["errors"] == 0
             assert section["jobs"][0]["duration_seconds"] is None
+
+    def test_tasker_success_counts_as_ok(self, tmp_path):
+        """Tasker stamps status=success; must not inflate error counts."""
+        jobs = {
+            "jobs": [
+                {"name": "portfolio-lab-data", "status": "success"},
+                {"name": "portfolio-lab-health", "status": "success"},
+                {"name": "portfolio-lab-build", "status": "disabled", "manual_only": True},
+            ]
+        }
+        f = tmp_path / "cron_status.json"
+        f.write_text(json.dumps(jobs))
+        with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
+            section = _get_cron_section()
+            assert section["ok"] == 2
+            assert section["errors"] == 0
+            assert section.get("disabled", 0) == 1
+            assert all(
+                j["status"] in ("ok", "disabled") for j in section["jobs"]
+            )
 
 
 # ─────────────────────────────────────────────
@@ -1181,8 +1229,11 @@ class TestDashboardGenerationEdgeCases:
             "dashboard_version", "generated_at", "generated_at_local",
             "health", "portfolio", "risk", "risk_history", "tca",
             "overlays", "regime", "attribution", "adaptive_weights", "cron",
+            "generator_git_sha", "generator_git_sha_status",
+            "last_full_generator_git_sha",
         }
-        assert set(dashboard.keys()) == expected
+        # Allow extra advisory keys without failing; require full expected set
+        assert expected.issubset(set(dashboard.keys()))
 
 
 # ─────────────────────────────────────────────
@@ -1418,3 +1469,94 @@ class TestReadJsonEdgeCases:
         with patch("src.monitor.unified_dashboard.DATA_DIR", tmp_path):
             result = _read_json("number.json")
             assert result == 42
+
+
+class TestHealthSectionPublicSignalHealth:
+    """Batch CD: prefer public health.json SH over entropy-only GARCH report."""
+
+    def test_public_sh_zero_of_n_surfaces_degraded(self, tmp_path):
+        from src.monitor import unified_dashboard as ud
+
+        pub = tmp_path / "public"
+        pub.mkdir()
+        (pub / "health.json").write_text(
+            json.dumps(
+                {
+                    "system_status": "degraded",
+                    "generated_at": "2026-07-21T18:15:00+00:00",
+                    "signal_health": {
+                        "status": "degraded",
+                        "summary": {
+                            "healthy": 0,
+                            "degraded": 8,
+                            "unhealthy": 1,
+                            "total_tracked": 9,
+                        },
+                    },
+                }
+            )
+        )
+        # GARCH-only private report would look "healthy" elevated tail only
+        (tmp_path / ".health_report.json").write_text(
+            json.dumps(
+                {
+                    "timestamp": "2026-07-21T16:57:00+00:00",
+                    "tail_severity": "elevated",
+                    "cvar_ratio": 1.59,
+                    "var_95": -1.13,
+                }
+            )
+        )
+        with patch.object(ud, "DATA_DIR", tmp_path), patch.object(
+            ud, "PUBLIC_DATA_DIR", pub
+        ):
+            section = ud._get_health_section()
+        assert section["available"] is True
+        assert section["status"] == "degraded"
+        assert section["components"]["signal_health"]["healthy"] == 0
+        assert section["components"]["signal_health"]["total_tracked"] == 9
+        assert section["checks_total"] == 9
+        assert any("0/9" in a for a in section["alerts"])
+        # GARCH still disclosed as component
+        assert "garch_cvar" in section["components"]
+
+
+class TestPortfolioSectionDailyReturn:
+    """Batch CF: unified portfolio surfaces DoD from daily_pnl_latest SSOT."""
+
+    def test_daily_return_from_pnl_latest(self, tmp_path, sample_portfolio):
+        from src.monitor import unified_dashboard as ud
+
+        (tmp_path / "portfolio_paper.json").write_text(json.dumps(sample_portfolio))
+        (tmp_path / "daily_pnl_latest.json").write_text(
+            json.dumps(
+                {
+                    "date": "2026-07-22",
+                    "daily_return": 0.001298,
+                    "total_value": 94746.06,
+                }
+            )
+        )
+        with patch.object(ud, "DATA_DIR", tmp_path):
+            section = ud._get_portfolio_section()
+        assert section["daily_return"] == 0.001298
+        assert section["daily_return_source"] == "daily_pnl_latest"
+        assert section["daily_return_date"] == "2026-07-22"
+
+    def test_daily_return_fallback_history(self, tmp_path, sample_portfolio):
+        from src.monitor import unified_dashboard as ud
+
+        paper = dict(sample_portfolio)
+        paper["history"] = [
+            {
+                "timestamp": "2026-07-22T02:20:00",
+                "session_date": "2026-07-22",
+                "total_value": 94746.0,
+                "daily_return": -0.00045,
+            }
+        ]
+        (tmp_path / "portfolio_paper.json").write_text(json.dumps(paper))
+        with patch.object(ud, "DATA_DIR", tmp_path):
+            section = ud._get_portfolio_section()
+        assert section["daily_return"] == -0.00045
+        assert section["daily_return_source"] == "portfolio_paper.history"

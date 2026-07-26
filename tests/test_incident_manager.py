@@ -123,6 +123,7 @@ def test_malformed_incident_event_is_skipped_when_replaying(tmp_path):
 
 
 def test_unresolved_alerts_escalate_kill_switch_by_cycle_threshold(tmp_path):
+    """HALT-severity incidents still escalate warning → restrict → halt by count."""
     manager = IncidentManager(
         log_path=tmp_path / "incidents.jsonl",
         summary_path=tmp_path / "incidents.json",
@@ -132,17 +133,18 @@ def test_unresolved_alerts_escalate_kill_switch_by_cycle_threshold(tmp_path):
 
     first = manager.record_alert(
         channel="signal_staleness",
-        level="warn",
+        level="halt",
         message="signals stale",
         now=datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc),
     )
     assert first is not None
     assert first.alert_count == 1
+    assert first.severity == "p0"
     assert not (tmp_path / "kill_switch.json").exists()
 
     second = manager.record_alert(
         channel="signal_staleness",
-        level="warn",
+        level="halt",
         message="signals still stale",
         now=datetime(2026, 7, 1, 0, 5, tzinfo=timezone.utc),
     )
@@ -159,7 +161,7 @@ def test_unresolved_alerts_escalate_kill_switch_by_cycle_threshold(tmp_path):
     for minute in (10, 15):
         fourth = manager.record_alert(
             channel="signal_staleness",
-            level="warn",
+            level="halt",
             message="signals still stale",
             now=datetime(2026, 7, 1, 0, minute, tzinfo=timezone.utc),
         )
@@ -185,6 +187,74 @@ def test_unresolved_alerts_escalate_kill_switch_by_cycle_threshold(tmp_path):
     assert halt["position_reduction"] == 1.0
     assert halt["incident_alert_count"] == 6
     assert halt["reason"] == "unresolved_incident:signal_staleness"
+
+
+def test_sustained_warn_never_escalates_kill_past_warning(tmp_path):
+    """p2 WARN must not ratchet to restrict/halt solely via alert_count."""
+    manager = IncidentManager(
+        log_path=tmp_path / "incidents.jsonl",
+        summary_path=tmp_path / "incidents.json",
+        kill_switch_path=tmp_path / "kill_switch.json",
+        escalation_cycles=2,
+    )
+
+    last = None
+    for minute in range(0, 40, 2):  # 20 updates → alert_count 20
+        last = manager.record_alert(
+            channel="signal_staleness",
+            level="warn",
+            message="optional signals unavailable",
+            details={
+                "stale_signals": [],
+                "unavailable_signals": ["optional_a", "optional_b"],
+                "policy": "unavailable_signals_nonempty_blocks_all_fresh_pass",
+            },
+            now=datetime(2026, 7, 1, 0, minute, tzinfo=timezone.utc),
+        )
+
+    assert last is not None
+    assert last.severity == "p2"
+    assert last.alert_count == 20
+    kill = json.loads((tmp_path / "kill_switch.json").read_text())
+    assert kill["level"] == "warning"
+    assert kill["position_reduction"] == 0.25
+    assert kill["incident_alert_count"] == 20
+    assert kill["level"] not in {"restrict", "halt"}
+
+
+def test_warn_then_halt_allows_full_kill_escalation(tmp_path):
+    """Severity upgrade mid-incident unlocks restrict/halt from current count."""
+    manager = IncidentManager(
+        log_path=tmp_path / "incidents.jsonl",
+        summary_path=tmp_path / "incidents.json",
+        kill_switch_path=tmp_path / "kill_switch.json",
+        escalation_cycles=2,
+    )
+
+    for minute in (0, 2, 4, 6):
+        manager.record_alert(
+            channel="signal_staleness",
+            level="warn",
+            message="optional unavailable",
+            now=datetime(2026, 7, 1, 0, minute, tzinfo=timezone.utc),
+        )
+    warn_kill = json.loads((tmp_path / "kill_switch.json").read_text())
+    assert warn_kill["level"] == "warning"
+    assert warn_kill["incident_alert_count"] == 4
+
+    halt = manager.record_alert(
+        channel="signal_staleness",
+        level="halt",
+        message="required signals stale",
+        now=datetime(2026, 7, 1, 0, 8, tzinfo=timezone.utc),
+    )
+    assert halt is not None
+    assert halt.severity == "p0"
+    assert halt.alert_count == 5
+    kill = json.loads((tmp_path / "kill_switch.json").read_text())
+    # count 5 with cycles=2 → stage 2 (restrict) once severity is p0
+    assert kill["level"] == "restrict"
+    assert kill["incident_alert_count"] == 5
 
 
 def test_incident_escalation_does_not_downgrade_existing_stronger_kill_switch(tmp_path):
@@ -400,3 +470,41 @@ def test_disabled_incident_escalation_does_not_write_kill_switch(tmp_path):
 
     assert incident is not None
     assert not (tmp_path / "kill_switch.json").exists()
+
+
+def test_write_summary_dual_writes_public_incidents(tmp_path, monkeypatch):
+    """PASS resolve must dual-write PUBLIC_DATA_DIR so operators never see split-brain."""
+    from src.monitor import incident_manager as im
+
+    public = tmp_path / "www"
+    public.mkdir()
+    monkeypatch.setattr(im, "PUBLIC_DATA_DIR", public)
+
+    private = tmp_path / "private"
+    private.mkdir()
+    manager = im.IncidentManager(
+        log_path=private / "incidents.jsonl",
+        summary_path=private / "incidents.json",
+        kill_switch_path=private / "kill_switch.json",
+        escalation_enabled=False,
+    )
+    manager.record_alert(
+        channel="signal_staleness",
+        level="warn",
+        message="13/23 signals unavailable",
+        now=datetime(2026, 7, 20, 17, 40, tzinfo=timezone.utc),
+    )
+    assert (private / "incidents.json").exists()
+    assert (public / "incidents.json").exists()
+    assert json.loads((public / "incidents.json").read_text())["open_count"] == 1
+
+    manager.record_alert(
+        channel="signal_staleness",
+        level="pass",
+        message="All required signals fresh",
+        now=datetime(2026, 7, 20, 17, 50, tzinfo=timezone.utc),
+    )
+    priv = json.loads((private / "incidents.json").read_text())
+    pub = json.loads((public / "incidents.json").read_text())
+    assert priv["open_count"] == 0
+    assert pub["open_count"] == 0

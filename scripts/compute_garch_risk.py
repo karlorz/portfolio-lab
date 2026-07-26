@@ -14,13 +14,13 @@ import sys
 import sqlite3
 import numpy as np
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.paths import MARKET_DB, DATA_DIR, BASE_ALLOCATION
+from src.paths import MARKET_DB, DATA_DIR, PUBLIC_DATA_DIR, BASE_ALLOCATION
 from src.monitor.garch_cvar import calculate_garch_cvar, ARCH_AVAILABLE
 
 
@@ -89,7 +89,7 @@ def main():
     parser.add_argument("--days", type=int, default=504, help="Days of price data to load")
     args = parser.parse_args()
 
-    print(f"GARCH-CVaR Risk Computation — {datetime.now().isoformat()}")
+    print(f"GARCH-CVaR Risk Computation — {datetime.now(timezone.utc).isoformat()}")
     print(f"  arch library: {'available' if ARCH_AVAILABLE else 'NOT AVAILABLE (will use historical fallback)'}")
 
     # Load returns
@@ -100,11 +100,35 @@ def main():
         print("  ERROR: Insufficient data (need at least 63 days)")
         sys.exit(1)
 
-    # Compute GARCH-CVaR
+    # Policy drawdown limit (PAPER_CONFIG default) — never publish as measured DD.
+    policy_max_dd = -0.15
+    try:
+        from src.strategy.evaluator import PAPER_CONFIG
+
+        policy_max_dd = -abs(float(PAPER_CONFIG.get("max_drawdown_pct", 0.15)))
+    except Exception:  # noqa: BLE001 — keep hard default
+        policy_max_dd = -0.15
+
+    # Measured peak-to-trough from the same return series fed to GARCH
+    measured_max_dd = None
+    measured_current_dd = None
+    if len(returns) >= 2:
+        nav = 1.0
+        peak = 1.0
+        max_dd = 0.0
+        for r in returns:
+            nav *= 1.0 + float(r)
+            peak = max(peak, nav)
+            if peak > 0:
+                max_dd = min(max_dd, (nav - peak) / peak)
+        measured_max_dd = float(max_dd)
+        measured_current_dd = float((nav - peak) / peak) if peak > 0 else 0.0
+
+    # Compute GARCH-CVaR (policy limit is a risk-engine input, not measured NAV DD)
     metrics = calculate_garch_cvar(
         returns=returns,
-        current_drawdown=0.0,
-        max_drawdown=-0.15,
+        current_drawdown=measured_current_dd if measured_current_dd is not None else 0.0,
+        max_drawdown=policy_max_dd,
         window=args.window,
     )
 
@@ -116,7 +140,36 @@ def main():
     import math
     report = asdict(metrics)
 
-    # Add portfolio entropy metrics
+    # Rename policy input out of the measured-metric slot (Batch AC / Z parity)
+    policy_limit_pct = round(abs(policy_max_dd) * 100, 2)
+    if "max_drawdown" in report:
+        report["max_drawdown_limit"] = report.pop("max_drawdown")
+        report["max_drawdown_limit_pct"] = policy_limit_pct
+    else:
+        report["max_drawdown_limit"] = round(policy_max_dd * 100, 2)
+        report["max_drawdown_limit_pct"] = policy_limit_pct
+    report["measured_max_drawdown"] = (
+        round(measured_max_dd * 100, 2) if measured_max_dd is not None else None
+    )
+    report["measured_max_drawdown_pct"] = (
+        round(abs(measured_max_dd) * 100, 2) if measured_max_dd is not None else None
+    )
+    report["measured_current_drawdown"] = (
+        round(measured_current_dd * 100, 2) if measured_current_dd is not None else None
+    )
+    report["measured_current_drawdown_pct"] = (
+        round(abs(measured_current_dd) * 100, 2)
+        if measured_current_dd is not None
+        else None
+    )
+    if measured_current_dd is not None:
+        report["current_drawdown"] = round(measured_current_dd * 100, 2)
+    report["drawdown_field_semantics"] = (
+        "max_drawdown_limit=policy input to GARCH-CVaR; "
+        "measured_max_drawdown=NAV peak-to-trough on portfolio returns series"
+    )
+
+    # Add portfolio entropy metrics (include max_possible for H_max honesty)
     weights = list(BASE_ALLOCATION.values())
     n = len(weights)
     shannon = -sum(w * math.log(w) for w in weights if w > 0)
@@ -133,6 +186,7 @@ def main():
             "metrics": {
                 "shannon_entropy": round(shannon, 4),
                 "effective_n": round(effective_n, 2),
+                "max_possible": round(h_max, 4) if n > 1 else None,
                 "normalized_score": round(normalized_score, 1),
                 "hhi_index": round(hhi, 4),
             },
@@ -146,10 +200,301 @@ def main():
         report["status"] = "unhealthy"
     else:
         report["status"] = "healthy"
-    report["summary"] = {"passed": 1, "total_checks": 1}
+    report["summary"] = {
+        "passed": 1,
+        "total_checks": 1,
+        "inventory_role": "garch_risk",
+        "inventory_note": (
+            "Not an ops multi-day health inventory; graduation multi-day "
+            "SSOT is data/.circuit_breaker.json consecutive_ok"
+        ),
+    }
+    report["schema_version"] = report.get("schema_version") or "garch-health-report/v1"
 
     with open(report_path, 'w') as f:
         json.dump(report, f, indent=2, default=str)
+
+    # Dual-write risk_metrics.json for unified / cvar_metrics consumers
+    # (field names match historical risk_metrics schema).
+    risk_metrics_path = DATA_DIR / "risk_metrics.json"
+    garch_active = bool(report.get("filter_active", False))
+    risk_payload = {
+        "timestamp": report.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+        "var_95_daily": report.get("var_95"),
+        "cvar_95_daily": report.get("cvar_95"),
+        "cvar_ratio": report.get("cvar_ratio"),
+        "tail_severity": report.get("tail_severity"),
+        # Prefer measured NAV DD; keep limit as separate field
+        "max_drawdown": report.get("measured_max_drawdown"),
+        "max_drawdown_limit": report.get("max_drawdown_limit"),
+        "max_drawdown_limit_pct": report.get("max_drawdown_limit_pct"),
+        "measured_max_drawdown": report.get("measured_max_drawdown"),
+        "measured_max_drawdown_pct": report.get("measured_max_drawdown_pct"),
+        "measured_current_drawdown": report.get("measured_current_drawdown"),
+        "current_drawdown": report.get("current_drawdown"),
+        "drawdown_field_semantics": report.get("drawdown_field_semantics"),
+        "volatility_annual": report.get("volatility_annual"),
+        "garch_filtered": bool(report.get("garch_filtered", report.get("filter_active", False))),
+        "garch_active": garch_active,
+        "garch_params": {
+            "omega": report.get("garch_omega"),
+            "alpha": report.get("garch_alpha"),
+            "beta": report.get("garch_beta"),
+            "persistence": report.get("garch_persistence"),
+        }
+        if report.get("filter_active")
+        else None,
+        "conditional_volatility_current": report.get("conditional_volatility_current"),
+        "source": "compute_garch_risk",
+    }
+
+    # Conformal coverage cross-check (same honesty contract as dashboard load):
+    # coverage_pass=false → demote garch_active (still publish diagnostics).
+    coverage_diagnostics = None
+    try:
+        from src.monitor.conformal_risk import (
+            conformal_coverage_diagnostics,
+            conformal_var,
+        )
+
+        if len(returns) >= 22:
+            cvar_thresh = float(conformal_var(returns, alpha=0.05))
+            var_thresholds = np.full_like(returns, cvar_thresh, dtype=float)
+            coverage_diagnostics = conformal_coverage_diagnostics(
+                returns,
+                var_thresholds,
+                alpha=0.05,
+                rolling_window=252,
+            )
+            risk_payload["coverage_diagnostics"] = coverage_diagnostics
+            if (
+                isinstance(coverage_diagnostics, dict)
+                and coverage_diagnostics.get("coverage_pass") is False
+                and garch_active
+            ):
+                risk_payload["garch_active"] = False
+                risk_payload["runtime_role"] = "advisory_degraded"
+                risk_payload["garch_active_reason"] = (
+                    "coverage_pass=false (Kupiec/coverage diagnostics failed); "
+                    "GARCH remains advisory only"
+                )
+                print("  GARCH demoted: coverage_pass=false → advisory_degraded")
+    except Exception as exc:  # noqa: BLE001 — never block dual-write on conformal
+        print(f"  WARNING: conformal coverage check skipped: {exc}")
+
+    with open(risk_metrics_path, "w") as f:
+        json.dump(risk_payload, f, indent=2, default=str)
+
+    # Mirror demote + measured honesty onto private .health_report so unified
+    # consumers that prefer health_report do not re-promote garch_active.
+    # Always stamp garch_active (bool) — never leave null when filter_active is set.
+    report["garch_active"] = bool(risk_payload.get("garch_active", False))
+    for key in (
+        "garch_active_reason",
+        "runtime_role",
+        "coverage_diagnostics",
+        "measured_max_drawdown",
+        "measured_max_drawdown_pct",
+        "measured_current_drawdown",
+        "measured_current_drawdown_pct",
+        "max_drawdown_limit",
+        "max_drawdown_limit_pct",
+        "drawdown_field_semantics",
+        "current_drawdown",
+    ):
+        if key in risk_payload and risk_payload[key] is not None:
+            report[key] = risk_payload[key]
+    # When coverage demote did not fire, still label filter state explicitly
+    if "garch_active_reason" not in report and report["garch_active"]:
+        report["garch_active_reason"] = "filter_active=true and coverage_pass not failed"
+    elif "garch_active_reason" not in report and not report["garch_active"]:
+        report["garch_active_reason"] = (
+            risk_payload.get("garch_active_reason")
+            or "garch_active=false (filter inactive or coverage demote)"
+        )
+    # Residual honesty (Batch BG): coverage demote must revise top-level status.
+    # Tail/cvar status is set earlier; never leave status=healthy when the model
+    # was demoted to advisory_degraded (Kupiec/coverage fail). Basel traffic-light
+    # yellow/red → not healthy for primary use.
+    coverage = report.get("coverage_diagnostics")
+    coverage_failed = (
+        isinstance(coverage, dict) and coverage.get("coverage_pass") is False
+    )
+    demoted = (
+        report.get("runtime_role") == "advisory_degraded"
+        or (report.get("garch_active") is False and coverage_failed)
+    )
+    if demoted:
+        prior_status = str(report.get("status") or "healthy").lower()
+        if prior_status in {"healthy", "ok", "good", ""}:
+            report["status"] = "degraded"
+        # Keep unhealthy if tail severity already elevated it
+        report["summary"] = {
+            "passed": 0 if report["status"] != "healthy" else 1,
+            "total_checks": 1,
+            "inventory_role": "garch_risk",
+            "inventory_note": (
+                "Not an ops multi-day health inventory; graduation multi-day "
+                "SSOT is data/.circuit_breaker.json consecutive_ok"
+            ),
+            "runtime_role": report.get("runtime_role") or "advisory_degraded",
+            "garch_active": bool(report.get("garch_active")),
+            "status_reason": report.get("garch_active_reason")
+            or "coverage demote or inactive filter",
+        }
+        report["schema_version"] = (
+            report.get("schema_version") or "garch-health-report/v1"
+        )
+        risk_payload["status"] = report["status"]
+        if report.get("runtime_role"):
+            risk_payload["runtime_role"] = report["runtime_role"]
+    # Ensure measured NAV DD is primary; policy stays in limit fields only
+    if report.get("measured_max_drawdown") is not None:
+        report.pop("max_drawdown", None)
+    with open(report_path, "w") as f:
+        json.dump(report, f, indent=2, default=str)
+    # Re-stamp private risk_metrics after status honesty so dual SSOT matches.
+    with open(risk_metrics_path, "w") as f:
+        json.dump(risk_payload, f, indent=2, default=str)
+
+    # Public dual-write: garch_cvar.json + risk_metrics.json for WWW / index.
+    # Batch EH: risk_metrics was private-only (investigate residual). Mirror
+    # risk_metrics as a content twin; garch_cvar remains the enriched WWW panel.
+    # Post-sync provenance only rewrites matching twin pairs (never overwrite
+    # private risk_metrics with garch_cvar body — different schema).
+    # Deep-research: measure lag after both writes complete; content-hash
+    # equality clears sticky dual_write_lag_stale.
+    try:
+        public_root = Path(PUBLIC_DATA_DIR)
+        public_root.mkdir(parents=True, exist_ok=True)
+        public_garch_path = public_root / "garch_cvar.json"
+        public_risk_path = public_root / "risk_metrics.json"
+        public_payload = {
+            **risk_payload,
+            "schema_version": "garch-cvar/v1",
+            "private_health_report": str(report_path),
+            "drawdown_field_semantics": report.get(
+                "drawdown_field_semantics",
+                "max_drawdown_limit=policy; measured_max_drawdown=NAV series",
+            ),
+        }
+        try:
+            from src.dashboard.generator import (
+                _stamp_generator_git_sha,
+                _attach_dual_write_provenance,
+            )
+
+            public_payload = _stamp_generator_git_sha(public_payload)
+            # Intent stamp before public write (paths differ; hash may clear lag)
+            public_payload = _attach_dual_write_provenance(
+                public_payload,
+                private_path=risk_metrics_path,
+                public_path=public_garch_path,
+                dual_write_attempted=True,
+                dual_write_ok=True,
+                paths_identical=False,
+                note=(
+                    "garch_cvar public panel; private SSOT is risk_metrics.json "
+                    "(Batch EH). Lag/hash recomputed after write when possible."
+                ),
+            )
+        except Exception:  # noqa: BLE001 — never block dual-write
+            pass
+        # Atomic write: temp + rename (same FS) so readers never see partial JSON
+        tmp_path = public_garch_path.with_suffix(".json.tmp")
+        with open(tmp_path, "w") as f:
+            json.dump(public_payload, f, indent=2, default=str)
+        tmp_path.replace(public_garch_path)
+        # Re-attach provenance post-write on public only (do not rewrite private)
+        try:
+            from src.dashboard.generator import _attach_dual_write_provenance
+
+            public_payload = _attach_dual_write_provenance(
+                public_payload,
+                private_path=risk_metrics_path,
+                public_path=public_garch_path,
+                dual_write_attempted=True,
+                dual_write_ok=True,
+                paths_identical=False,
+                note=(
+                    "post_write garch_cvar provenance (Batch EH): public mtime "
+                    "sampled after replace; private risk_metrics SSOT unchanged"
+                ),
+            )
+            tmp_path = public_garch_path.with_suffix(".json.tmp")
+            with open(tmp_path, "w") as f:
+                json.dump(public_payload, f, indent=2, default=str)
+            tmp_path.replace(public_garch_path)
+        except Exception:  # noqa: BLE001
+            pass
+        print(f"  Public GARCH: {public_garch_path}")
+
+        # risk_metrics public twin — same schema as private SSOT
+        risk_public_body = dict(risk_payload)
+        try:
+            from src.dashboard.generator import (
+                _stamp_generator_git_sha,
+                finalize_dual_write_provenance_after_sync,
+            )
+
+            risk_public_body = _stamp_generator_git_sha(risk_public_body)
+            tmp_risk = public_risk_path.with_suffix(".json.tmp")
+            with open(tmp_risk, "w") as f:
+                json.dump(risk_public_body, f, indent=2, default=str)
+            tmp_risk.replace(public_risk_path)
+            # Post-sync twin: rewrite private+public with honest lag/hash
+            finalize_dual_write_provenance_after_sync(
+                risk_public_body,
+                private_path=risk_metrics_path,
+                public_path=public_risk_path,
+                dual_write_ok=True,
+                note=(
+                    "post_sync risk_metrics dual-write (Batch EH): private DATA_DIR "
+                    "SSOT mirrored to PUBLIC_DATA_DIR for index/WWW consumers"
+                ),
+                write_json=True,
+            )
+            print(f"  Public risk_metrics: {public_risk_path}")
+        except Exception as risk_exc:  # noqa: BLE001
+            # Fallback: best-effort public copy without provenance rewrite
+            try:
+                tmp_risk = public_risk_path.with_suffix(".json.tmp")
+                with open(tmp_risk, "w") as f:
+                    json.dump(risk_public_body, f, indent=2, default=str)
+                tmp_risk.replace(public_risk_path)
+                print(f"  Public risk_metrics: {public_risk_path} (no post-sync stamp)")
+            except OSError:
+                print(f"  WARNING: public risk_metrics dual-write failed: {risk_exc}")
+    except OSError as exc:
+        print(f"  WARNING: public garch_cvar/risk_metrics dual-write failed: {exc}")
+
+    # Append sparse history so operators can see GARCH job cadence (keep last 720).
+    history_path = DATA_DIR / "risk_metrics_history.json"
+    try:
+        history = []
+        if history_path.exists():
+            try:
+                loaded = json.loads(history_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, list):
+                    history = loaded
+            except (json.JSONDecodeError, OSError):
+                history = []
+        history.append(
+            {
+                "timestamp": risk_payload["timestamp"],
+                "var_95": risk_payload["var_95_daily"],
+                "cvar_95": risk_payload["cvar_95_daily"],
+                "cvar_ratio": risk_payload["cvar_ratio"],
+                "tail_severity": risk_payload["tail_severity"],
+                "garch_active": risk_payload["garch_active"],
+                "source": "compute_garch_risk",
+            }
+        )
+        history = history[-720:]
+        with open(history_path, "w") as f:
+            json.dump(history, f, indent=2, default=str)
+    except OSError as exc:
+        print(f"  WARNING: failed to append risk_metrics_history: {exc}")
 
     print(f"  VaR 95%:      {metrics.var_95:.2f}%")
     print(f"  CVaR 95%:     {metrics.cvar_95:.2f}%")
@@ -160,6 +505,7 @@ def main():
         print(f"  Persistence:  {metrics.garch_persistence:.4f}")
         print(f"  Cond Vol:     {metrics.conditional_volatility_current:.2f}%")
     print(f"  Report saved: {report_path}")
+    print(f"  Risk metrics: {risk_metrics_path}")
 
 
 if __name__ == "__main__":

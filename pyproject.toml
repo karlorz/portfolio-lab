@@ -62,12 +62,22 @@ no-build-isolation-package = []
 
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"
+# Keep basetemp small on lab hosts: full suite used to leave multi-10k-inode
+# trees under /tmp/pytest-of-root, which tripped hermes pytest-watchdog cleanup
+# alerts every hour. Prefer failed-only retention of a single prior run.
+tmp_path_retention_policy = "failed"
+tmp_path_retention_count = 1
 markers = [
     "heavy: tests requiring heavy ML libraries (torch, xgboost) — require PORTFOLIO_LAB_ENABLE_ML=1",
     "ml_extract: safe-mode tests for extracted pure ML-adjacent kernels — require PORTFOLIO_LAB_ENABLE_ML=0 and --include-ml-extract",
+    "unit: fast hermetic unit tests (optional tag; path-based make test-unit is primary S18 gate)",
+    "integration: multi-module / host-touching flows (path list in Makefile TEST_INTEGRATION_FILES)",
     "db: tests that require SQLite database access",
     "network: tests that make real HTTP requests",
     "slow: tests that take >2 seconds to complete",
+    "allow_live_signal_health: opt out of generator autouse isolation for SignalHealthTracker / ensemble vote",
+    "allow_live_data: opt out of evaluator DATA_DIR isolation (conftest)",
+    "allow_live_public_data: opt out of PUBLIC_DATA_DIR dual-write isolation (conftest H16; dangerous on lab hosts)",
 ]
 testpaths = ["tests"]
 pythonpath = ["."]
@@ -89,5 +99,6 @@ select = ["T201"]  # flake8-print: detect print() calls
 "src/regime/transformer_regime.py" = ["T201"]  # ML-gated CLI output
 "src/research/gold_tlt_correlation.py" = ["T201"]  # research CLI summary
 "src/research/regime_walk_forward.py" = ["T201"]  # research CLI summary
+"src/monitor/prod_ideas.py" = ["T201"]  # tasker/CLI operator summary
 "src/strategy/hedge_selector.py" = ["T201"]  # CLI status/selection output
 "tests/**" = ["T201"]        # Test output — print() is expected

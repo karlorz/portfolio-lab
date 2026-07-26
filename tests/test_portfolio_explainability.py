@@ -95,3 +95,32 @@ def test_limits_to_top_five_signals():
 
     assert len(result["latest_decision"]["signals"]) == 5
     assert len(result["top_sources_today"]) == 5
+
+
+def test_explainability_neutral_action_not_bullish_direction():
+    from src.dashboard.explainability import build_portfolio_explainability
+
+    payload = build_portfolio_explainability(
+        {
+            "regime": "normal",
+            "action": "neutral",
+            "confidence": 0.5,
+            "weighted_consensus": 0.0521,
+            "agreement_ratio": 0.9429,
+            "num_sources": 6,
+            "n_eff": 2.82,
+            "weight_entropy": 0.99,
+            "reasoning": "",
+            "source_breakdown": [
+                {"source": "a", "value": 0.1, "weight": 0.2, "confidence": 0.8},
+                {"source": "b", "value": 0.05, "weight": 0.2, "confidence": 0.7},
+            ],
+        }
+    )
+    latest = payload["latest_decision"]
+    assert latest["action"] == "neutral"
+    assert latest["consensus_direction"] == "neutral"
+    assert latest["raw_consensus_direction"] == "bullish"
+    assert latest["reasoning"]
+    assert "deadband" in latest["reasoning"].lower() or "neutral" in latest["reasoning"].lower()
+    assert payload["decision_quality"].get("deadband") is True

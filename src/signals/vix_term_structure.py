@@ -8,12 +8,14 @@ Based on research: VIX term structure slope predicts equity returns better than 
 
 import json
 import logging
+import sqlite3
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from enum import Enum
-from typing import Optional, Dict, List, Tuple
+from pathlib import Path
+from typing import Optional, Dict, List, Tuple, Any
 
-from src.paths import DATA_DIR, SIGNALS_DIR
+from src.paths import DATA_DIR, SIGNALS_DIR, MARKET_DB, sqlite_connect
 from src.backtest.metrics import save_results_json
 import numpy as np
 
@@ -109,6 +111,11 @@ class VIXTermStructureSignal:
                 "vix_spot": self.vix_spot,
                 "slope_signal": self.slope_signal,
                 "roll_yield_signal": self.roll_yield_signal,
+                **(
+                    getattr(self, "_freshness", None)
+                    if isinstance(getattr(self, "_freshness", None), dict)
+                    else {}
+                ),
             },
         )
 
@@ -316,93 +323,406 @@ class VIXTermStructureSignalGenerator:
     Main signal generator for VIX term structure tactical overlay.
     
     Fetches data, calculates signals, and generates portfolio recommendations.
+    Prefers market.db levels when the JSON history file is stale.
     """
     
     DATA_DIR = DATA_DIR
     VIX_DATA_PATH = DATA_DIR / 'vix_term_structure.json'
     OUTPUT_PATH = SIGNALS_DIR / 'vix_term_structure_signal.json'
+    # If file latest date lags market.db by more than this many days, prefer DB.
+    FILE_STALE_DAYS = 3
     
-    def __init__(self):
+    def __init__(self, data_dir: Optional[Path] = None, db_path: Optional[Path] = None):
+        self.DATA_DIR = Path(data_dir) if data_dir is not None else DATA_DIR
+        self.VIX_DATA_PATH = self.DATA_DIR / 'vix_term_structure.json'
+        self.OUTPUT_PATH = SIGNALS_DIR / 'vix_term_structure_signal.json'
+        self.db_path = Path(db_path) if db_path is not None else MARKET_DB
         self.calculator = VIXTermStructureCalculator()
+        self._last_levels_meta: Dict[str, Any] = {}
         self._ensure_dirs()
     
     def _ensure_dirs(self):
         """Ensure output directories exist."""
         self.DATA_DIR.mkdir(parents=True, exist_ok=True)
         SIGNALS_DIR.mkdir(parents=True, exist_ok=True)
-    
+
+    @staticmethod
+    def _parse_iso_date(value: str) -> Optional[date]:
+        try:
+            return datetime.strptime(value[:10], "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            return None
+
     def load_vix_data(self) -> Dict:
-        """Load VIX term structure data from storage."""
+        """Load VIX term structure data from storage.
+
+        Batch BV: strip ``_meta`` / non-date keys so provenance never sorts
+        as the latest calendar day (``max(keys)`` would prefer ``_meta``).
+        """
         if not self.VIX_DATA_PATH.exists():
             logger.warning("VIX data file not found: %s", self.VIX_DATA_PATH)
             return {}
         
         try:
             with open(self.VIX_DATA_PATH, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+            if not isinstance(data, dict):
+                return {}
+            return {
+                k: v
+                for k, v in data.items()
+                if isinstance(v, dict)
+                and not str(k).startswith("_")
+                and str(k) not in {"meta", "schema"}
+                and len(str(k)) >= 10
+                and str(k)[4:5] == "-"
+            }
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.error("Error loading VIX data: %s", e)
             return {}
+
+    def _file_latest_as_of(self, data: Dict) -> Optional[str]:
+        if not data:
+            return None
+        try:
+            dates = [
+                k
+                for k in data.keys()
+                if not str(k).startswith("_")
+                and len(str(k)) >= 10
+                and str(k)[4:5] == "-"
+            ]
+            return max(dates) if dates else None
+        except ValueError:
+            return None
+
+    def fetch_levels_from_market_db(self) -> Optional[Dict[str, Any]]:
+        """Read latest ^VIX / ^VIX3M closes from market.db."""
+        if not self.db_path.exists():
+            return None
+        try:
+            with sqlite_connect(self.db_path) as conn:
+                def latest(symbol: str) -> Optional[Tuple[str, float]]:
+                    row = conn.execute(
+                        "SELECT date, close FROM prices WHERE symbol = ? "
+                        "ORDER BY date DESC LIMIT 1",
+                        (symbol,),
+                    ).fetchone()
+                    if not row or row[0] is None or row[1] is None:
+                        return None
+                    return str(row[0])[:10], float(row[1])
+
+                vix_row = latest("^VIX") or latest("VIX")
+                vix3m_row = latest("^VIX3M") or latest("VIX3M")
+                if vix_row is None and vix3m_row is None:
+                    return None
+
+                # Prefer the freshest available as_of across symbols
+                as_of_candidates = [r[0] for r in (vix_row, vix3m_row) if r]
+                as_of = max(as_of_candidates)
+                vix_spot = vix_row[1] if vix_row else None
+                vix3m = vix3m_row[1] if vix3m_row else None
+                # If spot missing but VIX3M present, leave spot None for caller fallback
+                return {
+                    "date": as_of,
+                    "vix_spot": vix_spot,
+                    "front_month": vix3m,
+                    "third_month": None,
+                    "source": "market.db",
+                    "as_of": as_of,
+                }
+        except (OSError, sqlite3.Error, TypeError, ValueError) as e:
+            logger.warning("market.db VIX fetch failed: %s", e)
+            return None
+
+    def _file_is_stale_vs_db(
+        self,
+        file_as_of: Optional[str],
+        db_as_of: Optional[str],
+    ) -> bool:
+        if db_as_of is None:
+            return False
+        if file_as_of is None:
+            return True
+        f_d = self._parse_iso_date(file_as_of)
+        d_d = self._parse_iso_date(db_as_of)
+        if f_d is None or d_d is None:
+            return d_d is not None and f_d is None
+        return (d_d - f_d).days > self.FILE_STALE_DAYS
+
+    def resolve_current_levels(
+        self,
+        historical_data: Dict,
+        requested_date: Optional[str] = None,
+        persist_refresh: bool = True,
+    ) -> Tuple[Optional[str], Optional[Dict], Dict[str, Any]]:
+        """Choose levels from JSON history and/or market.db by freshness.
+
+        Returns (as_of_date, levels_dict, meta).
+
+        Explicit ``requested_date`` present in the JSON history always uses that
+        row (backtests / historical generation). Freshness vs market.db applies
+        only to live/latest resolution (``requested_date is None``).
+        """
+        file_as_of = self._file_latest_as_of(historical_data)
+        db_levels = self.fetch_levels_from_market_db()
+        db_as_of = db_levels.get("as_of") if db_levels else None
+        prefer_db = self._file_is_stale_vs_db(file_as_of, db_as_of)
+
+        # Explicit historical date: always prefer file row when present
+        if requested_date is not None and requested_date in historical_data:
+            row = dict(historical_data[requested_date])
+            meta = {
+                "source": "vix_term_structure.json",
+                "as_of": requested_date,
+                "file_as_of": file_as_of,
+                "db_as_of": db_as_of,
+            }
+            return requested_date, row, meta
+
+        # Explicit date missing from file: fall through to live/latest resolution
+        # (legacy generate_signal behavior when date not in history).
+
+        if prefer_db and db_levels is not None:
+            # Merge file last spot if DB lacks ^VIX
+            file_last = historical_data.get(file_as_of, {}) if file_as_of else {}
+            vix_spot = db_levels.get("vix_spot")
+            if vix_spot is None:
+                vix_spot = file_last.get("vix_spot")
+            # Require a real spot for a usable slope; do not invent 0.0
+            if vix_spot is None or float(vix_spot) <= 0:
+                return None, None, {
+                    "source": "none",
+                    "as_of": None,
+                    "file_as_of": file_as_of,
+                    "db_as_of": db_as_of,
+                    "reason": "market.db missing usable ^VIX spot",
+                }
+            levels = {
+                "date": db_levels["as_of"],
+                "vix_spot": vix_spot,
+                "front_month": db_levels.get("front_month"),
+                "third_month": db_levels.get("third_month") or file_last.get("third_month"),
+                "source": "market.db",
+                "as_of": db_levels["as_of"],
+            }
+            meta = {
+                "source": "market.db",
+                "as_of": db_levels["as_of"],
+                "file_as_of": file_as_of,
+                "db_as_of": db_as_of,
+                "refreshed_from_db": True,
+            }
+            if persist_refresh:
+                self._persist_file_row(historical_data, levels)
+            return db_levels["as_of"], levels, meta
+
+        # File path (fresh enough or no DB) — live/latest
+        if file_as_of and file_as_of in historical_data:
+            row = dict(historical_data[file_as_of])
+            meta = {
+                "source": "vix_term_structure.json",
+                "as_of": file_as_of,
+                "file_as_of": file_as_of,
+                "db_as_of": db_as_of,
+            }
+            return file_as_of, row, meta
+
+        if db_levels is not None:
+            meta = {
+                "source": "market.db",
+                "as_of": db_levels["as_of"],
+                "file_as_of": file_as_of,
+                "db_as_of": db_as_of,
+            }
+            return db_levels["as_of"], db_levels, meta
+
+        return None, None, {
+            "source": "none",
+            "as_of": None,
+            "file_as_of": file_as_of,
+            "db_as_of": db_as_of,
+        }
+
+    def _persist_file_row(self, historical_data: Dict, levels: Dict) -> None:
+        """Write/refresh a JSON history row so the file does not stay frozen.
+
+        Only writes under ``self.DATA_DIR`` (never invents paths like
+        ``/nonexistent/...`` from tests).
+        """
+        as_of = levels.get("as_of") or levels.get("date")
+        if not as_of:
+            return
+        try:
+            target = Path(self.VIX_DATA_PATH)
+            data_root = Path(self.DATA_DIR).resolve()
+            # Allow write only when target lives under DATA_DIR
+            try:
+                target.resolve().relative_to(data_root)
+            except (ValueError, OSError):
+                # If path does not exist yet, check parent prefix without resolve
+                if data_root not in target.parents and target.parent != data_root:
+                    logger.debug(
+                        "Skip VIX file refresh outside DATA_DIR: %s (DATA_DIR=%s)",
+                        target,
+                        data_root,
+                    )
+                    return
+        except (OSError, RuntimeError):
+            return
+
+        # Persist with derived contango fields so VIXDataManager / from_dict
+        # never sees sparse market.db proxy rows (Batch BE sticky-kill class).
+        raw_row = {
+            "date": as_of,
+            "vix_spot": levels.get("vix_spot"),
+            "front_month": levels.get("front_month"),
+            "third_month": levels.get("third_month"),
+            "source": levels.get("source", "market.db"),
+            "as_of": as_of,
+            "refreshed_at": datetime.now().isoformat(),
+        }
+        try:
+            from src.data.vix_futures import VIXTermStructure as _VTS
+
+            # Hydrate required dataclass fields (second_month, contango_*, is_contango)
+            if raw_row.get("vix_spot") is not None and raw_row.get("front_month") is not None:
+                ts = _VTS.from_dict(raw_row)
+                row = ts.to_dict()
+                row["source"] = raw_row.get("source", "market.db")
+                row["as_of"] = as_of
+                row["refreshed_at"] = raw_row["refreshed_at"]
+            else:
+                row = raw_row
+        except (TypeError, ValueError, KeyError) as e:
+            logger.debug("VIX row hydrate skipped: %s", e)
+            row = raw_row
+        try:
+            # Batch CM: never write the meta-stripped in-memory view from
+            # load_vix_data() — that drops _meta and can orphan the full history
+            # when the caller only held a partial dict. Re-read disk, merge row.
+            on_disk: Dict = {}
+            if self.VIX_DATA_PATH.exists():
+                try:
+                    raw = json.loads(self.VIX_DATA_PATH.read_text(encoding="utf-8"))
+                    if isinstance(raw, dict):
+                        on_disk = raw
+                except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                    on_disk = {}
+            # Prefer full disk history; fall back to caller's date rows only
+            if not on_disk:
+                on_disk = {
+                    k: v
+                    for k, v in historical_data.items()
+                    if isinstance(v, dict) and not str(k).startswith("_")
+                }
+            on_disk[as_of] = row
+            # Keep/refresh light meta so schema rebuilds remain honest
+            meta = on_disk.get("_meta") if isinstance(on_disk.get("_meta"), dict) else {}
+            date_keys = [
+                k
+                for k, v in on_disk.items()
+                if isinstance(v, dict)
+                and not str(k).startswith("_")
+                and len(str(k)) >= 10
+                and str(k)[4:5] == "-"
+            ]
+            meta = {
+                **meta,
+                "schema": meta.get("schema") or "vix_term_structure/v1",
+                "last_row_refresh_at": row.get("refreshed_at"),
+                "last_row_as_of": as_of,
+                "n_dates": len(date_keys),
+                "date_min": min(date_keys) if date_keys else None,
+                "date_max": max(date_keys) if date_keys else None,
+                "live_authoritative": False,
+            }
+            on_disk["_meta"] = meta
+            self.VIX_DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+            save_results_json(on_disk, output_path=str(self.VIX_DATA_PATH))
+            logger.info(
+                "Refreshed VIX term-structure file row as_of=%s from market.db (n_dates=%d)",
+                as_of,
+                len(date_keys),
+            )
+        except (OSError, TypeError, ValueError) as e:
+            logger.warning("Failed to refresh vix_term_structure.json: %s", e)
     
     def fetch_current_vix(self) -> Optional[Dict]:
         """
-        Fetch current VIX levels from data sources.
-        
-        For production: Implement real-time API fetch from CBOE
-        For now: Use latest from stored data
+        Fetch current VIX levels: market.db when fresher, else JSON history.
         """
         data = self.load_vix_data()
-        if not data:
-            return None
-        
-        # Get latest date
-        latest_date = max(data.keys())
-        return data[latest_date]
+        _as_of, levels, meta = self.resolve_current_levels(data, requested_date=None)
+        self._last_levels_meta = meta
+        return levels
     
     def generate_signal(self, date: Optional[str] = None) -> VIXTermStructureSignal:
         """Generate complete VIX term structure signal."""
+        requested = date  # None means "live/latest"
         if date is None:
             date = datetime.now().strftime('%Y-%m-%d')
         
         # Load historical data for context
         historical_data = self.load_vix_data()
-        
-        # Build VIX history for Z-score
+
+        as_of, current, meta = self.resolve_current_levels(
+            historical_data,
+            requested_date=requested if requested is not None else None,
+            persist_refresh=(requested is None),
+        )
+        self._last_levels_meta = meta
+
+        # When live request and DB/file latest differs from "today", use as_of
+        if requested is None and as_of:
+            date = as_of
+
+        # Build VIX history for Z-score (file history + optional current)
         for d in sorted(historical_data.keys())[-252:]:
             vix = historical_data[d].get('vix_spot', 0)
-            if vix > 0:
-                self.calculator.add_vix_reading(d, vix)
-        
-        # Get current readings
-        current = historical_data.get(date)
+            if vix and vix > 0:
+                self.calculator.add_vix_reading(d, float(vix))
+        if current and current.get("vix_spot"):
+            try:
+                self.calculator.add_vix_reading(date, float(current["vix_spot"]))
+            except (TypeError, ValueError):
+                pass
         
         if current is None:
-            # Try to fetch current
-            current = self.fetch_current_vix()
-            if current is None:
-                return VIXTermStructureSignal(
-                    timestamp=datetime.now().isoformat(),
-                    signal_state="neutral",
-                    signal_value=0.0,
-                    vix_spot=0.0,
-                    vix3m=None,
-                    vix6m=None,
-                    slope_vix3m_vix=1.0,
-                    regime="unknown",
-                    regime_strength=0.0,
-                    slope_signal=0.0,
-                    roll_yield_signal=0.0,
-                    vix_zscore_signal=0.0,
-                    curve_shape_signal=0.0,
-                    spy_shift=0.0,
-                    gld_shift=0.0,
-                    tlt_shift=0.0,
-                    confidence=0.0,
-                    is_valid=False,
-                    reason="No VIX data available"
-                )
+            return VIXTermStructureSignal(
+                timestamp=datetime.now().isoformat(),
+                signal_state="neutral",
+                signal_value=0.0,
+                vix_spot=0.0,
+                vix3m=None,
+                vix6m=None,
+                slope_vix3m_vix=1.0,
+                regime="unknown",
+                regime_strength=0.0,
+                slope_signal=0.0,
+                roll_yield_signal=0.0,
+                vix_zscore_signal=0.0,
+                curve_shape_signal=0.0,
+                spy_shift=0.0,
+                gld_shift=0.0,
+                tlt_shift=0.0,
+                confidence=0.0,
+                is_valid=False,
+                reason=(
+                    "No VIX data available "
+                    f"(source={meta.get('source')}, file_as_of={meta.get('file_as_of')}, "
+                    f"db_as_of={meta.get('db_as_of')})"
+                ),
+            )
         
-        vix = current.get('vix_spot', 0)
+        try:
+            vix = float(current.get("vix_spot", 0) or 0)
+        except (TypeError, ValueError):
+            # Preserve prior TypeError surface for non-numeric spot in callers that expect it
+            vix = current.get("vix_spot")
+            if not isinstance(vix, (int, float)):
+                raise TypeError(f"vix_spot must be numeric, got {type(vix)!r}")
+            vix = float(vix)
         vix3m = current.get('front_month')  # Using front month as proxy for VIX3M
         vix6m = current.get('third_month')  # Third month as VIX6M proxy
         
@@ -437,8 +757,17 @@ class VIXTermStructureSignalGenerator:
             confidence += 10.0
         if len(self.calculator.vix_history) >= 60:
             confidence += 10.0
+        if meta.get("source") == "market.db":
+            confidence = min(100.0, confidence + 5.0)
         
-        return VIXTermStructureSignal(
+        source = meta.get("source", "unknown")
+        as_of_meta = meta.get("as_of") or date
+        reason = (
+            f"VIX={vix:.2f}, Slope={components['slope']:.3f}, Regime={regime.value}, "
+            f"as_of={as_of_meta}, source={source}"
+        )
+        
+        signal = VIXTermStructureSignal(
             timestamp=datetime.now().isoformat(),
             signal_state=signal_state.name,
             signal_value=composite,
@@ -457,8 +786,16 @@ class VIXTermStructureSignalGenerator:
             tlt_shift=shifts['tlt'],
             confidence=confidence,
             is_valid=True,
-            reason=f"VIX={vix:.2f}, Slope={components['slope']:.3f}, Regime={regime.value}"
+            reason=reason,
         )
+        # Attach freshness meta for snapshot consumers (not a dataclass field)
+        signal._freshness = {  # type: ignore[attr-defined]
+            "as_of": as_of_meta,
+            "source": source,
+            "file_as_of": meta.get("file_as_of"),
+            "db_as_of": meta.get("db_as_of"),
+        }
+        return signal
     
     def get_signal_snapshot(self, tickers=None, date=None):
         """Generate a SignalSnapshot for ensemble voter consumption."""

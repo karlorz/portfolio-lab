@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -35,6 +35,7 @@ _PUBLIC_DATA_CONTRACT: dict[str, tuple[str, str]] = {
     "alerts.json": ("monitoring", "alerts/v1"),
     "incidents.json": ("monitoring", "incident-lifecycle/v1"),
     "health.json": ("monitoring", "health/v1"),
+    "health_ops.json": ("monitoring", "health-ops/v1"),
     "analytics.json": ("analytics", "analytics/v1"),
     "graduation.json": ("paper_trading", "graduation/v1"),
     "adaptive_sizing.json": ("strategy", "adaptive-sizing/v1"),
@@ -47,7 +48,7 @@ _PUBLIC_DATA_CONTRACT: dict[str, tuple[str, str]] = {
     "explainability_latest.json": ("explainability", "explainability/v1"),
     "risk_decomposition.json": ("risk", "risk-decomposition/v1"),
     "overlay_dashboard.json": ("overlay", "overlay-dashboard/v1"),
-    "prices.json": ("market_data", "prices/compact-v1"),
+    "prices.json": ("market_data", "prices/full-v1"),
     "prices_compact.json": ("market_data", "prices/compact-v1"),
     "historical.json": ("market_data", "historical/v1"),
     "yields.json": ("market_data", "yields/v1"),
@@ -61,12 +62,18 @@ _PUBLIC_DATA_CONTRACT: dict[str, tuple[str, str]] = {
     "labs_replays.json": ("labs", LABS_REPLAY_SCHEMA_VERSION),
     "labs_validation.json": ("labs", LABS_VALIDATION_SCHEMA_VERSION),
     "decision_registry.json": ("monitoring", DECISION_REGISTRY_SCHEMA_VERSION),
+    # Nested dual-write (H19): basename used when path is attribution/*
+    "attribution/latest.json": ("attribution", "attribution-report/v1"),
+    # Batch EH: GARCH risk dual-writes (private risk_metrics + public garch_cvar)
+    "garch_cvar.json": ("risk", "garch-cvar/v1"),
+    "risk_metrics.json": ("risk", "risk-metrics/v1"),
 }
 
 _OPTIONAL_PUBLIC_DATA_FILES = (
     "data_quality.json",
     "rebalance_health.json",
     "tasker_status.json",
+    "health_ops.json",
     "duration-sweep-results.json",
     "labs_registry.json",
     "labs_scorecards.json",
@@ -74,6 +81,14 @@ _OPTIONAL_PUBLIC_DATA_FILES = (
     "labs_validation.json",
     "decision_registry.json",
     "incidents.json",
+    # Nested dual-write catalog (H19) — also discovered via _discover_attribution_public_paths
+    "attribution/latest.json",
+    # Batch EH: optional until first garch-risk cron after deploy
+    "garch_cvar.json",
+    "risk_metrics.json",
+    # Satellite dashboards / term structure (deploy consistency; may lag catalog)
+    "unified_dashboard.json",
+    "vix_term_structure.json",
 )
 
 _LABS_OBJECT_PAGINATION_ROW_KEYS = {
@@ -172,9 +187,20 @@ def _cached_sha256_file(
     return digest
 
 
-def _contract_for_filename(filename: str) -> tuple[str, str]:
+def _contract_for_filename(filename: str, relative_path: str | None = None) -> tuple[str, str]:
+    # Prefer nested relative path contracts (e.g. attribution/latest.json)
+    if relative_path and relative_path in _PUBLIC_DATA_CONTRACT:
+        return _PUBLIC_DATA_CONTRACT[relative_path]
     if filename in _PUBLIC_DATA_CONTRACT:
         return _PUBLIC_DATA_CONTRACT[filename]
+    if relative_path and relative_path.startswith("attribution/"):
+        return "attribution", "attribution-report/v1"
+    if filename.startswith("attribution_") and filename.endswith(".json"):
+        return "attribution", "attribution-report/v1"
+    if relative_path and relative_path.startswith("explainability/"):
+        return "explainability", "explainability/v1"
+    if filename.startswith("explainability_") and filename.endswith(".json"):
+        return "explainability", "explainability/v1"
     if "experiment_diff" in filename or "experiment-diff" in filename:
         return "labs", EXPERIMENT_DIFF_SCHEMA_VERSION
     if "labs" in filename or "scorecard" in filename or "replay" in filename:
@@ -325,6 +351,63 @@ def _discover_governed_public_paths(public_dir: Path) -> list[Path]:
         "duration-sweep-results.json",
     )
     return sorted(path for filename in filenames if (path := public_dir / filename).exists())
+
+
+def _discover_attribution_public_paths(public_dir: Path) -> list[Path]:
+    """Discover dual-written attribution reports under public/data/attribution/.
+
+    Live gap (H19): attribution dual-write publishes latest.json + dated files but
+    WWW index.json can lag until the next full dashboard generate. Discovery keeps
+    the catalog honest without requiring the generator path list.
+    """
+    attr_dir = public_dir / "attribution"
+    if not attr_dir.is_dir():
+        return []
+    paths: list[Path] = []
+    latest = attr_dir / "latest.json"
+    if latest.is_file():
+        paths.append(latest)
+    # Dated reports (attribution_YYYY-MM-DD.json) — cap to newest 30 for catalog size
+    dated = sorted(
+        (
+            p
+            for p in attr_dir.glob("attribution_*.json")
+            if p.is_file() and not _is_labs_page_shard_path(p)
+        ),
+        key=lambda p: p.name,
+        reverse=True,
+    )
+    paths.extend(dated[:30])
+    return paths
+
+
+def _discover_explainability_public_paths(public_dir: Path) -> list[Path]:
+    """Discover explainability dual-write under public/data/explainability/ (H21).
+
+    Generator writes explainability/explainability_latest.json; if the path list
+    omits it or only a partial generate ran, discovery still catalogs the surface.
+    """
+    expl_dir = public_dir / "explainability"
+    if not expl_dir.is_dir():
+        return []
+    paths: list[Path] = []
+    latest = expl_dir / "explainability_latest.json"
+    if latest.is_file():
+        paths.append(latest)
+    # Optional dated explainability_*.json (cap newest 10)
+    dated = sorted(
+        (
+            p
+            for p in expl_dir.glob("explainability_*.json")
+            if p.is_file()
+            and p.name != "explainability_latest.json"
+            and not _is_labs_page_shard_path(p)
+        ),
+        key=lambda p: p.name,
+        reverse=True,
+    )
+    paths.extend(dated[:10])
+    return paths
 
 
 def _load_source_manifest(public_dir: Path) -> dict[str, Any] | None:
@@ -688,12 +771,21 @@ def _public_data_entry(
     source_manifest: Mapping[str, Any] | None = None,
     source_manifest_quality_artifacts: set[str] | None = None,
 ) -> dict[str, Any]:
-    category, schema_version = _contract_for_filename(filename)
+    relative_hint = None
+    if path is not None:
+        try:
+            relative_hint = path.relative_to(public_dir).as_posix()
+        except ValueError:
+            relative_hint = filename if "/" in filename else None
+    elif "/" in filename:
+        relative_hint = filename
+    category, schema_version = _contract_for_filename(filename, relative_hint)
     if path is None or not path.exists():
         _remove_labs_page_shards(public_dir, filename)
+        missing_path = relative_hint or filename
         return {
-            "filename": filename,
-            "path": filename,
+            "filename": Path(filename).name,
+            "path": missing_path,
             "category": category,
             "schema_version": schema_version,
             "status": "missing",
@@ -707,6 +799,10 @@ def _public_data_entry(
 
     schema_version, validation_status, validation_errors = _validate_public_data_entry(path, filename, schema_version)
     relative_path = _relative_public_path(path, public_dir, filename)
+    # Re-resolve category with actual nested path (basename alone may be ambiguous)
+    category, schema_version_nested = _contract_for_filename(path.name, relative_path)
+    if schema_version_nested != "unknown":
+        schema_version = schema_version_nested
     size_budget = measure_public_data_size_budget(path)
     pagination = _write_labs_pagination_shards(path, filename, public_dir, size_budget, validation_status)
     source_manifest_row = _source_manifest_row_for(filename, source_manifest)
@@ -778,7 +874,7 @@ def build_public_data_index(
 ) -> dict[str, Any]:
     """Build the public data manifest while preserving the legacy files list."""
     public_dir = Path(public_dir)
-    generated_at = generated_at or datetime.now().isoformat()
+    generated_at = generated_at or datetime.now(timezone.utc).isoformat()
     resolved_cache_path = (
         Path(hash_cache_path) if hash_cache_path is not None else public_dir / DEFAULT_HASH_CACHE_FILENAME
     )
@@ -786,38 +882,44 @@ def build_public_data_index(
     hash_cache_updates = dict(hash_cache) if hash_cache is not None else None
     source_manifest = _load_source_manifest(public_dir)
     source_manifest_quality_artifacts = _source_manifest_quality_artifacts(source_manifest)
+    # Keys are catalog filenames (basename). Nested dual-writes use basename that
+    # is unique under public/data (attribution_*.json, explainability_latest.json).
     path_map: dict[str, Path] = {}
     ordered_filenames: list[str] = []
+
+    def _register(path: Path) -> None:
+        filename = path.name
+        path_map.setdefault(filename, path)
+        if filename not in ordered_filenames:
+            ordered_filenames.append(filename)
 
     for path in paths:
         if path is None:
             continue
-        path = Path(path)
-        filename = path.name
-        path_map[filename] = path
-        if filename not in ordered_filenames:
-            ordered_filenames.append(filename)
+        _register(Path(path))
 
     for path in _discover_labs_public_paths(public_dir):
-        path_map.setdefault(path.name, path)
-        if path.name not in ordered_filenames:
-            ordered_filenames.append(path.name)
+        _register(path)
 
     for path in _discover_market_data_public_paths(public_dir):
-        path_map.setdefault(path.name, path)
-        if path.name not in ordered_filenames:
-            ordered_filenames.append(path.name)
+        _register(path)
 
     for path in _discover_governed_public_paths(public_dir):
-        path_map.setdefault(path.name, path)
-        if path.name not in ordered_filenames:
-            ordered_filenames.append(path.name)
+        _register(path)
+
+    for path in _discover_attribution_public_paths(public_dir):
+        _register(path)
+
+    for path in _discover_explainability_public_paths(public_dir):
+        _register(path)
 
     for filename in _OPTIONAL_PUBLIC_DATA_FILES:
+        # Nested optional keys use posix relative paths
         path = public_dir / filename
-        if filename not in path_map and path.exists():
-            path_map[filename] = path
-        if filename not in ordered_filenames:
+        if path.exists():
+            _register(path)
+        elif filename not in ordered_filenames and "/" not in filename:
+            # Flat optional missing entries still appear as missing in catalog
             ordered_filenames.append(filename)
 
     entries = [
@@ -844,4 +946,97 @@ def build_public_data_index(
     source_manifest_identity = _source_manifest_identity(source_manifest, entries)
     if source_manifest_identity is not None:
         index["source_manifest"] = source_manifest_identity
+    try:
+        from src.dashboard.generator import _stamp_generator_git_sha
+
+        index = _stamp_generator_git_sha(index)
+    except Exception:  # noqa: BLE001 — index still usable without git
+        pass
     return index
+
+
+# Core partial-write surfaces that commonly lag index digests after ops merges
+# (health/signals/incidents). Batch BI residual honesty.
+# Batch BY: market-data dual-writes (source_manifest / quality / compact) also
+# leave index older than source_manifest → data_pipeline_slo stale_index warning.
+_PARTIAL_INDEX_CORE_FILES: tuple[str, ...] = (
+    "health.json",
+    "health_ops.json",
+    "signals.json",
+    "incidents.json",
+    "alerts.json",
+    "source_manifest.json",
+    "data_quality.json",
+    "prices.json",
+    "prices_compact.json",
+    "yields.json",
+)
+
+
+def refresh_public_data_index_after_partial_write(
+    *,
+    public_dir: Path | None = None,
+    extra_paths: Iterable[Path | None] | None = None,
+    reason: str = "partial_write",
+) -> dict[str, Any] | None:
+    """Rebuild public index.json after partial dual-writes (Batch BI).
+
+    Content-addressed catalogs must recompute digests when artifact bytes
+    change; leaving index sha/size stale after health/signals/incident patches
+    is an integrity lie for operators and SLO checks.
+
+    Best-effort: never raises; returns the index dict on success, else None.
+    """
+    root = Path(public_dir) if public_dir is not None else Path(PUBLIC_DATA_DIR)
+    index_path = root / "index.json"
+    paths: list[Path] = []
+
+    if index_path.is_file():
+        try:
+            prior = json.loads(index_path.read_text(encoding="utf-8"))
+            for entry in prior.get("entries") or []:
+                if not isinstance(entry, dict):
+                    continue
+                rel = entry.get("path") or entry.get("filename")
+                if isinstance(rel, str) and rel:
+                    candidate = root / rel
+                    if candidate.is_file():
+                        paths.append(candidate)
+        except (OSError, json.JSONDecodeError, TypeError, UnicodeDecodeError):
+            pass
+
+    for name in _PARTIAL_INDEX_CORE_FILES:
+        candidate = root / name
+        if candidate.is_file():
+            paths.append(candidate)
+
+    if extra_paths is not None:
+        for path in extra_paths:
+            if path is None:
+                continue
+            p = Path(path)
+            if p.is_file():
+                paths.append(p)
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for p in paths:
+        key = str(p.resolve()) if p.exists() else str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(p)
+
+    try:
+        index = build_public_data_index(unique, public_dir=root)
+        index["content_patch_source"] = f"index_refresh:{reason}"
+        index["content_patched_at"] = datetime.now(timezone.utc).isoformat()
+        # Atomic write
+        tmp = index_path.with_suffix(".json.tmp")
+        index_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
+        tmp.replace(index_path)
+        return index
+    except Exception:  # noqa: BLE001 — never block dual-write callers
+        return None

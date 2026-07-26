@@ -77,6 +77,8 @@ class SignalSnapshot:
                     f"Available values: {[m.value for m in SignalSource]}"
                 )
 
+        # Batch DF: pass module metadata for prediction provenance / IC cohorts
+        meta = dict(self.metadata) if isinstance(self.metadata, dict) else {}
         return SignalReading(
             source=source_enum,
             timestamp=self.timestamp,
@@ -86,6 +88,8 @@ class SignalSnapshot:
             regime_fit=self.regime_fit,
             asset_signals=self.asset_signals if self.asset_signals else None,
             explanation=self.explanation,
+            is_active=bool(self.is_active),
+            metadata=meta or None,
         )
 
     @classmethod

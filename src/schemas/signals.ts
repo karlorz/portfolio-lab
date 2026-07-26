@@ -150,6 +150,13 @@ export const SmartRebalanceSchema = z.object({
   ytd_cost_bps: z.number(),
   remaining_budget_pct: z.number(),
   remaining_budget_ratio: z.optional(z.number().min(0).max(1)),
+  /** True when kill_switch.json blocks execution (order_router SSOT). */
+  execution_blocked: z.optional(z.boolean()),
+  kill_switch_enabled: z.optional(z.boolean()),
+  kill_switch_level: z.optional(z.string().nullable()),
+  kill_switch_reason: z.optional(z.string().nullable()),
+  kill_switch_incident_id: z.optional(z.string().nullable()),
+  kill_switch_message: z.optional(z.string().nullable()),
   status: SmartRebalanceStatusSchema,
 }).superRefine((data, ctx) => {
   const hasRatioContract =
@@ -303,7 +310,7 @@ export const ZeroDTESchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// Bond Momentum
+// Bond Momentum (producer summary + legacy overlay rows)
 // ---------------------------------------------------------------------------
 const BondMomentumSignalSchema = z.object({
   etf: z.string(),
@@ -326,11 +333,39 @@ const BondMomentumEnsembleSchema = z.object({
   recommendation: z.string(),
 });
 
-export const BondMomentumSchema = z.object({
+/** Legacy TSMOM per-ETF overlay contract. */
+const BondMomentumLegacySchema = z.object({
   signals: z.array(BondMomentumSignalSchema),
-  timestamp: z.string(),
-  ensemble: BondMomentumEnsembleSchema,
+  timestamp: z.string().optional(),
+  ensemble: BondMomentumEnsembleSchema.optional(),
 });
+
+/**
+ * Canonical public producer shape from DashboardGenerator bond_duration /
+ * overlay bond_momentum summary (flat recommendation, no signals[]).
+ */
+const BondMomentumSummarySchema = z.object({
+  active: z.boolean().optional().default(true),
+  yield_10y: z.number(),
+  yield_2y: z.number(),
+  spread: z.number(),
+  curve_regime: z.string(),
+  rate_direction: z.string(),
+  tlt_weight: z.number(),
+  ief_weight: z.number(),
+  shy_weight: z.number(),
+  effective_duration: z.number(),
+  position: z.string(),
+  confidence: z.number(),
+  status_text: z.string().optional().default(''),
+  generated_at: z.string().optional(),
+  timestamp: z.string().optional(),
+}).passthrough();
+
+export const BondMomentumSchema = z.union([
+  BondMomentumSummarySchema,
+  BondMomentumLegacySchema,
+]);
 
 // ---------------------------------------------------------------------------
 // VIX Term Structure
@@ -340,20 +375,136 @@ const VIXTermStructureLevelSchema = z.object({
   timestamp: z.string(),
 });
 
-export const VIXTermStructureSchema = z.object({
+const VIX_TERM_STRUCTURE_REGIMES = [
+  'extreme_contango',
+  'steep_contango',
+  'mild_contango',
+  'flat',
+  'backwardation',
+  'extreme_backwardation',
+] as const;
+
+const VIXTermStructureViewSchema = z.object({
   vix: VIXTermStructureLevelSchema,
   vix3m: VIXTermStructureLevelSchema,
   vix6m: z.optional(VIXTermStructureLevelSchema),
   slope: z.number(),
   roll_yield: z.number(),
   composite_signal: z.number(),
-  regime: z.enum([
-    'extreme_contango', 'steep_contango', 'mild_contango',
-    'flat', 'backwardation', 'extreme_backwardation',
-  ]),
+  regime: z.enum(VIX_TERM_STRUCTURE_REGIMES),
   z_score: z.number(),
   percentile_1y: z.optional(z.number()),
+  timestamp: z.optional(z.string()),
 });
+
+function isVixTermStructureRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function finiteNumberOrUndefined(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+function vixLevelFrom(
+  nested: unknown,
+  flatValue: unknown,
+  timestamp: string,
+): { value: number; timestamp: string } | undefined {
+  if (isVixTermStructureRecord(nested)) {
+    const value = finiteNumberOrUndefined(nested.value);
+    if (value !== undefined) {
+      return {
+        value,
+        timestamp:
+          typeof nested.timestamp === 'string' && nested.timestamp
+            ? nested.timestamp
+            : timestamp,
+      };
+    }
+  }
+  const value = finiteNumberOrUndefined(flatValue);
+  if (value === undefined) return undefined;
+  return { value, timestamp };
+}
+
+/**
+ * Accept producer-shaped public artifact keys (vix_spot, slope_vix3m_vix, …)
+ * and nested legacy view-model; emit the panel/view schema.
+ */
+function normalizeVixTermStructureInput(raw: unknown): unknown {
+  if (!isVixTermStructureRecord(raw)) return raw;
+
+  const timestamp =
+    typeof raw.timestamp === 'string'
+      ? raw.timestamp
+      : typeof raw.generated_at === 'string'
+        ? raw.generated_at
+        : '';
+
+  const vix = vixLevelFrom(raw.vix, raw.vix_spot, timestamp);
+  const vix3m = vixLevelFrom(raw.vix3m, raw.vix3m, timestamp);
+  const vix6m = vixLevelFrom(raw.vix6m, raw.vix6m_spot ?? raw.vix6m_value, timestamp);
+
+  const slope = finiteNumberOrUndefined(
+    raw.slope ?? raw.slope_vix3m_vix ?? raw.slope_signal,
+  );
+  const roll_yield = finiteNumberOrUndefined(raw.roll_yield ?? raw.roll_yield_signal);
+  const composite_signal = finiteNumberOrUndefined(
+    raw.composite_signal ?? raw.signal_value,
+  );
+  const z_score = finiteNumberOrUndefined(raw.z_score ?? raw.vix_zscore_signal);
+  const percentile_1y = finiteNumberOrUndefined(raw.percentile_1y);
+  const regime = typeof raw.regime === 'string' ? raw.regime : undefined;
+
+  // If already nested-complete, keep extras via reconstruction of required fields.
+  if (
+    vix === undefined
+    || vix3m === undefined
+    || slope === undefined
+    || roll_yield === undefined
+    || composite_signal === undefined
+    || z_score === undefined
+    || !regime
+  ) {
+    // Fall through to raw so Zod reports structured issues when incomplete.
+    // Still prefer mapped fields when partially available for better errors.
+  }
+
+  if (
+    vix !== undefined
+    && vix3m !== undefined
+    && slope !== undefined
+    && roll_yield !== undefined
+    && composite_signal !== undefined
+    && z_score !== undefined
+    && regime !== undefined
+  ) {
+    return {
+      vix,
+      vix3m,
+      ...(vix6m ? { vix6m } : {}),
+      slope,
+      roll_yield,
+      composite_signal,
+      regime,
+      z_score,
+      ...(percentile_1y !== undefined ? { percentile_1y } : {}),
+      ...(timestamp ? { timestamp } : {}),
+    };
+  }
+
+  return raw;
+}
+
+export const VIXTermStructureSchema = z.preprocess(
+  normalizeVixTermStructureInput,
+  VIXTermStructureViewSchema,
+);
 
 // ---------------------------------------------------------------------------
 // VIX Overlay
@@ -834,9 +985,12 @@ export const KurtosisRegimeSchema = z.object({
   fat_tail_risk: z.number(),
 }).passthrough();
 
+// Public producer stores allocation/risk as percentage points (spy_pct: 40 = 40%).
 export const VolatilityParitySchema = z.object({
   date: z.string(),
+  /** Percentage points (10 = 10% target vol). */
   target_volatility: z.number(),
+  /** Percentage points (40 = 40% weight). */
   spy_pct: z.number(),
   gld_pct: z.number(),
   tlt_pct: z.number(),
@@ -853,7 +1007,8 @@ export const VolatilityParitySchema = z.object({
 
 const AllocationSurfaceRoleSchema = z.object({
   label: z.string(),
-  role: z.enum(['execution_routed', 'advisory_non_routed']),
+  // execution_blocked: kill-switch still routes via target_allocations but blocks execution
+  role: z.enum(['execution_routed', 'execution_blocked', 'advisory_non_routed']),
   routed: z.boolean(),
   routed_by: z.nullable(z.string()),
   live_authoritative: z.optional(z.boolean()),
@@ -888,7 +1043,8 @@ export const AllocationSurfaceRolesSchema = z.object({
   routed_by: z.string(),
   surfaces: z.object({
     target_allocations: AllocationSurfaceRoleSchema.extend({
-      role: z.literal('execution_routed'),
+      // Routed surface stays order_router; role flips to execution_blocked under kill switch.
+      role: z.enum(['execution_routed', 'execution_blocked']),
       routed: z.literal(true),
       routed_by: z.string(),
     }),
@@ -912,14 +1068,21 @@ export const AllocationSurfaceRolesSchema = z.object({
   }).passthrough(),
 }).passthrough();
 
+// Producer emits per-asset adjustment maps (SPY/GLD/TLT). Older fixtures may
+// use scalar totals; accept both so runtime validation matches public JSON.
+const adaptiveAdjustmentFieldSchema = z.union([
+  z.number(),
+  uppercaseSymbolWeightsSchema(),
+]);
+
 export const AdaptiveSizingSchema = z.object({
   base_allocation: uppercaseSymbolWeightsSchema().optional(),
   adjusted_allocation: uppercaseSymbolWeightsSchema(),
   adjustments: uppercaseSymbolWeightsSchema().optional(),
-  regime_adjustment: z.optional(z.number()),
-  volatility_adjustment: z.optional(z.number()),
-  signal_adjustment: z.optional(z.number()),
-  drawdown_adjustment: z.optional(z.number()),
+  regime_adjustment: adaptiveAdjustmentFieldSchema.optional(),
+  volatility_adjustment: adaptiveAdjustmentFieldSchema.optional(),
+  signal_adjustment: adaptiveAdjustmentFieldSchema.optional(),
+  drawdown_adjustment: adaptiveAdjustmentFieldSchema.optional(),
   factors: z.optional(z.record(z.string(), z.unknown())),
   authority: AdvisoryAllocationArtifactRoleSchema.extend({
     surface: z.literal('adaptive_sizing'),
@@ -1353,7 +1516,9 @@ const CrisisPeriodDataSchema = z.object({
   description: z.string(),
   spy_return: z.number(),
   portfolio_return: z.nullable(z.number()),
-});
+  portfolio_return_available: z.optional(z.boolean()),
+  availability: z.optional(z.enum(['available', 'unavailable', 'partial'])),
+}).passthrough();
 
 export const AnalyticsDataSchema = z.object({
   status: z.enum(['success', 'no_data', 'error']),
@@ -1377,6 +1542,9 @@ export const AnalyticsDataSchema = z.object({
     portfolio: PortfolioBenchmarkDataSchema,
   }),
   crisis_periods: z.array(CrisisPeriodDataSchema),
+  // Section-level availability: global status=success does not imply complete crisis comparison
+  crisis_periods_status: z.optional(z.enum(['success', 'partial', 'unavailable'])),
+  crisis_periods_reason: z.optional(z.nullable(z.string())),
 }).passthrough();
 
 // ---------------------------------------------------------------------------
@@ -1475,8 +1643,10 @@ export const GraduationDataSchema = z.object({
     id: z.string(),
     label: z.string(),
     passed: z.boolean(),
-    value: z.string(),
-    threshold: z.string(),
+    // Producer emits numeric value/required; panel String()-coerces for display.
+    // Accept both so dual-shape graduation.json validates without fallback.
+    value: z.union([z.string(), z.number()]),
+    threshold: z.union([z.string(), z.number()]),
   })),
   paper_trading: z.object({
     start_date: z.string(),

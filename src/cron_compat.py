@@ -42,25 +42,39 @@ CRON_TARGETS = [
     "portfolio-lab-unified-dashboard",
     "portfolio-lab-health",
     "portfolio-lab-prune-logs",
+    "portfolio-lab-prod-ideas",
+    "portfolio-lab-fetch-trends",
 ]
+
+# S18b: optional suite segments — NOT production cron jobs (not in CRON_TARGETS /
+# tasker / cron_status). Documented Makefile targets + commented crontab fallback
+# only. Enable carefully: full suite ~28m under 6GB; unit segment is lighter.
+# Mapping: job-id → Makefile target
+OPTIONAL_SUITE_TARGETS = {
+    "portfolio-lab-test-unit": "test-unit",       # generator+integration ignored
+    "portfolio-lab-test-generator": "test-generator",
+    "portfolio-lab-test-full": "test",            # full safe gate (3600s)
+}
 
 # Expected max duration per job (seconds). Exceeding 2x this triggers alerts.
 CRON_EXPECTED_DURATIONS = {
     "portfolio-lab-data": 300,      # 5 min — bun fetch-data
-    "portfolio-lab-dashboard": 120, # 2 min — static generation
+    "portfolio-lab-dashboard": 180, # 3 min — static generation (Batch II DF3; wall ~116s)
     "portfolio-lab-eval": 600,      # 10 min — iterates all portfolios
     "portfolio-lab-research": 300,  # 5 min — research loops
     "portfolio-lab-wiki-sync": 120, # 2 min — git operations
     "portfolio-lab-position-sync": 60,   # 1 min — placeholder/no-op
-    "portfolio-lab-overlay-signals": 600,  # 10 min — 5 sequential modules
+    "portfolio-lab-overlay-signals": 600,  # 10 min — 6 sequential modules (+ alternative_data)
     "portfolio-lab-overlay-dashboard": 120,  # 2 min — JSON serialization
     "portfolio-lab-garch-risk": 120,  # 2 min — GARCH-CVaR computation
     "portfolio-lab-mark-to-market": 15,   # 15 sec — price update from prices.json
     "portfolio-lab-daily-pnl": 30,   # 30 sec — snapshot from portfolio state
     "portfolio-lab-attribution": 300,  # 5 min — attribution + adaptive weights
     "portfolio-lab-unified-dashboard": 120,  # 2 min — JSON serialization
-    "portfolio-lab-health": 30,  # 30 sec — rebalance health check
+    "portfolio-lab-health": 90,  # expected ~13–90s; wall 120 (Batch JO HT1)
     "portfolio-lab-prune-logs": 60,  # 1 min — bound tasker_logs growth + dead-log removal
+    "portfolio-lab-prod-ideas": 60,  # 1 min — scan ops SSOT → channel delta (ML off)
+    "portfolio-lab-fetch-trends": 300,  # 5 min — pytrends weekly refresh
 }
 
 # Guard configuration (applied by scripts/cron_guard.sh)

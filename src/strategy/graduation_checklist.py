@@ -20,13 +20,13 @@ import sys
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, NamedTuple
+from typing import Any, Dict, Optional, NamedTuple
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-from src.paths import DATA_DIR
+from src.paths import DATA_DIR, PUBLIC_DATA_DIR, SIGNALS_JSON
 from src.backtest.metrics import save_results_json
 
 
@@ -35,7 +35,73 @@ ORDER_LOG_TAIL_LINES = int(os.environ.get("GRADUATION_ORDER_LOG_TAIL_LINES", "10
 REGIME_LOG_TAIL_LINES = int(os.environ.get("GRADUATION_REGIME_LOG_TAIL_LINES", "1000"))
 
 
-__all__ = ['CheckResult', 'GraduationChecklist', 'run_check_and_exit', 'run_report_and_exit', 'run_progress_and_exit']
+__all__ = [
+    'CheckResult',
+    'GraduationChecklist',
+    'is_ops_health_inventory',
+    'run_check_and_exit',
+    'run_report_and_exit',
+    'run_progress_and_exit',
+]
+
+
+def is_ops_health_inventory(health: dict | None) -> bool:
+    """True only for multi-check ops inventories; False for GARCH/risk stubs.
+
+    GARCH writers reuse ``.health_report.json`` and stamp
+    ``summary.total_checks=1`` (portfolio_entropy only). That must not
+    suppress the graduation CB consecutive_ok multi-day SSOT.
+    """
+    if not isinstance(health, dict) or not health:
+        return False
+
+    summary = health.get("summary") if isinstance(health.get("summary"), dict) else {}
+    role = str(
+        summary.get("inventory_role")
+        or health.get("inventory_role")
+        or health.get("schema_role")
+        or ""
+    ).lower()
+    if role in {"garch_risk", "garch", "risk", "risk_only", "non_ops"}:
+        return False
+
+    # Explicit GARCH / risk shape markers (producer historical + current)
+    garch_markers = (
+        "var_95",
+        "cvar_95",
+        "garch_filtered",
+        "garch_omega",
+        "garch_alpha",
+        "garch_beta",
+        "garch_active",
+        "conditional_volatility_current",
+    )
+    if any(k in health for k in garch_markers):
+        return False
+
+    total = 0
+    try:
+        total = int(summary.get("total_checks") or 0)
+    except (TypeError, ValueError):
+        total = 0
+
+    if total <= 0:
+        return False
+
+    # Single entropy-only stub without multi-day fields is not ops inventory
+    checks = health.get("checks") if isinstance(health.get("checks"), dict) else {}
+    consecutive_keys = (
+        "consecutive_passing_days",
+        "consecutive_ok_days",
+        "consecutive_green_days",
+    )
+    has_consecutive = any(summary.get(k) is not None for k in consecutive_keys)
+    if total == 1 and not has_consecutive:
+        if not checks or set(checks.keys()) <= {"portfolio_entropy"}:
+            return False
+
+    return True
+
 
 class CheckResult(NamedTuple):
     """Result of a single graduation criterion check."""
@@ -73,7 +139,12 @@ class GraduationChecklist:
         },
         "health_checks": {
             "value": int(os.environ.get("GRADUATION_HEALTH_CHECKS", "30")),
-            "description": "All 9 health checks passing for 30 consecutive days",
+            "description": (
+                "Ops health green AND signal_health not 0/N degraded for "
+                "N consecutive days (SSOT: health report consecutive counter "
+                "and/or graduation circuit_breaker consecutive_ok; not a "
+                "fixed '9 checks' inventory)"
+            ),
         },
         "min_tca_orders": {
             "value": int(os.environ.get("GRADUATION_MIN_TCA_ORDERS", "10")),
@@ -220,6 +291,7 @@ class GraduationChecklist:
         if path is None:
             path = DATA_DIR / ".graduation_report.json"
 
+        cb = results.get("circuit_breaker_confidence")
         report = {
             "timestamp": datetime.now().isoformat(),
             "readiness_score": self.readiness_score(results),
@@ -233,10 +305,285 @@ class GraduationChecklist:
                 }
                 for name, result in results.items()
             },
+            # Batch BP: stamp CB SSOT identity for dual-surface equality checks
+            "circuit_breaker_ssot": ".circuit_breaker.json",
+            "circuit_breaker_consecutive_ok": (
+                cb.value if cb is not None else None
+            ),
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         save_results_json(report, output_path=str(path))
         return path
+
+    def _tombstone_stale_promote(
+        self,
+        root: Path,
+        *,
+        action: str,
+        reason: str,
+        extra: Optional[Dict[str, Any]] = None,
+        readiness_score: Optional[float] = None,
+    ) -> None:
+        """Rewrite candidacy marker so no file claims action promote_to_live.
+
+        Writes the same tombstone to ``.promote_to_live`` (when present or
+        always for kill) and ``.graduation_conflict.json`` for operator SSOT.
+        """
+        tombstone: Dict[str, Any] = {
+            "graduation_conflict": True,
+            "action": action,
+            "reason": reason,
+            "is_graduation_ready": False,
+            "timestamp": datetime.now().isoformat(),
+            "source": "graduation_checklist",
+            "requires_approval": True,
+        }
+        if readiness_score is not None:
+            tombstone["readiness_score"] = readiness_score
+        if extra:
+            tombstone.update(extra)
+
+        promote_path = root / ".promote_to_live"
+        # Always rewrite if a candidacy file exists, or under kill block even if
+        # missing (no-op create only when prior candidacy existed — kill path
+        # only tombstones when file present so we do not invent markers).
+        if promote_path.exists():
+            try:
+                prior = json.loads(promote_path.read_text(encoding="utf-8"))
+                if isinstance(prior, dict) and prior.get("metrics") is not None:
+                    tombstone.setdefault("prior_metrics", prior.get("metrics"))
+            except (OSError, json.JSONDecodeError, TypeError, UnicodeDecodeError):
+                pass
+            save_results_json(tombstone, output_path=str(promote_path))
+
+        conflict_path = root / ".graduation_conflict.json"
+        save_results_json(tombstone, output_path=str(conflict_path))
+
+    def clear_kill_gated_promote_markers(
+        self,
+        *,
+        data_dir: Optional[Path] = None,
+    ) -> dict[str, Any]:
+        """Batch IU DQ1: clear ``promote_blocked_kill`` markers when kill is healed.
+
+        Kill-gated tombstones (``.graduation_conflict.json`` /
+        ``.promote_to_live`` with ``action=promote_blocked_kill``) must not
+        stick after kill authority is clear. Checklist-not-ready tombstones
+        are left alone — only kill-gated actions clear-on-heal.
+
+        Safe to call from health/dashboard paths every cycle (idempotent).
+        Does **not** invent promote_to_live candidacy.
+        """
+        root = Path(data_dir) if data_dir is not None else DATA_DIR
+        out: Dict[str, Any] = {
+            "cleared": False,
+            "kill_clear": False,
+            "removed": [],
+        }
+
+        kill_blocked = False
+        try:
+            from src.dashboard.kill_authority import (
+                is_kill_execution_blocked,
+                load_kill_switch_payload,
+            )
+
+            kill_payload = load_kill_switch_payload(root)
+            kill_blocked = bool(is_kill_execution_blocked(kill_payload))
+        except ImportError:
+            kill_file = root / "kill_switch.json"
+            if kill_file.exists():
+                try:
+                    payload = json.loads(kill_file.read_text(encoding="utf-8"))
+                    kill_blocked = bool(
+                        isinstance(payload, dict) and payload.get("enabled")
+                    )
+                except (OSError, json.JSONDecodeError, TypeError):
+                    kill_blocked = True  # fail-closed: do not clear
+
+        if kill_blocked:
+            out["kill_clear"] = False
+            out["reason"] = "kill_still_active"
+            return out
+        out["kill_clear"] = True
+
+        def _is_kill_gated(path: Path) -> bool:
+            if not path.exists():
+                return False
+            try:
+                body = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, TypeError, UnicodeDecodeError):
+                return False
+            if not isinstance(body, dict):
+                return False
+            action = str(body.get("action") or "")
+            reason = str(body.get("reason") or "")
+            return action == "promote_blocked_kill" or (
+                body.get("graduation_conflict") is True and reason == "kill_authority"
+            )
+
+        for rel in (".graduation_conflict.json", ".promote_to_live"):
+            path = root / rel
+            if not _is_kill_gated(path):
+                continue
+            try:
+                path.unlink()
+                out["removed"].append(rel)
+                out["cleared"] = True
+            except OSError as exc:
+                logger.warning("Failed to clear kill-gated marker %s: %s", path, exc)
+
+        if out["cleared"]:
+            logger.info(
+                "Cleared kill-gated promote markers after kill heal: %s",
+                out["removed"],
+            )
+        return out
+
+    def write_promote_to_live_if_ready(
+        self,
+        results: Optional[Dict[str, CheckResult]] = None,
+        *,
+        data_dir: Optional[Path] = None,
+        force: bool = False,
+    ) -> Optional[Path]:
+        """Sole writer for ``.promote_to_live`` candidacy (SSOT).
+
+        Only writes when the multi-criteria checklist is ready. Never writes
+        under authority kill halt. Returns path written, or None if skipped.
+
+        Manual approval remains a separate human gate; this marker means
+        *checklist-ready candidate*, not auto-live.
+
+        When blocked (kill or checklist fail), any existing ``action:
+        promote_to_live`` candidacy is tombstoned so operators never see a
+        live promote claim under halt / not-ready.
+
+        Batch IU DQ1: when kill is clear, kill-gated tombstones are cleared
+        even if checklist is not ready (no false promote_blocked_kill stickiness).
+        """
+        root = Path(data_dir) if data_dir is not None else DATA_DIR
+        if results is None:
+            results = self.check()
+
+        # Kill authority blocks promote writes (same SSOT as evaluator / order_router)
+        kill_payload: Optional[Dict[str, Any]] = None
+        try:
+            from src.dashboard.kill_authority import (
+                is_kill_execution_blocked,
+                load_kill_switch_payload,
+            )
+
+            kill_payload = load_kill_switch_payload(root)
+            if is_kill_execution_blocked(kill_payload):
+                level = None
+                if isinstance(kill_payload, dict):
+                    level = kill_payload.get("level")
+                self._tombstone_stale_promote(
+                    root,
+                    action="promote_blocked_kill",
+                    reason="kill_authority",
+                    extra={
+                        "kill_level": level,
+                        "kill_reason": (
+                            kill_payload.get("reason")
+                            if isinstance(kill_payload, dict)
+                            else None
+                        ),
+                        "kill_incident_id": (
+                            kill_payload.get("incident_id")
+                            if isinstance(kill_payload, dict)
+                            else None
+                        ),
+                    },
+                    readiness_score=self.readiness_score(results),
+                )
+                logger.info(
+                    "Promote blocked by kill authority — tombstoned stale candidacy "
+                    "(level=%s)",
+                    level,
+                )
+                return None
+        except ImportError:
+            kill_file = root / "kill_switch.json"
+            if kill_file.exists():
+                try:
+                    payload = json.loads(kill_file.read_text(encoding="utf-8"))
+                    if isinstance(payload, dict) and payload.get("enabled"):
+                        self._tombstone_stale_promote(
+                            root,
+                            action="promote_blocked_kill",
+                            reason="kill_authority",
+                            extra={
+                                "kill_level": payload.get("level"),
+                                "kill_reason": payload.get("reason"),
+                            },
+                            readiness_score=self.readiness_score(results),
+                        )
+                        logger.info(
+                            "Promote blocked by kill authority — tombstoned stale candidacy"
+                        )
+                        return None
+                except (OSError, json.JSONDecodeError, TypeError):
+                    logger.warning("Kill switch unreadable — fail-closed, skip promote write")
+                    return None
+
+        # Kill clear-on-heal (DQ1): drop sticky promote_blocked_kill even when
+        # checklist is not ready. Do not invent candidacy.
+        self.clear_kill_gated_promote_markers(data_dir=root)
+
+        ready = self.is_graduation_ready(results)
+        if not ready and not force:
+            # Fail-closed: tombstone stale promote markers that disagree with checklist
+            stale = root / ".promote_to_live"
+            if stale.exists():
+                try:
+                    prior = json.loads(stale.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError, TypeError, UnicodeDecodeError):
+                    prior = {}
+                # Only tombstone true candidacy — not residual kill-gated markers
+                # (already cleared above) or already-checklist-blocked markers.
+                action = prior.get("action") if isinstance(prior, dict) else None
+                if action == "promote_to_live":
+                    self._tombstone_stale_promote(
+                        root,
+                        action="promote_blocked_checklist",
+                        reason="checklist_not_ready",
+                        readiness_score=self.readiness_score(results),
+                    )
+                    logger.info(
+                        "Checklist not ready — tombstoned stale promote candidacy "
+                        "(action=promote_blocked_checklist)"
+                    )
+            return None
+
+        metrics = {
+            "sharpe": float(results["min_sharpe"].value) if "min_sharpe" in results else None,
+            "max_drawdown": float(results["max_drawdown"].value) if "max_drawdown" in results else None,
+            "win_rate": float(results["min_win_rate"].value) if "min_win_rate" in results else None,
+            "dsr": float(results["min_dsr"].value) if "min_dsr" in results else None,
+            "readiness_score": self.readiness_score(results),
+        }
+        trigger = {
+            "action": "promote_to_live",
+            "metrics": metrics,
+            "timestamp": datetime.now().isoformat(),
+            "requires_approval": True,
+            "source": "graduation_checklist",
+            "graduation_conflict": False,
+            "is_graduation_ready": True,
+        }
+        trigger_path = root / ".promote_to_live"
+        save_results_json(trigger, output_path=str(trigger_path))
+        # Clear prior conflict flag if any
+        conflict_path = root / ".graduation_conflict.json"
+        if conflict_path.exists():
+            try:
+                conflict_path.unlink()
+            except OSError:
+                pass
+        logger.info("Created promotion trigger (checklist SSOT): %s", trigger_path)
+        return trigger_path
 
     def progress_summary(self, results: Dict[str, CheckResult]) -> Dict:
         """Human-readable progress summary."""
@@ -304,11 +651,45 @@ class GraduationChecklist:
 
         # TCA scorecard (producer removed v977)
 
-        # Circuit breaker
-        cb_file = DATA_DIR / ".circuit_breaker.json"
-        if cb_file.exists():
-            with open(cb_file) as f:
-                state["circuit_breaker"] = json.load(f)
+        # Circuit breaker confidence SSOT (Batch BP):
+        # Only ``.circuit_breaker.json`` (health_check consecutive_ok producer).
+        # Never invent consecutive_ok from legacy ``.circuit_breaker_state.json``
+        # (drawdown paper file without consecutive_ok) — that caused private
+        # reports to claim CB=required while live SSOT was lower.
+        cb_payload = None
+        cb_ssot = DATA_DIR / ".circuit_breaker.json"
+        if cb_ssot.exists():
+            try:
+                with open(cb_ssot) as f:
+                    raw = json.load(f)
+                if isinstance(raw, dict):
+                    cb_payload = dict(raw)
+                    cb_payload["ssot_path"] = ".circuit_breaker.json"
+            except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                logger.warning("Failed to read graduation CB SSOT %s: %s", cb_ssot, exc)
+        if cb_payload is not None:
+            # Normalize status/severity; never invent consecutive_ok if missing
+            status = cb_payload.get("status") or cb_payload.get("severity") or "green"
+            if isinstance(status, str):
+                status_l = status.lower()
+                if status_l in ("ok", "normal", "closed"):
+                    status_l = "green"
+                cb_payload["status"] = status_l
+            if "consecutive_ok" not in cb_payload:
+                # Missing streak counter → fail-closed value 0 (do not invent)
+                cb_payload["consecutive_ok"] = 0
+                cb_payload["consecutive_ok_invented"] = False
+                cb_payload["consecutive_ok_missing"] = True
+            state["circuit_breaker"] = cb_payload
+        else:
+            # No SSOT file yet → explicit zero (health producer not run)
+            state["circuit_breaker"] = {
+                "status": "unknown",
+                "trips": 0,
+                "consecutive_ok": 0,
+                "ssot_path": ".circuit_breaker.json",
+                "ssot_missing": True,
+            }
 
         # Health report history (check how long all checks have been passing)
         health_file = DATA_DIR / ".health_report.json"
@@ -346,15 +727,26 @@ class GraduationChecklist:
             description=self.criteria["min_trading_days"]["description"],
         )
 
+    @staticmethod
+    def _sharpe_plausibility(sharpe: float) -> tuple[bool, Optional[str]]:
+        """Sharpe > 3.0 is treated as implausible (short-sample / artifact).
+
+        Honesty contract: keep the **raw** value for operators; fail the gate.
+        Never coerce to 0.0 (looked like measured zero performance).
+        """
+        if sharpe > 3.0:
+            return False, (
+                f"implausible raw Sharpe {sharpe:.2f} > 3.0 "
+                "(likely short-sample or near-zero vol artifact; gate fails)"
+            )
+        return True, None
+
     def _check_sharpe(self, state: Dict) -> CheckResult:
         """Check rolling Sharpe ratio."""
         # Prefer pre-computed summary
         summary = state.get("paper_trading_summary", {})
         if summary.get("sharpe", 0) > 0:
-            sharpe = summary["sharpe"]
-            # Sanity cap: any Sharpe > 3.0 is unrealistic (intra-day artifact)
-            if sharpe > 3.0:
-                sharpe = 0.0
+            sharpe = float(summary["sharpe"])
         else:
             portfolio = state.get("portfolio", {})
             history = portfolio.get("history", [])
@@ -384,17 +776,18 @@ class GraduationChecklist:
             daily_std = max(np.std(returns) if len(returns) > 1 else 0.0001, 0.0001)
             sharpe = float(np.mean(returns) / daily_std * np.sqrt(252)) if daily_std > 0 else 0
 
-            # Sanity cap: any Sharpe > 3.0 is unrealistic (intra-day artifact)
-            if sharpe > 3.0:
-                sharpe = 0.0
-
         required = float(self.criteria["min_sharpe"]["value"])
+        plausible, note = self._sharpe_plausibility(sharpe)
+        desc = self.criteria["min_sharpe"]["description"]
+        if note:
+            desc = f"{desc} — {note}"
         return CheckResult(
             name="min_sharpe",
-            passed=sharpe >= required,
+            # Implausible high Sharpe fails even if numerically above threshold
+            passed=bool(plausible and sharpe >= required),
             value=round(sharpe, 2),
             required=required,
-            description=self.criteria["min_sharpe"]["description"],
+            description=desc,
         )
 
     def _check_drawdown(self, state: Dict) -> CheckResult:
@@ -444,52 +837,152 @@ class GraduationChecklist:
             description=self.criteria["max_drawdown"]["description"],
         )
 
+    def _session_returns_from_daily_pnl(self) -> list[float]:
+        """Load session daily returns from daily_pnl.jsonl (SSOT).
+
+        Excludes zero-placeholder / micro-noise rows (|r| < 1e-8) so phantom
+        flat sessions do not dilute win rate.
+        """
+        path = DATA_DIR / "daily_pnl.jsonl"
+        if not path.exists():
+            return []
+        by_date: dict[str, float] = {}
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(row, dict):
+                        continue
+                    date_key = str(row.get("date") or "")[:10]
+                    if not date_key:
+                        continue
+                    try:
+                        ret = float(row.get("daily_return") or 0.0)
+                    except (TypeError, ValueError):
+                        continue
+                    by_date[date_key] = ret
+        except OSError:
+            return []
+        returns = []
+        for d in sorted(by_date.keys()):
+            r = by_date[d]
+            if abs(r) < 1e-8:
+                continue  # exclude zero placeholders
+            returns.append(r)
+        return returns
+
     def _check_win_rate(self, state: Dict) -> CheckResult:
-        """Check win rate (fraction of positive return days)."""
-        # Prefer pre-computed summary
+        """Check win rate (fraction of positive return days).
+
+        SSOT: daily_pnl.jsonl session returns when present; else paper summary;
+        else portfolio history (legacy). Zero-placeholder rows excluded.
+        """
+        required = float(self.criteria["min_win_rate"]["value"])
+        desc = self.criteria["min_win_rate"]["description"]
+
+        # 0) Explicit injected session returns (tests / callers)
+        if isinstance(state.get("session_returns"), list) and len(state["session_returns"]) >= 3:
+            session_returns = [float(r) for r in state["session_returns"]]
+            win_rate = sum(1 for r in session_returns if r > 0) / len(session_returns)
+            return CheckResult(
+                name="min_win_rate",
+                passed=win_rate >= required,
+                value=round(win_rate, 4),
+                required=required,
+                description=f"{desc} (ssot=state.session_returns, n={len(session_returns)})",
+            )
+
+        # 1) Session SSOT from daily_pnl.jsonl (isolated via DATA_DIR in tests)
+        session_returns = self._session_returns_from_daily_pnl()
+        if len(session_returns) >= 3:
+            win_rate = sum(1 for r in session_returns if r > 0) / len(session_returns)
+            return CheckResult(
+                name="min_win_rate",
+                passed=win_rate >= required,
+                value=round(win_rate, 4),
+                required=required,
+                description=f"{desc} (ssot=daily_pnl.jsonl, n={len(session_returns)})",
+            )
+
+        # 2) Prefer pre-computed summary when it has material days
         summary = state.get("paper_trading_summary", {})
         if summary.get("days_tracked", 0) > 0 and "win_rate" in summary:
-            win_rate = summary["win_rate"]
-        else:
-            portfolio = state.get("portfolio", {})
-            history = portfolio.get("history", [])
+            win_rate = float(summary["win_rate"] or 0.0)
+            return CheckResult(
+                name="min_win_rate",
+                passed=win_rate >= required,
+                value=round(win_rate, 4),
+                required=required,
+                description=f"{desc} (ssot=paper_trading_summary)",
+            )
 
-            # Deduplicate to daily
-            daily = {}
-            for entry in history:
-                ts = entry.get("timestamp", "")
-                date_key = ts[:10] if len(ts) >= 10 else ts
-                daily[date_key] = entry
-            sorted_daily = [daily[d] for d in sorted(daily.keys())]
+        # 3) Legacy portfolio history (exclude micro-noise zeros)
+        portfolio = state.get("portfolio", {})
+        history = portfolio.get("history", [])
+        daily = {}
+        for entry in history:
+            ts = entry.get("timestamp", "")
+            date_key = ts[:10] if len(ts) >= 10 else ts
+            daily[date_key] = entry
+        sorted_daily = [daily[d] for d in sorted(daily.keys())]
+        returns = []
+        for h in sorted_daily:
+            try:
+                r = float(h.get("daily_return", 0) or 0)
+            except (TypeError, ValueError):
+                r = 0.0
+            if abs(r) < 1e-8:
+                continue
+            returns.append(r)
 
-            if len(sorted_daily) < 3:
-                return CheckResult(
-                    name="min_win_rate",
-                    passed=False,
-                    value=0.0,
-                    required=0.40,
-                    description=self.criteria["min_win_rate"]["description"],
-                )
+        if len(returns) < 3:
+            return CheckResult(
+                name="min_win_rate",
+                passed=False,
+                value=0.0,
+                required=required,
+                description=desc,
+            )
 
-            returns = [h.get("daily_return", 0) for h in sorted_daily]
-            win_rate = sum(1 for r in returns if r > 0) / len(returns) if returns else 0
-        
-        required = float(self.criteria["min_win_rate"]["value"])
+        win_rate = sum(1 for r in returns if r > 0) / len(returns)
         return CheckResult(
             name="min_win_rate",
             passed=win_rate >= required,
             value=round(win_rate, 4),
             required=required,
-            description=self.criteria["min_win_rate"]["description"],
+            description=f"{desc} (ssot=portfolio.history)",
         )
 
     def _check_health(self, state: Dict) -> CheckResult:
-        """Check that health checks have been consistently passing."""
+        """Check consecutive healthy days with signal_health honesty.
+
+        SSOT alignment (Batch AO):
+        - Prefer ``consecutive_*`` counters from health_report summary.
+        - Also accept graduation CB ``consecutive_ok`` as the green streak
+          producer when health summary lacks multi-day counters.
+        - Do **not** pass when public/ops signal_health is 0 healthy of N tracked
+          (ops-only greenwash).
+        - Description no longer claims a fixed '9 checks' inventory.
+        """
         health = state.get("health_report", {})
-        summary = health.get("summary", {})
-        total = summary.get("total_checks", 0)
-        passed = summary.get("passed", 0)
-        
+        summary = health.get("summary", {}) if isinstance(health, dict) else {}
+        if not isinstance(summary, dict):
+            summary = {}
+        try:
+            total = int(summary.get("total_checks") or 0) if summary else 0
+        except (TypeError, ValueError):
+            total = 0
+        try:
+            passed = int(summary.get("passed") or 0) if summary else 0
+        except (TypeError, ValueError):
+            passed = 0
+
         required = int(self.criteria["health_checks"]["value"])
         consecutive_days = int(
             summary.get("consecutive_passing_days")
@@ -497,22 +990,85 @@ class GraduationChecklist:
             or summary.get("consecutive_green_days")
             or 0
         )
-        
-        if total > 0 and passed == total and consecutive_days >= required:
+        # CB producer is multi-day green streak SSOT when health_report is not a
+        # real ops inventory (missing inventory, or GARCH/risk stub that stamps
+        # total_checks without multi-day counters). Real ops inventories with
+        # total_checks but no consecutive_* stay fail-closed (Batch AO).
+        ops_inventory = is_ops_health_inventory(
+            health if isinstance(health, dict) else None
+        )
+        cb = state.get("circuit_breaker", {})
+        if (
+            isinstance(cb, dict)
+            and consecutive_days == 0
+            and not ops_inventory
+        ):
+            cb_ok = int(cb.get("consecutive_ok") or 0)
+            if cb_ok > 0:
+                consecutive_days = cb_ok
+
+        # Signal-health quality gate: 0/N healthy cannot count as multi-day pass
+        sh_blocked = False
+        sh = None
+        if isinstance(health, dict):
+            sh = health.get("signal_health")
+        if sh is None:
+            sh = state.get("signal_health")
+        if isinstance(sh, dict):
+            try:
+                from src.dashboard.health_report import signal_health_status_contribution
+
+                contrib = signal_health_status_contribution(sh)
+                # Batch EL: align with graduation CB producer — only hard
+                # quality outages (degraded/critical, e.g. 0/N healthy)
+                # block the health_checks criterion. Soft ``warning``
+                # (partial healthy sleeves) must not permanently fail
+                # graduation while ops green streak climbs.
+                if contrib in {"degraded", "critical"}:
+                    sh_blocked = True
+            except Exception:  # noqa: BLE001
+                # Fall back to summary counts when contribution helper unavailable
+                sm = sh.get("summary") if isinstance(sh.get("summary"), dict) else sh
+                try:
+                    healthy_n = int(sm.get("healthy") or 0)
+                    total_n = int(sm.get("total_tracked") or sm.get("total") or 0)
+                    if total_n > 0 and healthy_n == 0:
+                        sh_blocked = True
+                except (TypeError, ValueError):
+                    pass
+
+        desc = self.criteria["health_checks"]["description"]
+        if sh_blocked:
+            return CheckResult(
+                name="health_checks",
+                passed=False,
+                value=consecutive_days,
+                required=required,
+                description=f"{desc} — blocked: signal_health 0/N or degraded",
+            )
+
+        # Ops inventory all-pass, or non-ops / empty inventory relying on
+        # consecutive/CB multi-day streak SSOT.
+        ops_ok = (
+            (ops_inventory and total > 0 and passed == total)
+            or (not ops_inventory and consecutive_days > 0)
+            or (total == 0 and consecutive_days > 0)
+        )
+        if ops_ok and consecutive_days >= required:
             return CheckResult(
                 name="health_checks",
                 passed=True,
                 value=consecutive_days,
                 required=required,
-                description=self.criteria["health_checks"]["description"],
+                description=desc,
             )
-        
+
         return CheckResult(
             name="health_checks",
             passed=False,
             value=consecutive_days,
             required=required,
-            description=self.criteria["health_checks"]["description"],
+            description=desc,
         )
 
     def _check_tca_orders(self, state: Dict) -> CheckResult:
@@ -602,10 +1158,8 @@ class GraduationChecklist:
         # Prefer pre-computed summary for Sharpe
         summary = state.get("paper_trading_summary", {})
         if summary.get("sharpe", 0) > 0:
-            sharpe = summary["sharpe"]
-            n_days = summary.get("days_tracked", 0)
-            if sharpe > 3.0:
-                sharpe = 0.0
+            sharpe = float(summary["sharpe"])
+            n_days = int(summary.get("days_tracked", 0) or 0)
         else:
             # Compute Sharpe from portfolio history (same as _check_sharpe)
             portfolio = state.get("portfolio", {})
@@ -631,8 +1185,20 @@ class GraduationChecklist:
             daily_std = max(np.std(returns) if len(returns) > 1 else 0.0001, 0.0001)
             sharpe = float(np.mean(returns) / daily_std * np.sqrt(252)) if daily_std > 0 else 0.0
             n_days = len(recent)
-            if sharpe > 3.0:
-                sharpe = 0.0
+
+        plausible, note = self._sharpe_plausibility(sharpe)
+        desc = self.criteria["min_dsr"]["description"]
+        if not plausible:
+            # Do not feed implausible Sharpe into DSR as if it were real skill
+            if note:
+                desc = f"{desc} — {note}; DSR not computed on implausible input"
+            return CheckResult(
+                name="min_dsr",
+                passed=False,
+                value=0.0,
+                required=required,
+                description=desc,
+            )
 
         try:
             from src.backtest.metrics import compute_deflated_sharpe_ratio
@@ -648,7 +1214,7 @@ class GraduationChecklist:
             passed=dsr >= required,
             value=round(dsr, 4),
             required=required,
-            description=self.criteria["min_dsr"]["description"],
+            description=desc,
         )
 
     def _check_regime_coverage(self, state: Dict) -> CheckResult:
@@ -660,9 +1226,10 @@ class GraduationChecklist:
         """
         required = self.criteria["regime_coverage"]["value"]
 
-        # Count distinct regimes from regime state history
+        # Count distinct regimes from regime state history + log SSOT
         regime_file = DATA_DIR / "regime_state.json"
         regimes_seen = set()
+        sources_used: list[str] = []
 
         if regime_file.exists():
             try:
@@ -671,7 +1238,11 @@ class GraduationChecklist:
                 current = data.get("regime", "")
                 if current:
                     regimes_seen.add(current)
-            except (OSError, ValueError, KeyError):
+                for entry in data.get("history") or []:
+                    if isinstance(entry, dict) and entry.get("regime"):
+                        regimes_seen.add(entry["regime"])
+                sources_used.append("regime_state.json")
+            except (OSError, ValueError, KeyError, TypeError):
                 pass
 
         # Also check portfolio history for regime snapshots
@@ -681,6 +1252,8 @@ class GraduationChecklist:
             regime = entry.get("regime", "")
             if regime:
                 regimes_seen.add(regime)
+        if history:
+            sources_used.append("portfolio.history")
 
         # Check regime log if available
         regime_log = DATA_DIR / "regime_log.json"
@@ -694,30 +1267,102 @@ class GraduationChecklist:
                     regime = entry.get("regime", "")
                     if regime:
                         regimes_seen.add(regime)
+                sources_used.append("regime_log.json")
             except (OSError, ValueError):
                 pass
 
         n_regimes = len(regimes_seen)
+        desc = self.criteria["regime_coverage"]["description"]
+        if n_regimes == 0 and not sources_used:
+            desc = (
+                f"{desc} — no producer artifacts "
+                "(regime_state.json / regime_log.json / portfolio.history empty)"
+            )
 
         return CheckResult(
             name="regime_coverage",
             passed=n_regimes >= required,
             value=n_regimes,
             required=required,
-            description=self.criteria["regime_coverage"]["description"],
+            description=desc,
         )
+
+    def _count_ensemble_voting_contributors(self) -> tuple[int, str]:
+        """Primary SSOT: signals.json ensemble_voting contributing sources.
+
+        Fallback order: ensemble_voting → adaptive non-zero weights →
+        ensemble_state.json → orders.jsonl tags.
+        """
+        candidates: list[Path] = []
+        try:
+            candidates.append(Path(SIGNALS_JSON))
+        except Exception:  # noqa: BLE001
+            pass
+        candidates.extend(
+            [
+                Path(PUBLIC_DATA_DIR) / "signals.json",
+                Path(DATA_DIR) / "signals.json",
+            ]
+        )
+        seen: set[str] = set()
+        for path in candidates:
+            key = str(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            if not path.is_file():
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            ev = data.get("ensemble_voting")
+            if not isinstance(ev, dict):
+                continue
+            # Prefer explicit contributing count
+            csc = ev.get("contributing_source_count")
+            if csc is not None:
+                try:
+                    return int(csc), f"ensemble_voting.contributing_source_count@{path.name}"
+                except (TypeError, ValueError):
+                    pass
+            # configured_source_status: count contributing/active flags
+            status_list = ev.get("configured_source_status")
+            if isinstance(status_list, list) and status_list:
+                n = 0
+                for row in status_list:
+                    if not isinstance(row, dict):
+                        continue
+                    if row.get("contributing") or (
+                        row.get("active") and float(row.get("effective_weight") or 0) > 0.01
+                    ):
+                        n += 1
+                if n > 0:
+                    return n, f"ensemble_voting.configured_source_status@{path.name}"
+            # active_weights non-zero mass
+            aw = ev.get("active_weights") or ev.get("weights")
+            if isinstance(aw, dict) and aw:
+                n = sum(1 for w in aw.values() if float(w or 0) > 0.01)
+                if n > 0:
+                    return n, f"ensemble_voting.active_weights@{path.name}"
+        return 0, "none"
 
     def _check_signal_diversity(self, state: Dict) -> CheckResult:
         """Check that multiple ensemble signals have contributed to decisions.
 
-        If only 1-2 signals drive all rebalance decisions, the portfolio
-        hasn't validated the full ensemble. We require at least 4 of 6
-        active signals to have non-zero weight in rebalance decisions.
+        Primary SSOT: signals.json ``ensemble_voting`` contributing sources.
+        Never return silent 0 solely because ensemble_state.json is empty when
+        live ensemble_voting shows active arms.
         """
         required = self.criteria["signal_diversity"]["value"]
+        desc = self.criteria["signal_diversity"]["description"]
 
-        # Check ensemble voter state for active signals
-        signals_contributing = set()
+        n_from_ev, ssot = self._count_ensemble_voting_contributors()
+        signals_contributing: set[str] = set()
+
+        # Secondary: ensemble voter state for active signals
         ensemble_file = DATA_DIR / "ensemble_state.json"
         if ensemble_file.exists():
             try:
@@ -727,10 +1372,23 @@ class GraduationChecklist:
                 for signal, weight in weights.items():
                     if weight > 0.01:  # Non-trivial weight
                         signals_contributing.add(signal)
-            except (OSError, ValueError, KeyError):
+            except (OSError, ValueError, KeyError, TypeError):
                 pass
 
-        # Also check order log for signal attribution
+        # Adaptive weights surface (non-zero adjusted arms)
+        adaptive_file = DATA_DIR / "adaptive_weights_state.json"
+        if adaptive_file.exists():
+            try:
+                with open(adaptive_file) as f:
+                    data = json.load(f)
+                adj = data.get("adjusted_weights") or {}
+                for signal, weight in adj.items():
+                    if float(weight or 0) > 0.01:
+                        signals_contributing.add(signal)
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+
+        # Order log for signal attribution
         orders_file = DATA_DIR / "orders.jsonl"
         if orders_file.exists():
             try:
@@ -745,14 +1403,16 @@ class GraduationChecklist:
             except (OSError, ValueError):
                 pass
 
-        n_signals = len(signals_contributing)
+        n_legacy = len(signals_contributing)
+        n_signals = max(n_from_ev, n_legacy)
+        source_note = ssot if n_from_ev >= n_legacy else "ensemble_state|orders|adaptive"
 
         return CheckResult(
             name="signal_diversity",
             passed=n_signals >= required,
             value=n_signals,
             required=required,
-            description=self.criteria["signal_diversity"]["description"],
+            description=f"{desc} (ssot={source_note})",
         )
 
     def _check_sharpe_ci(self, state: Dict) -> CheckResult:
@@ -767,13 +1427,11 @@ class GraduationChecklist:
         """
         required = self.criteria["sharpe_ci_lower"]["value"]
 
-        # Get Sharpe from the same source as _check_sharpe
+        # Get Sharpe from the same source as _check_sharpe (raw, no silent zero)
         summary = state.get("paper_trading_summary", {})
         if summary.get("sharpe", 0) > 0:
-            sharpe = summary["sharpe"]
-            n_days = summary.get("days_tracked", 0)
-            if sharpe > 3.0:
-                sharpe = 0.0
+            sharpe = float(summary["sharpe"])
+            n_days = int(summary.get("days_tracked", 0) or 0)
         else:
             portfolio = state.get("portfolio", {})
             history = portfolio.get("history", [])
@@ -798,8 +1456,20 @@ class GraduationChecklist:
             daily_std = max(np.std(returns) if len(returns) > 1 else 0.0001, 0.0001)
             sharpe = float(np.mean(returns) / daily_std * np.sqrt(252)) if daily_std > 0 else 0.0
             n_days = len(recent)
-            if sharpe > 3.0:
-                sharpe = 0.0
+
+        desc = self.criteria["sharpe_ci_lower"]["description"]
+        plausible, note = self._sharpe_plausibility(sharpe)
+        if not plausible:
+            if note:
+                desc = f"{desc} — {note}; CI not trusted on implausible point estimate"
+            return CheckResult(
+                name="sharpe_ci_lower",
+                passed=False,
+                # Publish raw point estimate (not zero) so operators see the artifact
+                value=round(sharpe, 4),
+                required=required,
+                description=desc,
+            )
 
         if n_days < 5:
             return CheckResult(
@@ -807,7 +1477,7 @@ class GraduationChecklist:
                 passed=False,
                 value=0.0,
                 required=required,
-                description=self.criteria["sharpe_ci_lower"]["description"],
+                description=desc,
             )
 
         # Compute 75% CI lower bound
@@ -822,7 +1492,7 @@ class GraduationChecklist:
             passed=ci_lower >= required,
             value=round(ci_lower, 4),
             required=required,
-            description=self.criteria["sharpe_ci_lower"]["description"],
+            description=desc,
         )
 
 
@@ -861,6 +1531,9 @@ def run_check_and_exit():
     # Save report
     report_path = checklist.save_report(results)
     logger.info(f"  Report saved: {report_path}")
+    promote_path = checklist.write_promote_to_live_if_ready(results)
+    if promote_path:
+        logger.info(f"  Promote marker written: {promote_path}")
     
     return 0 if checklist.is_graduation_ready(results) else 1
 

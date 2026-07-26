@@ -159,7 +159,9 @@ def test_tasker_health_can_include_hermes_audit_when_explicitly_enabled(tmp_path
                 "jobs": [
                     {
                         "id": "bad-hermes-job",
-                        "name": "portfolio-lab-health",
+                        # Non-self job: portfolio-lab-health errors are excluded
+                        # from rollup so sticky health mirrors do not degrade forever.
+                        "name": "portfolio-lab-dashboard",
                         "last_status": "error",
                         "enabled": True,
                     }

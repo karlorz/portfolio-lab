@@ -14,7 +14,6 @@ Tests the AdaptiveEnsembleWeights class including:
 import json
 import os
 import sys
-import tempfile
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -24,6 +23,7 @@ import numpy as np
 from src.strategy.adaptive_ensemble_weights import (
     AdaptiveEnsembleWeights,
     DEFAULT_CONFIG,
+    STATE_FILE as DEFAULT_STATE_FILE,
     WeightAdjustment,
     AdaptiveWeightsState,
 )
@@ -33,25 +33,32 @@ from dataclasses import asdict
 # ── Fixtures ──────────────────────────────────────────────────────────────
 
 
-@pytest.fixture
-def tmp_state_dir(monkeypatch):
-    """Temporary directory for state files."""
-    with tempfile.TemporaryDirectory() as tmp:
-        state_path = Path(tmp) / "adaptive_weights_state.json"
-        monkeypatch.setattr(
-            "src.strategy.adaptive_ensemble_weights.STATE_FILE",
-            state_path,
-        )
-        # Also set DATA_DIR to use the tmp dir for attribution
-        monkeypatch.setattr(
-            "src.strategy.adaptive_ensemble_weights.DATA_DIR",
-            Path(tmp),
-        )
-        monkeypatch.setattr(
-            "src.strategy.adaptive_ensemble_weights.ATTRIBUTION_DIR",
-            Path(tmp) / "attribution",
-        )
-        yield tmp
+@pytest.fixture(autouse=True)
+def tmp_state_dir(monkeypatch, tmp_path):
+    """Keep every adaptive-weight test away from the live runtime state."""
+    state_path = tmp_path / "adaptive_weights_state.json"
+    monkeypatch.setattr(
+        "src.strategy.adaptive_ensemble_weights.STATE_FILE",
+        state_path,
+    )
+    # Also set DATA_DIR to use the tmp dir for attribution
+    monkeypatch.setattr(
+        "src.strategy.adaptive_ensemble_weights.DATA_DIR",
+        tmp_path,
+    )
+    monkeypatch.setattr(
+        "src.strategy.adaptive_ensemble_weights.ATTRIBUTION_DIR",
+        tmp_path / "attribution",
+    )
+    yield tmp_path
+
+
+def test_default_state_path_is_isolated(tmp_state_dir):
+    """The module default must never resolve to the live runtime state in tests."""
+    from src.strategy import adaptive_ensemble_weights as adaptive_module
+
+    assert adaptive_module.STATE_FILE == tmp_state_dir / "adaptive_weights_state.json"
+    assert adaptive_module.STATE_FILE != DEFAULT_STATE_FILE
 
 
 @pytest.fixture
@@ -166,7 +173,7 @@ def sample_attribution_mixed():
 
 
 @pytest.fixture
-def adaptive_weights(tmp_state_dir, sample_base_weights):
+def adaptive_weights(sample_base_weights):
     """Create AdaptiveEnsembleWeights instance with sample base weights."""
     return AdaptiveEnsembleWeights(base_weights=sample_base_weights)
 
@@ -290,9 +297,16 @@ class TestWeightUpdate:
             f"CTA ({cta_weight:.4f}) should > MSM ({msm_weight:.4f})"
 
     def test_min_weight_enforced(self, adaptive_weights, sample_attribution_good):
-        """No source should fall below min_weight."""
+        """Positive-baseline sources should not fall below min_weight.
+
+        Zero-baseline arms are hard-excluded (see test_zero_baseline_arm_stays_zero).
+        """
         adapted = adaptive_weights.update_weights(sample_attribution_good, "normal")
         for source, weight in adapted.items():
+            base = float(adaptive_weights.base_weights.get(source, 0) or 0)
+            if base <= 0:
+                assert weight == 0.0, f"zero-baseline {source} resurrected to {weight}"
+                continue
             assert weight >= adaptive_weights.config["min_weight"], \
                 f"{source} weight {weight:.4f} < min {adaptive_weights.config['min_weight']}"
 
@@ -352,7 +366,7 @@ class TestIntegration:
     """Integration tests with realistic data flow."""
 
     def test_end_to_end_attribution_flow(
-        self, tmp_state_dir, sample_base_weights, sample_attribution_good
+        self, sample_base_weights, sample_attribution_good
     ):
         """Full flow: attribution → weight update → normalized output."""
         weights = AdaptiveEnsembleWeights(base_weights=sample_base_weights)
@@ -360,7 +374,13 @@ class TestIntegration:
 
         # Check all expected properties
         assert abs(sum(adapted.values()) - 1.0) < 0.01
-        assert all(w >= 0.01 for w in adapted.values())
+        # Positive-baseline arms respect min floor; zero-baseline hard-exclude stays 0
+        for src, w in adapted.items():
+            base = float(sample_base_weights.get(src, 0) or 0)
+            if base <= 0:
+                assert w == 0.0, f"zero-baseline {src} resurrected to {w}"
+            else:
+                assert w >= 0.01, f"{src} weight {w} < min floor"
         assert all(w <= 0.40 for w in adapted.values())
 
         # Check that top performer got highest weight
@@ -368,9 +388,9 @@ class TestIntegration:
             "CTA trend (0.95 Sharpe) should outweigh HMM (0.2 Sharpe)"
 
     def test_attribution_with_extra_sources(
-        self, tmp_state_dir, sample_base_weights
+        self, sample_base_weights
     ):
-        """Attribution with sources not in baseline should still work."""
+        """Attribution-only ghosts must not enter live adaptive mass (Batch BJ)."""
         attribution = {
             "timestamp": datetime.now().isoformat(),
             "sources": {
@@ -381,10 +401,11 @@ class TestIntegration:
         }
         weights = AdaptiveEnsembleWeights(base_weights=sample_base_weights)
         adapted = weights.update_weights(attribution, "normal")
-        assert "brand_new_source_x" in adapted, "Extra source should be included"
+        assert "brand_new_source_x" not in adapted, "Ghost must not dilute live weights"
         assert abs(sum(adapted.values()) - 1.0) < 0.01
+        assert "tsfm_momentum" in adapted
 
-    def test_stale_attribution_handling(self, tmp_state_dir, sample_base_weights):
+    def test_stale_attribution_handling(self, sample_base_weights):
         """
         Fallback in EnsembleVoter: when attribution is stale (>7 days),
         the voter should not activate adaptive weights (handled in voter code).
@@ -409,7 +430,7 @@ class TestIntegration:
 class TestEdgeCases:
 
     def test_empty_base_weights(self):
-        """Empty base weights should not crash."""
+        """Empty base weights should not crash (isolated state path)."""
         weights = AdaptiveEnsembleWeights(base_weights={})
         adapted = weights.update_weights({"sources": {}, "timestamp": "now"}, "normal")
         assert adapted == {}
@@ -452,7 +473,7 @@ class TestEdgeCases:
 class TestCLI:
     """Basic CLI smoke tests."""
 
-    def test_cli_update_no_attribution(self, tmp_state_dir, monkeypatch):
+    def test_cli_update_no_attribution(self, monkeypatch):
         """CLI update with no attribution files should exit with error."""
         monkeypatch.setattr(
             "sys.argv", ["adaptive_ensemble_weights", "update", "--regime", "normal"]
@@ -463,7 +484,7 @@ class TestCLI:
         # Should return error code 1
         assert exc.value.code != 0
 
-    def test_cli_show_no_state(self, tmp_state_dir, monkeypatch):
+    def test_cli_show_no_state(self, monkeypatch):
         """CLI show with no state file should print error."""
         monkeypatch.setattr(
             "sys.argv", ["adaptive_ensemble_weights", "show"]
@@ -841,9 +862,13 @@ class TestWeightUpdateEdgeCases:
         attribution = {"timestamp": "now"}
         adapted = adaptive_weights.update_weights(attribution, "normal")
         assert adapted == adaptive_weights.base_weights
-        # multipliers should all be 1.0
-        for mult in adaptive_weights.multipliers.values():
-            assert mult == 1.0
+        # Multipliers: 1.0 for positive baseline; 0.0 for soft-delete (Batch DO)
+        for source, mult in adaptive_weights.multipliers.items():
+            base = float(adaptive_weights.base_weights.get(source, 0) or 0)
+            if base <= 0:
+                assert mult == 0.0, f"zero-baseline {source} mult {mult}"
+            else:
+                assert mult == 1.0
 
     def test_sources_is_none(self, adaptive_weights):
         """sources=None should be treated same as empty dict."""
@@ -876,7 +901,7 @@ class TestWeightUpdateEdgeCases:
         assert abs(ratio_ab - 1.667) < 0.1
 
     def test_attribution_only_extra_sources(self, adaptive_weights):
-        """Sources in attribution but not in baseline: use avg_weight as base."""
+        """Ghost-only attribution with empty baseline → empty adapted (Batch BJ)."""
         attribution = {
             "timestamp": "now",
             "sources": {
@@ -894,9 +919,9 @@ class TestWeightUpdateEdgeCases:
         }
         weights = AdaptiveEnsembleWeights(base_weights={})  # empty baseline
         adapted = weights.update_weights(attribution, "normal")
-        assert abs(sum(adapted.values()) - 1.0) < 0.01
-        assert "extra_one" in adapted
-        assert "extra_two" in adapted
+        assert adapted == {}
+        assert "extra_one" not in adapted
+        assert "extra_two" not in adapted
 
     def test_single_source_zero_sharpe(self):
         """Single source with zero Sharpe yields no_data_multiplier."""
@@ -1073,11 +1098,12 @@ class TestStatePersistenceEdgeCases:
         assert not adaptive_weights._load_state()
 
     def test_save_load_empty_baseline(self):
-        """Save/load with empty baseline weights."""
+        """Save/load with empty baseline weights (isolated state path)."""
         weights = AdaptiveEnsembleWeights(base_weights={})
         weights.adjusted_weights = {}
         weights.multipliers = {}
-        weights._save_state()
+        # force_empty allows intentional empty baseline persistence in tests
+        weights._save_state(force_empty=True)
         loaded = weights._load_state()
         assert loaded
         assert weights.base_weights == {}
@@ -1127,7 +1153,7 @@ class TestGetStateDictEdgeCases:
 class TestCLIEdgeCases:
     """Additional CLI command test coverage."""
 
-    def test_cli_reset_no_state(self, tmp_state_dir, monkeypatch):
+    def test_cli_reset_no_state(self, monkeypatch):
         """CLI reset without any prior update should not crash."""
         monkeypatch.setattr(
             "sys.argv", ["adaptive_ensemble_weights", "reset"],
@@ -1156,7 +1182,7 @@ class TestCLIEdgeCases:
             rc = main()
         assert rc == 0
 
-    def test_cli_unknown_command(self, tmp_state_dir, monkeypatch):
+    def test_cli_unknown_command(self, monkeypatch):
         """CLI with unknown command prints help and exits with error code 2."""
         monkeypatch.setattr(
             "sys.argv", ["adaptive_ensemble_weights", "unknown_command"],
@@ -1272,7 +1298,7 @@ class TestResetEdgeCases:
         assert result == {}
         assert weights.multipliers == {}
 
-    def test_reset_saves_state(self, tmp_state_dir):
+    def test_reset_saves_state(self):
         """Reset persists state to file."""
         weights = AdaptiveEnsembleWeights(
             base_weights={"a": 0.7, "b": 0.3},
@@ -1325,6 +1351,104 @@ class TestSaveStateParentDir:
             weights.adjusted_weights = {"src": 1.0}
             weights._save_state()
             assert deep_path.exists()
+
+
+# ── Zero-baseline hard exclude (Batch AQ) ──────────────────────────────────
+
+
+class TestZeroBaselineSkipsMinWeightFloor:
+    """Zero baseline weight must mean hard exclude — no min_weight resurrection."""
+
+    def test_zero_baseline_arm_stays_zero(self, tmp_state_dir):
+        """baseline multi_speed_momentum=0 yields adjusted msm=0 after update."""
+        base = {
+            "tsfm_momentum": 0.50,
+            "cta_trend": 0.50,
+            "multi_speed_momentum": 0.0,
+        }
+        attr = {
+            "timestamp": "now",
+            "sources": {
+                "tsfm_momentum": {
+                    "total_readings": 40,
+                    "sharpe_contribution": 0.8,
+                },
+                "cta_trend": {
+                    "total_readings": 40,
+                    "sharpe_contribution": 0.6,
+                },
+                # Strong attribution must not resurrect a zero-baseline arm
+                "multi_speed_momentum": {
+                    "total_readings": 40,
+                    "sharpe_contribution": 1.5,
+                },
+            },
+        }
+        weights = AdaptiveEnsembleWeights(
+            base_weights=base,
+            state_file=Path(tmp_state_dir) / "adaptive_zero.json",
+        )
+        adapted = weights.update_weights(attr, "normal")
+        assert adapted.get("multi_speed_momentum", None) == 0.0, (
+            f"zero-baseline msm resurrected to {adapted.get('multi_speed_momentum')}"
+        )
+        # Active mass still renormalizes
+        assert abs(sum(adapted.values()) - 1.0) < 0.01
+        assert adapted["tsfm_momentum"] > 0
+        assert adapted["cta_trend"] > 0
+        # Disclosure on instance + state payload
+        assert "multi_speed_momentum" in weights.zero_baseline_exclusions
+        state = weights.get_state_dict()
+        assert "multi_speed_momentum" in state["zero_baseline_exclusions"]
+        assert state["respect_zero_baseline"] is True
+
+    def test_respect_zero_baseline_config_default_true(self):
+        """respect_zero_baseline is True by default."""
+        assert DEFAULT_CONFIG.get("respect_zero_baseline") is True
+        w = AdaptiveEnsembleWeights(base_weights={"a": 1.0})
+        assert w.config.get("respect_zero_baseline") is True
+
+    def test_respect_zero_baseline_false_restores_floor(self, tmp_state_dir):
+        """Opt-out: respect_zero_baseline=false re-applies min_weight to zero base."""
+        base = {
+            "tsfm_momentum": 0.50,
+            "cta_trend": 0.50,
+            "multi_speed_momentum": 0.0,
+        }
+        attr = {
+            "timestamp": "now",
+            "sources": {
+                "tsfm_momentum": {
+                    "total_readings": 40,
+                    "sharpe_contribution": 0.8,
+                },
+                "cta_trend": {
+                    "total_readings": 40,
+                    "sharpe_contribution": 0.6,
+                },
+                "multi_speed_momentum": {
+                    "total_readings": 40,
+                    "sharpe_contribution": 1.5,
+                },
+            },
+        }
+        weights = AdaptiveEnsembleWeights(
+            base_weights=base,
+            config={"respect_zero_baseline": False, "min_weight": 0.01},
+            state_file=Path(tmp_state_dir) / "adaptive_legacy.json",
+        )
+        adapted = weights.update_weights(attr, "normal")
+        assert adapted["multi_speed_momentum"] >= weights.config["min_weight"] - 1e-9
+        assert weights.zero_baseline_exclusions == []
+
+    def test_sample_base_circuit_breaker_stays_zero(
+        self, adaptive_weights, sample_attribution_good
+    ):
+        """circuit_breaker baseline 0.0 in sample fixtures stays zero after update."""
+        adapted = adaptive_weights.update_weights(sample_attribution_good, "normal")
+        if "circuit_breaker" in adaptive_weights.base_weights:
+            assert adapted.get("circuit_breaker", 0.0) == 0.0
+            assert "circuit_breaker" in adaptive_weights.zero_baseline_exclusions
 
 
 if __name__ == "__main__":

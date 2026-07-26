@@ -179,3 +179,47 @@ def test_cron_update_persists_git_commit_metadata(tmp_path: Path, monkeypatch) -
 
     status = json.loads((tmp_path / "data" / "cron_status.json").read_text())
     assert status["jobs"][0]["git_commit"] == "abc1234"
+
+
+def test_cron_update_preserves_existing_tasker_backend(tmp_path: Path, monkeypatch) -> None:
+    """Ad-hoc updates must not re-stamp job backend away from tasker SSOT."""
+    spec = importlib.util.spec_from_file_location("cron_update", CRON_UPDATE_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "cron_status.json").write_text(
+        json.dumps(
+            {
+                "backend": "tasker",
+                "jobs": [
+                    {
+                        "name": "portfolio-lab-health",
+                        "status": "error",
+                        "backend": "tasker",
+                        "schedule": "0,30 * * * *",
+                        "enabled": True,
+                        "last_run": "old",
+                    }
+                ],
+            }
+        )
+    )
+
+    monkeypatch.setattr(module, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(module, "_default_backend", "manual")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["cron_update.py", "portfolio-lab-health", "ok", "1.5"],
+    )
+
+    module.main()
+
+    status = json.loads((data_dir / "cron_status.json").read_text())
+    job = status["jobs"][0]
+    assert job["status"] == "ok"
+    assert job["backend"] == "tasker"
+    assert status.get("backend") == "tasker"

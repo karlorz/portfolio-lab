@@ -65,9 +65,16 @@ export interface RegimeAuthority {
   };
 }
 
+/**
+ * Public `signals.json.volatility_parity` allocation shape.
+ * Allocation and risk fields are **percentage points** (spy_pct: 40 = 40%,
+ * target_volatility: 10 = 10% vol) — not decimal fractions.
+ */
 export interface VolatilityParitySignalData {
   date: string;
+  /** Percentage points (10 = 10% target vol). */
   target_volatility: number;
+  /** Percentage points (40 = 40% weight). */
   spy_pct: number;
   gld_pct: number;
   tlt_pct: number;
@@ -199,11 +206,8 @@ export interface SignalsData {
   };
   garch_cvar?: GarchCvarData;
   entropy?: EntropyData;
-  bond_momentum?: {
-    signals: BondMomentumSignal[];
-    timestamp: string;
-    ensemble: BondMomentumEnsemble;
-  };
+  /** Producer summary shape (canonical) or legacy overlay rows. */
+  bond_momentum?: BondMomentumSummaryData | BondMomentumLegacyData | null;
   vix_term_structure?: VIXTermStructureData;
   vix_overlay?: VIXOverlayState;
   hedge_selector?: HedgeSelectorData | null;
@@ -385,6 +389,42 @@ export interface AssetStat {
   current: number;
 }
 
+export interface KillSwitchHealth {
+  status?: string;
+  enabled?: boolean;
+  level?: string | null;
+  reason?: string | null;
+  source?: string | null;
+  message?: string | null;
+  timestamp?: string | null;
+  incident_id?: string | null;
+  mode?: string | null;
+  channel?: string | null;
+}
+
+export interface OpenIncidentsHealth {
+  status?: string;
+  open_count?: number;
+  incidents?: Array<Record<string, unknown>>;
+}
+
+/** Dual-write provenance_completeness block (Batch AS+; advisory split-brain forensics). */
+export interface ProvenanceCompleteness {
+  generator_git_sha_present?: boolean;
+  dual_write_attempted?: boolean;
+  dual_write_ok?: boolean | null;
+  dual_write_lag_seconds?: number | null;
+  dual_write_lag_stale?: boolean;
+  dual_write_lag_threshold_seconds?: number;
+  dual_write_lag_unit?: string;
+  paths_identical?: boolean | null;
+  private_path?: string | null;
+  public_path?: string | null;
+  note?: string;
+  disclosure?: string;
+  [key: string]: unknown;
+}
+
 export interface HealthData {
   cron_jobs: CronJobStatus[];
   data_freshness: Record<string, DataFreshness>;
@@ -392,6 +432,13 @@ export interface HealthData {
   generated_at: string;
   scheduler_status?: SchedulerStatus;
   data_pipeline_slo?: DataPipelineSlo;
+  kill_switch?: KillSwitchHealth;
+  open_incidents?: OpenIncidentsHealth;
+  /** Code tip that produced this artifact (when stamped). */
+  generator_git_sha?: string | null;
+  generator_git_sha_status?: string | null;
+  /** Dual-write lag / split-brain forensics (health_ops or dual-write producers). */
+  provenance_completeness?: ProvenanceCompleteness | null;
   error?: string;
 }
 
@@ -519,6 +566,9 @@ export interface AnalyticsData {
     portfolio: PortfolioBenchmarkData;
   };
   crisis_periods: CrisisPeriodData[];
+  /** Section-level: global status=success does not imply complete crisis comparison. */
+  crisis_periods_status?: 'success' | 'partial' | 'unavailable';
+  crisis_periods_reason?: string | null;
 }
 
 export interface DrawdownPoint {
@@ -565,6 +615,8 @@ export interface CrisisPeriodData {
   description: string;
   spy_return: number;
   portfolio_return: number | null;
+  portfolio_return_available?: boolean;
+  availability?: 'available' | 'unavailable' | 'partial';
 }
 
 export interface AlertsData {
@@ -621,6 +673,13 @@ export interface SmartRebalanceData {
   ytd_cost_bps: number;
   remaining_budget_pct: number;
   remaining_budget_ratio?: number;
+  /** Kill authority blocks actionable rebalance (mirrors order_router). */
+  execution_blocked?: boolean;
+  kill_switch_enabled?: boolean;
+  kill_switch_level?: string | null;
+  kill_switch_reason?: string | null;
+  kill_switch_incident_id?: string | null;
+  kill_switch_message?: string | null;
   status: {
     ytd_cost_bps: number;
     ytd_cost_pct: number;
@@ -776,7 +835,7 @@ export interface ClosingAuctionSignal {
   should_trade: boolean;
 }
 
-// Bond Momentum Types (v3.30)
+// Bond Momentum Types (v3.30 legacy overlay + current duration summary)
 export interface BondMomentumSignal {
   etf: string;
   timestamp: string;
@@ -796,6 +855,35 @@ export interface BondMomentumEnsemble {
   confidence: string;
   action: string;
   recommendation: string;
+}
+
+/** Legacy TSMOM per-ETF overlay rows (optional consumer shape). */
+export interface BondMomentumLegacyData {
+  signals: BondMomentumSignal[];
+  timestamp?: string;
+  ensemble?: BondMomentumEnsemble;
+}
+
+/**
+ * Canonical public producer shape from DashboardGenerator bond_duration /
+ * overlay bond_momentum summary (no signals[] rows).
+ */
+export interface BondMomentumSummaryData {
+  active: boolean;
+  yield_10y: number;
+  yield_2y: number;
+  spread: number;
+  curve_regime: string;
+  rate_direction: string;
+  tlt_weight: number;
+  ief_weight: number;
+  shy_weight: number;
+  effective_duration: number;
+  position: string;
+  confidence: number;
+  status_text: string;
+  generated_at?: string;
+  timestamp?: string;
 }
 
 // VIX Term Structure Types (v4.50)

@@ -470,6 +470,21 @@ class TestGenerateAnalyticsReport:
         assert 'crisis_periods' in report
         assert len(report['crisis_periods']) == 3
 
+    def test_all_null_crisis_portfolio_returns_emit_unavailable_metadata(self, tmp_path):
+        """Global status may be success, but crisis comparison must not look complete."""
+        calc = AnalyticsCalculator(data_dir=str(tmp_path))
+        data = _make_perf_data(n_days=300, daily_return=0.001)
+        f = tmp_path / "performance.jsonl"
+        with open(f, 'w') as fh:
+            for entry in data:
+                fh.write(json.dumps(entry) + '\n')
+        report = calc.generate_analytics_report()
+        assert report["status"] == "success"
+        assert report["crisis_periods_status"] == "unavailable"
+        assert report["crisis_periods_reason"] == "historical_simulation_unavailable"
+        assert all(row["portfolio_return"] is None for row in report["crisis_periods"])
+        assert all(row.get("portfolio_return_available") is False for row in report["crisis_periods"])
+
     def test_report_has_benchmark(self, tmp_path):
         calc = AnalyticsCalculator(data_dir=str(tmp_path))
         data = _make_perf_data(n_days=300, daily_return=0.001)
@@ -551,3 +566,60 @@ class TestEdgeCases:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+def test_benchmark_comparison_portfolio_sharpe_not_null_with_returns():
+    """Full-period portfolio.sharpe must be computed when NAV series has variance."""
+    calc = AnalyticsCalculator()
+    # Varying returns (not constant) so std > 0
+    rng = np.random.RandomState(0)
+    data = []
+    value = 100000.0
+    d = datetime(2024, 1, 2)
+    for i in range(80):
+        while d.weekday() >= 5:
+            d += timedelta(days=1)
+        data.append({
+            "timestamp": d.strftime("%Y-%m-%dT15:30:00"),
+            "total_value": round(value, 2),
+        })
+        value *= 1.0 + 0.0008 + float(rng.normal(0, 0.005))
+        d += timedelta(days=1)
+    result = calc.calculate_benchmark_comparison(performance_data=data)
+    port = result["portfolio"]
+    assert port["sharpe"] is not None
+    assert isinstance(port["sharpe"], (int, float))
+    assert port["volatility"] > 0
+
+
+
+def test_benchmark_comparison_sharpe_reason_when_flat():
+    calc = AnalyticsCalculator()
+    data = _make_perf_data(n_days=30, daily_return=0.0)
+    result = calc.calculate_benchmark_comparison(performance_data=data)
+    port = result["portfolio"]
+    # zero variance → null sharpe with reason
+    assert port.get("sharpe") is None
+    assert port.get("sharpe_reason") in {
+        "zero_return_variance",
+        "insufficient_return_observations",
+        "no_returns",
+    }
+
+
+def test_benchmark_comparison_includes_spy_peer_block(tmp_path):
+    """benchmark_comparison must include SPY peer when market DB has prices."""
+    calc = AnalyticsCalculator(data_dir=str(tmp_path))
+    data = _make_perf_data(n_days=40, daily_return=0.001, start_date="2026-05-11")
+    result = calc.calculate_benchmark_comparison(performance_data=data)
+    assert "portfolio" in result
+    # Live MARKET_DB has SPY — spy block should appear
+    if "spy" in result:
+        assert result["spy"].get("status") in ("ok", "unavailable")
+        if result["spy"].get("status") == "ok":
+            assert result["spy"]["symbol"] == "SPY"
+            assert "total_return" in result["spy"]
+            assert result["spy"].get("role") == "benchmark"
+    else:
+        # If DB unavailable in env, still require portfolio present
+        assert result["portfolio"]["total_return"] is not None

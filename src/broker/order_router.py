@@ -24,7 +24,14 @@ from src.data.price_cache import get_prices
 
 
 
-__all__ = ['Signal', 'OrderPlan', 'OrderRouter']
+__all__ = [
+    'Signal',
+    'OrderPlan',
+    'OrderRouter',
+    'estimate_execution_cost_bps',
+    'record_rebalance_costs_from_orders',
+]
+
 
 @dataclass
 class Signal:
@@ -43,6 +50,126 @@ class OrderPlan:
     order_type: str
     estimated_value: float
     reason: str
+
+
+def estimate_execution_cost_bps(
+    executed: List[Dict[str, Any]],
+    *,
+    portfolio_value: float = 100_000.0,
+) -> float:
+    """Estimate portfolio-level one-way cost bps from executed order notionals.
+
+    Same formula as Batch EA fill rebuild: Σ (notional/portfolio) × ETF bps.
+    """
+    if portfolio_value <= 0:
+        portfolio_value = 100_000.0
+    try:
+        from src.costs.etf_cost_table import get_cost_bps
+    except ImportError:
+        get_cost_bps = lambda _sym: 5.0  # noqa: E731
+
+    total = 0.0
+    for order in executed:
+        if not isinstance(order, dict):
+            continue
+        status = str(order.get("status") or "").lower()
+        if status in {"failed", "blocked", "dry_run"}:
+            continue
+        try:
+            notional = abs(float(order.get("estimated_value") or order.get("fill_value") or 0))
+        except (TypeError, ValueError):
+            continue
+        if notional <= 0:
+            continue
+        sym = str(order.get("symbol") or "")
+        total += (notional / portfolio_value) * float(get_cost_bps(sym))
+    return round(total, 4)
+
+
+def record_rebalance_costs_from_orders(
+    executed: List[Dict[str, Any]],
+    *,
+    data_dir: Optional[str] = None,
+    portfolio_value: Optional[float] = None,
+    dry_run: bool = False,
+    event_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Persist smart-rebalance cost ledger from an execution batch (Batch EF).
+
+    Called after successful non-dry-run submits so YTD budget tracking no longer
+    depends solely on offline order-history rebuild (Batch EA). Idempotent via
+    CostBudgetTracker composite-key dedupe.
+    """
+    if dry_run:
+        return {"recorded": False, "reason": "dry_run"}
+    if not executed:
+        return {"recorded": False, "reason": "no_executed_orders"}
+
+    # Only count submitted / filled-like statuses
+    countable = [
+        o
+        for o in executed
+        if isinstance(o, dict)
+        and str(o.get("status") or "").lower()
+        in {"submitted", "filled", "accepted", "partial_fill", "new", "ok", ""}
+    ]
+    if not countable:
+        # If status missing but list non-empty, still try
+        countable = [o for o in executed if isinstance(o, dict)]
+    if not countable:
+        return {"recorded": False, "reason": "no_countable_orders"}
+
+    pv = float(portfolio_value) if portfolio_value is not None else 100_000.0
+    # Prefer portfolio total from marks if available later; caller may pass
+    cost_bps = estimate_execution_cost_bps(countable, portfolio_value=pv)
+    if cost_bps <= 0:
+        return {"recorded": False, "reason": "zero_cost_estimate", "cost_bps": 0.0}
+
+    symbols = sorted(
+        {
+            str(o.get("symbol")).upper()
+            for o in countable
+            if o.get("symbol")
+        }
+    )
+    # Event date from max order timestamp (not wall clock write day)
+    date_str = event_date
+    if not date_str:
+        ts_candidates = []
+        for o in countable:
+            ts = o.get("timestamp") or o.get("filled_at")
+            if ts:
+                ts_candidates.append(str(ts))
+        if ts_candidates:
+            date_str = max(ts_candidates)
+        else:
+            date_str = datetime.now().isoformat()
+
+    try:
+        from src.rebalancing.integration import SmartRebalanceGate
+
+        gate = SmartRebalanceGate(
+            data_dir=data_dir or str(DATA_DIR),
+            load_state=True,
+        )
+        gate.record_execution(cost_bps, date_str, symbols)
+        return {
+            "recorded": True,
+            "cost_bps": cost_bps,
+            "symbols": symbols,
+            "date": date_str,
+            "order_count": len(countable),
+            "portfolio_value": pv,
+            "source": "order_router_execute",
+        }
+    except Exception as exc:  # noqa: BLE001 — never fail order path on cost ledger
+        logger.warning("rebalance cost record skipped: %s", exc)
+        return {
+            "recorded": False,
+            "reason": f"record_failed:{type(exc).__name__}",
+            "error": str(exc),
+            "cost_bps": cost_bps,
+        }
 
 
 class OrderRouter:
@@ -264,26 +391,38 @@ class OrderRouter:
                 "timestamp": datetime.now().isoformat(),
             }
         
-        # Check kill switch if enabled
+        # Check kill switch if enabled (fail-closed when file missing/unreadable)
         if kill_switch_check and not dry_run:
             kill_switch_path = os.path.join(self.data_dir, "kill_switch.json")
-            if os.path.exists(kill_switch_path):
-                try:
-                    with open(kill_switch_path, "r") as f:
-                        ks = json.load(f)
-                    if ks.get("enabled", False):
-                        return {
-                            "status": "blocked",
-                            "message": "Kill switch is enabled - execution blocked",
-                            "timestamp": datetime.now().isoformat(),
-                        }
-                except (OSError, json.JSONDecodeError) as e:
-                    logger.warning("Kill switch file corrupt/unreadable, blocking orders for safety: %s", e)
+            if not os.path.exists(kill_switch_path):
+                logger.warning(
+                    "Kill switch file missing at %s — blocking orders (fail-closed)",
+                    kill_switch_path,
+                )
+                return {
+                    "status": "blocked",
+                    "message": (
+                        "Kill switch file missing - execution blocked for safety "
+                        "(expected kill_switch.json with enabled true/false)"
+                    ),
+                    "timestamp": datetime.now().isoformat(),
+                }
+            try:
+                with open(kill_switch_path, "r") as f:
+                    ks = json.load(f)
+                if ks.get("enabled", False):
                     return {
                         "status": "blocked",
-                        "message": f"Kill switch file unreadable - execution blocked for safety: {e}",
+                        "message": "Kill switch is enabled - execution blocked",
                         "timestamp": datetime.now().isoformat(),
                     }
+            except (OSError, json.JSONDecodeError) as e:
+                logger.warning("Kill switch file corrupt/unreadable, blocking orders for safety: %s", e)
+                return {
+                    "status": "blocked",
+                    "message": f"Kill switch file unreadable - execution blocked for safety: {e}",
+                    "timestamp": datetime.now().isoformat(),
+                }
 
         market_session: Optional[Dict[str, Any]] = None
         if not dry_run:
@@ -363,6 +502,33 @@ class OrderRouter:
         with open(self.orders_log, "a") as f:
             for order in executed + failed:
                 f.write(json.dumps(order) + "\n")
+
+        # Batch EF: record YTD rebalance cost on real submits (not dry-run).
+        # Fill/execution event is cost SSOT; EA offline rebuild remains backup.
+        cost_record: Dict[str, Any] = {"recorded": False, "reason": "not_attempted"}
+        if not dry_run and executed:
+            try:
+                # Prefer live portfolio total_value when signals expose it
+                pv = 100_000.0
+                try:
+                    with open(self.signals_file, "r", encoding="utf-8") as sf:
+                        sig = json.load(sf)
+                    if isinstance(sig, dict) and sig.get("total_value"):
+                        pv = float(sig["total_value"])
+                except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                    pass
+                cost_record = record_rebalance_costs_from_orders(
+                    executed,
+                    data_dir=self.data_dir,
+                    portfolio_value=pv,
+                    dry_run=False,
+                )
+            except Exception as cost_exc:  # noqa: BLE001
+                logger.warning("rebalance cost record on execute failed: %s", cost_exc)
+                cost_record = {
+                    "recorded": False,
+                    "reason": f"execute_hook_failed:{type(cost_exc).__name__}",
+                }
         
         return {
             "timestamp": datetime.now().isoformat(),
@@ -375,6 +541,7 @@ class OrderRouter:
             "executed": executed,
             "failed": failed,
             "market_session": market_session,
+            "rebalance_cost_record": cost_record,
         }
     
     def rebalance(self, dry_run: bool = True) -> Dict[str, Any]:

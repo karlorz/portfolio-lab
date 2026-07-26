@@ -16,7 +16,7 @@ from bisect import bisect_right
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -219,9 +219,16 @@ class MultiSpeedMomentumBacktester:
                 # full file.  Since our data goes up to 2026-05 this gives the
                 # correct result for any backtest date -- the engine simply
                 # looks back the required lookback window.
+                # Batch DH: get_signal_for_ticker returns {"value", "confidence"} dict
+                # (not a bare float). Prior code clipped the dict → TypeError → silent
+                # 12m-proxy fallback and inflated ADR noise.
                 signal = self._signal_engine.get_signal_for_ticker(ticker, end_date)
                 if signal is not None:
-                    return float(np.clip(signal, -1.0, 1.0))
+                    if isinstance(signal, dict):
+                        raw = signal.get("value", signal.get("signal", 0.0))
+                    else:
+                        raw = signal
+                    return float(np.clip(float(raw), -1.0, 1.0))
             except (KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError) as exc:
                 logger.warning("MultiSpeedMomentum signal failed for %s on %s: %s", ticker, end_date, exc)
 
@@ -551,6 +558,125 @@ class MultiSpeedMomentumBacktester:
 
         save_results_json(asdict(result), output_path=output_path)
         logger.info("Results saved to %s", output_path)
+
+
+# Batch DH: soft-delete ADR gates (disclosure / human promote only)
+MSM_ADR_MIN_SHARPE: float = 0.79  # champion baseline floor
+MSM_ADR_MIN_SHARPE_IMPROVEMENT: float = 0.02
+MSM_ADR_MAX_DRAWDOWN: float = -30.0  # worse than this fails
+
+
+def evaluate_msm_soft_delete_adr(
+    result: Optional[BacktestResult] = None,
+    *,
+    result_path: Optional[str | Path] = None,
+) -> Dict[str, Any]:
+    """Batch DH: walk-forward ADR checklist for multi_speed zero_baseline.
+
+    Portfolio gate for soft-delete re-enable requires ALL of:
+    - overlay Sharpe >= champion floor (0.79)
+    - Sharpe improvement vs 46/38/16 baseline >= +0.02
+    - max drawdown > -30%
+    Never auto-reenable weight — returns evidence only.
+    """
+    payload: Dict[str, Any] = {}
+    path = Path(result_path) if result_path else (
+        Path(BACKTEST_RESULTS_DIR) / "multi_speed_momentum_backtest.json"
+    )
+    if result is not None:
+        payload = {
+            "sharpe_ratio": float(getattr(result, "sharpe_ratio", 0) or 0),
+            "baseline_sharpe": float(getattr(result, "baseline_sharpe", 0) or 0),
+            "sharpe_improvement": float(getattr(result, "sharpe_improvement", 0) or 0),
+            "max_drawdown": float(getattr(result, "max_drawdown", 0) or 0),
+            "total_return": float(getattr(result, "total_return", 0) or 0),
+            "cagr": float(getattr(result, "cagr", 0) or 0),
+        }
+        source = "BacktestResult"
+    elif path.exists():
+        try:
+            raw = json.loads(path.read_text())
+            payload = {
+                "sharpe_ratio": float(raw.get("sharpe_ratio") or 0),
+                "baseline_sharpe": float(raw.get("baseline_sharpe") or 0),
+                "sharpe_improvement": float(raw.get("sharpe_improvement") or 0),
+                "max_drawdown": float(raw.get("max_drawdown") or 0),
+                "total_return": float(raw.get("total_return") or 0),
+                "cagr": float(raw.get("cagr") or 0),
+            }
+            source = str(path)
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            return {
+                "source": "multi_speed_momentum",
+                "adr_status": "evidence_unavailable",
+                "portfolio_gates_pass": False,
+                "auto_reenable": False,
+                "error": f"failed_to_load_results: {exc}",
+                "hint": "Run: uv run python -m src.backtest.multi_speed_momentum_backtest run --save",
+            }
+    else:
+        return {
+            "source": "multi_speed_momentum",
+            "adr_status": "evidence_missing",
+            "portfolio_gates_pass": False,
+            "auto_reenable": False,
+            "artifact_path": str(path),
+            "hint": "No multi_speed_momentum_backtest.json — run walk-forward with --save",
+        }
+
+    sharpe = float(payload.get("sharpe_ratio") or 0)
+    baseline = float(payload.get("baseline_sharpe") or 0)
+    improvement = float(payload.get("sharpe_improvement") or 0)
+    max_dd = float(payload.get("max_drawdown") or 0)
+    checks = {
+        "sharpe_vs_champion_floor": sharpe >= MSM_ADR_MIN_SHARPE,
+        "sharpe_improvement_ge_002": improvement >= MSM_ADR_MIN_SHARPE_IMPROVEMENT,
+        "max_drawdown_better_than_neg30": max_dd > MSM_ADR_MAX_DRAWDOWN,
+    }
+    all_pass = all(checks.values())
+    if all_pass:
+        status = "adr_evidence_supports_review"
+        hint = (
+            "Walk-forward ADR checks pass — human may promote zero_baseline "
+            "weight via REGIME_WEIGHTS ADR; do not auto-reenable."
+        )
+    elif improvement < 0:
+        status = "adr_net_negative_keep_soft_delete"
+        hint = (
+            f"Net-negative overlay vs baseline (ΔSharpe={improvement:+.3f}) — "
+            "keep soft-delete (matches historical −0.012 rationale)."
+        )
+    else:
+        status = "adr_evidence_insufficient"
+        failed = [k for k, v in checks.items() if not v]
+        hint = (
+            f"ADR checks failed: {', '.join(failed)} — keep weight 0; "
+            "re-run walk-forward after signal/engine fixes."
+        )
+    return {
+        "source": "multi_speed_momentum",
+        "adr_status": status,
+        "portfolio_gates_pass": bool(all_pass),
+        "auto_reenable": False,
+        "evidence_source": source,
+        "artifact_path": str(path) if path.exists() or result is None else None,
+        "metrics": {
+            "sharpe_ratio": round(sharpe, 4),
+            "baseline_sharpe": round(baseline, 4),
+            "sharpe_improvement": round(improvement, 4),
+            "max_drawdown": round(max_dd, 4),
+            "total_return": round(float(payload.get("total_return") or 0), 4),
+            "cagr": round(float(payload.get("cagr") or 0), 4),
+        },
+        "thresholds": {
+            "min_sharpe": MSM_ADR_MIN_SHARPE,
+            "min_sharpe_improvement": MSM_ADR_MIN_SHARPE_IMPROVEMENT,
+            "max_drawdown_floor": MSM_ADR_MAX_DRAWDOWN,
+        },
+        "checks": checks,
+        "hint": hint,
+        "policy": "soft_delete_adr_no_auto_reenable",
+    }
 
 
 # ---------------------------------------------------------------------------

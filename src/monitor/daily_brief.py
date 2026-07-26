@@ -355,13 +355,20 @@ def generate_daily_brief() -> Dict[str, Any]:
         if s.severity == "warning":
             overall_severity = "warning"
 
-    return {
+    brief = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "sections": [asdict(s) for s in sections],
         "full_text": render_brief_text(sections),
         "severity": overall_severity,
         "has_narrative": False,
     }
+    try:
+        from src.dashboard.generator import _stamp_generator_git_sha
+
+        brief = _stamp_generator_git_sha(brief)
+    except Exception:  # noqa: BLE001 — brief must still emit without git
+        pass
+    return brief
 
 
 def main():

@@ -30,6 +30,25 @@ from src.rebalancing.smart_rebalancer import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_smart_rebalance_state(tmp_path, monkeypatch):
+    """Do not load host data/smart_rebalance_state.json into unit tests."""
+    # Force empty ephemeral state for every SmartRebalanceGate / controller
+    state = tmp_path / "smart_rebalance_state.json"
+    monkeypatch.setattr(
+        "src.rebalancing.smart_rebalancer.DATA_DIR",
+        tmp_path,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "src.rebalancing.integration.DATA_DIR",
+        tmp_path,
+        raising=False,
+    )
+    # Also pass load_state via env-less default: empty dir has no state file
+    yield
+
+
 # =========================================================================
 # __all__ export validation
 # =========================================================================
@@ -884,8 +903,13 @@ class TestRecordExecution:
 
     def test_record_high_cost_over_budget(self):
         gate = SmartRebalanceGate()
-        initial = gate.controller.cost_tracker.ytd_total_bps
+        # Batch DZ: single-trade cap quarantines 100 bps outlier from YTD sum
         gate.record_execution(cost_bps=100.0, date="2026-05-21", symbols=["SPY"])
+        assert gate.controller.cost_tracker.is_over_budget() is False
+        assert len(gate.controller.cost_tracker.quarantined_costs) >= 1
+        # Under-cap accumulation still can exhaust annual budget
+        gate.controller.cost_tracker.max_single_trade_cost_bps = None
+        gate.record_execution(cost_bps=60.0, date="2026-05-22", symbols=["SPY"])
         assert gate.controller.cost_tracker.is_over_budget() is True
 
     def test_record_iso_date_format(self):

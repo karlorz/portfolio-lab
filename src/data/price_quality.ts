@@ -1,5 +1,22 @@
+import { execFileSync } from 'child_process';
+
 export const PRICE_DATA_QUALITY_SCHEMA_VERSION = 'price-data-quality/v1';
 export const PRICE_DATA_QUALITY_FILENAME = 'data_quality.json';
+
+/** Short HEAD for operator lag detection (code vs projected artifact). */
+export function generatorGitShaShort(projectRoot: string = process.cwd()): string | null {
+  try {
+    const out = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+      timeout: 5000,
+    }).trim();
+    return out ? out.slice(0, 12) : null;
+  } catch {
+    return null;
+  }
+}
+
 
 export type PriceDataQualityStatus = 'ok' | 'warn' | 'fail';
 export type PriceReturnAnomalySeverity = 'warning' | 'critical';
@@ -81,6 +98,9 @@ export interface PriceSymbolQualitySummary {
 export interface PriceDataQualityReport {
   schema_version: typeof PRICE_DATA_QUALITY_SCHEMA_VERSION;
   generated_at: string;
+  /** Short HEAD when producer could resolve git (operator lag detection). */
+  generator_git_sha?: string | null;
+  generator_git_sha_status?: string;
   overall_status: PriceDataQualityStatus;
   issue_counts: PriceIssueCounts;
   symbols: PriceSymbolQualitySummary[];
@@ -94,6 +114,18 @@ export interface PriceDataQualityOptions {
   maxMissingDateSamples?: number;
   maxReturnAnomalySamples?: number;
   splitLikeReturnPct?: number;
+  /**
+   * Symbols whose latest-bar lag vs the reference calendar is advisory only.
+   * Yahoo often null-pads sparse VIX-family indices after the last real print
+   * while SPY keeps advancing; blocking the whole data job for that lag is wrong.
+   */
+  sparseIndexSymbols?: readonly string[];
+  /**
+   * Wall-clock as-of (ISO string or Date). Used to detect universe-wide freeze
+   * when all symbols share the same latest bar (peer calendar lag stays 0).
+   * Defaults to generatedAt of the report when not set.
+   */
+  asOfDate?: string | Date;
 }
 
 const EMPTY_ISSUE_COUNTS: PriceIssueCounts = {
@@ -131,6 +163,51 @@ type EnvHost = typeof globalThis & {
 const DEFAULT_CRITICAL_RETURN_PCT = 90;
 const DEFAULT_MAX_RETURN_ANOMALY_SAMPLES = 5;
 const DEFAULT_SPLIT_LIKE_RETURN_PCT = 40;
+
+/** Yahoo-sparse indexes: lag vs SPY is advisory, not a data-job hard fail. */
+const DEFAULT_SPARSE_INDEX_SYMBOLS: readonly string[] = [
+  '^VIX3M',
+  '^VIX',
+  '^VIX6M',
+  'VIX3M',
+  'VIX',
+  'VIX6M',
+];
+
+/**
+ * VIX-family volatility indices: large daily % moves are regime jumps
+ * (Volmageddon ~+115%, COVID ~+40–45%), not equity splits. Skip split_like /
+ * extreme equity return gates so they do not degrade the prices manifest.
+ */
+const DEFAULT_VOLATILITY_INDEX_SYMBOLS: readonly string[] = [
+  ...DEFAULT_SPARSE_INDEX_SYMBOLS,
+  '^VIX9D',
+  'VIX9D',
+];
+
+function isSparseIndexSymbol(
+  symbol: string,
+  options: PriceDataQualityOptions,
+): boolean {
+  const configured = options.sparseIndexSymbols ?? DEFAULT_SPARSE_INDEX_SYMBOLS;
+  const normalized = symbol.trim().toUpperCase();
+  return configured.some((candidate) => candidate.trim().toUpperCase() === normalized);
+}
+
+/** True for VIX-family indices that skip equity split-like return gates. */
+export function isVolatilityIndexSymbol(symbol: string): boolean {
+  const normalized = symbol.trim().toUpperCase();
+  if (!normalized) {
+    return false;
+  }
+  if (DEFAULT_VOLATILITY_INDEX_SYMBOLS.some(
+    (candidate) => candidate.trim().toUpperCase() === normalized,
+  )) {
+    return true;
+  }
+  const bare = normalized.startsWith('^') ? normalized.slice(1) : normalized;
+  return bare.startsWith('VIX');
+}
 
 function readEnvNumber(name: string): number | undefined {
   const host = globalThis as EnvHost;
@@ -279,16 +356,24 @@ function summarizeSymbol(
 function updateStatus(
   summary: PriceSymbolQualitySummary,
   hasCriticalReturnAnomaly = summary.return_anomalies.some((issue) => issue.severity === 'critical'),
+  options: PriceDataQualityOptions = {},
 ): void {
+  // Reference-calendar internal gaps are advisory: sparse index series such as
+  // ^VIX3M legitimately omit SPY trading days while still being current at the
+  // latest bar. Do not fail the data job for mid-history holes alone.
+  // Sparse-index latest lag (Yahoo null-pad after last real bar) is also advisory.
+  const sparseIndexStaleIsAdvisory = summary.stale_latest_date !== null
+    && isSparseIndexSymbol(summary.symbol, options);
+  const staleIsBlocking = summary.stale_latest_date !== null
+    && !sparseIndexStaleIsAdvisory;
   const hasBlockingIssues = (
     summary.duplicate_date_count > 0
-    || summary.internal_gaps.length > 0
     || summary.invalid_dates.length > 0
     || summary.invalid_prices.length > 0
     || summary.missing_required_keys.length > 0
     || summary.non_monotonic_rows.length > 0
     || summary.non_object_records.length > 0
-    || summary.stale_latest_date !== null
+    || staleIsBlocking
     || summary.row_count === 0
     || hasCriticalReturnAnomaly
   );
@@ -296,7 +381,12 @@ function updateStatus(
     summary.status = 'fail';
     return;
   }
-  summary.status = summary.return_anomalies.length > 0 ? 'warn' : 'ok';
+  const hasAdvisoryIssues = (
+    summary.return_anomalies.length > 0
+    || summary.internal_gaps.length > 0
+    || sparseIndexStaleIsAdvisory
+  );
+  summary.status = hasAdvisoryIssues ? 'warn' : 'ok';
 }
 
 function uniqueSortedDates(dates: string[]): string[] {
@@ -310,7 +400,7 @@ function computeReturnPct(previousPrice: number, currentPrice: number): number {
 function applyReturnAnomalyChecks(
   audits: SymbolAudit[],
   counts: PriceIssueCounts,
-  options: PriceDataQualityOptions,
+  options: PriceDataQualityOptions = {},
 ): void {
   const criticalReturnPct = positiveOption(
     options.criticalReturnPct,
@@ -333,8 +423,13 @@ function applyReturnAnomalyChecks(
       left.date.localeCompare(right.date) || left.index - right.index
     ));
     const anomalies: ReturnAnomalyIssue[] = [];
+    // VIX-family: skip equity split/extreme return gates (regime jumps, not splits).
+    const skipReturnAnomalyGates = isVolatilityIndexSymbol(audit.summary.symbol);
 
     for (let index = 1; index < sorted.length; index += 1) {
+      if (skipReturnAnomalyGates) {
+        break;
+      }
       const previous = sorted[index - 1];
       const current = sorted[index];
       if (current.date === previous.date) {
@@ -375,21 +470,54 @@ function applyReturnAnomalyChecks(
     const hasCriticalReturnAnomaly = anomalies.some((issue) => issue.severity === 'critical');
     audit.summary.return_anomaly_count = anomalies.length;
     audit.summary.return_anomalies = anomalies.slice(0, maxReturnAnomalySamples);
-    updateStatus(audit.summary, hasCriticalReturnAnomaly);
+    updateStatus(audit.summary, hasCriticalReturnAnomaly, options);
   }
 }
 
 function hasBlockingIssueCounts(counts: PriceIssueCounts): boolean {
+  // internal_gaps / split_like_returns are counted but advisory (overall warn).
   return counts.duplicate_dates > 0
     || counts.empty_symbols > 0
     || counts.extreme_returns > 0
-    || counts.internal_gaps > 0
     || counts.invalid_dates > 0
     || counts.invalid_prices > 0
     || counts.missing_required_keys > 0
     || counts.non_monotonic_rows > 0
     || counts.non_object_records > 0
     || counts.stale_latest_dates > 0;
+}
+
+
+/** YYYY-MM-DD in UTC from Date or ISO string. */
+export function toUtcDateString(value: string | Date): string {
+  const d = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(d.getTime())) {
+    return '';
+  }
+  return d.toISOString().slice(0, 10);
+}
+
+/** Count weekdays (Mon–Fri) strictly after startDate up to and including endDate (both YYYY-MM-DD). */
+export function countWeekdaysBetween(startDate: string, endDate: string): number {
+  if (!startDate || !endDate || endDate <= startDate) {
+    return 0;
+  }
+  const start = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return 0;
+  }
+  let count = 0;
+  const cur = new Date(start);
+  cur.setUTCDate(cur.getUTCDate() + 1);
+  while (cur <= end) {
+    const dow = cur.getUTCDay(); // 0 Sun .. 6 Sat
+    if (dow !== 0 && dow !== 6) {
+      count += 1;
+    }
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return count;
 }
 
 function applyReferenceCalendarChecks(
@@ -436,16 +564,37 @@ function applyReferenceCalendarChecks(
       increment(counts, 'internal_gaps');
     }
 
-    summary.latest_lag_days = referenceDates.filter((date) => date > latestDate).length;
+    const peerLagDays = referenceDates.filter((date) => date > latestDate).length;
+    // Wall-clock trading lag: when the whole universe freezes together, peer lag
+    // stays 0; compare latest bar to as-of weekday calendar instead.
+    const asOfRaw = options.asOfDate;
+    const asOfStr = asOfRaw
+      ? toUtcDateString(asOfRaw)
+      : '';
+    const wallClockLagDays = asOfStr
+      ? countWeekdaysBetween(latestDate, asOfStr)
+      : 0;
+    summary.latest_lag_days = Math.max(peerLagDays, wallClockLagDays);
+    const sparseIndex = isSparseIndexSymbol(summary.symbol, options);
     if (summary.latest_lag_days > maxLatestLagDays) {
+      const refDate = wallClockLagDays > peerLagDays && asOfStr
+        ? asOfStr
+        : referenceLatestDate;
       summary.stale_latest_date = {
-        reference_date: referenceLatestDate,
+        reference_date: refDate,
         latest_date: summary.latest_date,
       };
-      increment(counts, 'stale_latest_dates');
+      // Keep visibility on the symbol row, but do not increment the blocking
+      // stale_latest_dates counter for known sparse indexes (Yahoo null-pad lag).
+      // Still bump total so overall_status becomes warn (not silent ok).
+      if (!sparseIndex) {
+        increment(counts, 'stale_latest_dates');
+      } else {
+        counts.total += 1;
+      }
     }
 
-    updateStatus(summary);
+    updateStatus(summary, undefined, options);
   }
 }
 
@@ -467,10 +616,14 @@ export function buildPriceDataQualityReport(
       counts,
       options,
     ));
-  applyReferenceCalendarChecks(audits, counts, options);
+  const asOfOptions: PriceDataQualityOptions = {
+    ...options,
+    asOfDate: options.asOfDate ?? generatedAt,
+  };
+  applyReferenceCalendarChecks(audits, counts, asOfOptions);
   applyReturnAnomalyChecks(audits, counts, options);
 
-  return {
+  const report: PriceDataQualityReport = {
     schema_version: PRICE_DATA_QUALITY_SCHEMA_VERSION,
     generated_at: generatedAt,
     overall_status: hasBlockingIssueCounts(counts)
@@ -479,4 +632,10 @@ export function buildPriceDataQualityReport(
     issue_counts: counts,
     symbols: audits.map((audit) => audit.summary),
   };
+  const sha = generatorGitShaShort();
+  if (sha) {
+    report.generator_git_sha = sha;
+    report.generator_git_sha_status = 'full_generate';
+  }
+  return report;
 }

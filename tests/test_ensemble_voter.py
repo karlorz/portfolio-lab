@@ -50,6 +50,27 @@ def _make_voter(tmp_path):
     return voter
 
 
+def _make_bl_vote(**overrides):
+    """Precomputed vote for get_bl_views tests — avoids live compute_vote + IC health."""
+    base = dict(
+        timestamp=datetime.now().isoformat(),
+        regime=Regime.NORMAL,
+        regime_confidence=0.7,
+        num_sources=6,
+        weighted_consensus=0.5,
+        agreement_ratio=0.8,
+        equity_bias=0.5,
+        duration_bias=-0.2,
+        gold_bias=0.3,
+        action="increase_equity",
+        confidence=0.7,
+        reasoning="Bullish",
+        source_votes=[],
+    )
+    base.update(overrides)
+    return EnsembleVote(**base)
+
+
 def _make_price_df(n=100, drift=0.0004, vol=0.015, seed=42):
     np.random.seed(seed)
     spy = [500.0]
@@ -114,8 +135,11 @@ class TestSignalReading:
 
     def test_all_fields_present(self):
         """SignalReading should have all expected dataclass fields."""
-        expected = {'source', 'timestamp', 'value', 'confidence', 'weight',
-                    'regime_fit', 'asset_signals', 'explanation'}
+        # Batch CV/DF: is_active + metadata for inactive disclosure / provenance
+        expected = {
+            'source', 'timestamp', 'value', 'confidence', 'weight',
+            'regime_fit', 'asset_signals', 'explanation', 'is_active', 'metadata',
+        }
         actual = {f.name for f in fields(SignalReading)}
         assert actual == expected, f"Missing fields: {expected - actual}"
 
@@ -150,11 +174,14 @@ class TestEnsembleVote:
 
     def test_all_fields_present(self):
         """EnsembleVote should have all expected dataclass fields."""
+        # Batch CW/CX/DU: health_gate_* + regime_gated disclosure surfaces
         expected = {
             'timestamp', 'regime', 'regime_confidence', 'num_sources',
             'weighted_consensus', 'agreement_ratio', 'equity_bias', 'duration_bias',
             'gold_bias', 'action', 'confidence', 'reasoning', 'source_votes', 'n_eff', 'weight_entropy',
             'regime_multipliers', 'adaptive_learning',
+            'health_gate_slept', 'health_gate_freeze', 'regime_gated',
+            'health_gate_soft_floor',
         }
         actual = {f.name for f in fields(EnsembleVote)}
         assert actual == expected, f"Missing fields: {expected - actual}"
@@ -461,12 +488,25 @@ class TestEnsembleVoter:
         assert -1.0 <= vote.weighted_consensus <= 1.0
 
     def test_compute_vote_single_reading(self, tmp_path):
-        """Single reading should still produce valid vote."""
+        """Single reading should still produce valid vote.
+
+        Batch DK/HS: MULTI_SPEED_MOM is soft-delete (REGIME_WEIGHTS 0) — use an
+        awake arm so the vote path has non-zero mass.
+        """
         voter = _make_voter(tmp_path)
         readings = {
-            SignalSource.MULTI_SPEED_MOM: _make_reading(value=0.5, source=SignalSource.MULTI_SPEED_MOM),
+            SignalSource.CROSS_ASSET_RV: _make_reading(
+                value=0.5, source=SignalSource.CROSS_ASSET_RV
+            ),
         }
-        vote = voter.compute_vote(readings=readings, regime=Regime.NORMAL, regime_confidence=0.7)
+        with patch.object(
+            voter,
+            "_apply_health_weights",
+            side_effect=lambda w: w,
+        ):
+            vote = voter.compute_vote(
+                readings=readings, regime=Regime.NORMAL, regime_confidence=0.7
+            )
         assert vote.num_sources == 1
         assert vote.weighted_consensus != 0
 
@@ -1047,11 +1087,24 @@ class TestGetRebalanceConfig:
 
 
 class TestGetBLViews:
-    """Tests for get_bl_views() — BL view generation from ensemble vote."""
+    """Tests for get_bl_views() — BL view generation from ensemble vote.
+
+    Always pass a precomputed vote and stub the health tracker so these unit
+    tests never hit live compute_vote / SignalHealthTracker.compute_ic (20s+
+    each on lab hosts and the #1 cause of make-test stalls around 34%).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _isolate_bl_health(self):
+        with patch(
+            "src.strategy.ensemble_voter._get_health_tracker",
+            return_value=None,
+        ):
+            yield
 
     def test_returns_views_dict(self):
         voter = EnsembleVoter()
-        result = voter.get_bl_views()
+        result = voter.get_bl_views(vote=_make_bl_vote())
         assert 'views' in result
         assert 'tau' in result
         assert 'prior' in result
@@ -1059,36 +1112,26 @@ class TestGetBLViews:
     def test_views_is_blviews_instance(self):
         from src.strategy.black_litterman_mapper import BLViews
         voter = EnsembleVoter()
-        result = voter.get_bl_views()
+        result = voter.get_bl_views(vote=_make_bl_vote())
         assert isinstance(result['views'], BLViews)
 
     def test_default_tau(self):
         voter = EnsembleVoter()
-        result = voter.get_bl_views()
+        result = voter.get_bl_views(vote=_make_bl_vote())
         assert result['tau'] == 0.15
 
     def test_custom_tau(self):
         voter = EnsembleVoter()
-        result = voter.get_bl_views(tau=0.30)
+        result = voter.get_bl_views(vote=_make_bl_vote(), tau=0.30)
         assert result['tau'] == 0.30
         assert result['views'].tau == 0.30
 
     def test_with_precomputed_vote(self):
         voter = EnsembleVoter()
-        vote = EnsembleVote(
-            timestamp=datetime.now().isoformat(),
-            regime=Regime.NORMAL,
-            regime_confidence=0.7,
-            num_sources=6,
-            weighted_consensus=0.5,
-            agreement_ratio=0.8,
+        vote = _make_bl_vote(
             equity_bias=0.5,
             duration_bias=-0.2,
             gold_bias=0.3,
-            action="increase_equity",
-            confidence=0.7,
-            reasoning="Bullish",
-            source_votes=[],
         )
         result = voter.get_bl_views(vote=vote)
         assert result['equity_bias'] == 0.5
@@ -1097,7 +1140,7 @@ class TestGetBLViews:
 
     def test_views_have_absolute_views(self):
         voter = EnsembleVoter()
-        result = voter.get_bl_views()
+        result = voter.get_bl_views(vote=_make_bl_vote())
         views = result['views']
         assert 'SPY' in views.absolute_views
         assert 'GLD' in views.absolute_views
@@ -1105,7 +1148,7 @@ class TestGetBLViews:
 
     def test_views_have_confidences(self):
         voter = EnsembleVoter()
-        result = voter.get_bl_views()
+        result = voter.get_bl_views(vote=_make_bl_vote())
         views = result['views']
         assert len(views.view_confidences) == 3
         for c in views.view_confidences:
@@ -1113,7 +1156,7 @@ class TestGetBLViews:
 
     def test_market_prior(self):
         voter = EnsembleVoter()
-        result = voter.get_bl_views(prior="market")
+        result = voter.get_bl_views(vote=_make_bl_vote(), prior="market")
         assert result['prior'] == "market"
         assert result['views'].prior == "market"
 
@@ -1427,9 +1470,9 @@ class TestBanditWeighter:
 class TestGetBlendedWeights:
     """Tests for EnsembleVoter.get_blended_weights()."""
 
-    def test_cold_start_returns_static(self):
+    def test_cold_start_returns_static(self, tmp_path):
         """No bandit data should return the static REGIME_WEIGHTS unchanged."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         result = voter.get_blended_weights('NORMAL')
         assert isinstance(result, dict)
         # All SignalSource keys
@@ -1446,9 +1489,9 @@ class TestGetBlendedWeights:
         static = REGIME_WEIGHTS[Regime.NORMAL]
         assert result.keys() == static.keys()
 
-    def test_with_bandit_data_blends(self):
+    def test_with_bandit_data_blends(self, tmp_path):
         """Bandit data should produce blended weights."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         # Add bandit observations
         for _ in range(30):
             voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01)
@@ -1459,9 +1502,9 @@ class TestGetBlendedWeights:
         expected_blend = min(0.7, 30 / 252 * 0.7)
         assert expected_blend > 0.0
 
-    def test_bandit_missing_regime_returns_static(self):
+    def test_bandit_missing_regime_returns_static(self, tmp_path):
         """Bandit data in one regime should not affect blend for another."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         for _ in range(30):
             voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01)
         # CRISIS has no bandit data, should return static
@@ -1478,9 +1521,9 @@ class TestGetBlendedWeights:
             total = sum(result.values())
             assert abs(total - 1.0) < 0.05, f"{regime} blended weights sum to {total:.4f}"
 
-    def test_full_blend_after_252_observations(self):
+    def test_full_blend_after_252_observations(self, tmp_path):
         """After 252 bandit observations, the blend should be at max (70% bandit)."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         for i in range(252):
             voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01 + 0.001 * (i % 3))
             voter.update_bandit('cross_asset_rv', 'NORMAL', 0.02 + 0.001 * (i % 2))
@@ -1489,18 +1532,18 @@ class TestGetBlendedWeights:
         assert isinstance(result, dict)
         assert all(isinstance(k, SignalSource) for k in result)
 
-    def test_bandit_with_some_signals_missing(self):
+    def test_bandit_with_some_signals_missing(self, tmp_path):
         """When bandit has data for some but not all signals, all should still appear."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         for _ in range(30):
             voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01)
             voter.update_bandit('cross_asset_rv', 'NORMAL', 0.02)
         result = voter.get_blended_weights('NORMAL')
         assert len(result) == len([s for s in SignalSource])
 
-    def test_blended_weights_differ_by_regime(self):
+    def test_blended_weights_differ_by_regime(self, tmp_path):
         """Different regimes should produce different blended weights."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         for _ in range(30):
             voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01)
             voter.update_bandit('multi_speed_momentum', 'HIGH_VOL', -0.01)
@@ -1580,10 +1623,11 @@ class TestApplyGoalRiskBudget:
 
     @patch('src.config.goals.load_goals')
     @patch('src.config.goals.get_risk_budget_multiplier')
-    def test_risk_mult_0_5_reduces_spy_by_half(self, mock_get_rbm, mock_load_goals):
+    def test_risk_mult_0_5_reduces_spy_by_half(self, mock_get_rbm, mock_load_goals, tmp_path):
         """risk_mult=0.5 should cut SPY weight in half (pre-normalization)."""
+        # @patch injects mocks bottom-up before fixtures: mock_get_rbm, mock_load_goals, then tmp_path
         mock_get_rbm.return_value = 0.5
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         base = {'SPY': 1.0}  # Only SPY, no safe assets
         result = voter.apply_goal_risk_budget(base)
         # With only SPY and no safe assets, risky_reduction stays but has nowhere to go
@@ -1598,29 +1642,29 @@ class TestApplyGoalRiskBudget:
 class TestUpdateBandit:
     """Tests for EnsembleVoter.update_bandit()."""
 
-    def test_increments_observation_count(self):
-        voter = EnsembleVoter()
+    def test_increments_observation_count(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
         assert voter.bandit_observations == 0
         voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01)
         assert voter.bandit_observations == 1
 
-    def test_delegates_to_bandit_update(self):
-        voter = EnsembleVoter()
+    def test_delegates_to_bandit_update(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
         voter.update_bandit('cross_asset_rv', 'HIGH_VOL', -0.02)
         # Bandit should have the history
         assert 'HIGH_VOL' in voter.bandit._history
         assert 'cross_asset_rv' in voter.bandit._history['HIGH_VOL']
         assert voter.bandit._history['HIGH_VOL']['cross_asset_rv'] == [-0.02]
 
-    def test_multiple_updates_accumulate(self):
-        voter = EnsembleVoter()
+    def test_multiple_updates_accumulate(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
         for _ in range(5):
             voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01)
         assert voter.bandit_observations == 5
         assert len(voter.bandit._history['NORMAL']['multi_speed_momentum']) == 5
 
-    def test_update_different_regimes(self):
-        voter = EnsembleVoter()
+    def test_update_different_regimes(self, tmp_path):
+        voter = EnsembleVoter(data_path=tmp_path)
         voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01)
         voter.update_bandit('multi_speed_momentum', 'CRISIS', -0.03)
         assert 'NORMAL' in voter.bandit._history
@@ -1826,14 +1870,15 @@ class TestGetBLViewsAdditional:
         mock_tracker.get_health_report.side_effect = ValueError("Tracker crashed")
         with patch('src.strategy.ensemble_voter._get_health_tracker',
                    return_value=mock_tracker):
-            result = voter.get_bl_views()
+            result = voter.get_bl_views(vote=_make_bl_vote())
             assert 'views' in result
             assert result['health_scores_used'] == {}
 
-    def test_get_bl_views_default_prior_equal(self):
+    def test_get_bl_views_default_prior_equal(self, tmp_path):
         """Default prior should be 'equal'."""
-        voter = EnsembleVoter()
-        result = voter.get_bl_views()
+        voter = EnsembleVoter(data_path=tmp_path)
+        with patch("src.strategy.ensemble_voter._get_health_tracker", return_value=None):
+            result = voter.get_bl_views(vote=_make_bl_vote())
         assert result['prior'] == 'equal'
 
 
@@ -1844,17 +1889,17 @@ class TestGetBLViewsAdditional:
 class TestUpdateBanditAdditional:
     """Additional update_bandit edge cases."""
 
-    def test_update_bandit_with_nan_return(self):
+    def test_update_bandit_with_nan_return(self, tmp_path):
         """NaN daily_return should be stored (valid data point)."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         voter.update_bandit('multi_speed_momentum', 'NORMAL', float('nan'))
         assert voter.bandit_observations == 1
         hist = voter.bandit._history['NORMAL']['multi_speed_momentum']
         assert np.isnan(hist[0])
 
-    def test_update_bandit_with_negative_returns(self):
+    def test_update_bandit_with_negative_returns(self, tmp_path):
         """Negative daily returns should be stored correctly."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         voter.update_bandit('multi_speed_momentum', 'CRISIS', -0.05)
         voter.update_bandit('multi_speed_momentum', 'CRISIS', -0.03)
         assert len(voter.bandit._history['CRISIS']['multi_speed_momentum']) == 2
@@ -2031,9 +2076,9 @@ class TestSignalReadingFieldValidation:
     """Detailed field validation for SignalReading dataclass."""
 
     def test_field_count(self):
-        """SignalReading should have exactly 8 fields."""
+        """SignalReading should have exactly 10 fields (Batch CV/DF)."""
         flds = fields(SignalReading)
-        assert len(flds) == 8
+        assert len(flds) == 10
 
     def test_all_field_types(self):
         """Verify type annotations for all SignalReading fields."""
@@ -2099,7 +2144,8 @@ class TestEnsembleVoteFieldValidation:
 
     def test_field_count(self):
         flds = fields(EnsembleVote)
-        assert len(flds) == 17
+        # 17 core + health_gate_slept/freeze + regime_gated + soft_floor (Batch CW/CX/DU)
+        assert len(flds) == 21
 
     def test_all_field_types(self):
         """Verify specific type annotations for EnsembleVote fields."""
@@ -2128,7 +2174,16 @@ class TestEnsembleVoteFieldValidation:
     def test_no_fields_have_defaults(self):
         """All EnsembleVote fields are required except diagnostic fields."""
         import dataclasses
-        exempt = {"n_eff", "weight_entropy", "regime_multipliers", "adaptive_learning"}
+        exempt = {
+            "n_eff",
+            "weight_entropy",
+            "regime_multipliers",
+            "adaptive_learning",
+            "health_gate_slept",
+            "health_gate_freeze",
+            "regime_gated",
+            "health_gate_soft_floor",
+        }
         for f in fields(EnsembleVote):
             if f.name in exempt:
                 continue
@@ -2562,35 +2617,44 @@ class TestVoteComputationEdgeCases:
         assert vote.action in ('neutral', 'increase_equity', 'decrease_equity', 'risk_off')
 
     def test_compute_vote_value_at_exactly_positive_one(self, tmp_path):
+        """Batch HS: use awake arm (not MSM soft-delete) + bypass live health gate."""
         voter = _make_voter(tmp_path)
         readings = {
-            SignalSource.MULTI_SPEED_MOM: _make_reading(
-                value=1.0, source=SignalSource.MULTI_SPEED_MOM,
+            SignalSource.CROSS_ASSET_RV: _make_reading(
+                value=1.0, source=SignalSource.CROSS_ASSET_RV,
                 asset_signals={'SPY': 1.0, 'TLT': -0.5, 'GLD': 0.3},
             ),
         }
-        vote = voter.compute_vote(readings=readings, regime=Regime.NORMAL, regime_confidence=0.8)
+        with patch.object(voter, "_apply_health_weights", side_effect=lambda w: w):
+            vote = voter.compute_vote(
+                readings=readings, regime=Regime.NORMAL, regime_confidence=0.8
+            )
         assert vote.weighted_consensus == pytest.approx(1.0)
         assert vote.equity_bias == pytest.approx(1.0)
 
     def test_compute_vote_value_at_exactly_negative_one(self, tmp_path):
+        """Batch HS: awake arm + health bypass so soft-delete/health cannot mute ±1."""
         voter = _make_voter(tmp_path)
         readings = {
-            SignalSource.MULTI_SPEED_MOM: _make_reading(
-                value=-1.0, source=SignalSource.MULTI_SPEED_MOM,
+            SignalSource.CROSS_ASSET_RV: _make_reading(
+                value=-1.0, source=SignalSource.CROSS_ASSET_RV,
                 asset_signals={'SPY': -1.0, 'TLT': 0.5, 'GLD': 0.0},
             ),
         }
-        vote = voter.compute_vote(readings=readings, regime=Regime.NORMAL, regime_confidence=0.8)
+        with patch.object(voter, "_apply_health_weights", side_effect=lambda w: w):
+            vote = voter.compute_vote(
+                readings=readings, regime=Regime.NORMAL, regime_confidence=0.8
+            )
         assert vote.weighted_consensus == pytest.approx(-1.0)
         assert vote.equity_bias == pytest.approx(-1.0)
 
     def test_compute_vote_conflicting_assets(self, tmp_path):
         """Different asset_signals per source should produce blended biases."""
         voter = _make_voter(tmp_path)
+        # Both arms must be non-soft-delete under REGIME_WEIGHTS normal.
         readings = {
-            SignalSource.MULTI_SPEED_MOM: _make_reading(
-                value=0.3, source=SignalSource.MULTI_SPEED_MOM,
+            SignalSource.ALTERNATIVE_DATA: _make_reading(
+                value=0.3, source=SignalSource.ALTERNATIVE_DATA,
                 asset_signals={'SPY': 0.6, 'TLT': -0.4, 'GLD': 0.2},
             ),
             SignalSource.CROSS_ASSET_RV: _make_reading(
@@ -2598,10 +2662,13 @@ class TestVoteComputationEdgeCases:
                 asset_signals={'SPY': -0.3, 'TLT': 0.5, 'GLD': -0.1},
             ),
         }
-        vote = voter.compute_vote(readings=readings, regime=Regime.NORMAL, regime_confidence=0.7)
-        # Equity bias should be a blend: (0.6 * w1 + (-0.3) * w2) / (w1 + w2)
-        assert vote.equity_bias != 0.6  # Not just MSM's value
-        assert vote.equity_bias != -0.3  # Not just RV's value
+        with patch.object(voter, "_apply_health_weights", side_effect=lambda w: w):
+            vote = voter.compute_vote(
+                readings=readings, regime=Regime.NORMAL, regime_confidence=0.7
+            )
+        # Equity bias should be a blend: not either source alone
+        assert vote.equity_bias != 0.6
+        assert vote.equity_bias != -0.3
 
     def test_compute_vote_empty_readings_with_regime_gate(self, tmp_path):
         """Empty readings should produce neutral vote even with regime gating."""
@@ -2692,6 +2759,8 @@ class TestApplyHealthWeightsEdgeCases:
             mock_instance = MagicMock()
             mock_score = MagicMock()
             mock_score.health_score = 1.0
+            mock_score.status = "healthy"
+            mock_score.ic = 0.1
             mock_instance.calculate_all_health_scores.return_value = {
                 'multi_speed_momentum': mock_score,
                 'cross_asset_rv': mock_score,
@@ -2702,13 +2771,15 @@ class TestApplyHealthWeightsEdgeCases:
             assert result[k] > 0
 
     def test_all_health_zero(self, tmp_path):
-        """Health scores of 0 should clamp multiplier to 0.2."""
+        """Health scores of 0 (degraded, IC>=0) clamp multiplier to 0.2 soft floor."""
         voter = _make_voter(tmp_path)
         weights = {SignalSource.MULTI_SPEED_MOM: 0.6, SignalSource.CROSS_ASSET_RV: 0.4}
         with patch('src.signals.health_tracker.SignalHealthTracker') as MockTracker:
             mock_instance = MagicMock()
             mock_score = MagicMock()
             mock_score.health_score = 0.0
+            mock_score.status = "degraded"
+            mock_score.ic = 0.0  # non-negative IC keeps soft floor (Batch CN)
             mock_instance.calculate_all_health_scores.return_value = {
                 'multi_speed_momentum': mock_score,
                 'cross_asset_rv': mock_score,
@@ -2727,8 +2798,12 @@ class TestApplyHealthWeightsEdgeCases:
             mock_instance = MagicMock()
             mock_score_good = MagicMock()
             mock_score_good.health_score = 1.0
+            mock_score_good.status = "healthy"
+            mock_score_good.ic = 0.2
             mock_score_bad = MagicMock()
             mock_score_bad.health_score = 0.5
+            mock_score_bad.status = "degraded"
+            mock_score_bad.ic = 0.05
             mock_instance.calculate_all_health_scores.return_value = {
                 'multi_speed_momentum': mock_score_good,
                 'cross_asset_rv': mock_score_bad,
@@ -2750,6 +2825,8 @@ class TestApplyHealthWeightsEdgeCases:
             mock_instance = MagicMock()
             mock_score = MagicMock()
             mock_score.health_score = 0.5
+            mock_score.status = "degraded"
+            mock_score.ic = 0.0
             mock_instance.calculate_all_health_scores.return_value = {
                 'multi_speed_momentum': mock_score,
                 # CROSS_ASSET_RV and ALTERNATIVE_DATA have no health scores
@@ -2758,6 +2835,90 @@ class TestApplyHealthWeightsEdgeCases:
             result = voter._apply_health_weights(weights)
         assert len(result) == 3
         assert abs(sum(result.values()) - 1.0) < 0.01
+
+    def test_unhealthy_status_hard_zeros(self, tmp_path):
+        """Batch CY: unhealthy + IC unknown → hard zero; unhealthy + IC>=0 soft floor."""
+        voter = _make_voter(tmp_path)
+        weights = {
+            SignalSource.MULTI_SPEED_MOM: 0.5,
+            SignalSource.VIX_TERM_STRUCTURE: 0.5,
+        }
+        with patch('src.signals.health_tracker.SignalHealthTracker') as MockTracker:
+            mock_instance = MagicMock()
+            good = MagicMock()
+            good.health_score = 0.8
+            good.status = "healthy"
+            good.ic = 0.1
+            bad = MagicMock()
+            bad.health_score = 0.43
+            bad.status = "unhealthy"
+            bad.ic = None  # unknown IC → fail-closed hard zero
+            bad.predictions_count = 20
+            mock_instance.calculate_all_health_scores.return_value = {
+                'multi_speed_momentum': good,
+                'vix_term_structure': bad,
+            }
+            MockTracker.return_value = mock_instance
+            result = voter._apply_health_weights(weights)
+        assert result[SignalSource.VIX_TERM_STRUCTURE] == 0.0
+        assert result[SignalSource.MULTI_SPEED_MOM] == pytest.approx(1.0)
+        assert "vix_term_structure" in voter._health_gate_slept
+
+    def test_unhealthy_positive_ic_soft_floor(self, tmp_path):
+        """Batch DU: unhealthy + IC >= ENSEMBLE_UNHEALTHY_MIN_IC soft-floors."""
+        voter = _make_voter(tmp_path)
+        weights = {
+            SignalSource.MULTI_SPEED_MOM: 0.5,
+            SignalSource.VIX_TERM_STRUCTURE: 0.5,
+        }
+        with patch('src.signals.health_tracker.SignalHealthTracker') as MockTracker:
+            mock_instance = MagicMock()
+            good = MagicMock()
+            good.health_score = 0.8
+            good.status = "healthy"
+            good.ic = 0.1
+            bad = MagicMock()
+            bad.health_score = 0.43
+            bad.status = "unhealthy"
+            # Weak IC 0.05 hard-sleeps under DU (min 0.08); use strong IC for soft floor
+            bad.ic = 0.12
+            mock_instance.calculate_all_health_scores.return_value = {
+                'multi_speed_momentum': good,
+                'vix_term_structure': bad,
+            }
+            MockTracker.return_value = mock_instance
+            result = voter._apply_health_weights(weights)
+        assert result[SignalSource.VIX_TERM_STRUCTURE] > 0.0
+        assert result[SignalSource.VIX_TERM_STRUCTURE] < result[SignalSource.MULTI_SPEED_MOM]
+        assert "vix_term_structure" not in voter._health_gate_slept
+
+    def test_degraded_negative_ic_hard_zeros(self, tmp_path):
+        """Batch CN: degraded + IC < 0 sleeps arm (fail-closed hybrid policy)."""
+        voter = _make_voter(tmp_path)
+        weights = {
+            SignalSource.CROSS_ASSET_RV: 0.5,
+            SignalSource.CROSS_ASSET_REGIME_ARB: 0.5,
+        }
+        with patch('src.signals.health_tracker.SignalHealthTracker') as MockTracker:
+            mock_instance = MagicMock()
+            good = MagicMock()
+            good.health_score = 0.57
+            good.status = "degraded"
+            good.ic = 0.15
+            toxic = MagicMock()
+            toxic.health_score = 0.5
+            toxic.status = "degraded"
+            toxic.ic = -0.29
+            toxic.predictions_count = 20
+            mock_instance.calculate_all_health_scores.return_value = {
+                'cross_asset_rv': good,
+                'cross_asset_regime_arb': toxic,
+            }
+            MockTracker.return_value = mock_instance
+            result = voter._apply_health_weights(weights)
+        assert result[SignalSource.CROSS_ASSET_REGIME_ARB] == 0.0
+        assert result[SignalSource.CROSS_ASSET_RV] == pytest.approx(1.0)
+        assert "cross_asset_regime_arb" in voter._health_gate_slept
 
 
 # ===========================================================================
@@ -3027,18 +3188,18 @@ class TestGetBlendedWeightsEdgeCases:
         static = REGIME_WEIGHTS[Regime.NORMAL]
         assert result.keys() == static.keys()
 
-    def test_zero_bandit_observations(self):
+    def test_zero_bandit_observations(self, tmp_path):
         """Zero bandit observations should return purely static weights."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         assert voter.bandit_observations == 0
         result = voter.get_blended_weights('NORMAL')
         static = REGIME_WEIGHTS[Regime.NORMAL]
         for k, v in static.items():
             assert result[k] == pytest.approx(v, abs=0.01)
 
-    def test_blend_max_after_many_observations(self):
+    def test_blend_max_after_many_observations(self, tmp_path):
         """Observations exceeding 252 should cap blend at 70%."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         for i in range(300):
             voter.update_bandit('multi_speed_momentum', 'NORMAL', 0.01 + 0.001 * (i % 5))
         # blend should be capped at 0.7
@@ -3375,17 +3536,19 @@ class TestCLIEntryPoints:
 # ===========================================================================
 
 class TestGetBLViewsEdgeCases:
-    """Edge cases for get_bl_views()."""
+    """Edge cases for get_bl_views() — isolated from live vote/health paths."""
 
     def test_get_bl_views_zero_tau(self):
         voter = EnsembleVoter()
-        result = voter.get_bl_views(tau=0.0)
+        with patch("src.strategy.ensemble_voter._get_health_tracker", return_value=None):
+            result = voter.get_bl_views(vote=_make_bl_vote(), tau=0.0)
         assert result['tau'] == 0.0
         assert result['views'].tau == 0.0
 
     def test_get_bl_views_negative_tau(self):
         voter = EnsembleVoter()
-        result = voter.get_bl_views(tau=-0.1)
+        with patch("src.strategy.ensemble_voter._get_health_tracker", return_value=None):
+            result = voter.get_bl_views(vote=_make_bl_vote(), tau=-0.1)
         assert result['tau'] == -0.1
         assert result['views'].tau == -0.1
 
@@ -3401,27 +3564,36 @@ class TestGetBLViewsEdgeCases:
         }
         with patch('src.strategy.ensemble_voter._get_health_tracker',
                    return_value=mock_tracker):
-            result = voter.get_bl_views()
+            result = voter.get_bl_views(vote=_make_bl_vote())
         assert 'multi_speed_momentum' in result['health_scores_used']
         assert result['health_scores_used']['multi_speed_momentum'] == 0.85
         assert result['health_scores_used']['cross_asset_rv'] == 0.72
 
     def test_get_bl_views_empty_vote_readings(self):
         """get_bl_views with a vote that has 0 sources should still return basic structure."""
-        vote = EnsembleVote(
-            timestamp='2026-06-01T12:00:00', regime=Regime.NORMAL,
-            regime_confidence=0.5, num_sources=0, weighted_consensus=0.0,
-            agreement_ratio=0.0, equity_bias=0.0, duration_bias=0.0, gold_bias=0.0,
-            action='neutral', confidence=0.0, reasoning='', source_votes=[],
+        vote = _make_bl_vote(
+            timestamp='2026-06-01T12:00:00',
+            regime_confidence=0.5,
+            num_sources=0,
+            weighted_consensus=0.0,
+            agreement_ratio=0.0,
+            equity_bias=0.0,
+            duration_bias=0.0,
+            gold_bias=0.0,
+            action='neutral',
+            confidence=0.0,
+            reasoning='',
         )
         voter = EnsembleVoter()
-        result = voter.get_bl_views(vote=vote)
+        with patch("src.strategy.ensemble_voter._get_health_tracker", return_value=None):
+            result = voter.get_bl_views(vote=vote)
         assert result['views'] is not None
         assert result['equity_bias'] == 0.0
 
     def test_get_bl_views_with_prior_market(self):
         voter = EnsembleVoter()
-        result = voter.get_bl_views(prior='market')
+        with patch("src.strategy.ensemble_voter._get_health_tracker", return_value=None):
+            result = voter.get_bl_views(vote=_make_bl_vote(), prior='market')
         assert result['prior'] == 'market'
 
 
@@ -3432,28 +3604,28 @@ class TestGetBLViewsEdgeCases:
 class TestUpdateBanditInteraction:
     """Interaction edge cases for update_bandit()."""
 
-    def test_update_bandit_extreme_return(self):
+    def test_update_bandit_extreme_return(self, tmp_path):
         """Extreme daily return (+100%) should not crash."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         voter.update_bandit('multi_speed_momentum', 'NORMAL', 1.0)
         assert voter.bandit_observations == 1
 
-    def test_update_bandit_extreme_negative_return(self):
+    def test_update_bandit_extreme_negative_return(self, tmp_path):
         """Extreme daily return (-100%) should not crash."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         voter.update_bandit('multi_speed_momentum', 'NORMAL', -1.0)
         assert voter.bandit_observations == 1
 
-    def test_update_bandit_inf_return(self):
+    def test_update_bandit_inf_return(self, tmp_path):
         """Inf daily return should be storable (valid float)."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         voter.update_bandit('multi_speed_momentum', 'NORMAL', float('inf'))
         assert voter.bandit_observations == 1
         assert np.isinf(voter.bandit._history['NORMAL']['multi_speed_momentum'][0])
 
-    def test_update_bandit_all_regimes(self):
+    def test_update_bandit_all_regimes(self, tmp_path):
         """update_bandit should work for all five regimes."""
-        voter = EnsembleVoter()
+        voter = EnsembleVoter(data_path=tmp_path)
         for regime_name in ['NORMAL', 'HIGH_VOL', 'CRISIS', 'RECOVERY', 'LOW_VOL']:
             voter.update_bandit('multi_speed_momentum', regime_name, 0.01)
         assert voter.bandit_observations == 5
@@ -3926,11 +4098,20 @@ class TestDetermineAction:
     def test_low_agreement_neutral(self):
         action, conf = EnsembleVoter._determine_action(Regime.NORMAL, 0.5, 0.5, 0.3)
         assert action == "neutral"
-        assert conf == 0.5
+        # conf = agreement * regime_confidence = 0.3 * 0.5
+        assert conf == pytest.approx(0.15)
 
     def test_small_bias_neutral(self):
         action, conf = EnsembleVoter._determine_action(Regime.NORMAL, 0.5, 0.1, 0.8)
         assert action == "neutral"
+        assert conf == pytest.approx(0.4)
+
+    def test_high_agreement_neutral_not_hardcoded_half(self):
+        """High-agreement hold must not force confidence exactly 0.5."""
+        action, conf = EnsembleVoter._determine_action(Regime.NORMAL, 0.755, 0.03, 0.9378)
+        assert action == "neutral"
+        assert conf == pytest.approx(0.755 * 0.9378)
+        assert conf > 0.5
 
     def test_uses_consensus_threshold(self):
         """Agreement just below regime threshold should be neutral."""

@@ -27,13 +27,13 @@ import json
 import logging
 import os
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 import pandas as pd
 
-from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON, sqlite_connect
+from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON, PUBLIC_DATA_DIR, sqlite_connect
 from src.data.price_cache import get_prices, get_prices_df
 from src.backtest.metrics import save_results_json
 
@@ -146,30 +146,139 @@ class AdaptiveSizer:
             return None
         return self._prices_df[symbol].dropna().values
 
-    def _load_regime_state(self) -> Tuple[str, float]:
-        """Load current regime — uses state file when available, VIX-based detection as fallback.
+    @staticmethod
+    def _parse_timestamp(value: object) -> Optional[datetime]:
+        """Best-effort parse of ISO timestamps (naive treated as local/UTC-agnostic)."""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value if value.tzinfo is None else value.astimezone(timezone.utc).replace(tzinfo=None)
+        if not isinstance(value, str) or not value.strip():
+            return None
+        text = value.strip().replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
 
-        If a regime_classifier_state.json exists (from test fixtures or legacy writes),
-        use it directly. Otherwise, fall back to VIX-based live detection from
-        the market database. Returns unknown with low confidence if neither works.
+    @staticmethod
+    def _is_fresh(ts: Optional[datetime], max_age: timedelta) -> bool:
+        if ts is None:
+            return False
+        return (datetime.now() - ts) <= max_age
+
+    def _regime_from_signals_payload(self, payload: dict) -> Optional[Tuple[str, float]]:
+        """Extract (regime, confidence) from signals.json payload."""
+        if not isinstance(payload, dict):
+            return None
+        # Prefer ensemble_voting (live vote surface)
+        ev = payload.get("ensemble_voting")
+        if isinstance(ev, dict):
+            regime = ev.get("regime")
+            conf = ev.get("regime_confidence", ev.get("confidence"))
+            if isinstance(regime, str) and regime in REGIME_ADJUSTMENTS and conf is not None:
+                try:
+                    return regime, float(conf)
+                except (TypeError, ValueError):
+                    pass
+        # Top-level regime block
+        reg = payload.get("regime")
+        if isinstance(reg, dict):
+            regime = reg.get("name") or reg.get("regime") or reg.get("current_regime")
+            conf = reg.get("confidence", reg.get("regime_confidence"))
+            if isinstance(regime, str) and regime in REGIME_ADJUSTMENTS and conf is not None:
+                try:
+                    return regime, float(conf)
+                except (TypeError, ValueError):
+                    pass
+        return None
+
+    def _load_regime_from_signals(self) -> Optional[Tuple[str, float]]:
+        for sig_path in self._signals_json_candidates():
+            try:
+                if not sig_path.exists():
+                    continue
+                payload = json.loads(sig_path.read_text())
+                parsed = self._regime_from_signals_payload(payload)
+                if parsed is not None:
+                    return parsed
+            except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+                logger.debug("regime signals.json read failed (%s): %s", sig_path, e)
+        return None
+
+    def _load_regime_state(self) -> Tuple[str, float]:
+        """Load current regime with live SSOT preference.
+
+        Order:
+          1. ``regime_state.json`` when present and fresh (dashboard SSOT)
+          2. ``signals.json`` regime / ensemble_voting confidence
+          3. Fresh, high-quality ``regime_classifier_state.json``
+          4. VIX-based live detector
+          5. Stale/low-quality classifier as last resort
+          6. unknown @ 0.3
+
+        Stale May fixtures with confidence 0.3 must not permanently pin factors
+        when live signals carry ~0.75 confidence for the same regime.
         """
-        # Primary: state file (supports test fixtures and legacy writes)
+        classifier_max_age = timedelta(days=3)
+        ssot_max_age = timedelta(days=7)
+        stale_classifier: Optional[Tuple[str, float]] = None
+
+        # 1) regime_state.json SSOT
+        ssot_path = self.data_dir / "regime_state.json"
+        try:
+            if ssot_path.exists():
+                state = json.loads(ssot_path.read_text())
+                if isinstance(state, dict):
+                    regime = state.get("regime") or state.get("current_regime")
+                    conf = state.get("confidence", state.get("regime_confidence"))
+                    ts = self._parse_timestamp(
+                        state.get("updated_at") or state.get("generated_at") or state.get("timestamp")
+                    )
+                    if (
+                        isinstance(regime, str)
+                        and regime in REGIME_ADJUSTMENTS
+                        and conf is not None
+                        and self._is_fresh(ts, ssot_max_age)
+                    ):
+                        return regime, float(conf)
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+            logger.debug("regime_state.json read failed: %s", e)
+
+        # 2) Live signals
+        from_signals = self._load_regime_from_signals()
+        if from_signals is not None:
+            return from_signals
+
+        # 3) Classifier state — only if fresh and not a failed low-confidence read
         regime_state_path = self.data_dir / "regime_classifier_state.json"
         try:
             if regime_state_path.exists():
                 state = json.loads(regime_state_path.read_text())
                 regime = state.get("current_regime", "unknown")
-                last = state.get("last_reading", {})
-                conf = last.get("confidence", 0.5)
-
-                # Validate that the regime is valid
-                if regime not in REGIME_ADJUSTMENTS:
+                last = state.get("last_reading", {}) if isinstance(state.get("last_reading"), dict) else {}
+                conf = float(last.get("confidence", state.get("confidence", 0.5)))
+                reason = str(last.get("regime_reason") or last.get("reason") or "")
+                ts = self._parse_timestamp(
+                    state.get("last_updated") or last.get("timestamp") or last.get("updated_at")
+                )
+                # Explicit unknown / invalid regime labels are authoritative bad input
+                if not isinstance(regime, str) or regime not in REGIME_ADJUSTMENTS:
                     return "unknown", 0.3
-                return regime, float(conf)
+                low_quality = conf <= 0.35 or "insufficient" in reason.lower()
+                # Missing timestamp: treat as fresh when quality is good (test fixtures)
+                fresh = ts is None or self._is_fresh(ts, classifier_max_age)
+                if fresh and not low_quality:
+                    return regime, conf
+                # Keep as last-resort fallback (stale or low quality)
+                stale_classifier = (regime, conf)
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
-            logger.warning("Failed to load regime state: %s", e)
+            logger.warning("Failed to load regime classifier state: %s", e)
 
-        # Fallback: VIX-based live detection (no stale state file available)
+        # 4) VIX-based live detection
         try:
             from src.paths import MARKET_DB
             import sqlite3
@@ -182,21 +291,158 @@ class AdaptiveSizer:
         except (OSError, sqlite3.Error, KeyError, ValueError, TypeError, ImportError) as e:
             logger.warning("VIX-based regime detection unavailable: %s", e)
 
+        # 5) Stale classifier last resort (documented degraded input)
+        if stale_classifier is not None:
+            logger.warning(
+                "Using stale/low-quality regime_classifier_state as last resort: %s conf=%s",
+                stale_classifier[0],
+                stale_classifier[1],
+            )
+            return stale_classifier
+
         return "unknown", 0.3
 
-    def _load_circuit_breaker(self) -> str:
-        """Load circuit breaker severity."""
-        cb_path = self.data_dir / ".circuit_breaker_state.json"
-        try:
-            if cb_path.exists():
-                state = json.loads(cb_path.read_text())
-                return state.get("severity", "ok")
-        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
-            logger.error("Failed to load circuit breaker state: %s", e)
+    @staticmethod
+    def _normalize_cb_severity(state: dict) -> str:
+        """Normalize paper-risk CB payloads to a severity string.
+
+        Live paper files often use ``status`` (green/yellow/red) while some
+        writers/tests use ``severity``. Map both so sizing does not silently
+        default to ok when the file is green but key name differs.
+        """
+        if not isinstance(state, dict):
+            return "ok"
+        if "severity" in state and state.get("severity") not in (None, ""):
+            return str(state["severity"]).lower()
+        status = state.get("status")
+        if isinstance(status, str) and status.strip():
+            s = status.strip().lower()
+            if s in ("green", "ok", "normal", "closed"):
+                return "ok"
+            if s in ("yellow", "warn", "warning", "elevated"):
+                return "elevated"
+            if s in ("orange", "amber"):
+                return "elevated"
+            if s in ("red", "critical", "halt", "open", "tripped"):
+                return "red"
+            return s
         return "ok"
 
+    def _load_circuit_breaker(self) -> str:
+        """Load circuit breaker severity from paper-risk state file(s)."""
+        candidates = [
+            self.data_dir / ".circuit_breaker_state.json",
+            self.data_dir / ".circuit_breaker.json",
+        ]
+        for cb_path in candidates:
+            try:
+                if not cb_path.exists():
+                    continue
+                state = json.loads(cb_path.read_text())
+                if isinstance(state, dict):
+                    return self._normalize_cb_severity(state)
+            except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
+                logger.error("Failed to load circuit breaker state from %s: %s", cb_path, e)
+        return "ok"
+
+    def _signals_json_candidates(self) -> list:
+        """Ordered candidate paths for live signals.json.
+
+        Always include ``data_dir/signals.json``. When the sizer is bound to the
+        default ``DATA_DIR`` (production), also consult PUBLIC_DATA_DIR env,
+        freshly resolved public SSOT, and repo DATA_DIR. Explicit non-default
+        ``data_dir`` (tests / sandboxes) stays local so live WWW signals do not
+        override fixture classifier/weights state.
+        """
+        candidates = [self.data_dir / "signals.json"]
+        try:
+            use_global = self.data_dir.resolve() == Path(DATA_DIR).resolve()
+        except OSError:
+            use_global = self.data_dir == DATA_DIR
+
+        if use_global:
+            env_public = os.environ.get("PUBLIC_DATA_DIR")
+            if env_public and str(env_public).strip():
+                candidates.append(Path(str(env_public).strip()).expanduser() / "signals.json")
+            try:
+                from src.paths import resolve_runtime_public_data_dir
+
+                candidates.append(resolve_runtime_public_data_dir() / "signals.json")
+            except Exception:
+                candidates.append(PUBLIC_DATA_DIR / "signals.json")
+            candidates.append(DATA_DIR / "signals.json")
+        else:
+            # Still honor an explicit PUBLIC_DATA_DIR env (tests that set it)
+            env_public = os.environ.get("PUBLIC_DATA_DIR")
+            if env_public and str(env_public).strip():
+                candidates.append(Path(str(env_public).strip()).expanduser() / "signals.json")
+
+        # Dedup while preserving order
+        seen = set()
+        ordered = []
+        for p in candidates:
+            try:
+                key = str(p.resolve()) if p.exists() else str(p)
+            except OSError:
+                key = str(p)
+            if key not in seen:
+                seen.add(key)
+                ordered.append(p)
+        return ordered
+
+    @staticmethod
+    def _vote_from_mapping(state: dict) -> Optional[Tuple[float, float]]:
+        """Extract (signal, agreement) from a mapping that looks like a live vote.
+
+        Returns None when the mapping is a regime weight table (nested regimes)
+        or lacks vote keys entirely — so callers can fall through.
+        """
+        if not isinstance(state, dict):
+            return None
+        # Live vote may be nested under ensemble_voting
+        vote = state.get("ensemble_voting") if isinstance(state.get("ensemble_voting"), dict) else state
+        if not isinstance(vote, dict):
+            return None
+        # Per-regime weight tables look like {"normal": {...}, "crisis": {...}}
+        # without composite/weighted_consensus/agreement at top level.
+        has_vote_key = any(
+            k in vote for k in ("composite_signal", "weighted_consensus", "agreement_ratio")
+        )
+        if not has_vote_key:
+            return None
+        try:
+            if "composite_signal" in vote:
+                signal = float(vote["composite_signal"])
+            elif "weighted_consensus" in vote:
+                signal = float(vote["weighted_consensus"])
+            else:
+                signal = 0.0
+            agreement = float(vote.get("agreement_ratio", 0.5))
+            return signal, agreement
+        except (TypeError, ValueError):
+            return None
+
     def _load_ensemble_signal(self) -> Tuple[float, float]:
-        """Load latest ensemble signal value and agreement."""
+        """Load latest ensemble signal value and agreement.
+
+        Primary SSOT: signals.json#ensemble_voting (public/data or data_dir).
+        Fallback: ENSEMBLE_WEIGHTS_FILE / ensemble_weights.json only when that
+        file actually carries vote fields (composite_signal / weighted_consensus).
+        Pure regime weight tables are ignored so they never pin signal=0.0.
+        """
+        # 1) Live signals.json ensemble_voting
+        for sig_path in self._signals_json_candidates():
+            try:
+                if not sig_path.exists():
+                    continue
+                payload = json.loads(sig_path.read_text())
+                parsed = self._vote_from_mapping(payload)
+                if parsed is not None:
+                    return parsed
+            except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+                logger.debug("ensemble signal signals.json read failed (%s): %s", sig_path, e)
+
+        # 2) Explicit weights/vote file override (must contain vote keys)
         ev_path = Path(os.environ.get(
             "ENSEMBLE_WEIGHTS_FILE",
             str(self.data_dir / "ensemble_weights.json"),
@@ -204,9 +450,13 @@ class AdaptiveSizer:
         try:
             if ev_path.exists():
                 state = json.loads(ev_path.read_text())
-                signal = float(state.get("composite_signal", state.get("weighted_consensus", 0.0)))
-                agreement = float(state.get("agreement_ratio", 0.5))
-                return signal, agreement
+                parsed = self._vote_from_mapping(state)
+                if parsed is not None:
+                    return parsed
+                logger.debug(
+                    "ensemble weights at %s lack vote keys; ignoring for adaptive sizing",
+                    ev_path,
+                )
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.error("Failed to load ensemble signal from %s: %s", ev_path, e)
         return 0.0, 0.5

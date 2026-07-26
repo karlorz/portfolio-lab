@@ -96,3 +96,92 @@ def test_runner_cancels_active_process_without_incrementing_failure_health(tmp_p
     assert completed["status"] == "cancelled"
     assert task["state"]["failure_count"] == 0
     assert task["state"]["consecutive_failures"] == 0
+
+
+def test_runner_exit_2_is_error_for_non_eval_tasks(tmp_path):
+    """Batch CE: make exit 2 (recipe failure) must not map to RUN_BLOCKED."""
+    command = [sys.executable, "-c", "import sys; sys.exit(2)"]
+    registry = _registry(command)
+    # override task id to look like health (not intentional block list)
+    registry = TaskRegistry(
+        [
+            TaskDefinition(
+                id="portfolio-lab-health",
+                label="Health",
+                command=command,
+                schedule=None,
+                timeout_seconds=5,
+            )
+        ],
+        validate_commands=False,
+    )
+    store = _store(tmp_path)
+    store.sync_registry(registry)
+    runner = TaskRunner(registry=registry, store=store, project_root=tmp_path)
+
+    run = runner.start_task("portfolio-lab-health", trigger="manual")
+    completed = runner.wait_for_run(run["run_id"], timeout_seconds=5)
+    assert completed["status"] == "error"
+    assert completed["exit_code"] == 2
+    assert completed.get("error")
+    assert "non-intentional-block" in (completed.get("error") or "")
+
+
+def test_runner_exit_2_is_blocked_for_eval_task(tmp_path):
+    """Eval may intentionally return EXIT_BLOCKED=2 under kill authority."""
+    command = [sys.executable, "-c", "import sys; sys.exit(2)"]
+    registry = TaskRegistry(
+        [
+            TaskDefinition(
+                id="portfolio-lab-eval",
+                label="Eval",
+                command=command,
+                schedule=None,
+                timeout_seconds=5,
+            )
+        ],
+        validate_commands=False,
+    )
+    store = _store(tmp_path)
+    store.sync_registry(registry)
+    runner = TaskRunner(registry=registry, store=store, project_root=tmp_path)
+
+    run = runner.start_task("portfolio-lab-eval", trigger="manual")
+    completed = runner.wait_for_run(run["run_id"], timeout_seconds=5)
+    assert completed["status"] == "blocked"
+    assert completed["exit_code"] == 2
+
+
+def test_runner_clears_thread_after_completion(tmp_path):
+    """Completed runs must not leak entries in _threads.
+
+    Without cleanup, a finished-but-not-removed thread leaves stale state. If
+    a later subprocess hangs (thread stays is_alive), the worker can report
+    "busy" forever - the condition that froze the scheduler on 2026-07-19 and
+    silently skipped the weekly fetch-trends job for weeks.
+    """
+    command = [sys.executable, "-c", "pass"]
+    registry = _registry(command)
+    store = _store(tmp_path)
+    store.sync_registry(registry)
+    runner = TaskRunner(registry=registry, store=store, project_root=tmp_path)
+
+    run = runner.start_task("env-task", trigger="manual")
+    runner.wait_for_run(run["run_id"], timeout_seconds=5)
+
+    assert run["run_id"] not in runner._threads
+
+
+def test_runner_clears_thread_after_timeout_kill(tmp_path):
+    """A timed-out run must also clear its thread so a hung subprocess cannot
+    permanently block the single worker slot."""
+    command = [sys.executable, "-c", "import time; time.sleep(30)"]
+    registry = _registry(command, timeout_seconds=1)
+    store = _store(tmp_path)
+    store.sync_registry(registry)
+    runner = TaskRunner(registry=registry, store=store, project_root=tmp_path)
+
+    run = runner.start_task("env-task", trigger="manual")
+    completed = runner.wait_for_run(run["run_id"], timeout_seconds=5)
+    assert completed["status"] == "timeout"
+    assert run["run_id"] not in runner._threads

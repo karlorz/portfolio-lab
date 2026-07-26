@@ -340,9 +340,11 @@ class TestRiskLimits:
         # Should not trigger extreme tail risk with normal returns
         assert result is None or "extreme_tail_risk" not in result
 
-    def test_garch_cvar_writes_health_report(self, tmp_path):
+    def test_garch_cvar_writes_health_report(self, tmp_path, monkeypatch):
         """check_risk_limits should write .health_report.json to DATA_DIR."""
-        from src.paths import DATA_DIR as PROJECT_DATA_DIR
+        import src.strategy.evaluator as evaluator
+
+        monkeypatch.setattr(evaluator, "DATA_DIR", tmp_path)
         p = _make_portfolio(tmp_path, cash=100000)
         p.positions = {"SPY": _make_position(weight=0.30)}
         rng = np.random.RandomState(42)
@@ -352,8 +354,7 @@ class TestRiskLimits:
                 "daily_return": float(rng.normal(0.0004, 0.01)),
             })
         p.check_risk_limits({"SPY": 460})
-        # Report is written to project DATA_DIR (not tmp_path)
-        report_path = PROJECT_DATA_DIR / ".health_report.json"
+        report_path = tmp_path / ".health_report.json"
         assert report_path.exists()
         with open(report_path) as f:
             data = json.load(f)
@@ -402,6 +403,11 @@ class TestCalculatePerformance:
 # ---------------------------------------------------------------------------
 
 class TestGraduationCriteria:
+
+    @pytest.fixture(autouse=True)
+    def _isolate_data_dir(self, tmp_path, monkeypatch):
+        """Graduation tests must not see live data/kill_switch.json."""
+        monkeypatch.setattr("src.strategy.evaluator.DATA_DIR", tmp_path)
 
     def test_too_few_days(self, tmp_path, caplog):
         p = _make_portfolio(tmp_path)
@@ -583,8 +589,9 @@ class TestDeduplicateToDaily:
         assert len(result) == 1
         assert result[0]["daily_return"] == 0.2
 
-    def test_deferred_when_too_few_trading_days(self, tmp_path, caplog):
+    def test_deferred_when_too_few_trading_days(self, tmp_path, caplog, monkeypatch):
         """63 snapshots but only 3 unique days → should defer with message."""
+        monkeypatch.setattr("src.strategy.evaluator.DATA_DIR", tmp_path)
         p = _make_portfolio(tmp_path)
         val = 100000
         p.history = []
@@ -615,12 +622,81 @@ class TestDeduplicateToDaily:
 class TestConstantsExtended:
 
     def test_orders_log_path(self):
-        from src.paths import DATA_DIR
-        assert ORDERS_LOG == DATA_DIR / "orders.jsonl"
+        import src.strategy.evaluator as ev
+
+        # Resolve against evaluator.DATA_DIR (may be tmp under suite isolation).
+        assert ORDERS_LOG == Path(ev.DATA_DIR) / "orders.jsonl"
 
     def test_performance_log_path(self):
-        from src.paths import DATA_DIR
-        assert PERFORMANCE_LOG == DATA_DIR / "performance.jsonl"
+        import src.strategy.evaluator as ev
+
+        assert PERFORMANCE_LOG == Path(ev.DATA_DIR) / "performance.jsonl"
+
+    def test_performance_log_follows_data_dir_patch(self, tmp_path):
+        """Patching DATA_DIR alone must redirect log appends (no live contamination)."""
+        import src.strategy.evaluator as ev
+        from src.paths import DATA_DIR as LIVE_DATA_DIR
+
+        live_log = Path(LIVE_DATA_DIR) / "performance.jsonl"
+        before = live_log.read_bytes() if live_log.exists() else None
+        before_mtime = live_log.stat().st_mtime_ns if live_log.exists() else None
+
+        with patch.object(ev, "DATA_DIR", tmp_path):
+            assert ev.PERFORMANCE_LOG == tmp_path / "performance.jsonl"
+            assert ev.ORDERS_LOG == tmp_path / "orders.jsonl"
+            with open(ev.PERFORMANCE_LOG, "a") as f:
+                f.write('{"total_value": 100000, "positions": 0, "test": true}\n')
+            assert (tmp_path / "performance.jsonl").exists()
+            assert b"test" in (tmp_path / "performance.jsonl").read_bytes()
+
+        if before is None:
+            assert not live_log.exists() or live_log.stat().st_size == 0
+        else:
+            assert live_log.read_bytes() == before
+            assert live_log.stat().st_mtime_ns == before_mtime
+
+    def test_phantom_cash_only_detected_after_positions_history(self, tmp_path):
+        """100k/0-pos rows after recent positions are phantom and must be skipped."""
+        import src.strategy.evaluator as ev
+
+        with patch.object(ev, "DATA_DIR", tmp_path):
+            log = tmp_path / "performance.jsonl"
+            log.write_text(
+                json.dumps(
+                    {
+                        "timestamp": "2026-07-15T02:20:00",
+                        "total_value": 95655.0,
+                        "cash": 100.0,
+                        "positions_count": 3,
+                        "mode": "paper",
+                    }
+                )
+                + "\n"
+            )
+            p = _make_portfolio(tmp_path, cash=100000, positions=[])
+            phantom = {
+                "timestamp": "2026-07-15T02:25:00",
+                "total_value": 100000.0,
+                "cash": 100000.0,
+                "positions_count": 0,
+                "mode": "paper",
+            }
+            assert ev._is_phantom_cash_only_performance(phantom, p) is True
+
+    def test_empty_start_portfolio_not_phantom_without_history(self, tmp_path):
+        """First-day empty portfolio near initial capital is allowed."""
+        import src.strategy.evaluator as ev
+
+        with patch.object(ev, "DATA_DIR", tmp_path):
+            p = _make_portfolio(tmp_path, cash=100000, positions=[])
+            first = {
+                "timestamp": "2026-07-15T02:25:00",
+                "total_value": 100000.0,
+                "cash": 100000.0,
+                "positions_count": 0,
+                "mode": "paper",
+            }
+            assert ev._is_phantom_cash_only_performance(first, p) is False
 
     def test_paper_config_bounds(self):
         assert 50000 <= PAPER_CONFIG["initial_capital"] <= 500000
@@ -1016,6 +1092,7 @@ class TestPortfolioEntropy:
         metrics = result["metrics"]
         assert "shannon_entropy" in metrics
         assert "effective_n" in metrics
+        assert "max_possible" in metrics
         assert "normalized_score" in metrics
         assert "hhi_index" in metrics
 
@@ -1036,6 +1113,7 @@ class TestPortfolioEntropy:
         assert result["ok"] is True
         assert metrics["shannon_entropy"] == pytest.approx(expected_h, abs=0.001)
         assert metrics["effective_n"] == pytest.approx(expected_eff_n, abs=0.05)
+        assert metrics["max_possible"] == pytest.approx(expected_h_max, abs=0.001)
         assert metrics["normalized_score"] == pytest.approx(expected_norm, abs=0.5)
         assert metrics["hhi_index"] == pytest.approx(expected_hhi, abs=0.001)
 
@@ -1149,6 +1227,12 @@ class TestCalculatePerformanceDailyReturn:
 # ---------------------------------------------------------------------------
 
 class TestGraduationCriteriaBoundaries:
+
+    @pytest.fixture(autouse=True)
+    def _isolate_data_dir(self, tmp_path, monkeypatch):
+        """Graduation tests must not see live data/kill_switch.json."""
+        monkeypatch.setattr("src.strategy.evaluator.DATA_DIR", tmp_path)
+
 
     @patch("src.backtest.metrics.compute_deflated_sharpe_ratio", return_value=0.0)
     def test_dsr_zero_blocks_graduation(self, mock_dsr, tmp_path, caplog):
@@ -2023,24 +2107,17 @@ class TestOrderRouterKillSwitch:
             assert result["status"] == "blocked"
 
     def test_order_router_fail_closed_on_missing_json(self, tmp_path):
-        """When kill_switch.json does not exist, router should allow orders (no kill switch active)."""
+        """When kill_switch.json is missing, router must block (fail-closed)."""
         from src.broker.order_router import OrderRouter, OrderPlan
 
         # Ensure no kill_switch.json exists
         assert not (tmp_path / "kill_switch.json").exists()
 
-        # Mock submit_order to return an object with .id and .status attributes
-        mock_fill = MagicMock()
-        mock_fill.id = "test-123"
-        mock_fill.status = "filled"
-
         with (
             patch("src.broker.order_router.AlpacaClient") as mock_client_cls,
             patch("src.broker.order_router.PaperTradingManager") as mock_mgr_cls,
-            patch("src.broker.order_router.time"),
         ):
             mock_client_cls.return_value.is_ready.return_value = True
-            mock_client_cls.return_value.submit_order.return_value = mock_fill
             mock_mgr_cls.return_value = MagicMock()
             router = OrderRouter(data_dir=str(tmp_path), paper=True)
 
@@ -2049,5 +2126,274 @@ class TestOrderRouterKillSwitch:
                 estimated_value=500, reason="rebalance",
             )]
             result = router.execute_orders(plans, dry_run=False, kill_switch_check=True)
-            # Should NOT be blocked — missing kill_switch.json means no active kill switch
-            assert result["status"] != "blocked"
+            assert result["status"] == "blocked"
+            assert "missing" in result["message"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Incident kill blocks paper execute + promote (2026-07-15 batch C)
+# ---------------------------------------------------------------------------
+
+class TestIncidentKillBlocksPaperControlLoop:
+    """Paper path must honor data/kill_switch.json like order_router."""
+
+    def test_is_kill_execution_blocked_helper(self):
+        from src.dashboard.kill_authority import is_kill_execution_blocked
+
+        assert is_kill_execution_blocked(None) is False
+        assert is_kill_execution_blocked({"enabled": False}) is False
+        assert is_kill_execution_blocked({"enabled": True, "level": "halt"}) is True
+        assert is_kill_execution_blocked({"enabled": True, "level": "restrict"}) is True
+        assert is_kill_execution_blocked({"enabled": True, "level": "warning"}) is True
+        assert is_kill_execution_blocked({"enabled": True}) is True
+
+    def test_graduation_refuses_promote_under_incident_halt(self, tmp_path, caplog):
+        """check_graduation_criteria must not write .promote_to_live under kill."""
+        from src.strategy.evaluator import check_graduation_criteria
+        import src.strategy.evaluator as ev
+
+        p = _make_portfolio(tmp_path)
+        rng = np.random.RandomState(12345)
+        p.history = []
+        val = 100000
+        for i in range(63):
+            ret = rng.normal(0.0008, 0.01)
+            val *= (1 + ret)
+            p.history.append({
+                "timestamp": f"2026-01-{i+1:02d}T23:00:00",
+                "total_value": round(val, 2),
+                "daily_return": ret,
+            })
+
+        kill_file = tmp_path / "kill_switch.json"
+        kill_file.write_text(json.dumps({
+            "enabled": True,
+            "level": "halt",
+            "reason": "unresolved_incident:signal_staleness",
+            "source": "incident_lifecycle",
+            "incident_id": "incident-halt-1",
+            "mode": "paper",
+            "timestamp": "2026-07-12T09:15:00+00:00",
+            "position_reduction": 1.0,
+        }))
+
+        with (
+            patch.object(ev, "DATA_DIR", tmp_path),
+            caplog.at_level(logging.INFO, logger="src.strategy.evaluator"),
+        ):
+            check_graduation_criteria(p)
+
+        promote = tmp_path / ".promote_to_live"
+        assert not promote.exists(), "promote file must not be written under kill halt"
+        assert "kill" in caplog.text.lower() or "HALT" in caplog.text or "blocked" in caplog.text.lower()
+
+    @patch('src.strategy.evaluator.sqlite_connect')
+    @patch('src.strategy.evaluator.get_latest_prices', return_value={"SPY": 500.0, "GLD": 180.0, "TLT": 90.0})
+    @patch('src.strategy.evaluator.get_current_regime', return_value="normal")
+    @patch('src.strategy.evaluator.get_latest_vix', return_value=15.0)
+    def test_incident_halt_blocks_paper_execute_and_promote(
+        self, mock_vix, mock_regime, mock_prices, mock_sqlite,
+        tmp_path, caplog,
+    ):
+        """main() must not execute fills or refresh promote when incident kill is on."""
+        from src.strategy.evaluator import main
+        import src.strategy.evaluator as ev
+
+        kill_file = tmp_path / "kill_switch.json"
+        kill_file.write_text(json.dumps({
+            "enabled": True,
+            "level": "halt",
+            "reason": "unresolved_incident:signal_staleness",
+            "source": "incident_lifecycle",
+            "incident_id": "incident-halt-1",
+            "incident_channel": "signal_staleness",
+            "mode": "paper",
+            "timestamp": "2026-07-12T09:15:00+00:00",
+            "position_reduction": 1.0,
+        }))
+
+        orders = [{
+            "symbol": "SPY",
+            "side": "buy",
+            "shares": 10,
+            "estimated_price": 500.0,
+            "estimated_value": 5000.0,
+            "reason": "rebalance_up",
+            "drift_before": 0.05,
+        }]
+
+        with (
+            patch.object(ev, "DATA_DIR", tmp_path),
+            patch.object(ev, "ORDERS_LOG", tmp_path / "orders.jsonl"),
+            patch.object(ev, "PERFORMANCE_LOG", tmp_path / "performance.jsonl"),
+            patch('sys.argv', ['evaluator.py', 'paper']),
+            patch.object(ev, "Portfolio") as MockPortfolio,
+            caplog.at_level(logging.INFO, logger="src.strategy.evaluator"),
+        ):
+            mock_portfolio = MagicMock()
+            mock_portfolio.check_risk_limits.return_value = None
+            mock_portfolio.total_value.return_value = 100000
+            mock_portfolio.calculate_orders.return_value = orders
+            mock_portfolio.current_weights.return_value = {"SPY": 0.4, "GLD": 0.4, "TLT": 0.2}
+            mock_portfolio.cash = 100000
+            mock_portfolio.positions = {}
+            mock_portfolio.mode = "paper"
+            mock_portfolio.history = []
+            mock_portfolio.execute_orders = MagicMock(return_value=[{"symbol": "SPY"}])
+            MockPortfolio.return_value = mock_portfolio
+
+            rc = main()
+
+            mock_portfolio.execute_orders.assert_not_called()
+            assert rc == 2, "authority kill must exit non-zero so make eval STATUS != ok"
+
+        assert kill_file.exists(), "incident kill must be preserved"
+        assert not (tmp_path / ".promote_to_live").exists()
+        # orders log should not contain fills from blocked cycle
+        orders_log = tmp_path / "orders.jsonl"
+        if orders_log.exists():
+            assert orders_log.read_text().strip() == ""
+
+    @patch('src.strategy.evaluator.sqlite_connect')
+    @patch('src.strategy.evaluator.get_latest_prices', return_value={"SPY": 500.0, "GLD": 180.0, "TLT": 90.0})
+    @patch('src.strategy.evaluator.get_current_regime', return_value="normal")
+    @patch('src.strategy.evaluator.get_latest_vix', return_value=15.0)
+    def test_risk_kill_path_exits_nonzero(
+        self, mock_vix, mock_regime, mock_prices, mock_sqlite,
+        tmp_path,
+    ):
+        """Risk-limit kill must not report green cron success either."""
+        from src.strategy.evaluator import main
+        import src.strategy.evaluator as ev
+
+        with (
+            patch.object(ev, "DATA_DIR", tmp_path),
+            patch('sys.argv', ['evaluator.py', 'paper']),
+            patch.object(ev, "Portfolio") as MockPortfolio,
+        ):
+            mock_portfolio = MagicMock()
+            mock_portfolio.check_risk_limits.return_value = "max_drawdown_-25.0%"
+            mock_portfolio.total_value.return_value = 75000
+            mock_portfolio.current_weights.return_value = {}
+            MockPortfolio.return_value = mock_portfolio
+
+            rc = main()
+
+        assert rc == 2
+        assert (tmp_path / "kill_switch.json").exists()
+
+    @patch('src.strategy.evaluator.sqlite_connect')
+    @patch('src.strategy.evaluator.get_latest_prices', return_value={"SPY": 500.0, "GLD": 180.0, "TLT": 90.0})
+    @patch('src.strategy.evaluator.get_current_regime', return_value="normal")
+    @patch('src.strategy.evaluator.get_latest_vix', return_value=15.0)
+    def test_no_kill_still_executes_orders(
+        self, mock_vix, mock_regime, mock_prices, mock_sqlite,
+        tmp_path,
+    ):
+        """Without kill file, paper execute_orders still runs."""
+        from src.strategy.evaluator import main
+        import src.strategy.evaluator as ev
+
+        orders = [{
+            "symbol": "SPY",
+            "side": "buy",
+            "shares": 10,
+            "estimated_price": 500.0,
+            "estimated_value": 5000.0,
+            "reason": "rebalance_up",
+            "drift_before": 0.05,
+        }]
+
+        with (
+            patch.object(ev, "DATA_DIR", tmp_path),
+            patch.object(ev, "ORDERS_LOG", tmp_path / "orders.jsonl"),
+            patch.object(ev, "PERFORMANCE_LOG", tmp_path / "performance.jsonl"),
+            patch('sys.argv', ['evaluator.py', 'paper']),
+            patch.object(ev, "Portfolio") as MockPortfolio,
+        ):
+            mock_portfolio = MagicMock()
+            mock_portfolio.check_risk_limits.return_value = None
+            mock_portfolio.total_value.return_value = 100000
+            mock_portfolio.calculate_orders.return_value = orders
+            mock_portfolio.current_weights.return_value = {"SPY": 0.4, "GLD": 0.4, "TLT": 0.2}
+            mock_portfolio.cash = 100000
+            mock_portfolio.positions = {}
+            mock_portfolio.mode = "paper"
+            mock_portfolio.history = [{"total_value": 100000, "daily_return": 0.0}]
+            mock_portfolio.execute_orders = MagicMock(return_value=[{
+                **orders[0],
+                "fill_price": 500.0,
+                "fill_shares": 10,
+                "fill_value": 5000.0,
+                "timestamp": "2026-07-15T00:00:00",
+            }])
+            MockPortfolio.return_value = mock_portfolio
+
+            rc = main()
+
+            mock_portfolio.execute_orders.assert_called_once()
+            assert rc == 0
+
+
+def test_garch_health_report_separates_policy_and_measured_dd(tmp_path, monkeypatch):
+    from src.strategy.evaluator import Portfolio, PAPER_CONFIG, DATA_DIR
+    from types import SimpleNamespace
+    from dataclasses import dataclass
+    import src.strategy.evaluator as ev
+
+    monkeypatch.setattr(ev, "DATA_DIR", tmp_path)
+    state = tmp_path / "paper_state.json"
+    state.write_text('{"cash": 100000, "positions": {}, "history": []}')
+    port = Portfolio(state_file=state)
+    # synthetic measured drawdown path
+    port.history = [
+        {"timestamp": "2026-01-01T00:00:00", "total_value": 100000},
+        {"timestamp": "2026-02-01T00:00:00", "total_value": 94000},  # -6%
+        {"timestamp": "2026-03-01T00:00:00", "total_value": 96000},
+    ]
+
+    @dataclass
+    class FakeMetrics:
+        max_drawdown: float = -0.15
+        current_drawdown: float = 0.0
+        tail_severity: str = "normal"
+        cvar_ratio: float = 1.2
+        filter_active: bool = True
+
+    port._write_garch_health_report(FakeMetrics())
+    report = json.loads((tmp_path / ".health_report.json").read_text())
+    assert "max_drawdown" not in report or report.get("max_drawdown") != -15.0
+    assert report.get("max_drawdown_limit") == -0.15 or report.get("max_drawdown_limit_pct") == 15.0
+    assert report.get("measured_max_drawdown") is not None
+    assert abs(report["measured_max_drawdown"] + 0.06) < 0.01  # ~-6%
+    assert "drawdown_field_semantics" in report
+
+
+def test_garch_health_report_marks_non_ops_inventory(tmp_path, monkeypatch):
+    """GARCH writer must tag summary so graduation multi-day SSOT is not blocked."""
+    from dataclasses import dataclass
+
+    import src.strategy.evaluator as ev
+    from src.strategy.evaluator import Portfolio
+
+    monkeypatch.setattr(ev, "DATA_DIR", tmp_path)
+    state = tmp_path / "paper_state.json"
+    state.write_text('{"cash": 100000, "positions": {}, "history": []}')
+    port = Portfolio(state_file=state)
+
+    @dataclass
+    class FakeMetrics:
+        max_drawdown: float = -0.15
+        current_drawdown: float = 0.0
+        tail_severity: str = "normal"
+        cvar_ratio: float = 1.2
+        filter_active: bool = True
+        var_95: float = -1.46
+        cvar_95: float = -2.21
+        garch_filtered: bool = True
+
+    port._write_garch_health_report(FakeMetrics())
+    report = json.loads((tmp_path / ".health_report.json").read_text())
+    assert report["summary"]["inventory_role"] == "garch_risk"
+    assert report["summary"]["total_checks"] == 1
+    assert report.get("schema_version") == "garch-health-report/v1"

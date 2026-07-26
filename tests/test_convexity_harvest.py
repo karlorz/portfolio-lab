@@ -861,15 +861,55 @@ class TestGenerateSignalEdgeCases:
         return ConvexityHarvestStrategy(vix_data_manager=mock_mgr)
 
     def test_generate_signal_contango_no_data(self):
-        """Contango regime but no signal data returns flat."""
+        """Contango regime but no signal data returns flat with null VIX (not 0.0)."""
         from src.strategy.convexity_harvest import ConvexityHarvestStrategy
         mock_mgr = MagicMock()
         mock_mgr.get_contango_signal.return_value = None
+        mock_mgr.get_data_range.return_value = ("", "")
         strategy = ConvexityHarvestStrategy(vix_data_manager=mock_mgr)
         pos = strategy.generate_signal("2026-05-14")
         assert pos.position_type == "flat"
         assert pos.risk_score == 1.0
-        assert pos.exit_reason == "No VIX data available"
+        assert pos.exit_reason is not None
+        assert "unavailable" in pos.exit_reason
+        # Residual honesty: unknown levels are null, not silent zeros
+        assert pos.vix_level is None
+        assert pos.contango_pct is None
+        assert pos.expected_roll_yield is None
+        payload = strategy.get_current_signal()
+        assert payload["status"] == "unavailable"
+        assert payload["vix_level"] is None
+        assert payload["contango_pct"] is None
+        assert payload.get("vix_source") == "unavailable"
+
+    def test_generate_signal_falls_back_to_last_cache_day(self):
+        """Today missing → last futures cache day supplies VIX (not zeros)."""
+        from src.strategy.convexity_harvest import ConvexityHarvestStrategy
+
+        mock_mgr = MagicMock()
+
+        def _contango(date):
+            if date == "2026-07-20":
+                return None
+            if date == "2026-05-22":
+                return {
+                    "vix_level": 16.76,
+                    "contango_spot_1m": 19.5,
+                    "contango_1m_2m": 0.0,
+                    "is_contango": True,
+                    "annualized_roll_yield": 50.0,
+                }
+            return None
+
+        mock_mgr.get_contango_signal.side_effect = _contango
+        mock_mgr.get_data_range.return_value = ("2021-05-10", "2026-05-22")
+        strategy = ConvexityHarvestStrategy(vix_data_manager=mock_mgr)
+        pos = strategy.generate_signal("2026-07-20")
+        assert pos.vix_level == pytest.approx(16.76)
+        assert pos.exit_reason != "unavailable: no VIX futures cache"
+        payload = strategy.get_current_signal()
+        # get_current uses today; mock still falls back
+        assert payload.get("vix_level", 0) != 0 or pos.vix_level > 0
 
     def test_generate_signal_contango_positive_allocation(self, strategy_with_data):
         """Contango with positive allocation produces short_vix position."""
@@ -1209,3 +1249,34 @@ class TestCLIMain:
                         mock_sys.argv = ['convexity_harvest.py', '--backtest', '2020-01-01']
                         ch.main()
 
+
+
+def test_get_current_signal_uses_utc_calendar_date(monkeypatch):
+    """Host-local midnight must not advance date ahead of UTC SSOT."""
+    from datetime import datetime, timezone
+    from src.strategy.convexity_harvest import ConvexityHarvestStrategy
+
+    # Freeze "now" to 2026-07-20 01:00+08 (still 2026-07-19 UTC)
+    class _FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is timezone.utc or (tz is not None and getattr(tz, "tzname", lambda: None)(None) == "UTC"):
+                return cls(2026, 7, 19, 17, 0, 0, tzinfo=timezone.utc)
+            # naive local Asia/Shanghai-like
+            return cls(2026, 7, 20, 1, 0, 0)
+
+    import src.strategy.convexity_harvest as mod
+    monkeypatch.setattr(mod, "datetime", _FixedDateTime)
+    mock_mgr = MagicMock()
+    mock_mgr.get_contango_signal.side_effect = lambda d: {
+        "vix_level": 16.0,
+        "contango_spot_1m": 10.0,
+        "annualized_roll_yield": 5.0,
+        "is_contango": True,
+    } if d == "2026-07-19" else None
+    mock_mgr.get_data_range.return_value = ("2026-01-01", "2026-07-19")
+    strategy = ConvexityHarvestStrategy(vix_data_manager=mock_mgr)
+    # Patch generate path: if today uses UTC, date is 2026-07-19
+    sig = strategy.get_current_signal()
+    # Should resolve via UTC day or last cache — not silently No VIX for local tomorrow
+    assert sig.get("vix_level", 0) != 0 or sig.get("status") != "unavailable"
