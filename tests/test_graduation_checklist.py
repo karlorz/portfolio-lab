@@ -951,6 +951,7 @@ class TestAllExports:
         expected = {
             "CheckResult",
             "GraduationChecklist",
+            "is_ops_health_inventory",
             "run_check_and_exit",
             "run_report_and_exit",
             "run_progress_and_exit",
@@ -961,12 +962,14 @@ class TestAllExports:
         from src.strategy.graduation_checklist import (
             CheckResult,
             GraduationChecklist,
+            is_ops_health_inventory,
             run_check_and_exit,
             run_report_and_exit,
             run_progress_and_exit,
         )
         assert CheckResult is not None
         assert GraduationChecklist is not None
+        assert callable(is_ops_health_inventory)
         assert callable(run_check_and_exit)
         assert callable(run_report_and_exit)
         assert callable(run_progress_and_exit)
