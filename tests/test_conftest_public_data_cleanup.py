@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+
+from tests.fixtures.synthetic_prices import (
+    SYNTHETIC_PRICE_END,
+    SYNTHETIC_PRICE_START,
+)
 
 
 def _project_conftest(pytestconfig):
@@ -47,3 +53,19 @@ def test_caller_provided_public_data_dir_is_not_removed(
     conftest.pytest_sessionfinish(session=None, exitstatus=0)
 
     assert caller_root.is_dir()
+
+
+def test_isolated_prices_are_seeded_synthetically(
+    tmp_path: Path, pytestconfig,
+) -> None:
+    conftest = _project_conftest(pytestconfig)
+    public = tmp_path / "isolated-public"
+    public.mkdir()
+
+    conftest._seed_isolated_public_fixtures(public)
+
+    prices = json.loads((public / "prices.json").read_text(encoding="utf-8"))
+    assert {"SPY", "GLD", "TLT", "IEF", "BTC", "^VIX", "^VIX3M"} <= prices.keys()
+    assert prices["SPY"][0]["d"] == SYNTHETIC_PRICE_START.isoformat()
+    assert prices["SPY"][-1]["d"] == SYNTHETIC_PRICE_END.isoformat()
+    assert len(prices["SPY"]) >= 20 * 252
