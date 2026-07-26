@@ -318,6 +318,39 @@ def mirror_repo_public_data(
                     paths=unique_paths,
                     lag_summary=lag_summary,
                 )
+            # Health-only cron writes alerts mid-job while live lag can still be
+            # non-zero (self-induced health/index writes). After soft-mirror +
+            # restamp heal lag to 0, re-publish alerts so dual-plane labeling
+            # sees final ops (signal_quality for SH-only, not Health Warning: ops).
+            # Skip under pytest / ephemeral roots — never touch prod alerts from
+            # fixture mirrors.
+            try:
+                import os
+
+                try:
+                    lag_n = int((lag_summary or {}).get("lagging_count") or 0)
+                except (TypeError, ValueError):
+                    lag_n = -1
+                under_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+                roots_ephemeral = False
+                try:
+                    from src.monitor.repo_public_mirror_lag import (
+                        is_ephemeral_restamp_path,
+                    )
+
+                    roots_ephemeral = is_ephemeral_restamp_path(
+                        source_root
+                    ) or is_ephemeral_restamp_path(dest_root)
+                except Exception:  # noqa: BLE001
+                    roots_ephemeral = False
+                if lag_n == 0 and not under_pytest and not roots_ephemeral:
+                    from src.monitor.health_check import publish_health_alerts_json
+
+                    publish_health_alerts_json()
+            except Exception as alerts_exc:  # noqa: BLE001 — never fail mirror
+                report.errors.append(
+                    f"alerts republish after lag heal skipped: {alerts_exc}"
+                )
         except Exception as exc:  # noqa: BLE001 — never fail soft-mirror on restamp
             report.errors.append(f"health lag restamp skipped: {exc}")
 

@@ -1272,6 +1272,48 @@ def publish_health_alerts_json(report: dict[str, Any] | None = None) -> Path | N
     except Exception:  # noqa: BLE001
         pass
 
+    # Post-merge live lag heal (2026-07-26 health-alerts-publish-after-lag-heal):
+    # Soft-mirror during ops merge can leave sticky lag stamps + system_status=
+    # warning on public health while the live probe is already 0. Labeling must
+    # re-probe live lag and re-derive ops system_status (SH excluded) before
+    # build_health_slo_alerts so health-only cron cannot leave Health Warning: ops
+    # when final ops are green and only signal quality is thin.
+    try:
+        import os
+
+        from src.dashboard.generator import project_repo_public_mirror_lag_onto_health
+        from src.monitor.repo_public_mirror_lag import (
+            is_ephemeral_restamp_path,
+            rederive_ops_status_for_lag_heal,
+            summarize_repo_public_mirror_lag,
+        )
+
+        public_root = Path(PUBLIC_DATA_DIR)
+        # Under pytest / ephemeral PUBLIC trees, never project production lag
+        # onto fixture health (HW rebind would stamp live WWW lag into tmp).
+        # Pass source=dest=public_root so the probe is isolation-local; unit
+        # tests that monkeypatch summarize_repo_public_mirror_lag still win.
+        if os.environ.get("PYTEST_CURRENT_TEST") or is_ephemeral_restamp_path(
+            public_root
+        ):
+            live = summarize_repo_public_mirror_lag(
+                source_root=public_root,
+                dest_root=public_root,
+            )
+        else:
+            live = summarize_repo_public_mirror_lag()
+        if isinstance(live, dict):
+            project_repo_public_mirror_lag_onto_health(health_payload, live)
+            try:
+                lag_n = int(live.get("lagging_count") or 0)
+            except (TypeError, ValueError):
+                lag_n = -1
+            if lag_n == 0:
+                for key, value in rederive_ops_status_for_lag_heal(health_payload).items():
+                    health_payload[key] = value
+    except Exception as exc:  # noqa: BLE001 — fall back to stamp labeling
+        logger.debug("alerts live lag heal skipped: %s", exc)
+
     now_utc = datetime.now(timezone.utc).isoformat()
     # Prefer health stamp so operators can correlate
     stamp = (
