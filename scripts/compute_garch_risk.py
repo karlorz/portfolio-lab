@@ -200,7 +200,16 @@ def main():
         report["status"] = "unhealthy"
     else:
         report["status"] = "healthy"
-    report["summary"] = {"passed": 1, "total_checks": 1}
+    report["summary"] = {
+        "passed": 1,
+        "total_checks": 1,
+        "inventory_role": "garch_risk",
+        "inventory_note": (
+            "Not an ops multi-day health inventory; graduation multi-day "
+            "SSOT is data/.circuit_breaker.json consecutive_ok"
+        ),
+    }
+    report["schema_version"] = report.get("schema_version") or "garch-health-report/v1"
 
     with open(report_path, 'w') as f:
         json.dump(report, f, indent=2, default=str)
@@ -323,11 +332,19 @@ def main():
         report["summary"] = {
             "passed": 0 if report["status"] != "healthy" else 1,
             "total_checks": 1,
+            "inventory_role": "garch_risk",
+            "inventory_note": (
+                "Not an ops multi-day health inventory; graduation multi-day "
+                "SSOT is data/.circuit_breaker.json consecutive_ok"
+            ),
             "runtime_role": report.get("runtime_role") or "advisory_degraded",
             "garch_active": bool(report.get("garch_active")),
             "status_reason": report.get("garch_active_reason")
             or "coverage demote or inactive filter",
         }
+        report["schema_version"] = (
+            report.get("schema_version") or "garch-health-report/v1"
+        )
         risk_payload["status"] = report["status"]
         if report.get("runtime_role"):
             risk_payload["runtime_role"] = report["runtime_role"]
