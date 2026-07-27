@@ -24,10 +24,10 @@ def test_alt_snapshot_soft_scales_composite() -> None:
     )
     with patch.object(gen, "load_latest_signal", return_value=signal):
         snap = gen.get_signal_snapshot()
-    assert abs(snap.value - soft) < 1e-6
-    assert snap.metadata.get("value_scale") == "tanh_0.5"
+    assert abs(snap.value - (-soft)) < 1e-6  # SPY polarity map inverts sign
+    assert snap.metadata.get("value_scale") == "tanh_0.5_spy_mapped"
     assert snap.metadata.get("composite_raw") == composite
-    assert abs(snap.value) < abs(composite) or abs(composite) < 0.5
+    assert abs(snap.value) < abs(composite) or abs(composite) < 0.5  # magnitude unchanged
 
 
 def test_tail_risk_uses_tanh_scale() -> None:
