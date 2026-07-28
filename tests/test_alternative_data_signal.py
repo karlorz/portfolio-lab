@@ -1027,6 +1027,23 @@ class TestSignalSnapshotBridgeEdgeCases:
         # bear regime maps to -0.4, SPY polarity map inverts to +0.4
         assert snapshot.value == 0.4
 
+    def test_snapshot_zero_score_neutral_is_positive_zero(self, mock_generator, tmp_path):
+        """Neutral fallback stays positive zero after the SPY polarity map."""
+        mock_generator.signals_dir = tmp_path
+        composite = AlternativeDataComposite(
+            timestamp=datetime.now().isoformat(),
+            composite_score=0.0, confidence=0.8,
+            regime="neutral", z_score=0.0,
+            components={}, component_confidences={},
+            weights={}, data_freshness_hours=12.0,
+            sources_count=0, symbol_coverage=[],
+        )
+        signal = mock_generator.to_ensemble_signal(composite)
+        mock_generator._save_signal(composite, signal)
+        snapshot = mock_generator.get_signal_snapshot()
+        assert snapshot.value == 0.0
+        assert math.copysign(1.0, snapshot.value) == 1.0
+
     def test_snapshot_metadata_includes_regime_and_probability(self, mock_generator, tmp_path):
         """Snapshot metadata contains regime and probability fields."""
         mock_generator.signals_dir = tmp_path

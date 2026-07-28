@@ -27,6 +27,7 @@ def test_alt_snapshot_soft_scales_composite() -> None:
     assert abs(snap.value - (-soft)) < 1e-6  # SPY polarity map inverts sign
     assert snap.metadata.get("value_scale") == "tanh_0.5_spy_mapped"
     assert snap.metadata.get("composite_raw") == composite
+    assert snap.metadata.get("polarity_policy") == "no_auto_invert_spy_mapped"
     assert abs(snap.value) < abs(composite) or abs(composite) < 0.5  # magnitude unchanged
 
 
