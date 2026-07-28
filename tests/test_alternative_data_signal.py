@@ -955,7 +955,7 @@ class TestSignalSnapshotBridgeEdgeCases:
         assert "unavailable" in snapshot.explanation
 
     def test_snapshot_negative_composite_score(self, mock_generator, tmp_path):
-        """Negative composite score yields negative snapshot value."""
+        """Negative composite score yields positive SPY snapshot value (polarity map inverts)."""
         mock_generator.signals_dir = tmp_path
         # Save a signal with negative score
         composite = AlternativeDataComposite(
@@ -971,11 +971,11 @@ class TestSignalSnapshotBridgeEdgeCases:
         signal = mock_generator.to_ensemble_signal(composite)
         mock_generator._save_signal(composite, signal)
         snapshot = mock_generator.get_signal_snapshot()
-        assert snapshot.value < 0
+        assert snapshot.value > 0  # SPY polarity map: negative composite → positive SPY
         assert snapshot.is_active is True
 
     def test_snapshot_positive_composite_score(self, mock_generator, tmp_path):
-        """Positive composite score yields positive snapshot value."""
+        """Positive composite score yields negative SPY snapshot value (polarity map inverts)."""
         mock_generator.signals_dir = tmp_path
         composite = AlternativeDataComposite(
             timestamp=datetime.now().isoformat(),
@@ -990,7 +990,7 @@ class TestSignalSnapshotBridgeEdgeCases:
         signal = mock_generator.to_ensemble_signal(composite)
         mock_generator._save_signal(composite, signal)
         snapshot = mock_generator.get_signal_snapshot()
-        assert snapshot.value > 0
+        assert snapshot.value < 0  # SPY polarity map: positive composite → negative SPY
         assert snapshot.is_active is True
 
     def test_snapshot_zero_score_uses_regime_map_bull(self, mock_generator, tmp_path):
@@ -1007,8 +1007,8 @@ class TestSignalSnapshotBridgeEdgeCases:
         signal = mock_generator.to_ensemble_signal(composite)
         mock_generator._save_signal(composite, signal)
         snapshot = mock_generator.get_signal_snapshot()
-        # bull regime maps to 0.4 when value is 0
-        assert snapshot.value == 0.4
+        # bull regime maps to 0.4, SPY polarity map inverts to -0.4
+        assert snapshot.value == -0.4
 
     def test_snapshot_zero_score_bear_regime(self, mock_generator, tmp_path):
         """Zero composite with bear regime uses regime fallback -0.4."""
@@ -1024,8 +1024,25 @@ class TestSignalSnapshotBridgeEdgeCases:
         signal = mock_generator.to_ensemble_signal(composite)
         mock_generator._save_signal(composite, signal)
         snapshot = mock_generator.get_signal_snapshot()
-        # bear regime maps to -0.4 when value is 0
-        assert snapshot.value == -0.4
+        # bear regime maps to -0.4, SPY polarity map inverts to +0.4
+        assert snapshot.value == 0.4
+
+    def test_snapshot_zero_score_neutral_is_positive_zero(self, mock_generator, tmp_path):
+        """Neutral fallback stays positive zero after the SPY polarity map."""
+        mock_generator.signals_dir = tmp_path
+        composite = AlternativeDataComposite(
+            timestamp=datetime.now().isoformat(),
+            composite_score=0.0, confidence=0.8,
+            regime="neutral", z_score=0.0,
+            components={}, component_confidences={},
+            weights={}, data_freshness_hours=12.0,
+            sources_count=0, symbol_coverage=[],
+        )
+        signal = mock_generator.to_ensemble_signal(composite)
+        mock_generator._save_signal(composite, signal)
+        snapshot = mock_generator.get_signal_snapshot()
+        assert snapshot.value == 0.0
+        assert math.copysign(1.0, snapshot.value) == 1.0
 
     def test_snapshot_metadata_includes_regime_and_probability(self, mock_generator, tmp_path):
         """Snapshot metadata contains regime and probability fields."""

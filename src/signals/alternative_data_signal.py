@@ -655,25 +655,37 @@ class AlternativeDataSignalGenerator:
         # vs raw composite; reduces deadband pile-up with other long-biased arms.
         if composite_f != 0.0:
             value = float(math.tanh(composite_f / 0.5))
+            value_scale = "tanh_0.5"
         else:
             regime_map = {"bull": 0.4, "bear": -0.4, "neutral": 0.0, "crisis": -0.7}
             value = float(regime_map.get(signal.regime, 0.0))
+            value_scale = "regime_map"
+        # SPY polarity map (Batch DC pattern): the alternative_data composite is
+        # a risk-appetite score (positive=risk_on) that is counter-cyclical for
+        # SPY in the IC measurement window (ic_raw=-0.087, flipped=+0.087,
+        # +rate=98%). Map to SPY-facing value — NOT runtime auto-invert; this
+        # is a deliberate classifier output mapping (auto_invert_policy:
+        # disabled by design). Ensemble scalar follows SPY polarity because
+        # health IC is vs SPY labels.
+        spy_value = -value if value != 0.0 else 0.0
         return SignalSnapshot(
             source="alternative_data",
             timestamp=signal.timestamp,
-            value=value,
+            value=spy_value,
             confidence=signal.confidence,
-            asset_signals={"SPY": value},
+            asset_signals={"SPY": spy_value},
             regime_fit="all",
             is_active=True,
             explanation=f"Alt Data: regime={signal.regime}, composite={composite_f:.4f}, "
-                        f"soft={value:.4f}, prob={signal.probability:.2f}, conf={signal.confidence:.2f}",
+                        f"soft={value:.4f}, spy={spy_value:.4f}, prob={signal.probability:.2f}, "
+                        f"conf={signal.confidence:.2f}",
             metadata={
                 "regime": signal.regime,
                 "probability": signal.probability,
                 "raw_data": signal.raw_data,
                 "composite_raw": composite_f,
-                "value_scale": "tanh_0.5",
+                "value_scale": f"{value_scale}_spy_mapped",
+                "polarity_policy": "no_auto_invert_spy_mapped",
                 "soft_delete_policy": "health_gate_no_force_wake",
             },
         )
