@@ -24,6 +24,60 @@ from src.paths import MARKET_DB, DATA_DIR, PUBLIC_DATA_DIR, BASE_ALLOCATION
 from src.monitor.garch_cvar import calculate_garch_cvar, ARCH_AVAILABLE
 
 
+def append_risk_metrics_history(
+    history_path: Path,
+    risk_payload: dict,
+    *,
+    retention: int = 720,
+) -> None:
+    """Append one additive history record while preserving bounded retention."""
+    history = []
+    if history_path.exists():
+        try:
+            loaded = json.loads(history_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, list):
+                history = loaded
+        except (json.JSONDecodeError, OSError):
+            history = []
+    history.append(
+        {
+            "timestamp": risk_payload["timestamp"],
+            "var_95": risk_payload["var_95_daily"],
+            "cvar_95": risk_payload["cvar_95_daily"],
+            "cvar_ratio": risk_payload["cvar_ratio"],
+            "tail_severity": risk_payload["tail_severity"],
+            "garch_active": risk_payload["garch_active"],
+            "source": "compute_garch_risk",
+            "coverage_diagnostics": risk_payload.get("coverage_diagnostics"),
+        }
+    )
+    history_path.write_text(
+        json.dumps(history[-retention:], indent=2, default=str),
+        encoding="utf-8",
+    )
+
+
+def append_garch_log(log_path: Path, risk_payload: dict) -> None:
+    """Write a concise direct-run log entry independent of the Make wrapper."""
+    coverage = risk_payload.get("coverage_diagnostics")
+    coverage = coverage if isinstance(coverage, dict) else {}
+    lines = [
+        f"=== GARCH-CVaR Risk: {risk_payload['timestamp']} ===",
+        f"VaR 95%: {risk_payload['var_95_daily']}",
+        f"CVaR 95%: {risk_payload['cvar_95_daily']}",
+        f"CVaR ratio: {risk_payload['cvar_ratio']}",
+        f"GARCH active: {risk_payload['garch_active']}",
+        f"Kupiec p-value: {coverage.get('kupiec_p_value')}",
+        (
+            "Conditional coverage p-value: "
+            f"{coverage.get('conditional_coverage_p_value')}"
+        ),
+    ]
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
+
+
 def compute_portfolio_returns(db_path: Path, days: int = 504) -> np.ndarray:
     """Load SPY/GLD/TLT daily returns from market.db."""
     if not db_path.exists():
@@ -471,30 +525,14 @@ def main():
     # Append sparse history so operators can see GARCH job cadence (keep last 720).
     history_path = DATA_DIR / "risk_metrics_history.json"
     try:
-        history = []
-        if history_path.exists():
-            try:
-                loaded = json.loads(history_path.read_text(encoding="utf-8"))
-                if isinstance(loaded, list):
-                    history = loaded
-            except (json.JSONDecodeError, OSError):
-                history = []
-        history.append(
-            {
-                "timestamp": risk_payload["timestamp"],
-                "var_95": risk_payload["var_95_daily"],
-                "cvar_95": risk_payload["cvar_95_daily"],
-                "cvar_ratio": risk_payload["cvar_ratio"],
-                "tail_severity": risk_payload["tail_severity"],
-                "garch_active": risk_payload["garch_active"],
-                "source": "compute_garch_risk",
-            }
-        )
-        history = history[-720:]
-        with open(history_path, "w") as f:
-            json.dump(history, f, indent=2, default=str)
+        append_risk_metrics_history(history_path, risk_payload)
     except OSError as exc:
         print(f"  WARNING: failed to append risk_metrics_history: {exc}")
+
+    try:
+        append_garch_log(DATA_DIR / "garch.log", risk_payload)
+    except OSError as exc:
+        print(f"  WARNING: failed to append garch.log: {exc}")
 
     print(f"  VaR 95%:      {metrics.var_95:.2f}%")
     print(f"  CVaR 95%:     {metrics.cvar_95:.2f}%")
