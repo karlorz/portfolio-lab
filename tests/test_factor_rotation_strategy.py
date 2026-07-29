@@ -549,14 +549,22 @@ class TestFactorRotationBacktest:
     def test_backtest_with_data(self, tmp_path):
         np.random.seed(42)
         db = tmp_path / "market.db"
+        # Seed relative to now; fixed 2024–2026 windows go stale once
+        # calendar time moves past the seeded history (need 252+ bdays).
+        seed_days = 400
         _seed_prices(
             db,
             symbols=list(FactorMomentumEngine.FACTORS),
-            days=400,
+            days=seed_days,
         )
         engine = _make_engine(tmp_path)
         bt = FactorRotationBacktest(engine)
-        result = bt.run_backtest("2024-01-01", "2026-01-01")
+        end = pd.Timestamp.now().normalize()
+        start = end - pd.offsets.BDay(300)
+        result = bt.run_backtest(
+            start.strftime("%Y-%m-%d"),
+            end.strftime("%Y-%m-%d"),
+        )
         assert result["strategy"] == "factor_momentum_rotation"
         assert result["status"] == "completed"
         assert "cagr" in result
@@ -575,7 +583,12 @@ class TestFactorRotationBacktest:
         _seed_prices(db, symbols=["MTUM", "VTV"], days=400)
         engine = _make_engine(tmp_path)
         bt = FactorRotationBacktest(engine)
-        result = bt.run_backtest("2024-01-01", "2026-01-01")
+        end = pd.Timestamp.now().normalize()
+        start = end - pd.offsets.BDay(300)
+        result = bt.run_backtest(
+            start.strftime("%Y-%m-%d"),
+            end.strftime("%Y-%m-%d"),
+        )
         # Without SPY data for benchmark, should error
         assert "error" in result
 

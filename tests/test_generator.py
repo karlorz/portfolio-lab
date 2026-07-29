@@ -6545,7 +6545,10 @@ class TestTwoStageRegimeUnavailableHonesty:
     def test_two_stage_none_publishes_unavailable_section(self, tmp_path, monkeypatch):
         from datetime import datetime, timezone
         import types
+        from src.dashboard import generator as generator_module
+
         gen, _ = _make_generator(tmp_path)
+        monkeypatch.setattr(generator_module, "DATA_DIR", tmp_path)
         fresh = datetime.now(timezone.utc).isoformat()
         monkeypatch.setattr(
             "src.dashboard.generator.validate_signal",

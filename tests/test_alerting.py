@@ -326,6 +326,7 @@ class TestCheckStalenessAndAlert:
             "two_stage_regime",
             "regime_transition",
             "fred_macro",
+            "garch_cvar",
         ]
         staleness = {
             "stale_signals": [],
@@ -352,7 +353,7 @@ class TestCheckStalenessAndAlert:
         if details is None:
             details = call_args.kwargs.get("details")
         assert details is not None
-        assert details.get("unavailable_count") == 12
+        assert details.get("unavailable_count") == 13
         assert details.get("unavailable_signals") == unavailable
         assert "unavailable_ownership" in details
         assert details.get("recovery", {}).get("actionable_unavailable_count", 0) >= 1
@@ -374,6 +375,36 @@ class TestCheckStalenessAndAlert:
         assert "unavailable" in message.lower()
         details = mock_send.call_args.kwargs.get("details")
         assert details["unavailable_count"] == 2
+
+    @patch("src.monitor.alerting.send_alert")
+    def test_optional_advisory_unavailable_only_passes_required_freshness(self, mock_send):
+        staleness = {
+            "stale_signals": [],
+            "unavailable_signals": ["regime_transition"],
+            "healthy_count": 22,
+            "total_count": 23,
+        }
+
+        check_staleness_and_alert(staleness)
+
+        mock_send.assert_called_once()
+        args = mock_send.call_args[0]
+        assert args[0] == AlertChannel.SIGNAL_STALENESS
+        assert args[1] == AlertLevel.PASS
+        assert "required signals fresh" in args[2].lower()
+
+    @patch("src.monitor.alerting.send_alert")
+    def test_unknown_unavailable_signal_remains_fail_closed(self, mock_send):
+        staleness = {
+            "stale_signals": [],
+            "unavailable_signals": ["future_unknown_signal"],
+            "healthy_count": 22,
+            "total_count": 23,
+        }
+
+        check_staleness_and_alert(staleness)
+
+        assert mock_send.call_args[0][1] == AlertLevel.WARN
 
 
 class TestCheckDriftAndAlert:

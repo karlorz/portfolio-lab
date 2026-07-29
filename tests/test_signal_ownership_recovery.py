@@ -9,6 +9,8 @@ from pathlib import Path
 from src.monitor.signal_ownership import (
     SIGNAL_OWNERSHIP,
     annotate_unavailable_signals,
+    blocks_all_fresh,
+    optional_advisory_signals,
     recovery_summary,
 )
 from src.monitor.alerting import (
@@ -64,14 +66,14 @@ def test_annotate_marks_ml_off_intentional() -> None:
 
 def test_recovery_summary_excludes_intentional_ml_off() -> None:
     rows = annotate_unavailable_signals(
-        ["behavioral_sentiment", "collar", "kurtosis_regime"],
+        ["behavioral_sentiment", "ensemble_voting", "garch_cvar"],
         ml_enabled=False,
     )
     summary = recovery_summary(rows)
     assert summary["intentional_ml_off_count"] == 1
     assert summary["actionable_unavailable_count"] == 2
-    assert "portfolio-lab-overlay-signals" in summary["jobs_to_rerun"]
-    assert "overlay-signals" in summary["make_targets"]
+    assert "portfolio-lab-dashboard" in summary["jobs_to_rerun"]
+    assert "dashboard" in summary["make_targets"]
 
 
 def test_sustained_unavailability_fires_under_old_kill(tmp_path, monkeypatch) -> None:
@@ -134,17 +136,38 @@ def test_factor_rotation_ownership_points_at_dashboard_not_overlay() -> None:
 
 def test_fred_gaps_intentional_when_unconfigured() -> None:
     rows = annotate_unavailable_signals(
-        ["fred_macro", "two_stage_regime", "collar"],
+        ["fred_macro", "two_stage_regime", "ensemble_voting"],
         ml_enabled=False,
         fred_configured=False,
     )
     by = {r["signal"]: r for r in rows}
     assert by["fred_macro"]["intentional_lab_gap"] is True
     assert by["two_stage_regime"]["intentional_lab_gap"] is True
-    assert by["collar"]["intentional_lab_gap"] is False
+    assert by["ensemble_voting"]["intentional_lab_gap"] is False
     summary = recovery_summary(rows)
     assert summary["actionable_unavailable_count"] == 1
-    assert "collar" in str(summary) or summary["actionable_unavailable_count"] == 1
+    assert "dashboard" in summary["make_targets"]
+
+
+def test_optional_advisory_criticality_is_canonical_and_unknown_fails_closed() -> None:
+    assert "regime_transition" in optional_advisory_signals()
+    assert blocks_all_fresh("regime_transition") is False
+    assert blocks_all_fresh("ensemble_voting") is True
+    assert blocks_all_fresh("future_unknown_signal") is True
+
+    rows = annotate_unavailable_signals(
+        ["regime_transition", "ensemble_voting", "future_unknown_signal"],
+        fred_configured=True,
+    )
+    by = {row["signal"]: row for row in rows}
+    assert by["regime_transition"]["criticality"] == "optional_advisory"
+    assert by["regime_transition"]["blocks_all_fresh"] is False
+    assert by["ensemble_voting"]["blocks_all_fresh"] is True
+    assert by["future_unknown_signal"]["blocks_all_fresh"] is True
+
+    summary = recovery_summary(rows)
+    assert summary["optional_advisory_unavailable_count"] == 1
+    assert summary["actionable_unavailable_count"] == 2
 
 
 def test_sustained_unavailability_skips_warning_level_kill(tmp_path, monkeypatch) -> None:

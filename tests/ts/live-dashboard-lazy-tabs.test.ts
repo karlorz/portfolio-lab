@@ -135,10 +135,11 @@ describe('LiveDashboard lazy tab panel contract', () => {
 
   it('wires Labs as a lazy tab that delegates endpoint loading to the Labs fetch helper', () => {
     const labsPanelSource = readFileSync('src/components/LabsPanel.tsx', 'utf8');
+    const navigationSource = readFileSync('src/components/control-plane/navigation.ts', 'utf8');
 
     expect(source).toContain("type IncidentTab");
     expect(source).toContain('type TabType = IncidentTab;');
-    expect(source).toContain("{ id: 'labs', label: 'Labs'");
+    expect(navigationSource).toContain("{ id: 'labs', label: 'Labs'");
     expect(source).toContain("import('./LabsPanel')");
     expect(source).toMatch(/activeTab === 'labs'[\s\S]*<LabsPanel \/>/);
     expect(labsPanelSource).toContain("from '../data/labs'");

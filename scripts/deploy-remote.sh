@@ -35,6 +35,7 @@ KEEP_RELEASES="5"
 RELEASE_ID=""
 SKIP_INSTALL="0"
 SKIP_BUILD="0"
+ALLOW_DIRTY="0"
 RUN_GENERATOR="0"
 BOOTSTRAP_PREVIEW_DATA="1"
 DRY_RUN="0"
@@ -74,6 +75,7 @@ Health/options:
   --health-url <url>            Remote health URL; defaults per mode
   --skip-install                Skip dependency install
   --skip-build                  Skip frontend build step
+  --allow-dirty                 Allow a build from an uncommitted working tree
   --run-generator               Run dashboard generator (best-effort, ML disabled)
   --no-bootstrap-preview-data   Disable preview /dist/data + /public/data JSON bootstrap
   --exclude-file <path>         Additional exclude patterns file
@@ -141,6 +143,7 @@ while [ $# -gt 0 ]; do
     --exclude-file) EXCLUDE_FILE="${2:-}"; shift 2 ;;
     --skip-install) SKIP_INSTALL="1"; shift ;;
     --skip-build) SKIP_BUILD="1"; shift ;;
+    --allow-dirty) ALLOW_DIRTY="1"; shift ;;
     --run-generator) RUN_GENERATOR="1"; shift ;;
     --no-bootstrap-preview-data) BOOTSTRAP_PREVIEW_DATA="0"; shift ;;
     --dry-run) DRY_RUN="1"; shift ;;
@@ -160,6 +163,13 @@ is_integer "$PREVIEW_PORT" || die "--preview-port must be an integer"
 is_integer "$KEEP_RELEASES" || die "--keep-releases must be an integer"
 [ -n "$PREVIEW_HOST" ] || die "--preview-host must not be empty"
 [ -n "$PREVIEW_MEMORY_MAX" ] || die "--preview-memory-max must not be empty"
+
+if [ "$SKIP_BUILD" = "0" ] && [ "$ALLOW_DIRTY" != "1" ]; then
+  DIRTY_COUNT="$(git -C "$PROJECT_ROOT" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+  if [ "$DIRTY_COUNT" -gt 0 ]; then
+    die "Working tree has ${DIRTY_COUNT} uncommitted paths. Commit them or pass --allow-dirty."
+  fi
+fi
 
 if [ -z "$REMOTE_BASE" ]; then
   if [ "$MODE" = "preview" ]; then

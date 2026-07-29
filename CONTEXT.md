@@ -40,6 +40,18 @@ Domain glossary for dev-loop agents. Use these precise terms instead of paraphra
   directional vote. Sources: TSMOM, collar, bond duration, crypto, calendar,
   VIXY hedge, factor rotation, behavioral sentiment, stacking ensemble.
 - **SignalSource** — Enum of signal origins with associated ensemble weights.
+- **Inactive-source classes** (diagnostic vocabulary from B5):
+  `active_contributing` | `active_soft_floor` | `zero_weight_policy` |
+  `expected_sleep` | `generator_bug` | `missing_data` | `unknown`.
+  4/9 contributing can be honest (ADR soft-delete + multi-horizon sleep), not
+  an automatic ops failure.
+- **no_force_wake / multi_horizon_hysteresis** — Sleep/reentry uses multi-horizon
+  IC gates; do not force-wake slept arms or lower IC thresholds to "fix" counts.
+  C1e owns calendar remeasure ≥2026-08-08.
+- **sign_bias_long_with_negative_ic** — Predictions mostly long while IC is
+  negative and flipped IC is positive. `auto_invert_policy: disabled` — fix
+  classifier polarity (not runtime invert). Follow-on:
+  `work/2026-07-27-ensemble-sign-bias-polarity-fix/` (low, after C1e).
 - **Combined Signal Orchestrator** — Multi-source aggregation with historical
   validation. Key finding: TSMOM alone (0.96) beats combined (0.93).
 - **Signal stacking** — ML meta-learner (XGBoost) trained on 84 features from

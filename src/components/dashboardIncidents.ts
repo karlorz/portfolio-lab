@@ -58,31 +58,39 @@ const SEVERITY_RANK: Record<IncidentSeverity, number> = {
 const RISK_WARNING_CVAR_RATIO = 1.5;
 const RISK_SEVERE_CVAR_RATIO = 1.8;
 
-function slugify(value: string): string {
-  const slug = value
-    .trim()
+function safeText(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+}
+
+function slugify(value: unknown): string {
+  const slug = safeText(value, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
   return slug || 'incident';
 }
 
-function formatAlertSource(type: string): string {
-  if (type === 'graduation_candidate') return 'Graduation checklist';
-  if (type === 'kill_switch') return 'Kill switch';
-  if (type === 'portfolio_drift') return 'Portfolio drift';
-  if (type === 'ic_decay') return 'IC decay monitor';
-  if (type === 'staleness') return 'Signal staleness';
-
-  return type
+function humanizeAlertType(type: unknown): string {
+  return safeText(type, 'dashboard_alert')
     .split(/[_-]+/)
     .filter(Boolean)
     .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-    .join(' ') || 'Dashboard alert';
+    .join(' ');
+}
+
+function formatAlertSource(type: unknown): string {
+  const normalizedType = safeText(type, 'dashboard_alert');
+  if (normalizedType === 'graduation_candidate') return 'Graduation checklist';
+  if (normalizedType === 'kill_switch') return 'Kill switch';
+  if (normalizedType === 'portfolio_drift') return 'Portfolio drift';
+  if (normalizedType === 'ic_decay') return 'IC decay monitor';
+  if (normalizedType === 'staleness') return 'Signal staleness';
+
+  return humanizeAlertType(normalizedType);
 }
 
 function extractAlertCurrentValue(alert: Alert): string | undefined {
-  if (alert.type === 'graduation_candidate') {
+  if (alert.type === 'graduation_candidate' && typeof alert.message === 'string') {
     const sharpe = alert.message.match(/Sharpe:\s*([0-9.]+)/i);
     if (sharpe?.[1]) return `Sharpe ${sharpe[1]}`;
   }
@@ -126,15 +134,24 @@ function alertSeverity(alert: Alert): IncidentSeverity | null {
 function mapAlertToIncident(alert: Alert): DashboardIncident | null {
   const severity = alertSeverity(alert);
   if (!severity) return null;
+  const type = safeText(alert.type, 'dashboard_alert');
+  const title = typeof alert.title === 'string' && alert.title.trim()
+    ? alert.title.trim()
+    : humanizeAlertType(type);
+  const message = safeText(alert.message, 'Alert details are unavailable.');
+  const stableId = safeText(
+    alert.stable_id,
+    safeText(alert.incident_id, `${type}:${slugify(title)}`),
+  );
 
   return {
-    id: `alert:${alert.type}:${slugify(alert.title)}`,
+    id: `alert:${stableId}`,
     tab: 'overview',
     severity,
-    title: alert.title,
-    source: formatAlertSource(alert.type),
+    title,
+    source: formatAlertSource(type),
     currentValue: extractAlertCurrentValue(alert),
-    message: alert.message,
+    message,
     nextAction: alertNextAction(alert, severity),
     timestamp: alert.timestamp,
   };
@@ -147,10 +164,7 @@ function incidentSeverity(severity: string): IncidentSeverity {
 }
 
 function incidentTitle(channel: string): string {
-  return `${formatAlertSource(channel)
-    .split(' ')
-    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-    .join(' ')} Incident`;
+  return `${formatAlertSource(channel)} Incident`;
 }
 
 function persistedIncidentNextAction(incident: IncidentLifecycleIncident): string {

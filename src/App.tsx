@@ -7,6 +7,14 @@ import { PortfolioSelector } from './components/PortfolioSelector';
 import { MetricsCards } from './components/MetricsCards';
 import { EquityCurve } from './components/EquityCurve';
 import { LiveDashboard } from './components/LiveDashboard';
+import { AppShell } from './components/control-plane/AppShell';
+import { DesignGuidePage } from './components/control-plane/DesignGuidePage';
+import { AppErrorBoundary } from './components/control-plane/AppErrorBoundary';
+import { workspaceDestination } from './components/control-plane/navigation';
+import { useWorkspaceLocation } from './hooks/useWorkspaceLocation';
+import './styles/tokens.css';
+import './styles/base.css';
+import './styles/control-plane.css';
 import './App.css';
 
 const RiskReturnChart = lazy(() => import('./components/RiskReturnChart').then(m => ({ default: m.RiskReturnChart })));
@@ -27,13 +35,21 @@ interface ResultItem {
 const COLORS: string[] = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#a855f7'];
 
 function App() {
+  const { workspace, navigate } = useWorkspaceLocation();
   const [selected, setSelected] = useState<string[]>(['SPY (S&P 500)', 'SPY/GLD/TLT 46/38/16 ★★', 'SPY/GLD 55/45']);
   const [rawPrices, setRawPrices] = useState<CompactPriceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    document.title = window.location.pathname === '/design-guide'
+      ? 'Design Guide · Portfolio Lab'
+      : `${workspaceDestination(workspace).label} · Portfolio Lab`;
+  }, [workspace]);
+
   // Load real price data
   useEffect(() => {
+    if (workspace !== 'backtests' || rawPrices || error) return;
     fetchCompactPriceData()
       .then(prices => {
         setRawPrices(prices);
@@ -43,7 +59,7 @@ function App() {
         setError(`Failed to load data: ${err.message}`);
         setLoading(false);
       });
-  }, []);
+  }, [workspace, rawPrices, error]);
 
   const selectedPortfolios = useMemo(
     () => PORTFOLIOS.filter(portfolio => selected.includes(portfolio.name)),
@@ -107,98 +123,96 @@ function App() {
       .find(r => r.metrics.cagr >= spyResult.metrics.cagr * 0.9 && r.metrics.volatility <= spyVol * 0.7);
   }, [results, spyResult]);
 
-  if (loading) {
-    return (
-      <div className="app">
-        <header>
-          <h1>Portfolio Lab</h1>
-          <p>Loading historical data...</p>
-        </header>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="app">
-        <header>
-          <h1>Portfolio Lab</h1>
-          <p style={{ color: '#ef4444' }}>{error}</p>
-        </header>
-      </div>
-    );
+  if (window.location.pathname === '/design-guide') {
+    return <DesignGuidePage />;
   }
 
   return (
-    <div className="app">
-      <header>
-        <h1>Portfolio Lab</h1>
-        <p>All-Season Portfolio Strategy Backtest (2005-2026)</p>
-      </header>
+    <AppErrorBoundary scope="shell">
+      <AppShell workspace={workspace} onNavigate={navigate}>
+        <AppErrorBoundary scope="workspace" resetKey={workspace}>
+          {workspace === 'backtests' ? (
+            <div className="backtests-workspace">
+              <p className="workspace-intro">
+                Historical portfolio comparison is a research workspace. It does not change live order authority.
+              </p>
+              {loading ? (
+                <div className="control-loading" role="status" aria-live="polite">
+                  Loading historical data…
+                </div>
+              ) : error ? (
+                <div className="control-error" role="alert">
+                  <strong>Historical data unavailable</strong>
+                  <p>{error}. Refresh the page or run the data refresh before reopening Backtests.</p>
+                </div>
+              ) : (
+                <>
+                  <PortfolioSelector
+                    portfolios={PORTFOLIOS}
+                    selected={selected}
+                    onToggle={handleToggle}
+                    colors={COLORS}
+                  />
 
-      <PortfolioSelector
-        portfolios={PORTFOLIOS}
-        selected={selected}
-        onToggle={handleToggle}
-        colors={COLORS}
-      />
+                  {filteredResults.length > 0 && (
+                    <>
+                      <MetricsCards results={filteredResults} />
+                      <div className="charts">
+                        <EquityCurve results={filteredResults} />
+                        <Suspense fallback={<div className="chart-loading" role="status">Loading chart…</div>}>
+                          <div className="chart-row">
+                            <RiskReturnChart results={filteredResults} />
+                            <DrawdownChart results={filteredResults} />
+                          </div>
+                          <ComparisonTable results={filteredResults} />
+                          <CrisisAnalysis results={filteredResults} />
+                          <RollingWindow
+                            portfolios={selectedPortfolios}
+                            priceData={priceData!}
+                            colors={COLORS}
+                          />
+                          <CorrelationMatrix priceData={priceData!} />
+                          <FIRECalculator results={filteredResults} />
+                        </Suspense>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
 
-      <LiveDashboard refreshInterval={60} />
-
-      {filteredResults.length > 0 && (
-        <>
-          <MetricsCards results={filteredResults} />
-
-          <div className="charts">
-            <EquityCurve results={filteredResults} />
-
-            <Suspense fallback={<div className="chart-loading">Loading chart...</div>}>
-              <div className="chart-row">
-                <RiskReturnChart results={filteredResults} />
-                <DrawdownChart results={filteredResults} />
-              </div>
-
-              <ComparisonTable results={filteredResults} />
-
-              <CrisisAnalysis results={filteredResults} />
-
-              <RollingWindow
-                portfolios={selectedPortfolios}
-                priceData={priceData!}
-                colors={COLORS}
-              />
-
-              <CorrelationMatrix priceData={priceData!} />
-
-              <FIRECalculator results={filteredResults} />
-            </Suspense>
-          </div>
-        </>
-      )}
-
-      <footer>
-        {bestPortfolio && (
-          <p>
-            <strong>Highest Sharpe Ratio:</strong>{' '}
-            <span style={{ color: bestPortfolio.color }}>{bestPortfolio.name}</span>
-            {' '}({bestPortfolio.metrics.sharpeRatio.toFixed(2)})
-          </p>
-        )}
-        {efficientAlternative && spyResult && (
-          <p>
-            <strong>≥90% SPY Return with ≤70% Volatility:</strong>{' '}
-            <span style={{ color: efficientAlternative.color }}>{efficientAlternative.name}</span>
-            {' '}(CAGR: {(efficientAlternative.metrics.cagr * 100).toFixed(1)}%,
-            {' '}Vol: {(efficientAlternative.metrics.volatility * 100).toFixed(1)}%)
-          </p>
-        )}
-        <p style={{ marginTop: 15, fontSize: '0.75rem' }}>
-          Data: Yahoo Finance historical daily prices 2005-2026.
-          <br />
-          <code>bun run fetch-data</code> to refresh data from Yahoo Finance
-        </p>
-      </footer>
-    </div>
+              <footer className="backtests-footer">
+                {bestPortfolio && (
+                  <p>
+                    <strong>Highest Sharpe ratio:</strong>{' '}
+                    <span style={{ color: bestPortfolio.color }}>{bestPortfolio.name}</span>
+                    {' '}({bestPortfolio.metrics.sharpeRatio.toFixed(2)})
+                  </p>
+                )}
+                {efficientAlternative && spyResult && (
+                  <p>
+                    <strong>≥90% SPY return with ≤70% volatility:</strong>{' '}
+                    <span style={{ color: efficientAlternative.color }}>{efficientAlternative.name}</span>
+                    {' '}(CAGR: {(efficientAlternative.metrics.cagr * 100).toFixed(1)}%,
+                    {' '}Vol: {(efficientAlternative.metrics.volatility * 100).toFixed(1)}%)
+                  </p>
+                )}
+                <p>
+                  Data: Yahoo Finance historical daily prices 2005–2026.
+                  <br />
+                  Run <code>bun run fetch-data</code> to refresh.
+                </p>
+              </footer>
+            </div>
+          ) : (
+            <LiveDashboard
+              refreshInterval={60}
+              activeView={workspace}
+              onViewChange={navigate}
+            />
+          )}
+        </AppErrorBoundary>
+      </AppShell>
+    </AppErrorBoundary>
   );
 }
 

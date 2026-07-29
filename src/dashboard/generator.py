@@ -4632,18 +4632,17 @@ class DashboardGenerator:
 
         # Regime transition forecast (Oliveira et al. 2025 step 2)
         try:
+            from src.regime.regime_history import load_daily_regime_history
             from src.regime.regime_transition_forecaster import RegimeTransitionForecaster
+
             forecaster = RegimeTransitionForecaster()
-            # Extract regime labels from two_stage_regime signal or VIX classification
-            two_stage_block = output.get("two_stage_regime") or {}
-            current = two_stage_block.get("regime") if isinstance(two_stage_block, dict) else None
-            if not current or current in ("UNKNOWN", "unavailable"):
-                current = current_regime
-            # Fit on recent regime history from regime_log
-            cursor.execute("SELECT regime FROM regime_log ORDER BY detected_at DESC LIMIT 100")
-            history = [row[0] for row in cursor.fetchall()]
+            daily_history = load_daily_regime_history(DATA_DIR / "regime_log.json")
+            history = daily_history.labels
+            history_metadata = daily_history.metadata
+            # Forecast on one basis end-to-end: the daily VIX/controller series.
+            current = history[-1] if history else str(current_regime).upper()
             if len(history) >= 2:
-                forecaster.fit(list(reversed(history)))
+                forecaster.fit(history)
                 forecast = forecaster.forecast(current, horizon_days=5)
                 output["regime_transition"] = {
                     "current_regime": current,
@@ -4652,7 +4651,11 @@ class DashboardGenerator:
                     "most_likely": forecast.most_likely,
                     "persistence_params": {k: round(v, 1) for k, v in forecast.persistence_params.items()},
                     "status": "ok",
-                    "timestamp": datetime.now().isoformat(),
+                    "runtime_status": "ok",
+                    "role": "advisory_shadow",
+                    "routed": False,
+                    **history_metadata,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             else:
                 output["regime_transition"] = {
@@ -4661,16 +4664,20 @@ class DashboardGenerator:
                     "status": "unavailable",
                     "runtime_status": "unavailable",
                     "reason": "insufficient_regime_history",
-                    "history_len": len(history),
-                    "timestamp": datetime.now().isoformat(),
+                    "role": "advisory_shadow",
+                    "routed": False,
+                    **history_metadata,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
         except MONITOR_EXCEPTIONS as e:
             _log_signal_error("regime_transition", e)
             output["regime_transition"] = {
                 "status": "unavailable",
                 "runtime_status": "unavailable",
+                "role": "advisory_shadow",
+                "routed": False,
                 "error": str(e),
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
         # Signal staleness must be computed after optional regime sections are appended.
@@ -6970,26 +6977,9 @@ class DashboardGenerator:
     # Signal staleness detection (production readiness)
     SIGNAL_STALENESS_TTL_HOURS = int(os.environ.get("SIGNAL_STALENESS_TTL_HOURS", "4"))
     STALENESS_DECAY_TAU_HOURS = float(os.environ.get("STALENESS_DECAY_TAU_HOURS", "2.0"))
-    OPTIONAL_SIGNAL_STALENESS_KEYS = {
-        "behavioral_sentiment",
-        "calendar_seasonality",
-        "crypto_allocation",
-        "factor_rotation",
-        "stacking_ensemble",
-        "convexity_harvest",
-        "llm_sentiment",
-        "sector_rotation",
-        "kurtosis_regime",
-        "volatility_parity",
-        "collar",
-        "bond_momentum",
-        "risk_decomposition",
-        "two_stage_regime",
-        "bocd_regime",
-        "regime_transition",
-        "hedge_selector",
-        "fred_macro",
-    }
+    from src.monitor.signal_ownership import optional_advisory_signals
+
+    OPTIONAL_SIGNAL_STALENESS_KEYS = optional_advisory_signals()
     OPTIONAL_DAILY_SIGNAL_STALENESS_KEYS = {
         "convexity_harvest",
         "volatility_parity",

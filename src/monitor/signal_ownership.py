@@ -4,6 +4,32 @@ from __future__ import annotations
 
 from typing import Any
 
+# A signal in this set remains observable but cannot, by itself, block required
+# freshness or create/preserve kill authority. Unknown signals are deliberately
+# absent and therefore fail closed as required/actionable.
+OPTIONAL_ADVISORY_SIGNALS = frozenset(
+    {
+        "behavioral_sentiment",
+        "calendar_seasonality",
+        "crypto_allocation",
+        "factor_rotation",
+        "stacking_ensemble",
+        "convexity_harvest",
+        "llm_sentiment",
+        "sector_rotation",
+        "kurtosis_regime",
+        "volatility_parity",
+        "collar",
+        "bond_momentum",
+        "risk_decomposition",
+        "two_stage_regime",
+        "bocd_regime",
+        "regime_transition",
+        "hedge_selector",
+        "fred_macro",
+    }
+)
+
 # signal_key -> {job, make_target, module, intentional_when_ml_off}
 SIGNAL_OWNERSHIP: dict[str, dict[str, Any]] = {
     "ensemble_voting": {
@@ -135,8 +161,7 @@ SIGNAL_OWNERSHIP: dict[str, dict[str, Any]] = {
         "job": "portfolio-lab-dashboard",
         "make_target": "dashboard",
         "module": "src.dashboard.generator",
-        "intentional_when_fred_unconfigured": True,
-        "recovery": "Set FRED_API_KEY then make data && make dashboard",
+        "recovery": "make dashboard  # inspect data/regime_log.json daily history",
     },
     "hedge_selector": {
         "job": "portfolio-lab-dashboard",
@@ -153,6 +178,24 @@ SIGNAL_OWNERSHIP: dict[str, dict[str, Any]] = {
         "recovery": "Set FRED_API_KEY then make data && make dashboard",
     },
 }
+
+
+def signal_criticality(signal: str) -> str:
+    """Return canonical criticality; unknown signals fail closed."""
+    key = str(signal)
+    if key in OPTIONAL_ADVISORY_SIGNALS:
+        return "optional_advisory"
+    return "required"
+
+
+def blocks_all_fresh(signal: str) -> bool:
+    """Whether unavailable/stale state must block required freshness."""
+    return signal_criticality(signal) != "optional_advisory"
+
+
+def optional_advisory_signals() -> frozenset[str]:
+    """Return the canonical immutable optional-advisory signal set."""
+    return OPTIONAL_ADVISORY_SIGNALS
 
 
 def annotate_unavailable_signals(
@@ -175,6 +218,7 @@ def annotate_unavailable_signals(
             bool(owner.get("intentional_when_fred_unconfigured")) and not fred_configured
         )
         intentional = intentional_ml or intentional_fred
+        criticality = signal_criticality(key)
         rows.append(
             {
                 "signal": key,
@@ -186,6 +230,8 @@ def annotate_unavailable_signals(
                 "intentional_when_ml_off": intentional_ml,
                 "intentional_when_fred_unconfigured": intentional_fred,
                 "intentional_lab_gap": intentional,
+                "criticality": criticality,
+                "blocks_all_fresh": blocks_all_fresh(key),
             }
         )
     return rows
@@ -196,15 +242,19 @@ def recovery_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     actionable = [
         r
         for r in rows
-        if not (r.get("intentional_lab_gap") or r.get("intentional_when_ml_off"))
+        if r.get("blocks_all_fresh", True)
+        and not (r.get("intentional_lab_gap") or r.get("intentional_when_ml_off"))
     ]
     jobs = sorted({str(r.get("job")) for r in actionable if r.get("job") != "unknown"})
     targets = sorted(
         {str(r.get("make_target")) for r in actionable if r.get("make_target") != "unknown"}
     )
-    intentional_count = len(rows) - len(actionable)
+    intentional_count = sum(1 for r in rows if r.get("intentional_lab_gap"))
     return {
         "actionable_unavailable_count": len(actionable),
+        "optional_advisory_unavailable_count": sum(
+            1 for r in rows if not r.get("blocks_all_fresh", True)
+        ),
         "intentional_ml_off_count": sum(
             1 for r in rows if r.get("intentional_when_ml_off")
         ),

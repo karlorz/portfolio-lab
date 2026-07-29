@@ -30,6 +30,11 @@ logger = logging.getLogger(__name__)
 ALERT_WEBHOOK_URL = os.environ.get("ALERT_WEBHOOK_URL", "").strip()
 ALERT_MIN_INTERVAL_SECONDS = int(os.environ.get("ALERT_MIN_INTERVAL_SECONDS", "300"))
 
+# Producer-aware stale-only exception. This is deliberately separate from
+# optional-unavailable criticality: the generated section remains required,
+# but projection lag alone cannot sole-page kill.
+_ADVISORY_STALE_ONLY_SIGNALS = frozenset({"alternative_data"})
+
 
 class AlertLevel(str, Enum):
     """Alert severity levels following PASS→WARN→HALT state machine."""
@@ -184,11 +189,6 @@ def _post_webhook(
         return False
 
 
-# Batch IM DP: signals that are advisory_shadow / non-routed must not sole-drive
-# WARN→kill escalation. alternative_data is the primary thrash source in lab.
-_DEFAULT_ADVISORY_STALE_SIGNALS = frozenset({"alternative_data"})
-
-
 def _is_advisory_stale_signal(name: str, signal_roles: Optional[Dict] = None) -> bool:
     """True when a stale signal is advisory-only and must not sole-page kill."""
     key = str(name)
@@ -203,7 +203,9 @@ def _is_advisory_stale_signal(name: str, signal_roles: Optional[Dict] = None) ->
             return True
         if role in {"execution_routed", "required", "authoritative"}:
             return False
-    return key in _DEFAULT_ADVISORY_STALE_SIGNALS
+    from src.monitor.signal_ownership import blocks_all_fresh
+
+    return key in _ADVISORY_STALE_ONLY_SIGNALS or not blocks_all_fresh(key)
 
 
 def classify_signal_staleness(
@@ -302,27 +304,47 @@ def classify_signal_staleness(
         # all-fresh PASS / sticky warning kill. Prefer ownership annotation when
         # present; otherwise treat full unavailable list as actionable.
         ownership = staleness_data.get("unavailable_ownership")
-        actionable_unavailable = unavailable_signals
+        from src.monitor.signal_ownership import blocks_all_fresh
+
+        actionable_unavailable = [
+            signal for signal in unavailable_signals if blocks_all_fresh(signal)
+        ]
         intentional_count = 0
+        optional_unavailable: list[str] = [
+            signal
+            for signal in unavailable_signals
+            if not blocks_all_fresh(signal)
+        ]
         if isinstance(ownership, list) and ownership:
             actionable_unavailable = [
                 str(r.get("signal"))
                 for r in ownership
                 if isinstance(r, dict)
+                and r.get("blocks_all_fresh", True)
                 and not (
                     r.get("intentional_lab_gap")
                     or r.get("intentional_when_ml_off")
                     or r.get("intentional_when_fred_unconfigured")
                 )
             ]
-            intentional_count = max(0, unavailable_count - len(actionable_unavailable))
+            intentional_count = sum(
+                1
+                for row in ownership
+                if isinstance(row, dict) and row.get("intentional_lab_gap")
+            )
             details["actionable_unavailable"] = actionable_unavailable
             details["intentional_lab_gap_count"] = intentional_count
+            optional_unavailable = [
+                str(r.get("signal"))
+                for r in ownership
+                if isinstance(r, dict) and not r.get("blocks_all_fresh", True)
+            ]
+        details["optional_advisory_unavailable"] = optional_unavailable
 
         if not actionable_unavailable:
             details["policy"] = (
                 "advisory_or_intentional_only_pass"
-                if advisory_stale
+                if advisory_stale or optional_unavailable
                 else "intentional_lab_gaps_only_pass"
             )
             return (
@@ -331,12 +353,17 @@ def classify_signal_staleness(
                     f"All required signals fresh "
                     f"({intentional_count} intentional lab gaps skipped"
                     + (
+                        f"; {len(optional_unavailable)} optional advisory unavailable"
+                        if optional_unavailable
+                        else ""
+                    )
+                    + (
                         f"; {len(advisory_stale)} advisory-only stale"
                         if advisory_stale
                         else ""
                     )
                     + ")"
-                    if intentional_count or advisory_stale
+                    if intentional_count or advisory_stale or optional_unavailable
                     else f"All {total_count} signals fresh"
                 ),
                 details,

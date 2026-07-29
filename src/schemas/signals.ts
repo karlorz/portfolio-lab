@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { SignalsData } from '../types/live';
+import type { Alert, AlertsData, SignalsData } from '../types/live';
 
 // ---------------------------------------------------------------------------
 // Regime
@@ -1292,18 +1292,128 @@ export const DashboardDataSchema = z.object({
 // ---------------------------------------------------------------------------
 // AlertsDataSchema — /data/alerts.json
 // ---------------------------------------------------------------------------
+const AlertLevelSchema = z.enum(['success', 'warning', 'error', 'info']);
+
+/**
+ * Tolerant producer-facing alert contract. Health-only jobs historically omit
+ * presentation fields, so those fields are normalized at the fetch boundary.
+ */
+export const AlertWireSchema = z.object({
+  level: AlertLevelSchema,
+  type: z.string(),
+  title: z.optional(z.string()),
+  message: z.string(),
+  timestamp: z.optional(z.string()),
+  requires_action: z.optional(z.boolean()),
+  reason: z.optional(z.string()),
+  incident_id: z.optional(z.string()),
+  enabled: z.optional(z.boolean()),
+  channel: z.optional(z.string()),
+  kill_switch_level: z.optional(z.string().nullable()),
+}).passthrough();
+
+export const AlertsWireDataSchema = z.object({
+  alerts: z.array(z.unknown()),
+  count: z.optional(z.number()),
+  generated_at: z.optional(z.string()),
+}).passthrough();
+
+const NormalizedAlertSchema = AlertWireSchema.extend({
+  type: z.string().trim().min(1),
+  title: z.string().trim().min(1),
+  message: z.string().trim().min(1),
+  timestamp: z.optional(z.string().trim().min(1)),
+  requires_action: z.boolean(),
+  // Legacy in-memory fixtures predate stable_id; validateAlertsData always
+  // supplies it for fetched data.
+  stable_id: z.optional(z.string().trim().min(1)),
+});
+
 export const AlertsDataSchema = z.object({
-  alerts: z.array(z.object({
-    level: z.enum(['success', 'warning', 'error', 'info']),
-    type: z.string(),
-    title: z.string(),
-    message: z.string(),
-    timestamp: z.optional(z.string()),
-    requires_action: z.boolean(),
-  })),
+  alerts: z.array(NormalizedAlertSchema),
   count: z.number(),
   generated_at: z.string(),
 }).passthrough();
+
+function alertTypeLabel(type: string): string {
+  return type
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ') || 'Dashboard Alert';
+}
+
+function alertIdentityPart(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'alert';
+}
+
+/**
+ * Validate and normalize alerts without using validateFetchData's legacy raw
+ * object fallback. Invalid rows are dropped together and reported once.
+ */
+export function validateAlertsData(raw: unknown): AlertsData | null {
+  const envelope = AlertsWireDataSchema.safeParse(raw);
+  if (!envelope.success) {
+    if (import.meta.env.DEV) {
+      console.warn('[alerts] Unusable alerts envelope:', envelope.error.issues);
+    }
+    return null;
+  }
+
+  const generatedAt = envelope.data.generated_at?.trim() || undefined;
+  const alerts: Alert[] = [];
+  let malformedRows = 0;
+
+  for (const candidate of envelope.data.alerts) {
+    const parsed = AlertWireSchema.safeParse(candidate);
+    if (!parsed.success) {
+      malformedRows += 1;
+      continue;
+    }
+
+    const type = parsed.data.type.trim();
+    const message = parsed.data.message.trim();
+    if (!type || !message) {
+      malformedRows += 1;
+      continue;
+    }
+
+    const title = parsed.data.title?.trim() || alertTypeLabel(type);
+    const timestamp = parsed.data.timestamp?.trim() || generatedAt;
+    const incidentId = parsed.data.incident_id?.trim() || undefined;
+    const stableId = incidentId || `${type}:${alertIdentityPart(message)}`;
+    const requiresAction = parsed.data.requires_action
+      ?? (type === 'kill_switch' || parsed.data.level === 'error' || parsed.data.level === 'warning');
+
+    alerts.push({
+      ...parsed.data,
+      type,
+      title,
+      message,
+      timestamp,
+      requires_action: requiresAction,
+      stable_id: stableId,
+      incident_id: incidentId,
+      reason: parsed.data.reason?.trim() || undefined,
+      channel: parsed.data.channel?.trim() || undefined,
+      kill_switch_level: parsed.data.kill_switch_level?.trim() || undefined,
+    });
+  }
+
+  if (malformedRows > 0) {
+    console.warn(`[alerts] Omitted ${malformedRows} malformed alert rows`);
+  }
+
+  return {
+    alerts,
+    count: alerts.length,
+    generated_at: generatedAt ?? '',
+  };
+}
 
 // ---------------------------------------------------------------------------
 // StatsDataSchema — /data/stats.json

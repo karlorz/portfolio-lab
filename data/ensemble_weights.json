@@ -56,8 +56,8 @@
   },
   "_meta": {
     "schema": "ensemble-weights/v1",
-    "last_freshness_stamp": "2026-07-22T06:54:45.748747",
-    "stamp_reason": "batch_cs_ops",
+    "last_freshness_stamp": "2026-07-29T13:47:11.337030",
+    "stamp_reason": "adaptive_update",
     "regime_count": 5,
     "content_identity": "unchanged",
     "note": "Freshness stamp only \u2014 regime source weights not recomputed. Live target_allocations remain champion baseline unless separately promoted."

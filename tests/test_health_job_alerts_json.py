@@ -33,3 +33,53 @@ def test_publish_health_alerts_json_writes_public_and_private(tmp_path, monkeypa
     assert payload.get("source") == "health_check_job"
     assert "alerts" in payload
     assert (data / "alerts.json").exists()
+
+
+def test_publish_health_alerts_json_reuses_canonical_kill_alert(
+    tmp_path, monkeypatch
+):
+    from src.dashboard.kill_authority import build_kill_switch_alert
+    from src.monitor.health_check import publish_health_alerts_json
+
+    public = tmp_path / "public"
+    data = tmp_path / "data"
+    public.mkdir()
+    data.mkdir()
+    kill_payload = {
+        "enabled": True,
+        "level": "halt",
+        "mode": "paper",
+        "reason": "max_drawdown_-25.0%",
+        "message": "Paper trading halted: max drawdown breached",
+        "incident_id": "INC-20260728-001",
+        "channel": "risk",
+        "source": "risk_monitor",
+        "timestamp": "2026-07-28T00:00:00+00:00",
+    }
+    (data / "kill_switch.json").write_text(
+        json.dumps(kill_payload),
+        encoding="utf-8",
+    )
+    report = {
+        "status": "critical",
+        "generated_at": "2026-07-28T00:01:00+00:00",
+        "timestamp": "2026-07-28T00:01:00+00:00",
+        "checks": {},
+    }
+    monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", public)
+    monkeypatch.setattr("src.monitor.health_check.DATA_DIR", data)
+    monkeypatch.setattr(
+        "src.monitor.health_check.HEALTH_PATH", data / "health.json"
+    )
+
+    out = publish_health_alerts_json(report)
+
+    assert out is not None
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    kill_alerts = [
+        alert
+        for alert in payload["alerts"]
+        if alert.get("type") == "kill_switch"
+    ]
+    assert kill_alerts == [build_kill_switch_alert(kill_payload)]
+    assert json.loads((data / "alerts.json").read_text(encoding="utf-8")) == payload

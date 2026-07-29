@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { existsSync, readFileSync } from 'fs';
 
 const liveDashboardSource = readFileSync('src/components/LiveDashboard.tsx', 'utf8');
+const navigationSource = readFileSync('src/components/control-plane/navigation.ts', 'utf8');
 const taskerSchemaPath = 'src/schemas/tasker.ts';
 const tasksPanelPath = 'src/components/TasksPanel.tsx';
 
@@ -9,7 +10,7 @@ describe('Tasker dashboard console contract', () => {
   it('adds Tasks as a lazy top-level LiveDashboard tab', () => {
     expect(liveDashboardSource).toContain("const TasksPanel = lazy(() => import('./TasksPanel')");
     expect(liveDashboardSource).toContain("'tasks'");
-    expect(liveDashboardSource).toContain("{ id: 'tasks', label: 'Tasks'");
+    expect(navigationSource).toContain("{ id: 'tasks', label: 'Tasks'");
     expect(liveDashboardSource).toMatch(/activeTab === 'tasks'[\s\S]*<TasksPanel \/>/);
     expect(liveDashboardSource).toMatch(/<PanelErrorBoundary name="Tasks">\s*<Suspense fallback=/);
   });

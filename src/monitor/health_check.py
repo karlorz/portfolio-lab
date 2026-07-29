@@ -1325,23 +1325,17 @@ def publish_health_alerts_json(report: dict[str, Any] | None = None) -> Path | N
     alerts = list(build_health_slo_alerts(health_payload) or [])
     # Include kill row when present on health checks
     try:
-        from src.dashboard.kill_authority import load_kill_switch_payload
+        from src.dashboard.kill_authority import (
+            build_kill_switch_alert,
+            load_kill_switch_payload,
+        )
 
         kill_payload = load_kill_switch_payload(DATA_DIR)
-        if kill_payload and kill_payload.get("enabled"):
-            alerts.insert(
-                0,
-                {
-                    "type": "kill_switch",
-                    "level": kill_payload.get("level") or "error",
-                    "reason": kill_payload.get("reason"),
-                    "incident_id": kill_payload.get("incident_id"),
-                    "enabled": True,
-                    "message": kill_payload.get("message")
-                    or kill_payload.get("reason")
-                    or "kill switch enabled",
-                },
-            )
+        kill_alert = (
+            build_kill_switch_alert(kill_payload) if kill_payload else None
+        )
+        if kill_alert is not None:
+            alerts.insert(0, kill_alert)
     except Exception:  # noqa: BLE001 — kill surface optional
         pass
 

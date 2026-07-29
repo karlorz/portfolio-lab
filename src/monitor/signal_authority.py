@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import tempfile
 from dataclasses import dataclass
+from numbers import Real
 from pathlib import Path
 from typing import Any, Mapping, MutableMapping, Optional, Sequence
 
@@ -246,12 +248,27 @@ class MultiDestWriteResult:
 
 
 def serialize_signals_payload(payload: Mapping[str, Any]) -> str:
-    """Canonical JSON body used for multi-dest equality."""
+    """Canonical, browser-parseable JSON body used for multi-dest equality."""
     try:
         from src.backtest.metrics import _json_serializer as _default
     except Exception:  # noqa: BLE001 — keep fan-out usable offline
         _default = str  # type: ignore[assignment]
-    return json.dumps(dict(payload), indent=2, default=_default) + "\n"
+
+    def strict_json_value(value: Any) -> Any:
+        if isinstance(value, Mapping):
+            return {key: strict_json_value(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [strict_json_value(item) for item in value]
+        if isinstance(value, Real) and not isinstance(value, bool):
+            return value if math.isfinite(float(value)) else None
+        return value
+
+    return json.dumps(
+        strict_json_value(dict(payload)),
+        indent=2,
+        default=_default,
+        allow_nan=False,
+    ) + "\n"
 
 
 def write_signals_multi_dest(

@@ -34,6 +34,7 @@ export interface PriceIssueCounts {
   non_object_records: number;
   split_like_returns: number;
   stale_latest_dates: number;
+  stale_latest_dates_within_tolerance: number;
   total: number;
 }
 
@@ -75,6 +76,19 @@ export interface ReturnAnomalyIssue {
   return_pct: number;
 }
 
+export interface PriceAnomalyWhitelistEntry {
+  symbol: string;
+  date: string;
+  reason: string;
+}
+
+export interface StaleWithinToleranceIssue {
+  symbol: string;
+  latest_lag_days: number;
+  reference_date: string;
+  latest_date: string;
+}
+
 export interface PriceSymbolQualitySummary {
   symbol: string;
   status: PriceDataQualityStatus;
@@ -103,10 +117,13 @@ export interface PriceDataQualityReport {
   generator_git_sha_status?: string;
   overall_status: PriceDataQualityStatus;
   issue_counts: PriceIssueCounts;
+  stale_within_tolerance: StaleWithinToleranceIssue[];
+  whitelisted_anomalies: PriceAnomalyWhitelistEntry[];
   symbols: PriceSymbolQualitySummary[];
 }
 
 export interface PriceDataQualityOptions {
+  anomalyWhitelist?: readonly PriceAnomalyWhitelistEntry[];
   criticalReturnPct?: number;
   referenceSymbol?: string;
   maxDuplicateDateSamples?: number;
@@ -114,6 +131,11 @@ export interface PriceDataQualityOptions {
   maxMissingDateSamples?: number;
   maxReturnAnomalySamples?: number;
   splitLikeReturnPct?: number;
+  /**
+   * A detected non-sparse latest-date lag at or below this threshold remains
+   * visible but advisory. Larger lags continue to fail closed.
+   */
+  staleDateToleranceDays?: number;
   /**
    * Symbols whose latest-bar lag vs the reference calendar is advisory only.
    * Yahoo often null-pads sparse VIX-family indices after the last real print
@@ -140,6 +162,7 @@ const EMPTY_ISSUE_COUNTS: PriceIssueCounts = {
   non_object_records: 0,
   split_like_returns: 0,
   stale_latest_dates: 0,
+  stale_latest_dates_within_tolerance: 0,
   total: 0,
 };
 
@@ -163,6 +186,15 @@ type EnvHost = typeof globalThis & {
 const DEFAULT_CRITICAL_RETURN_PCT = 90;
 const DEFAULT_MAX_RETURN_ANOMALY_SAMPLES = 5;
 const DEFAULT_SPLIT_LIKE_RETURN_PCT = 40;
+export const DEFAULT_STALE_DATE_TOLERANCE_DAYS = 3;
+
+export const DEFAULT_ANOMALY_WHITELIST: readonly PriceAnomalyWhitelistEntry[] = [
+  {
+    symbol: 'ETH-USD',
+    date: '2020-03-12',
+    reason: 'COVID-19 "Black Thursday" crypto crash - genuine historical event, not a stock split',
+  },
+];
 
 /** Yahoo-sparse indexes: lag vs SPY is advisory, not a data-job hard fail. */
 const DEFAULT_SPARSE_INDEX_SYMBOLS: readonly string[] = [
@@ -190,18 +222,51 @@ function isSparseIndexSymbol(
   options: PriceDataQualityOptions,
 ): boolean {
   const configured = options.sparseIndexSymbols ?? DEFAULT_SPARSE_INDEX_SYMBOLS;
-  const normalized = symbol.trim().toUpperCase();
-  return configured.some((candidate) => candidate.trim().toUpperCase() === normalized);
+  const normalized = normalizeSymbol(symbol);
+  return configured.some((candidate) => normalizeSymbol(candidate) === normalized);
+}
+
+function normalizeSymbol(symbol: string): string {
+  return symbol.trim().toUpperCase();
+}
+
+function staleDateToleranceDays(options: PriceDataQualityOptions): number {
+  const configured = options.staleDateToleranceDays;
+  return configured !== undefined && Number.isFinite(configured) && configured >= 0
+    ? Math.trunc(configured)
+    : DEFAULT_STALE_DATE_TOLERANCE_DAYS;
+}
+
+function resolveAnomalyWhitelist(
+  options: PriceDataQualityOptions,
+): PriceAnomalyWhitelistEntry[] {
+  const configured = options.anomalyWhitelist ?? DEFAULT_ANOMALY_WHITELIST;
+  return configured.map((entry, index) => {
+    if (!entry || typeof entry.symbol !== 'string' || entry.symbol.trim() === '') {
+      throw new Error(`Invalid anomaly whitelist entry at index ${index}: symbol is required`);
+    }
+    if (!isValidIsoDate(entry.date)) {
+      throw new Error(`Invalid anomaly whitelist entry at index ${index}: date must be YYYY-MM-DD`);
+    }
+    if (typeof entry.reason !== 'string' || entry.reason.trim() === '') {
+      throw new Error(`Invalid anomaly whitelist entry at index ${index}: reason is required`);
+    }
+    return {
+      symbol: normalizeSymbol(entry.symbol),
+      date: entry.date,
+      reason: entry.reason.trim(),
+    };
+  });
 }
 
 /** True for VIX-family indices that skip equity split-like return gates. */
 export function isVolatilityIndexSymbol(symbol: string): boolean {
-  const normalized = symbol.trim().toUpperCase();
+  const normalized = normalizeSymbol(symbol);
   if (!normalized) {
     return false;
   }
   if (DEFAULT_VOLATILITY_INDEX_SYMBOLS.some(
-    (candidate) => candidate.trim().toUpperCase() === normalized,
+    (candidate) => normalizeSymbol(candidate) === normalized,
   )) {
     return true;
   }
@@ -362,10 +427,8 @@ function updateStatus(
   // ^VIX3M legitimately omit SPY trading days while still being current at the
   // latest bar. Do not fail the data job for mid-history holes alone.
   // Sparse-index latest lag (Yahoo null-pad after last real bar) is also advisory.
-  const sparseIndexStaleIsAdvisory = summary.stale_latest_date !== null
-    && isSparseIndexSymbol(summary.symbol, options);
-  const staleIsBlocking = summary.stale_latest_date !== null
-    && !sparseIndexStaleIsAdvisory;
+  const staleClassification = classifyLatestDateStaleness(summary, options);
+  const staleIsBlocking = staleClassification === 'blocking';
   const hasBlockingIssues = (
     summary.duplicate_date_count > 0
     || summary.invalid_dates.length > 0
@@ -384,9 +447,26 @@ function updateStatus(
   const hasAdvisoryIssues = (
     summary.return_anomalies.length > 0
     || summary.internal_gaps.length > 0
-    || sparseIndexStaleIsAdvisory
+    || (summary.stale_latest_date !== null && !staleIsBlocking)
   );
   summary.status = hasAdvisoryIssues ? 'warn' : 'ok';
+}
+
+type LatestDateStaleness = 'none' | 'sparse-advisory' | 'within-tolerance' | 'blocking';
+
+function classifyLatestDateStaleness(
+  summary: PriceSymbolQualitySummary,
+  options: PriceDataQualityOptions,
+): LatestDateStaleness {
+  if (summary.stale_latest_date === null) {
+    return 'none';
+  }
+  if (isSparseIndexSymbol(summary.symbol, options)) {
+    return 'sparse-advisory';
+  }
+  return summary.latest_lag_days <= staleDateToleranceDays(options)
+    ? 'within-tolerance'
+    : 'blocking';
 }
 
 function uniqueSortedDates(dates: string[]): string[] {
@@ -401,7 +481,7 @@ function applyReturnAnomalyChecks(
   audits: SymbolAudit[],
   counts: PriceIssueCounts,
   options: PriceDataQualityOptions = {},
-): void {
+): PriceAnomalyWhitelistEntry[] {
   const criticalReturnPct = positiveOption(
     options.criticalReturnPct,
     'PRICE_QUALITY_CRITICAL_RETURN_PCT',
@@ -417,6 +497,8 @@ function applyReturnAnomalyChecks(
     'PRICE_QUALITY_MAX_RETURN_ANOMALY_SAMPLES',
     DEFAULT_MAX_RETURN_ANOMALY_SAMPLES,
   )));
+  const anomalyWhitelist = resolveAnomalyWhitelist(options);
+  const whitelistedAnomalies: PriceAnomalyWhitelistEntry[] = [];
 
   for (const audit of audits) {
     const sorted = [...audit.valid_prices].sort((left, right) => (
@@ -452,6 +534,14 @@ function applyReturnAnomalyChecks(
         counts.extreme_returns += 1;
         counts.total += 1;
       } else if (absoluteReturnPct >= splitLikeReturnPct) {
+        const whitelistEntry = anomalyWhitelist.find((entry) => (
+          entry.symbol === normalizeSymbol(audit.summary.symbol)
+          && entry.date === current.date
+        ));
+        if (whitelistEntry) {
+          whitelistedAnomalies.push(whitelistEntry);
+          continue;
+        }
         anomalies.push({
           type: 'split_like_return',
           severity: 'warning',
@@ -472,6 +562,8 @@ function applyReturnAnomalyChecks(
     audit.summary.return_anomalies = anomalies.slice(0, maxReturnAnomalySamples);
     updateStatus(audit.summary, hasCriticalReturnAnomaly, options);
   }
+
+  return whitelistedAnomalies;
 }
 
 function hasBlockingIssueCounts(counts: PriceIssueCounts): boolean {
@@ -524,19 +616,20 @@ function applyReferenceCalendarChecks(
   audits: SymbolAudit[],
   counts: PriceIssueCounts,
   options: PriceDataQualityOptions,
-): void {
+): StaleWithinToleranceIssue[] {
+  const staleWithinTolerance: StaleWithinToleranceIssue[] = [];
   const referenceSymbol = options.referenceSymbol ?? 'SPY';
   const referenceAudit = audits.find((audit) => (
     audit.summary.symbol === referenceSymbol && audit.valid_dates.length > 0
   )) ?? audits.find((audit) => audit.valid_dates.length > 0);
   if (!referenceAudit) {
-    return;
+    return staleWithinTolerance;
   }
 
   const referenceDates = uniqueSortedDates(referenceAudit.valid_dates);
   const referenceLatestDate = referenceDates[referenceDates.length - 1] ?? null;
   if (referenceLatestDate === null) {
-    return;
+    return staleWithinTolerance;
   }
 
   const maxLatestLagDays = options.maxLatestLagDays ?? 1;
@@ -575,7 +668,6 @@ function applyReferenceCalendarChecks(
       ? countWeekdaysBetween(latestDate, asOfStr)
       : 0;
     summary.latest_lag_days = Math.max(peerLagDays, wallClockLagDays);
-    const sparseIndex = isSparseIndexSymbol(summary.symbol, options);
     if (summary.latest_lag_days > maxLatestLagDays) {
       const refDate = wallClockLagDays > peerLagDays && asOfStr
         ? asOfStr
@@ -584,10 +676,19 @@ function applyReferenceCalendarChecks(
         reference_date: refDate,
         latest_date: summary.latest_date,
       };
+      const staleClassification = classifyLatestDateStaleness(summary, options);
       // Keep visibility on the symbol row, but do not increment the blocking
       // stale_latest_dates counter for known sparse indexes (Yahoo null-pad lag).
       // Still bump total so overall_status becomes warn (not silent ok).
-      if (!sparseIndex) {
+      if (staleClassification === 'within-tolerance') {
+        increment(counts, 'stale_latest_dates_within_tolerance');
+        staleWithinTolerance.push({
+          symbol: summary.symbol,
+          latest_lag_days: summary.latest_lag_days,
+          reference_date: refDate,
+          latest_date: summary.latest_date,
+        });
+      } else if (staleClassification === 'blocking') {
         increment(counts, 'stale_latest_dates');
       } else {
         counts.total += 1;
@@ -596,6 +697,8 @@ function applyReferenceCalendarChecks(
 
     updateStatus(summary, undefined, options);
   }
+
+  return staleWithinTolerance;
 }
 
 export function buildPriceDataQualityReport(
@@ -620,8 +723,8 @@ export function buildPriceDataQualityReport(
     ...options,
     asOfDate: options.asOfDate ?? generatedAt,
   };
-  applyReferenceCalendarChecks(audits, counts, asOfOptions);
-  applyReturnAnomalyChecks(audits, counts, options);
+  const staleWithinTolerance = applyReferenceCalendarChecks(audits, counts, asOfOptions);
+  const whitelistedAnomalies = applyReturnAnomalyChecks(audits, counts, options);
 
   const report: PriceDataQualityReport = {
     schema_version: PRICE_DATA_QUALITY_SCHEMA_VERSION,
@@ -630,6 +733,8 @@ export function buildPriceDataQualityReport(
       ? 'fail'
       : counts.total > 0 ? 'warn' : 'ok',
     issue_counts: counts,
+    stale_within_tolerance: staleWithinTolerance,
+    whitelisted_anomalies: whitelistedAnomalies,
     symbols: audits.map((audit) => audit.summary),
   };
   const sha = generatorGitShaShort();
