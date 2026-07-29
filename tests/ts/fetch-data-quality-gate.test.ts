@@ -56,10 +56,13 @@ describe('fetch-data price quality fail-closed gate', () => {
         non_monotonic_rows: 0,
         non_object_records: 0,
         stale_latest_dates: 0,
+        stale_latest_dates_within_tolerance: 0,
         internal_gaps: 0,
         extreme_returns: 0,
         split_like_returns: 0,
       },
+      stale_within_tolerance: [],
+      whitelisted_anomalies: [],
       symbols: [],
     };
     expect(() => assertPriceQualityAllowsSuccess(ok)).not.toThrow();
@@ -86,10 +89,13 @@ describe('fetch-data price quality fail-closed gate', () => {
         non_monotonic_rows: 0,
         non_object_records: 0,
         stale_latest_dates: 1,
+        stale_latest_dates_within_tolerance: 0,
         internal_gaps: 0,
         extreme_returns: 0,
         split_like_returns: 0,
       },
+      stale_within_tolerance: [],
+      whitelisted_anomalies: [],
       symbols: [{ symbol: '^VIX3M', status: 'fail', latest_date: '2026-07-02', row_count: 10 }],
     };
     const rows = buildPriceSourceRows(
@@ -118,10 +124,13 @@ describe('fetch-data price quality fail-closed gate', () => {
         non_monotonic_rows: 0,
         non_object_records: 0,
         stale_latest_dates: 1,
+        stale_latest_dates_within_tolerance: 0,
         internal_gaps: 0,
         extreme_returns: 0,
         split_like_returns: 0,
       },
+      stale_within_tolerance: [],
+      whitelisted_anomalies: [],
       symbols: [],
     });
     expect(shouldWriteLastGoodRetentionManifest(err)).toBe(false);
@@ -162,7 +171,7 @@ describe('price quality wall-clock trading lag', () => {
     const report = buildPriceDataQualityReport(
       payload,
       '2026-07-20T12:00:00.000Z',
-      { maxLatestLagDays: 0 },
+      { maxLatestLagDays: 0, staleDateToleranceDays: 0 },
     );
     const spy = report.symbols.find((s) => s.symbol === 'SPY');
     expect(spy).toBeDefined();

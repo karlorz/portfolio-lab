@@ -351,6 +351,14 @@ export interface Alert {
   message: string;
   timestamp?: string;
   requires_action: boolean;
+  /** Stable presentation identity, normalized from incident_id or type/message. */
+  stable_id?: string;
+  /** Producer lifecycle identity when one is available. */
+  incident_id?: string;
+  reason?: string;
+  enabled?: boolean;
+  channel?: string;
+  kill_switch_level?: string | null;
 }
 
 export type IncidentLifecycleState = 'firing' | 'acknowledged' | 'resolving' | 'resolved';

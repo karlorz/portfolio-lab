@@ -88,6 +88,56 @@ def test_slo_healthy_when_all_dimensions_ok() -> None:
     assert slo["top_dimension"] is None
 
 
+def test_slo_optional_advisory_unavailable_only_is_ok() -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={
+            "stale_signals": [],
+            "unavailable_signals": ["regime_transition"],
+        },
+    )
+
+    signal = slo["dimensions"]["signal"]
+    assert signal["status"] == "ok"
+    assert signal["actionable_unavailable_count"] == 0
+    assert signal["optional_advisory_unavailable_count"] == 1
+
+
+def test_slo_unknown_unavailable_signal_is_fail_closed() -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={
+            "stale_signals": [],
+            "unavailable_signals": ["future_unknown_signal"],
+        },
+    )
+
+    signal = slo["dimensions"]["signal"]
+    assert signal["status"] == "warning"
+    assert signal["actionable_unavailable_signals"] == ["future_unknown_signal"]
+
+
+def test_slo_optional_advisory_stale_only_is_ok() -> None:
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=_source_manifest(),
+        public_index={"entries": []},
+        signal_staleness={
+            "stale_signals": ["regime_transition"],
+            "unavailable_signals": [],
+        },
+    )
+
+    signal = slo["dimensions"]["signal"]
+    assert signal["status"] == "ok"
+    assert signal["actionable_stale_count"] == 0
+    assert signal["optional_advisory_stale_signals"] == ["regime_transition"]
+
+
 def test_slo_includes_data_quality_ok_dimension() -> None:
     slo = build_data_pipeline_slo(
         health_data=_health(),
@@ -501,8 +551,7 @@ def test_slo_warns_on_stale_required_signals_and_counts_unavailable() -> None:
         public_index={"entries": []},
         signal_staleness={
             "stale_signals": ["garch_cvar"],
-            # collar is actionable (not a FRED/ML intentional gap)
-            "unavailable_signals": ["collar"],
+            "unavailable_signals": ["ensemble_voting"],
         },
     )
 
@@ -524,21 +573,19 @@ def test_slo_signal_dim_warns_on_unavailable_without_stale() -> None:
         signal_staleness={
             "stale_signals": [],
             "unavailable_signals": [
-                "collar",
-                "bond_momentum",
-                "kurtosis_regime",
-                "calendar_seasonality",
+                "ensemble_voting",
+                "garch_cvar",
             ],
         },
     )
 
     signal = slo["dimensions"]["signal"]
     assert signal["status"] == "warning"
-    assert signal["unavailable_count"] == 4
+    assert signal["unavailable_count"] == 2
     assert signal["stale_count"] == 0
     assert "unavailable" in signal["message"]
     assert "required signals fresh" not in signal["message"]
-    assert "collar" in signal.get("unavailable_signals", [])
+    assert "ensemble_voting" in signal.get("unavailable_signals", [])
 
 
 def test_slo_signal_dim_ok_when_only_intentional_fred_lab_gaps(
@@ -1031,4 +1078,3 @@ def test_slo_derived_artifact_missing_file_is_critical(tmp_path) -> None:
 
     assert dim["status"] == "critical"
     assert "garch_cvar.json" in dim["missing_artifacts"]
-

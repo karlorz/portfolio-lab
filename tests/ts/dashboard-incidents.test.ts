@@ -79,6 +79,31 @@ function incidentSummary(overrides: Partial<IncidentLifecycleSummary> = {}): Inc
 }
 
 describe('dashboard incident derivation', () => {
+  it('maps a live missing-title kill alert defensively and prefers its incident id', () => {
+    const incidents = buildDashboardIncidents({
+      alerts: [{
+        level: 'warning',
+        type: 'kill_switch',
+        message: 'New orders are blocked pending operator review.',
+        requires_action: true,
+        incident_id: 'kill-incident-42',
+        stable_id: 'kill-incident-42',
+      } as Alert],
+      signals: null,
+      health: null,
+    });
+
+    expect(incidents).toHaveLength(1);
+    expect(incidents[0]).toMatchObject({
+      id: 'alert:kill-incident-42',
+      severity: 'critical',
+      title: 'Kill Switch',
+      source: 'Kill switch',
+      message: 'New orders are blocked pending operator review.',
+      nextAction: 'Review kill-switch state before placing new orders.',
+    });
+  });
+
   it('derives a critical Risk incident when GARCH CVaR ratio is severe', () => {
     const incidents = buildRiskIncidents(signalsWithCvar(3));
 

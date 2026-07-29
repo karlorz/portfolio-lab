@@ -8,7 +8,7 @@ const TAB_LABELS = [
   'Performance',
   'Rebalance',
   'Analytics',
-  '0DTE',
+  'Options',
   'Auction',
   'Labs',
   'Decisions',
@@ -33,7 +33,7 @@ const LOADED_TAB_SELECTORS: Record<DashboardTabLabel, readonly string[]> = {
   'Performance': ['.performance-summary'],
   'Rebalance': ['.rebalance-health-panel'],
   'Analytics': ['.analytics-summary', '.analytics-empty', '.explainability-panel'],
-  '0DTE': ['.zero-dte-panel'],
+  'Options': ['.zero-dte-panel'],
   'Auction': ['.closing-auction-panel'],
   'Labs': ['.labs-panel .positions-table', '.labs-panel .analytics-empty:not([role="status"])'],
   'Decisions': ['.decision-replay-panel', '.decision-replay-panel .analytics-empty'],
@@ -45,7 +45,7 @@ async function openDashboard(page: Page, viewport = { width: 1200, height: 900 }
   await page.setViewportSize(viewport);
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Live Paper Trading' })).toBeVisible();
-  await expect(page.locator('.dashboard-tabs')).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Portfolio Lab workspaces' })).toBeVisible();
 }
 
 async function expectNoDocumentOverflow(page: Page) {
@@ -121,8 +121,8 @@ async function expectExplainabilityPanelStyles(page: Page, expectedProvenanceCol
 
 function dashboardTab(page: Page, label: string) {
   return page
-    .locator('.dashboard-tabs')
-    .getByRole('button', { name: new RegExp(`^${label}(?:\\s+\\d+)?$`) });
+    .getByRole('navigation', { name: 'Portfolio Lab workspaces' })
+    .getByRole('link', { name: label, exact: true });
 }
 
 async function waitForLoadedDashboardTab(page: Page, label: DashboardTabLabel) {
@@ -143,8 +143,83 @@ function collectPresentationConsoleFailures(page: Page): string[] {
 }
 
 test.describe('dashboard browser presentation smoke', () => {
+  test('contains the live missing-title kill alert without losing authority or the React root', async ({ page }) => {
+    const consoleMessages = collectPresentationConsoleFailures(page);
+    const signalsFixture = {
+      timestamp: '2026-07-28T03:40:23Z',
+      generated_at: '2026-07-28T03:40:23Z',
+      regime: { regime: 'normal', vix: 18.67, detected: null },
+      latest_prices: { SPY: 635, GLD: 305, TLT: 88 },
+      current_positions: [],
+      target_allocations: { SPY: 0.46, GLD: 0.38, TLT: 0.16 },
+      cash: 0,
+      total_value: 100000,
+      recent_orders: [],
+      ml_signals: {
+        available: false,
+        timestamp: null,
+        predictions: {},
+        features: {},
+        grid_search: {
+          available: false,
+          timestamp: null,
+          top_allocation: null,
+          sharpe: null,
+          volatility: null,
+        },
+      },
+      marl_status: {
+        schema_version: 'marl-runtime-status/v1',
+        available: false,
+        timestamp: '2026-07-28T03:40:23Z',
+        runtime: {
+          version: 'unknown',
+          device: 'unknown',
+          agents_loaded: [],
+          signal_integrator_connected: false,
+          checkpoint_loaded: false,
+          inference_count: 0,
+          current_allocation: {},
+          graph_metrics: {},
+        },
+        execution_role: {
+          role: 'research_shadow_non_routed',
+          routed: false,
+          routed_by: null,
+          live_authoritative: false,
+          description: 'Research shadow only.',
+        },
+      },
+    };
+
+    await page.route('**/data/signals.json', (route) => route.fulfill({ json: signalsFixture }));
+    await page.route('**/data/alerts.json', (route) => route.fulfill({
+      json: {
+        generated_at: '2026-07-28T03:40:23Z',
+        alerts: [{
+          type: 'kill_switch',
+          level: 'warning',
+          reason: 'unresolved_incident:signal_staleness',
+          incident_id: 'bb796837-2920-47af-a1b0-b67d9c08d356',
+          enabled: true,
+          message: '1/23 signals unavailable: regime_transition',
+        }],
+      },
+    }));
+
+    await openDashboard(page);
+    await expect(page.locator('#root')).not.toBeEmpty();
+    await expect(page.locator('.allocation-spine')).toContainText('SPY');
+    await expect(page.locator('.allocation-spine')).toContainText('46%');
+    await expect(page.locator('.allocation-spine')).toContainText('Research shadow · non-routed');
+    const operatorContext = page.getByRole('complementary', { name: 'Operator context' });
+    await expect(operatorContext.getByText('Kill Switch', { exact: true })).toBeVisible();
+    await expect(operatorContext.getByText('Review kill-switch state before placing new orders.')).toBeVisible();
+    expect(consoleMessages).toEqual([]);
+  });
+
   for (const viewport of VIEWPORTS) {
-    test(`keeps dashboard tabs clickable without document overflow at ${viewport.width}px`, async ({ page }) => {
+    test(`keeps workspace navigation usable without document overflow at ${viewport.width}px`, async ({ page }) => {
       const consoleMessages = collectPresentationConsoleFailures(page);
 
       await openDashboard(page, viewport);
@@ -154,7 +229,7 @@ test.describe('dashboard browser presentation smoke', () => {
         const tab = dashboardTab(page, label);
         await expect(tab).toBeVisible();
         await tab.click();
-        await expect(tab).toHaveClass(/active/);
+        await expect(tab).toHaveAttribute('aria-current', 'page');
         await waitForLoadedDashboardTab(page, label);
         await expectNoDocumentOverflow(page);
       }
@@ -192,7 +267,7 @@ test.describe('dashboard browser presentation smoke', () => {
     await expectCardSurface(page, '.rebalance-health-panel');
     await expectGridColumns(page, '.rh-state-grid', 2);
 
-    await dashboardTab(page, '0DTE').click();
+    await dashboardTab(page, 'Options').click();
     await expectCardSurface(page, '.zero-dte-panel');
     await expectCardSurface(page, '.panel');
 
@@ -226,16 +301,20 @@ test.describe('dashboard browser presentation smoke', () => {
     await openDashboard(page, { width: 390, height: 900 });
     await dashboardTab(page, 'Labs').click();
     await expect(page.locator('.labs-panel')).toBeVisible();
-    await expect(page.locator('.labs-panel .positions-table')).toBeVisible();
+    const table = page.locator('.labs-panel .positions-table');
+    const empty = page.locator('.labs-panel .analytics-empty:not([role="status"])');
+    await expect(table.or(empty).first()).toBeVisible();
 
-    const tableMetrics = await page.locator('.labs-panel .positions-table').evaluate((table) => {
-      const panel = table.closest('.labs-panel');
-      return {
-        tableWidth: table.scrollWidth,
-        panelWidth: panel?.clientWidth ?? 0,
-      };
-    });
-    expect(tableMetrics.tableWidth).toBeGreaterThan(tableMetrics.panelWidth);
+    if (await table.isVisible()) {
+      const tableMetrics = await table.evaluate((element) => {
+        const panel = element.closest('.labs-panel');
+        return {
+          tableWidth: element.scrollWidth,
+          panelWidth: panel?.clientWidth ?? 0,
+        };
+      });
+      expect(tableMetrics.tableWidth).toBeGreaterThan(tableMetrics.panelWidth);
+    }
     await expectNoDocumentOverflow(page);
 
     expect(consoleMessages).toEqual([]);

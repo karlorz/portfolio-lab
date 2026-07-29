@@ -95,6 +95,29 @@ def test_write_signals_multi_dest_same_bytes_all_dests(tmp_path):
         assert d["target_allocations"] == {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
 
 
+def test_serialize_signals_payload_emits_strict_browser_json():
+    from src.monitor.signal_authority import serialize_signals_payload
+
+    payload = {
+        "target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
+        "diagnostics": {
+            "infinite_half_life": float("inf"),
+            "missing_score": float("nan"),
+            "finite_score": 1.25,
+        },
+    }
+
+    body = serialize_signals_payload(payload)
+
+    assert "Infinity" not in body
+    assert "NaN" not in body
+    assert json.loads(body)["diagnostics"] == {
+        "infinite_half_life": None,
+        "missing_score": None,
+        "finite_score": 1.25,
+    }
+
+
 def test_health_kill_refresh_preserves_ta_on_private_twin(tmp_path, monkeypatch):
     """Case B: partial health kill refresh keeps TA on private even if it was hollow."""
     from src.monitor import health_check as hc

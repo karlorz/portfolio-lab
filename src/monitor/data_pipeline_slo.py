@@ -348,7 +348,7 @@ def _artifact_dimension(
 def _actionable_unavailable_signals(
     signal_staleness: Mapping[str, Any],
     unavailable_signals: list[str],
-) -> tuple[list[str], int]:
+) -> tuple[list[str], int, int]:
     """Split unavailable signals into actionable vs intentional lab gaps.
 
     Matches ``classify_signal_staleness``: FRED-unconfigured / ML-off gaps must
@@ -368,16 +368,28 @@ def _actionable_unavailable_signals(
             str(row.get("signal"))
             for row in ownership
             if isinstance(row, Mapping)
+            and row.get("blocks_all_fresh", True)
             and not (
                 row.get("intentional_lab_gap")
                 or row.get("intentional_when_ml_off")
             )
         ]
-        intentional_count = max(0, len(unavailable_signals) - len(actionable))
-        return actionable, intentional_count
+        optional_count = sum(
+            1
+            for row in ownership
+            if isinstance(row, Mapping) and not row.get("blocks_all_fresh", True)
+        )
+        intentional_count = sum(
+            1
+            for row in ownership
+            if isinstance(row, Mapping)
+            and row.get("blocks_all_fresh", True)
+            and bool(row.get("intentional_lab_gap") or row.get("intentional_when_ml_off"))
+        )
+        return actionable, intentional_count, optional_count
 
     # No ownership metadata: treat full list as actionable (fail-closed).
-    return list(unavailable_signals), 0
+    return list(unavailable_signals), 0, 0
 
 
 def _signal_dimension(signal_staleness: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -385,35 +397,66 @@ def _signal_dimension(signal_staleness: Mapping[str, Any] | None) -> dict[str, A
     unavailable = signal_staleness.get("unavailable_signals") if isinstance(signal_staleness, Mapping) else None
     stale_signals = [str(item) for item in stale] if isinstance(stale, list) else []
     unavailable_signals = [str(item) for item in unavailable] if isinstance(unavailable, list) else []
+    signal_roles = (
+        signal_staleness.get("signal_roles")
+        if isinstance(signal_staleness, Mapping)
+        else None
+    )
+    if not isinstance(signal_roles, Mapping):
+        signal_roles = {}
+    from src.monitor.signal_ownership import blocks_all_fresh
+
+    advisory_roles = {
+        "advisory_shadow",
+        "advisory_non_routed",
+        "advisory_sleeve",
+        "advisory",
+    }
+    required_roles = {"execution_routed", "required", "authoritative"}
+    actionable_stale = []
+    for signal in stale_signals:
+        role = str(signal_roles.get(signal) or "").lower()
+        if role in advisory_roles:
+            continue
+        if role in required_roles or blocks_all_fresh(signal):
+            actionable_stale.append(signal)
+    optional_advisory_stale = [
+        signal for signal in stale_signals if signal not in actionable_stale
+    ]
 
     actionable_unavailable: list[str] = []
     intentional_lab_gap_count = 0
+    optional_advisory_unavailable_count = 0
     if unavailable_signals and isinstance(signal_staleness, Mapping):
-        actionable_unavailable, intentional_lab_gap_count = _actionable_unavailable_signals(
-            signal_staleness, unavailable_signals
-        )
+        (
+            actionable_unavailable,
+            intentional_lab_gap_count,
+            optional_advisory_unavailable_count,
+        ) = _actionable_unavailable_signals(signal_staleness, unavailable_signals)
     elif unavailable_signals:
         actionable_unavailable = list(unavailable_signals)
 
     # Stale or actionable unavailable → warning. Intentional lab gaps alone → ok.
-    if stale_signals or actionable_unavailable:
+    if actionable_stale or actionable_unavailable:
         status = "warning"
     else:
         status = "ok"
 
-    if stale_signals and actionable_unavailable:
+    if actionable_stale and actionable_unavailable:
         message = (
-            f"{len(stale_signals)} stale signal(s); "
+            f"{len(actionable_stale)} stale signal(s); "
             f"{len(actionable_unavailable)} unavailable signal(s)"
         )
-    elif stale_signals:
-        message = f"{len(stale_signals)} stale required signal(s)"
+    elif actionable_stale:
+        message = f"{len(actionable_stale)} stale required signal(s)"
     elif actionable_unavailable:
         message = f"{len(actionable_unavailable)} unavailable signal(s) (not all-fresh)"
-    elif intentional_lab_gap_count:
+    elif intentional_lab_gap_count or optional_advisory_stale or optional_advisory_unavailable_count:
         message = (
             f"required signals fresh "
-            f"({intentional_lab_gap_count} intentional lab gaps skipped)"
+            f"({intentional_lab_gap_count} intentional lab gaps, "
+            f"{len(optional_advisory_stale)} advisory stale, "
+            f"{optional_advisory_unavailable_count} advisory unavailable)"
         )
     else:
         message = "required signals fresh"
@@ -421,15 +464,24 @@ def _signal_dimension(signal_staleness: Mapping[str, Any] | None) -> dict[str, A
     payload: dict[str, Any] = {
         "status": status,
         "stale_count": len(stale_signals),
+        "actionable_stale_count": len(actionable_stale),
+        "optional_advisory_stale_count": len(optional_advisory_stale),
         "unavailable_count": len(unavailable_signals),
         "actionable_unavailable_count": len(actionable_unavailable),
         "intentional_lab_gap_count": intentional_lab_gap_count,
+        "optional_advisory_unavailable_count": optional_advisory_unavailable_count,
         "stale_signals": stale_signals[:10],
+        "actionable_stale_signals": actionable_stale[:10],
+        "optional_advisory_stale_signals": optional_advisory_stale[:10],
         "unavailable_signals": unavailable_signals[:10],
         "actionable_unavailable_signals": actionable_unavailable[:10],
         "message": message,
     }
-    if intentional_lab_gap_count and not actionable_unavailable and not stale_signals:
+    if (
+        intentional_lab_gap_count
+        and not actionable_unavailable
+        and not actionable_stale
+    ):
         payload["intentional_lab_gaps_only"] = True
     return payload
 

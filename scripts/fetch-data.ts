@@ -22,6 +22,8 @@ import {
   type MarketDataSourceRow,
 } from '../src/data/source_manifest';
 import {
+  DEFAULT_ANOMALY_WHITELIST,
+  DEFAULT_STALE_DATE_TOLERANCE_DAYS,
   PRICE_DATA_QUALITY_FILENAME,
   buildPriceDataQualityReport,
   type PriceDataQualityReport,
@@ -670,7 +672,10 @@ export async function main() {
   const pricesCompactPath = join(DATA_DIR, 'prices_compact.json');
   const priceQualityPath = join(DATA_DIR, PRICE_DATA_QUALITY_FILENAME);
   // Quality audit runs on full history (operators care about full-book anomalies)
-  const priceQualityReport = buildPriceDataQualityReport(fullPrices);
+  const priceQualityReport = buildPriceDataQualityReport(fullPrices, undefined, {
+    anomalyWhitelist: DEFAULT_ANOMALY_WHITELIST,
+    staleDateToleranceDays: DEFAULT_STALE_DATE_TOLERANCE_DAYS,
+  });
   await writeJsonAtomic(pricesPath, fullPrices);
   await writeJsonAtomic(pricesCompactPath, pricesCompactPayload);
   await writeJsonAtomic(priceQualityPath, priceQualityReport);

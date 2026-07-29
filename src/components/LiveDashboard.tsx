@@ -33,18 +33,19 @@ import type { KurtosisData } from './KurtosisRegimePanel';
 import type { VolatilityParityData } from './VolatilityParityPanel';
 import { summarizeHealthOperations } from './healthOperations';
 import { IncidentSummary } from './IncidentSummary';
+import { ActionCenter } from './control-plane/ActionCenter';
+import { AllocationSpine } from './control-plane/AllocationSpine';
+import { ContextRail } from './control-plane/ContextRail';
 import {
   buildDashboardIncidents,
   getIncidentsForTab,
-  getTabIncidentBadge,
   type IncidentTab,
-  type TabIncidentBadge,
 } from './dashboardIncidents';
 import {
   validateSignalsData,
+  validateAlertsData,
   validateFetchData,
   DashboardDataSchema,
-  AlertsDataSchema,
   StatsDataSchema,
   HealthDataSchema,
   IncidentLifecycleSummarySchema,
@@ -109,13 +110,21 @@ const TasksPanel = lazy(() => import('./TasksPanel').then((module) => ({ default
 function tabLoadingFallback(name: string) {
   return (
     <div className="tab-panel lazy-tab-loading" role="status" aria-live="polite">
-      Loading {name}...
+      Loading {name}…
     </div>
   );
 }
 
+const refreshTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  hour: 'numeric',
+  minute: '2-digit',
+  second: '2-digit',
+});
+
 interface LiveDashboardProps {
   refreshInterval?: number; // seconds
+  activeView?: IncidentTab;
+  onViewChange?: (view: IncidentTab) => void;
 }
 
 function formatAllocationSurfaceRoute(role: AllocationSurfaceRole): string {
@@ -147,7 +156,7 @@ function isBehavioralSentimentData(value: unknown): value is BehavioralSentiment
   );
 }
 
-async function safeParseJson(response: Response, endpoint: string): Promise<unknown | null> {
+async function safeParseJson(response: Response): Promise<unknown | null> {
   if (!response.ok) return null;
 
   const contentType = response.headers.get('content-type')?.toLowerCase() || '';
@@ -160,17 +169,26 @@ async function safeParseJson(response: Response, endpoint: string): Promise<unkn
   try {
     return await response.json();
   } catch {
-    if (import.meta.env.DEV) {
-      console.warn(`[${endpoint}] Failed to parse JSON response`);
-    }
+    // Producers replace these files atomically, but a preview server or a
+    // concurrent refresh can still expose a transient incomplete response.
+    // Keep the last validated state and let the next refresh recover.
     return null;
   }
 }
 
 type TabType = IncidentTab;
 
-export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
-  const [activeTab, setActiveTab] = useState<TabType>('overview');
+export function LiveDashboard({
+  refreshInterval = 60,
+  activeView,
+  onViewChange,
+}: LiveDashboardProps) {
+  const [internalActiveTab, setInternalActiveTab] = useState<TabType>('overview');
+  const activeTab = activeView ?? internalActiveTab;
+  const changeView = (view: TabType) => {
+    if (activeView === undefined) setInternalActiveTab(view);
+    onViewChange?.(view);
+  };
   const [signals, setSignals] = useState<SignalsData | null>(null);
   const [performance, setPerformance] = useState<PerformanceEntry[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -203,6 +221,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
 
   const fetchCoreData = async () => {
     const requestGeneration = ++coreFetchGeneration.current;
+    let endpointError: string | null = null;
     try {
       const [signalsRes, dashboardRes, alertsRes, statsRes, healthRes, incidentsRes, healthOpsRes] = await Promise.all([
         fetch('/data/signals.json'),
@@ -215,18 +234,18 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
       ]);
       if (requestGeneration !== coreFetchGeneration.current) return;
 
-      const signalsRaw = await safeParseJson(signalsRes, 'signals');
+      const signalsRaw = await safeParseJson(signalsRes);
       if (requestGeneration !== coreFetchGeneration.current) return;
       if (signalsRaw) {
         const raw = signalsRaw;
         const validated = validateSignalsData(raw);
         if (validated) {
           setSignals(validated);
-          setLastUpdate(new Date(validated.timestamp).toLocaleTimeString());
+          setLastUpdate(refreshTimeFormatter.format(new Date(validated.timestamp)));
           setHedgeSelectorData(validated.hedge_selector ?? null);
         }
       }
-      const dashboardRaw = await safeParseJson(dashboardRes, 'dashboard');
+      const dashboardRaw = await safeParseJson(dashboardRes);
       if (requestGeneration !== coreFetchGeneration.current) return;
       if (dashboardRaw) {
         const raw = dashboardRaw;
@@ -236,23 +255,26 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
           setDashboard(validated as DashboardData);
         }
       }
-      const alertsRaw = await safeParseJson(alertsRes, 'alerts');
+      const alertsRaw = await safeParseJson(alertsRes);
       if (requestGeneration !== coreFetchGeneration.current) return;
       if (alertsRaw) {
         const raw = alertsRaw;
-        const validated = validateFetchData(raw, AlertsDataSchema, 'alerts');
+        const validated = validateAlertsData(raw);
         if (validated) {
           setAlerts(validated.alerts || []);
+        } else {
+          setAlerts([]);
+          endpointError = 'Alerts data is unavailable or invalid';
         }
       }
-      const statsRaw = await safeParseJson(statsRes, 'stats');
+      const statsRaw = await safeParseJson(statsRes);
       if (requestGeneration !== coreFetchGeneration.current) return;
       if (statsRaw) {
         const raw = statsRaw;
         const validated = validateFetchData(raw, StatsDataSchema, 'stats');
         if (validated) setStats(validated as StatsData);
       }
-      const healthRaw = await safeParseJson(healthRes, 'health');
+      const healthRaw = await safeParseJson(healthRes);
       if (requestGeneration !== coreFetchGeneration.current) return;
       if (healthRaw) {
         const raw = healthRaw;
@@ -276,7 +298,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
           setHealthOpsProvenance(null);
         }
       }
-      const incidentsRaw = await safeParseJson(incidentsRes, 'incidents');
+      const incidentsRaw = await safeParseJson(incidentsRes);
       if (requestGeneration !== coreFetchGeneration.current) return;
       if (incidentsRaw) {
         const raw = incidentsRaw;
@@ -284,7 +306,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
         if (validated) setIncidentSummary(validated as IncidentLifecycleSummary);
       }
 
-      if (requestGeneration === coreFetchGeneration.current) setError(null);
+      if (requestGeneration === coreFetchGeneration.current) setError(endpointError);
     } catch (err) {
       if (requestGeneration === coreFetchGeneration.current) setError('Failed to load live data');
     }
@@ -311,7 +333,7 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
     if (tab === 'rebalance') {
       try {
         const rebalanceHealthRes = await fetch('/data/rebalance_health.json');
-        const rebalanceHealthRaw = await safeParseJson(rebalanceHealthRes, 'rebalance_health');
+        const rebalanceHealthRaw = await safeParseJson(rebalanceHealthRes);
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (rebalanceHealthRaw) {
           const raw = rebalanceHealthRaw;
@@ -335,49 +357,49 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
           fetch('/data/turnover_validator.json'),
         ]);
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
-        const analyticsRaw = await safeParseJson(analyticsRes, 'analytics');
+        const analyticsRaw = await safeParseJson(analyticsRes);
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (analyticsRaw) {
           const raw = analyticsRaw;
           const validated = validateFetchData(raw, AnalyticsDataSchema, 'analytics');
           if (validated) setAnalytics(validated as AnalyticsData);
         }
-        const explainabilityRaw = await safeParseJson(exRes, 'explainability');
+        const explainabilityRaw = await safeParseJson(exRes);
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (explainabilityRaw) {
           const raw = explainabilityRaw;
           const validated = validateFetchData(raw, PassthroughSchema, 'explainability');
           if (validated) setExplainability(validated as unknown as ExplainabilityData);
         }
-        const graduationRaw = await safeParseJson(gradRes, 'graduation');
+        const graduationRaw = await safeParseJson(gradRes);
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (graduationRaw) {
           const raw = graduationRaw;
           const validated = validateFetchData(raw, GraduationDataSchema, 'graduation');
           if (validated) setGraduationData(validated as unknown as GraduationChecklistData);
         }
-        const adaptiveSizingRaw = await safeParseJson(sizingRes, 'adaptive_sizing');
+        const adaptiveSizingRaw = await safeParseJson(sizingRes);
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (adaptiveSizingRaw) {
           const raw = adaptiveSizingRaw;
           const validated = validateFetchData(raw, AdaptiveSizingSchema, 'adaptive_sizing');
           if (validated) setAdaptiveSizingData(validated as unknown as AdaptiveSizingData);
         }
-        const vixyRaw = await safeParseJson(vixyRes, 'vixy_hedge');
+        const vixyRaw = await safeParseJson(vixyRes);
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (vixyRaw) {
           const raw = vixyRaw;
           const validated = validateFetchData(raw, PassthroughSchema, 'vixy_hedge');
           if (validated) setVixyHedgeData(validated as unknown as VixyHedgeSizingData);
         }
-        const blackLittermanRaw = await safeParseJson(blRes, 'black_litterman');
+        const blackLittermanRaw = await safeParseJson(blRes);
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (blackLittermanRaw) {
           const raw = blackLittermanRaw;
           const validated = validateFetchData(raw, BlackLittermanSchema, 'black_litterman');
           if (validated) setBLMapperData(validated as unknown as BlackLittermanMapperData);
         }
-        const turnoverRaw = await safeParseJson(turnoverRes, 'turnover_validator');
+        const turnoverRaw = await safeParseJson(turnoverRes);
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (turnoverRaw) {
           const raw = turnoverRaw;
@@ -393,21 +415,21 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
           fetch('/data/cross_asset_rv.json'),
         ]);
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
-        const regimeGateRaw = await safeParseJson(rgRes, 'regime_gate');
+        const regimeGateRaw = await safeParseJson(rgRes);
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (regimeGateRaw) {
           const raw = regimeGateRaw;
           const validated = validateFetchData(raw, PassthroughSchema, 'regime_gate');
           if (validated) setRegimeGateData(validated as unknown as RegimeGateData);
         }
-        const tsmomRaw = await safeParseJson(tsmomRes, 'tsmom');
+        const tsmomRaw = await safeParseJson(tsmomRes);
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (tsmomRaw) {
           const raw = tsmomRaw;
           const validated = validateFetchData(raw, PassthroughSchema, 'tsmom');
           if (validated) setTsmomData(validated as unknown as TSMOMData);
         }
-        const crossAssetRVRaw = await safeParseJson(rvRes, 'cross_asset_rv');
+        const crossAssetRVRaw = await safeParseJson(rvRes);
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (crossAssetRVRaw) {
           const raw = crossAssetRVRaw;
@@ -490,26 +512,6 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
   const targetAllocationRole = signals?.allocation_surface_roles?.surfaces.target_allocations;
   const ensembleVotingRole = signals?.allocation_surface_roles?.surfaces.ensemble_voting;
 
-  const countBadge = (count: number | undefined, severity: TabIncidentBadge['severity']): TabIncidentBadge | undefined => {
-    return count && count > 0 ? { count, severity } : undefined;
-  };
-
-  const tabs: { id: TabType; label: string; badge?: TabIncidentBadge }[] = [
-    { id: 'overview', label: 'Overview', badge: getTabIncidentBadge(dashboardIncidents, 'overview') },
-    { id: 'health', label: 'Health', badge: getTabIncidentBadge(dashboardIncidents, 'health') },
-    { id: 'risk', label: 'Risk', badge: getTabIncidentBadge(dashboardIncidents, 'risk') },
-    { id: 'history', label: 'History' },
-    { id: 'performance', label: 'Performance' },
-    { id: 'rebalance', label: 'Rebalance' },
-    { id: 'analytics', label: 'Analytics' },
-    { id: 'options', label: '0DTE', badge: countBadge(signals?.zero_dte?.positions?.length, 'info') },
-    { id: 'auction', label: 'Auction', badge: countBadge(signals?.closing_auction?.signals?.filter(s => s.should_trade).length, 'warning') },
-    { id: 'labs', label: 'Labs' },
-    { id: 'decisions', label: 'Decisions', badge: getTabIncidentBadge(dashboardIncidents, 'decisions') },
-    { id: 'tasks', label: 'Tasks' },
-    { id: 'chat', label: 'Chat' }
-  ];
-
   return (
     <div className="live-dashboard">
       {/* Header */}
@@ -530,46 +532,42 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
 
         {/* Health Summary (always visible) */}
         {health && (
-          <div 
+          <button
+            type="button"
             className={`health-summary-bar status-${health.system_status}`}
-            onClick={() => setActiveTab('health')}
+            onClick={() => changeView('health')}
           >
-            <span className="health-indicator"></span>
+            <span className="health-indicator" aria-hidden="true"></span>
             <span className="health-text">
               {healthOperationsSummary?.headerText}
             </span>
-          </div>
+          </button>
         )}
       </div>
 
-      {/* Tabs */}
-      <div className="dashboard-tabs">
-        {tabs.map(tab => (
-          <button
-            key={tab.id}
-            className={`tab ${activeTab === tab.id ? 'active' : ''}`}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            {tab.label}
-            {tab.badge !== undefined && tab.badge.count > 0 && (
-              <span className={`tab-badge tab-badge-${tab.badge.severity}`}>{tab.badge.count}</span>
-            )}
-          </button>
-        ))}
-      </div>
+      <AllocationSpine
+        allocations={signals?.target_allocations}
+        regime={signals?.regime?.regime}
+        updatedAt={lastUpdate}
+        killEnabled={health?.kill_switch?.enabled}
+        killLevel={health?.kill_switch?.level}
+        routed={targetAllocationRole?.routed}
+        marlAuthoritative={signals?.marl_status?.execution_role?.live_authoritative ?? false}
+      />
 
       {/* Tab Content */}
+      <div className="live-dashboard-layout">
       <div className="tab-content">
         {/* Overview Tab */}
         {activeTab === 'overview' && (
         <PanelErrorBoundary name="Overview">
           <div className="tab-panel overview-panel">
-            <IncidentSummary
-              title="Action Center"
-              incidents={overviewIncidents}
-              showTab
-              onIncidentSelect={(incident) => setActiveTab(incident.tab)}
-            />
+            <div className="overview-mobile-actions">
+              <ActionCenter
+                incidents={overviewIncidents}
+                onSelect={(incident) => changeView(incident.tab)}
+              />
+            </div>
 
             {/* Portfolio Summary */}
             <div className="metrics-grid">
@@ -1120,6 +1118,14 @@ export function LiveDashboard({ refreshInterval = 60 }: LiveDashboardProps) {
           </Suspense>
         </PanelErrorBoundary>
         )}
+      </div>
+      <ContextRail
+        incidents={dashboardIncidents}
+        routed={targetAllocationRole?.routed}
+        freshness={lastUpdate ? `Core data refreshed at ${lastUpdate}` : 'Awaiting core data refresh'}
+        openIncidentCount={incidentSummary?.incidents?.filter((incident) => incident.state !== 'resolved').length ?? 0}
+        onIncidentSelect={(incident) => changeView(incident.tab)}
+      />
       </div>
     </div>
   );

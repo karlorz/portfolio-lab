@@ -136,17 +136,17 @@ describe('dashboard presentation source contracts', () => {
     expect(liveDashboard).not.toContain('className="mt-4"');
   });
 
-  it('wraps twelve dashboard tabs before they can create page-level overflow', () => {
-    expectRuleContains(css, '.dashboard-tabs', [
-      /flex-wrap:\s*wrap;/,
-      /max-width:\s*100%;/,
-      /overflow-x:\s*hidden;/,
-    ]);
-    expectRuleContains(css, '.dashboard-tabs .tab', [
-      /flex:\s*1\s+1\s+96px;/,
-      /min-width:\s*0;/,
-    ]);
-    expect(css).toMatch(/@media\s*\(max-width:\s*1100px\)[\s\S]*\.dashboard-tabs \.tab\s*\{[\s\S]*flex-basis:\s*calc\(25% - 4px\);/);
+  it('replaces the flat dashboard tabs with grouped URL-backed navigation', () => {
+    const navigation = read('src/components/control-plane/navigation.ts');
+    const rail = read('src/components/control-plane/NavigationRail.tsx');
+
+    expect(liveDashboard).not.toContain('className="dashboard-tabs"');
+    expect(navigation).toContain("label: 'Operations'");
+    expect(navigation).toContain("label: 'Research'");
+    expect(navigation).toContain("label: 'System'");
+    expect(navigation).toContain("id: 'backtests'");
+    expect(rail).toContain("aria-current={active === item.id ? 'page' : undefined}");
+    expect(rail).toContain('workspaceHref');
   });
 
   it('waits for loaded dashboard content before browser overflow assertions', () => {
@@ -159,10 +159,10 @@ describe('dashboard presentation source contracts', () => {
     expect(browserSmoke).toContain("'Labs': ['.labs-panel .positions-table'");
     expect(browserSmoke).toContain("'Decisions': ['.decision-replay-panel'");
     expect(browserSmoke).toMatch(
-      /await tab\.click\(\);\s*await expect\(tab\)\.toHaveClass\(/,
+      /await tab\.click\(\);\s*await expect\(tab\)\.toHaveAttribute\('aria-current', 'page'\)/,
     );
     expect(browserSmoke).toMatch(
-      /await expect\(tab\)\.toHaveClass\([^)]+\);\s*await waitForLoadedDashboardTab\(page, label\);\s*await expectNoDocumentOverflow\(page\);/,
+      /await expect\(tab\)\.toHaveAttribute\('aria-current', 'page'\);\s*await waitForLoadedDashboardTab\(page, label\);\s*await expectNoDocumentOverflow\(page\);/,
     );
   });
 

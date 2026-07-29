@@ -242,6 +242,7 @@ export const PublicDataQualityIssueCountsSchema = z.object({
   non_object_records: NonNegativeIntegerSchema,
   split_like_returns: NonNegativeIntegerSchema,
   stale_latest_dates: NonNegativeIntegerSchema,
+  stale_latest_dates_within_tolerance: NonNegativeIntegerSchema.optional(),
   total: NonNegativeIntegerSchema,
 }).strict();
 

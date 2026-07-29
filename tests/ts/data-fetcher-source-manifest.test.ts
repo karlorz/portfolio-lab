@@ -371,8 +371,11 @@ describe('market data fetcher source provenance', () => {
         non_object_records: 0,
         split_like_returns: 0,
         stale_latest_dates: 0,
+        stale_latest_dates_within_tolerance: 0,
         total: 0,
       },
+      stale_within_tolerance: [],
+      whitelisted_anomalies: [],
       symbols: [
         {
           symbol: 'GLD',
@@ -446,7 +449,7 @@ describe('market data fetcher source provenance', () => {
     const report = buildPriceDataQualityReport(
       staleLatestCompactPrices(),
       '2026-06-13T00:00:00Z',
-      { maxLatestLagDays: 0 },
+      { maxLatestLagDays: 0, staleDateToleranceDays: 0 },
     );
 
     const gld = report.symbols.find((symbol) => symbol.symbol === 'GLD');
@@ -569,6 +572,7 @@ describe('market data fetcher source provenance', () => {
         ],
       },
       '2026-07-18T00:00:00Z',
+      { staleDateToleranceDays: 1 },
     );
 
     const gld = report.symbols.find((symbol) => symbol.symbol === 'GLD');
@@ -578,6 +582,230 @@ describe('market data fetcher source provenance', () => {
     expect(gld?.stale_latest_date).toEqual({
       reference_date: '2026-07-17',
       latest_date: '2026-07-15',
+    });
+  });
+
+  describe('stale latest-date tolerance', () => {
+    const twoDayLagPayload = {
+      SPY: [
+        { d: '2026-07-22', p: 740 },
+        { d: '2026-07-23', p: 742 },
+        { d: '2026-07-24', p: 743 },
+      ],
+      FXC: [{ d: '2026-07-22', p: 72 }],
+    };
+
+    it('classifies a non-sparse two-day lag within the default tolerance as advisory', () => {
+      const report = buildPriceDataQualityReport(
+        twoDayLagPayload,
+        '2026-07-24T00:00:00Z',
+      );
+
+      expect(report.issue_counts.stale_latest_dates).toBe(0);
+      expect(report.issue_counts.stale_latest_dates_within_tolerance).toBe(1);
+      expect(report.symbols.find((symbol) => symbol.symbol === 'FXC')?.status).toBe('warn');
+    });
+
+    it('keeps a five-day non-sparse lag blocking when it exceeds tolerance', () => {
+      const report = buildPriceDataQualityReport(
+        {
+          SPY: [
+            { d: '2026-07-20', p: 740 },
+            { d: '2026-07-21', p: 741 },
+            { d: '2026-07-22', p: 742 },
+            { d: '2026-07-23', p: 743 },
+            { d: '2026-07-24', p: 744 },
+            { d: '2026-07-27', p: 745 },
+          ],
+          FXC: [{ d: '2026-07-20', p: 72 }],
+        },
+        '2026-07-27T00:00:00Z',
+      );
+
+      expect(report.issue_counts.stale_latest_dates).toBe(1);
+      expect(report.issue_counts.stale_latest_dates_within_tolerance).toBe(0);
+      expect(report.overall_status).toBe('fail');
+    });
+
+    it('keeps sparse-index staleness advisory independently of the tolerance', () => {
+      const report = buildPriceDataQualityReport(
+        {
+          SPY: [
+            { d: '2026-07-20', p: 740 },
+            { d: '2026-07-21', p: 741 },
+            { d: '2026-07-22', p: 742 },
+            { d: '2026-07-23', p: 743 },
+            { d: '2026-07-24', p: 744 },
+            { d: '2026-07-27', p: 745 },
+            { d: '2026-07-28', p: 746 },
+          ],
+          '^VIX3M': [{ d: '2026-07-20', p: 18 }],
+        },
+        '2026-07-28T00:00:00Z',
+        { staleDateToleranceDays: 1 },
+      );
+
+      expect(report.issue_counts.stale_latest_dates).toBe(0);
+      expect(report.issue_counts.stale_latest_dates_within_tolerance).toBe(0);
+      expect(report.symbols.find((symbol) => symbol.symbol === '^VIX3M')?.status).toBe('warn');
+    });
+
+    it('treats the tolerance boundary as advisory and tolerance plus one as blocking', () => {
+      const atBoundary = buildPriceDataQualityReport(
+        twoDayLagPayload,
+        '2026-07-24T00:00:00Z',
+        { staleDateToleranceDays: 2 },
+      );
+      const beyondBoundary = buildPriceDataQualityReport(
+        twoDayLagPayload,
+        '2026-07-24T00:00:00Z',
+        { staleDateToleranceDays: 1 },
+      );
+
+      expect(atBoundary.issue_counts.stale_latest_dates_within_tolerance).toBe(1);
+      expect(atBoundary.overall_status).toBe('warn');
+      expect(beyondBoundary.issue_counts.stale_latest_dates).toBe(1);
+      expect(beyondBoundary.overall_status).toBe('fail');
+    });
+
+    it('honors a configured one-day tolerance for a two-day lag', () => {
+      const report = buildPriceDataQualityReport(
+        twoDayLagPayload,
+        '2026-07-24T00:00:00Z',
+        { staleDateToleranceDays: 1 },
+      );
+
+      expect(report.issue_counts.stale_latest_dates).toBe(1);
+      expect(report.overall_status).toBe('fail');
+    });
+
+    it('publishes the within-tolerance advisory details', () => {
+      const report = buildPriceDataQualityReport(
+        twoDayLagPayload,
+        '2026-07-24T00:00:00Z',
+      );
+
+      expect(report.stale_within_tolerance).toEqual([
+        {
+          symbol: 'FXC',
+          latest_lag_days: 2,
+          reference_date: '2026-07-24',
+          latest_date: '2026-07-22',
+        },
+      ]);
+    });
+
+    it('reports warn when only within-tolerance staleness and a whitelisted anomaly remain', () => {
+      const report = buildPriceDataQualityReport(
+        {
+          SPY: [
+            { d: '2020-03-11', p: 100 },
+            { d: '2020-03-12', p: 91 },
+            { d: '2020-03-13', p: 82 },
+            { d: '2020-03-16', p: 72 },
+          ],
+          FXC: [
+            { d: '2020-03-11', p: 72 },
+            { d: '2020-03-12', p: 71 },
+          ],
+          'ETH-USD': [
+            { d: '2020-03-11', p: 194.8685302734375 },
+            { d: '2020-03-12', p: 112.34712219238281 },
+            { d: '2020-03-13', p: 120 },
+            { d: '2020-03-16', p: 125 },
+          ],
+        },
+        '2020-03-16T00:00:00Z',
+      );
+
+      expect(report.issue_counts.stale_latest_dates).toBe(0);
+      expect(report.issue_counts.stale_latest_dates_within_tolerance).toBe(1);
+      expect(report.issue_counts.split_like_returns).toBe(0);
+      expect(report.overall_status).toBe('warn');
+    });
+  });
+
+  describe('return anomaly whitelist', () => {
+    const ethCrashPayload = {
+      'ETH-USD': [
+        { d: '2020-03-11', p: 194.8685302734375 },
+        { d: '2020-03-12', p: 112.34712219238281 },
+      ],
+    };
+
+    it('skips a configured ETH-USD 2020-03-12 split-like anomaly', () => {
+      const report = buildPriceDataQualityReport(
+        ethCrashPayload,
+        '2020-03-12T00:00:00Z',
+        {
+          anomalyWhitelist: [{
+            symbol: 'ETH-USD',
+            date: '2020-03-12',
+            reason: 'COVID-19 crash',
+          }],
+        },
+      );
+
+      expect(report.issue_counts.split_like_returns).toBe(0);
+      expect(report.symbols[0].return_anomalies).toEqual([]);
+    });
+
+    it('still counts the same return magnitude on a non-whitelisted date', () => {
+      const report = buildPriceDataQualityReport(
+        {
+          'ETH-USD': [
+            { d: '2020-03-12', p: 194.8685302734375 },
+            { d: '2020-03-13', p: 112.34712219238281 },
+          ],
+        },
+        '2020-03-13T00:00:00Z',
+      );
+
+      expect(report.issue_counts.split_like_returns).toBe(1);
+    });
+
+    it('rejects whitelist entries without a non-empty reason', () => {
+      expect(() => buildPriceDataQualityReport(
+        ethCrashPayload,
+        '2020-03-12T00:00:00Z',
+        {
+          anomalyWhitelist: [{
+            symbol: 'ETH-USD',
+            date: '2020-03-12',
+            reason: '',
+          }],
+        },
+      )).toThrow('reason');
+    });
+
+    it('matches whitelist entries to the exact symbol and date', () => {
+      const report = buildPriceDataQualityReport(
+        {
+          'BTC-USD': [
+            { d: '2020-03-11', p: 194.8685302734375 },
+            { d: '2020-03-12', p: 112.34712219238281 },
+          ],
+        },
+        '2020-03-12T00:00:00Z',
+      );
+
+      expect(report.issue_counts.split_like_returns).toBe(1);
+      expect(report.whitelisted_anomalies).toEqual([]);
+    });
+
+    it('publishes default whitelist metadata for the known ETH crash', () => {
+      const report = buildPriceDataQualityReport(
+        ethCrashPayload,
+        '2020-03-12T00:00:00Z',
+      );
+
+      expect(report.whitelisted_anomalies).toEqual([
+        {
+          symbol: 'ETH-USD',
+          date: '2020-03-12',
+          reason: expect.stringContaining('COVID-19'),
+        },
+      ]);
     });
   });
 
@@ -614,6 +842,7 @@ describe('market data fetcher source provenance', () => {
       non_object_records: 0,
       split_like_returns: 0,
       stale_latest_dates: 0,
+      stale_latest_dates_within_tolerance: 0,
       total: 6,
     });
     expect(report.symbols.find((symbol) => symbol.symbol === 'GLD')).toMatchObject({
@@ -838,6 +1067,7 @@ describe('market data fetcher source provenance', () => {
         non_object_records: 0,
         split_like_returns: 1,
         stale_latest_dates: 0,
+        stale_latest_dates_within_tolerance: 0,
         total: 1,
       },
     });
