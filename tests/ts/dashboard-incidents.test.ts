@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { ActionCenter } from '../../src/components/control-plane/ActionCenter';
 import {
   buildDashboardIncidents,
   buildDecisionIncidents,
@@ -199,6 +202,35 @@ describe('dashboard incident derivation', () => {
     });
 
     expect(incidents).toEqual([]);
+  });
+
+  it('keeps non-action provider warnings visible as advisory without action count', () => {
+    const incidents = buildDashboardIncidents({
+      alerts: [
+        alert({
+          level: 'warning',
+          type: 'provider_cached',
+          title: 'Provider data cached',
+          message: 'Signal breadth is degraded: 1/9 healthy.',
+          requires_action: false,
+        }),
+      ],
+      signals: null,
+      health: null,
+    });
+
+    expect(incidents).toHaveLength(1);
+    expect(incidents[0]).toMatchObject({
+      attention: 'advisory',
+      severity: 'warning',
+      title: 'Provider data cached',
+    });
+    expect(getTabIncidentBadge(incidents, 'overview')).toEqual({ count: 1, severity: 'warning' });
+
+    const html = renderToStaticMarkup(React.createElement(ActionCenter, { incidents }));
+    expect(html).toContain('aria-label="0 actions required"');
+    expect(html).toContain('advisory');
+    expect(html).toContain('Provider data cached');
   });
 
   it('aggregates Overview incidents across tabs and reports badge count by highest severity', () => {

@@ -14,6 +14,7 @@ const components = [
   'ActionCenter',
   'ContextRail',
   'DesignGuidePage',
+  'OverflowRegion',
 ];
 
 describe('control-plane design contracts', () => {
@@ -67,8 +68,61 @@ describe('control-plane design contracts', () => {
       'MetricCard',
       'ActionCenter',
       'ContextRail',
+      'OverflowRegion',
     ]) {
       expect(guide).toContain(`<${component}`);
     }
+  });
+
+  it('makes the shell context track conditional and keeps mobile navigation before content', () => {
+    const shell = read('src/components/control-plane/AppShell.tsx');
+    const css = read('src/styles/control-plane.css');
+
+    expect(shell).toContain('control-plane-grid-with-context');
+    expect(shell).toContain('control-plane-grid-no-context');
+    expect(shell).toContain('context ? context : null');
+    expect(css).toContain('.control-plane-grid-no-context');
+    expect(css).toContain('.control-plane-grid-with-context');
+    expect(css).not.toContain('.workspace-main {\n    order: -1;');
+  });
+
+  it('uses one named container-query owner for dashboard reflow', () => {
+    const dashboard = read('src/components/LiveDashboard.tsx');
+    const css = read('src/styles/control-plane.css');
+    const contextIndex = dashboard.indexOf('<ContextRail');
+    const tabIndex = dashboard.indexOf('<div className="tab-content">');
+
+    expect(css).toContain('container: live-dashboard / inline-size');
+    expect(css).toContain('@container live-dashboard');
+    expect(css).toContain('grid-template-areas: "main context"');
+    expect(css).toContain('"context"');
+    expect(css).toContain('"main"');
+    expect(contextIndex).toBeGreaterThanOrEqual(0);
+    expect(tabIndex).toBeGreaterThan(contextIndex);
+    expect(dashboard).not.toContain('overview-mobile-actions');
+  });
+
+  it('wraps wide live tables in named keyboard-focusable overflow regions', () => {
+    const overflow = read('src/components/control-plane/OverflowRegion.tsx');
+    const dashboard = read('src/components/LiveDashboard.tsx');
+    const css = read('src/styles/control-plane.css');
+
+    expect(overflow).toContain('aria-label={label}');
+    expect(overflow).toContain('tabIndex={0}');
+    expect(css).toContain('.overflow-region');
+    expect(css).toContain('overflow-x: auto');
+    expect(css).toContain('.overflow-region:focus-visible');
+    expect(dashboard).toContain('<OverflowRegion label="Current positions table">');
+    expect(dashboard).toContain('<OverflowRegion label="Recent orders table">');
+  });
+
+  it('uses semantic regime tones and tabular numeric table regions', () => {
+    const dashboard = read('src/components/LiveDashboard.tsx');
+    const css = read('src/styles/control-plane.css');
+
+    expect(dashboard).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    expect(dashboard).toContain('regime-tone-');
+    expect(dashboard).toContain('regime-text-');
+    expect(css).toContain('font-variant-numeric: tabular-nums');
   });
 });

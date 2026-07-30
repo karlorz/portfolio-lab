@@ -40,17 +40,18 @@ export function AppShell({ workspace, onNavigate, spine, context, refreshedAt, c
           onClick={openPalette}
           aria-keyshortcuts="Control+K Meta+K"
         >
-          Navigate <kbd>⌘ K</kbd>
+          <span className="command-palette-label">Navigate</span>
+          <kbd>⌘ K</kbd>
         </button>
       </header>
       {spine}
-      <div className="control-plane-grid">
+      <div className={`control-plane-grid ${context ? 'control-plane-grid-with-context' : 'control-plane-grid-no-context'}`}>
         <NavigationRail active={workspace} onNavigate={onNavigate} />
         <main id="workspace-main" className="workspace-main">
           <WorkspaceHeader workspace={workspace} refreshedAt={refreshedAt} />
           {children}
         </main>
-        {context}
+        {context ? context : null}
       </div>
       <CommandPalette open={paletteOpen} onClose={closePalette} onNavigate={onNavigate} />
     </div>

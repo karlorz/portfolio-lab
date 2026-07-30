@@ -111,8 +111,8 @@ export const EntropySchema = z.object({
   normalized_score: z.number(),
   concentration_risk: z.enum(['critical', 'high', 'medium', 'low', 'good']),
   hhi_index: z.number(),
-  correlation_entropy: z.optional(z.number()),
-  participation_ratio: z.optional(z.number()),
+  correlation_entropy: z.optional(z.nullable(z.number())),
+  participation_ratio: z.optional(z.nullable(z.number())),
 });
 
 // ---------------------------------------------------------------------------
@@ -968,7 +968,7 @@ export const FactorRotationDashboardSchema = z.object({
   selected_factors: z.array(z.string()),
   signal_strength: z.number(),
   factor_allocations: z.record(z.string(), z.number()),
-  backtest_finding: z.string(),
+  backtest_finding: z.optional(z.string()),
 }).passthrough();
 
 export const CollarSchema = z.object({
