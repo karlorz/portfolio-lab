@@ -21,8 +21,8 @@ def test_daily_loader_sorts_collapses_normalizes_and_counts(tmp_path) -> None:
         path,
         [
             {"regime": "crisis", "detected_at": "2026-07-21T23:00:00Z"},
-            {"regime": "normal", "detected_at": "2026-07-20T01:00:00+00:00"},
-            {"regime": "high_vol", "detected_at": "2026-07-20T22:00:00Z"},
+            {"regime": "normal", "detected_at": "2026-07-20T01:00:00+00:00", "vix_level": 18.5},
+            {"regime": "high_vol", "detected_at": "2026-07-20T22:00:00Z", "vix": 21.2},
             {"regime": "recovery", "detected_at": "2026-07-22T00:30:00Z"},
         ],
     )
@@ -30,6 +30,11 @@ def test_daily_loader_sorts_collapses_normalizes_and_counts(tmp_path) -> None:
     result = load_daily_regime_history(path)
 
     assert result.labels == ["HIGH_VOL", "CRISIS", "RECOVERY"]
+    assert result.records == [
+        {"d": "2026-07-20", "r": "high_vol", "v": 21.2},
+        {"d": "2026-07-21", "r": "crisis", "v": None},
+        {"d": "2026-07-22", "r": "recovery", "v": None},
+    ]
     assert result.metadata["raw_row_count"] == 4
     assert result.metadata["valid_row_count"] == 4
     assert result.metadata["history_len"] == 3
@@ -78,6 +83,7 @@ def test_missing_file_returns_honest_empty_result(tmp_path) -> None:
     result = load_daily_regime_history(tmp_path / "missing.json")
 
     assert result.labels == []
+    assert result.records == []
     assert result.metadata["history_len"] == 0
     assert result.metadata["evidence_quality"] == "insufficient"
     assert result.metadata["history_source"].endswith("missing.json")

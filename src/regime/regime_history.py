@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +21,7 @@ class DailyRegimeHistory:
     """Oldest-to-newest daily labels plus provenance and quality metadata."""
 
     labels: list[str]
+    records: list[dict[str, str | float | None]]
     metadata: dict[str, Any]
 
 
@@ -45,6 +47,18 @@ def _evidence_quality(history_len: int, transition_count: int) -> str:
     return "observed"
 
 
+def _parse_vix(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed):
+        return None
+    return parsed
+
+
 def load_daily_regime_history(
     path: Path | str = DEFAULT_REGIME_HISTORY_PATH,
 ) -> DailyRegimeHistory:
@@ -58,7 +72,7 @@ def load_daily_regime_history(
     raw_row_count = 0
     malformed_row_count = 0
     unknown_regime_count = 0
-    observations: list[tuple[datetime, str]] = []
+    observations: list[tuple[datetime, str, float | None]] = []
 
     try:
         lines = history_path.open("r", encoding="utf-8")
@@ -87,14 +101,24 @@ def load_daily_regime_history(
                 if regime not in _KNOWN_REGIMES:
                     unknown_regime_count += 1
                     continue
-                observations.append((detected_at, regime))
+                observations.append(
+                    (
+                        detected_at,
+                        regime,
+                        _parse_vix(row.get("vix_level", row.get("vix"))),
+                    )
+                )
 
     observations.sort(key=lambda item: item[0])
-    daily: dict[str, tuple[datetime, str]] = {}
-    for detected_at, regime in observations:
-        daily[detected_at.date().isoformat()] = (detected_at, regime)
+    daily: dict[str, tuple[datetime, str, float | None]] = {}
+    for detected_at, regime, vix in observations:
+        daily[detected_at.date().isoformat()] = (detected_at, regime, vix)
     collapsed = list(daily.values())
-    labels = [regime for _, regime in collapsed]
+    labels = [regime for _, regime, _ in collapsed]
+    records = [
+        {"d": detected_at.date().isoformat(), "r": regime.lower(), "v": vix}
+        for detected_at, regime, vix in collapsed
+    ]
     transition_count = sum(
         previous != current for previous, current in zip(labels, labels[1:])
     )
@@ -112,4 +136,4 @@ def load_daily_regime_history(
         "last_observation_at": collapsed[-1][0].isoformat() if collapsed else None,
         "evidence_quality": _evidence_quality(len(labels), transition_count),
     }
-    return DailyRegimeHistory(labels=labels, metadata=metadata)
+    return DailyRegimeHistory(labels=labels, records=records, metadata=metadata)
