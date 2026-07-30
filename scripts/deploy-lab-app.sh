@@ -274,11 +274,10 @@ check_public_data_consistency() {
   if [ "$SKIP_DATA" = "1" ]; then
     warn "--skip-data set; validating existing public/data artifacts"
   fi
-  # Checkout public/data is intentional here (pre-publish). Live WWW SSOT is
-  # separate; immutable static release identity excludes /data/**, so this
-  # deploy path audits public data without requiring checkout dist/data copies.
+  # Immutable static release identity excludes /data/**, so this deploy path
+  # audits the live public data tree in place instead of the checkout mirror.
   run_app_cmd ./scripts/python_runtime.sh scripts/check_public_data_consistency.py \
-    --app-dir "$APP_DIR" --allow-repo-public-data --skip-dist-data-match
+    --app-dir "$APP_DIR" --public-dir "${PUBLIC_ROOT}/data" --skip-dist-data-match
 }
 
 prepare_release_dir() {

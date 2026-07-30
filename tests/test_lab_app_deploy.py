@@ -150,13 +150,14 @@ def test_lab_deploy_checks_public_data_consistency_after_live_mirror_before_publ
 
     assert "check_public_data_consistency" in source
     assert "--skip-dist-data-match" in source
-    # Live WWW data must be mirrored into checkout public/data before the
-    # consistency check so index entries resolve. Immutable release identity
-    # excludes /data/** and is verified separately before publish.
+    # Immutable release identity excludes /data/**; deploy validates the live
+    # public data tree in place and verifies static release bytes separately.
     assert main_body.index("mirror_repo_public_data_from_live") < main_body.index("build_frontend")
     assert main_body.index("build_frontend") < main_body.index("check_public_data_consistency")
     assert main_body.index("check_public_data_consistency") < main_body.index("verify_static_release")
     assert main_body.index("verify_static_release") < main_body.index("publish_dist")
+    assert '--public-dir "${PUBLIC_ROOT}/data"' in source
+    assert "--allow-repo-public-data" not in source
 
 
 def test_lab_deploy_warns_that_skip_data_uses_existing_artifact_consistency_gate():
