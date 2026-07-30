@@ -33,6 +33,22 @@ def test_validate_authority_payload_accepts_champion():
     validate_authority_payload(payload)  # does not raise
 
 
+def test_champion_policy_accepts_exact_baseline():
+    from src.monitor.signal_authority import is_champion_target_allocations
+
+    payload = {"target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}}
+
+    assert is_champion_target_allocations(payload) is True
+
+
+def test_champion_policy_rejects_vol_spike_override():
+    from src.monitor.signal_authority import is_champion_target_allocations
+
+    payload = {"target_allocations": {"SPY": 0.30, "GLD": 0.45, "TLT": 0.25}}
+
+    assert is_champion_target_allocations(payload) is False
+
+
 def test_write_signals_multi_dest_refuses_hollow(tmp_path):
     from src.monitor.signal_authority import (
         AuthorityValidationError,

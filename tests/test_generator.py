@@ -1082,17 +1082,34 @@ class TestEnsemblePostDecayMetrics:
     def test_regime_authority_discloses_live_controller_and_shadow_roles(self):
         authority = DashboardGenerator._build_regime_authority(
             current_regime="vol_spike",
-            target_alloc={"SPY": 0.38, "GLD": 0.42, "TLT": 0.20},
+            target_alloc={"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
         )
 
         assert authority["schema_version"] == "regime-authority/v1"
-        assert authority["live_controller"] == "classify_vix_regime"
-        assert authority["live_controller_module"] == "src.utils.classify_vix_regime"
+        assert authority["live_controller"] == "signals.json.target_allocations"
+        assert authority["live_controller_module"] == "src.broker.order_router"
+        assert authority["regime_controller"] == "classify_vix_regime"
+        assert authority["regime_routed"] is False
         assert authority["live_regime"] == "vol_spike"
         assert authority["allocation_regime"] == "high_vol"
         assert authority["routed_surface"] == "target_allocations"
+        assert authority["target_allocations"] == {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
         assert authority["advanced_regime_signals"]["two_stage_regime"]["role"] == "advisory_shadow"
         assert authority["advanced_regime_signals"]["bocd_regime"]["routed"] is False
+
+    def test_regime_allocation_diagnostic_is_advisory_non_routed(self):
+        diagnostic = DashboardGenerator._build_regime_allocation_diagnostic("vol_spike")
+
+        assert diagnostic["role"] == "advisory_non_routed"
+        assert diagnostic["live_authoritative"] is False
+        assert diagnostic["routed"] is False
+        assert diagnostic["allocation_regime"] == "high_vol"
+        assert diagnostic["candidate_target_allocations"] == {
+            "SPY": 0.30,
+            "GLD": 0.45,
+            "TLT": 0.25,
+        }
+        assert diagnostic["canonical_controller"] == "signals.json.target_allocations"
 
     def test_regime_authority_marks_missing_advanced_sections_unpublished(self):
         output = {
@@ -4478,8 +4495,10 @@ class TestSignalsJSONRegimeComposite:
         assert data["regime"]["regime"] == "crisis"
         gen.conn.close()
 
-    def test_crisis_target_alloc_applied(self, tmp_path):
-        """Crisis regime uses crisis target allocation weights."""
+    def test_crisis_regime_keeps_champion_target_alloc_and_advisory_candidate(
+        self, tmp_path
+    ):
+        """Current hard rule: crisis regime does not rewrite live target_allocations."""
         gen, db_path = _make_generator(tmp_path)
         conn = sqlite3.connect(str(db_path))
         conn.execute("INSERT INTO prices VALUES ('^VIX', ?, ?)",
@@ -4496,13 +4515,20 @@ class TestSignalsJSONRegimeComposite:
                     path = gen.generate_signals_json()
         with open(path) as f:
             data = json.load(f)
-        expected = {"SPY": 0.20, "GLD": 0.50, "TLT": 0.30}
-        assert data["target_allocations"] == expected
+        assert data["target_allocations"] == {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
+        diagnostic = data["regime_allocation_diagnostic"]
+        assert diagnostic["routed"] is False
+        assert diagnostic["live_authoritative"] is False
+        assert diagnostic["candidate_target_allocations"] == {
+            "SPY": 0.20,
+            "GLD": 0.50,
+            "TLT": 0.30,
+        }
         gen.conn.close()
 
 
 class TestRegimeTargetAllocationParity:
-    """Dashboard target allocations should match scheduled evaluator semantics."""
+    """Dashboard target allocations preserve current champion authority."""
 
     @pytest.mark.parametrize(
             ("expected_regime", "vix_level", "trend_regime"),
@@ -4513,13 +4539,13 @@ class TestRegimeTargetAllocationParity:
                 ("recovery", 16.0, "recovery"),
             ],
         )
-    def test_env_enabled_target_allocations_match_regime_helper(
+    def test_target_allocations_stay_champion_when_regime_changes(
         self, tmp_path, monkeypatch, expected_regime, vix_level, trend_regime
     ):
-        """REGIME_ALLOC_ENABLED dashboard path uses the evaluator helper."""
-        from src.strategy.regime_allocation import get_regime_allocation_with_override
+        """VIX/trend regimes remain advisory under the current hard rule."""
+        from src.paths import BASE_ALLOCATION
 
-        monkeypatch.setenv("REGIME_ALLOC_ENABLED", "1")
+        monkeypatch.delenv("REGIME_ALLOC_ENABLED", raising=False)
         gen, db_path = _make_generator(tmp_path)
         conn = sqlite3.connect(str(db_path))
         conn.execute(
@@ -4544,7 +4570,21 @@ class TestRegimeTargetAllocationParity:
             gen.conn.close()
 
         assert context["current_regime"] == expected_regime
-        assert context["target_alloc"] == get_regime_allocation_with_override(expected_regime)
+        assert context["target_alloc"] == BASE_ALLOCATION
+
+    def test_default_dashboard_target_allocations_stay_champion_in_vol_spike(
+        self, tmp_path, monkeypatch
+    ):
+        """Current hard rule: VIX regimes do not rewrite live target_allocations."""
+        from src.paths import BASE_ALLOCATION
+        from src.dashboard.generator import DashboardGenerator
+
+        monkeypatch.delenv("REGIME_ALLOC_ENABLED", raising=False)
+
+        gen = DashboardGenerator.__new__(DashboardGenerator)
+        target = gen._resolve_live_target_allocations_for_regime("vol_spike")
+
+        assert target == BASE_ALLOCATION
 
 
 # ---------------------------------------------------------------------------

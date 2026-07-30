@@ -128,6 +128,55 @@ class TestCheckDataFreshness:
         assert "plab-pytest" not in str(freshness["signals"].get("path") or "")
         assert freshness["prices"]["status"] == "ok"
 
+    def test_health_kill_refresh_refuses_to_restamp_non_champion_ta(
+        self, tmp_path, monkeypatch
+    ):
+        from src.monitor import health_check as hc
+
+        public_dir = tmp_path / "www"
+        data_dir = tmp_path / "data"
+        public_dir.mkdir()
+        data_dir.mkdir()
+        before = {
+            "generated_at": "2026-07-30T07:16:18+00:00",
+            "target_allocations": {"SPY": 0.30, "GLD": 0.45, "TLT": 0.25},
+            "health": {"status": "ok", "kill_switch_enabled": False},
+        }
+        (public_dir / "signals.json").write_text(json.dumps(before), encoding="utf-8")
+        (data_dir / "signals.json").write_text(json.dumps(before), encoding="utf-8")
+
+        monkeypatch.setattr(hc, "PUBLIC_DATA_DIR", public_dir)
+        monkeypatch.setattr(hc, "DATA_DIR", data_dir)
+
+        with patch.object(
+            hc,
+            "_disk_kill_and_open_incidents",
+            return_value=(
+                {"enabled": False, "level": None},
+                {"open_count": 0, "status": "ok"},
+            ),
+        ), patch(
+            "src.dashboard.kill_authority.project_compact_kill_fields",
+            return_value={"kill_switch_enabled": False, "open_incidents_count": 0},
+        ):
+            hc.refresh_signals_health_kill_fields(
+                {"status": "ok", "timestamp": "2026-07-30T07:30:00+00:00"},
+                public_dir=public_dir,
+                data_dir=data_dir,
+            )
+
+        after = json.loads((public_dir / "signals.json").read_text(encoding="utf-8"))
+        private_after = json.loads(
+            (data_dir / "signals.json").read_text(encoding="utf-8")
+        )
+        assert after["target_allocations"] == {
+            "SPY": 0.30,
+            "GLD": 0.45,
+            "TLT": 0.25,
+        }
+        assert after.get("generated_at") == before.get("generated_at")
+        assert private_after == after
+
     def test_hermes_cron_error_degrades_cron_check(self, tmp_path, monkeypatch):
         """Hermes scheduler errors should be included in health cron checks."""
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
