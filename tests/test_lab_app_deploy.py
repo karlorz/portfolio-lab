@@ -119,6 +119,28 @@ def test_lab_deploy_refreshes_dashboard_data_before_build():
     assert main_body.index("refresh_dashboard_data") < main_body.index("publish_dist")
 
 
+def test_lab_deploy_builds_verifies_and_publishes_static_release():
+    source = _read("scripts/deploy-lab-app.sh")
+    main_body = source.split("main() {", 1)[1]
+    main_body = main_body.split("}", 1)[0]
+
+    assert "--release-dir" in source
+    assert "scripts/build_lab_release.py" in source
+    assert "scripts/verify_lab_release.py" in source
+    assert "Building verified static release" in source
+    assert "Publishing verified static app" in source
+    assert main_body.index("build_frontend") < main_body.index("verify_static_release")
+    assert main_body.index("verify_static_release") < main_body.index("publish_dist")
+
+
+def test_lab_deploy_preserves_mutable_data_when_publishing_static_release():
+    source = _read("scripts/deploy-lab-app.sh")
+
+    assert "--exclude='/data/'" in source
+    assert "--exclude='/data/**'" in source
+    assert "--exclude='./data'" in source
+
+
 def test_lab_deploy_checks_public_data_consistency_after_live_mirror_before_publish():
     source = _read("scripts/deploy-lab-app.sh")
     # Isolate the main() call sequence (after the last function definition),
@@ -127,20 +149,20 @@ def test_lab_deploy_checks_public_data_consistency_after_live_mirror_before_publ
     main_body = main_body.split("}", 1)[0]
 
     assert "check_public_data_consistency" in source
-    # Live WWW data must be mirrored into checkout public/data BEFORE build
-    # (so dist/data captures the fresh mirror) and before the consistency
-    # check (so index entries resolve). Files the operator tree has but the
-    # repo mirror lacked (e.g. attribution_YYYY-MM-DD.json) otherwise
-    # false-fail the pre-publish gate.
+    assert "--skip-dist-data-match" in source
+    # Live WWW data must be mirrored into checkout public/data before the
+    # consistency check so index entries resolve. Immutable release identity
+    # excludes /data/** and is verified separately before publish.
     assert main_body.index("mirror_repo_public_data_from_live") < main_body.index("build_frontend")
     assert main_body.index("build_frontend") < main_body.index("check_public_data_consistency")
-    assert main_body.index("check_public_data_consistency") < main_body.index("publish_dist")
+    assert main_body.index("check_public_data_consistency") < main_body.index("verify_static_release")
+    assert main_body.index("verify_static_release") < main_body.index("publish_dist")
 
 
 def test_lab_deploy_warns_that_skip_data_uses_existing_artifact_consistency_gate():
     source = _read("scripts/deploy-lab-app.sh")
 
-    assert "--skip-data set; validating existing public/data and dist/data artifacts" in source
+    assert "--skip-data set; validating existing public/data artifacts" in source
 
 
 def test_public_data_consistency_checker_accepts_matching_public_and_dist_data(tmp_path: Path):

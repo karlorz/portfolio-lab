@@ -653,6 +653,7 @@ def check_public_data_consistency(
     allow_repo_public_data: bool = False,
     env: dict[str, str] | None = None,
     live_public_data_dir: str | Path | None = None,
+    skip_dist_data_match: bool = False,
 ) -> ConsistencyResult:
     """Return deploy-blocking public data consistency errors for an app checkout.
 
@@ -691,7 +692,7 @@ def check_public_data_consistency(
         auditing_repo_tree = public_data.resolve() == repo_public
     except OSError:
         auditing_repo_tree = False
-    if auditing_repo_tree:
+    if auditing_repo_tree and not skip_dist_data_match:
         _check_dist_matches_public(root, errors)
         _check_compact_prices_match_market_db(root, errors)
     _check_critical_health_has_slo_alert(public_data, health, errors)
@@ -715,12 +716,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Allow auditing app-dir/public/data even when live WWW public data exists",
     )
+    parser.add_argument(
+        "--skip-dist-data-match",
+        action="store_true",
+        help="Skip dist/data vs public/data comparison when immutable static release policy excludes /data/**",
+    )
     args = parser.parse_args(argv)
 
     result = check_public_data_consistency(
         args.app_dir,
         public_dir=args.public_dir,
         allow_repo_public_data=args.allow_repo_public_data,
+        skip_dist_data_match=args.skip_dist_data_match,
     )
     for warning in result.warnings:
         print(f"WARN: {warning}", file=sys.stderr)
