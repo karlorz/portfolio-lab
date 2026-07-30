@@ -1094,30 +1094,6 @@ def refresh_signals_health_kill_fields(
     except Exception:  # noqa: BLE001
         pass
 
-    payload["health"] = health
-    # Partial rewrite must advance top-level generated_at (mtime honesty)
-    from datetime import datetime, timezone
-    now_utc = datetime.now(timezone.utc).isoformat()
-    payload["generated_at"] = now_utc
-    payload["content_patched_at"] = now_utc
-    payload["content_patch_source"] = "health_kill_refresh"
-    # Clear sticky full-run git sha — partial ≠ full dashboard generation
-    try:
-        from src.dashboard.generator import _apply_partial_patch_git_sha_honesty
-
-        _apply_partial_patch_git_sha_honesty(
-            payload, patch_source="health_kill_refresh"
-        )
-    except Exception:  # noqa: BLE001 — never fail kill refresh on import
-        prior = payload.get("generator_git_sha")
-        if prior:
-            payload.setdefault("last_full_generator_git_sha", prior)
-        payload["generator_git_sha"] = None
-        payload["generator_git_sha_status"] = "partial_patch"
-    # After honesty stamp, concentration lag flag is definitive for this path
-    if isinstance(payload.get("health"), dict):
-        payload["health"]["ensemble_may_lag_full_generate"] = True
-
     root_data = Path(data_dir) if data_dir is not None else Path(DATA_DIR)
     private = root_data / "signals.json"
 
@@ -1127,6 +1103,7 @@ def refresh_signals_health_kill_fields(
     try:
         from src.monitor.signal_authority import (
             AuthorityValidationError,
+            is_champion_target_allocations,
             validate_authority_payload,
             write_signals_multi_dest,
         )
@@ -1164,6 +1141,37 @@ def refresh_signals_health_kill_fields(
                 signals_path,
             )
             return
+
+    if not is_champion_target_allocations(payload):
+        logger.error(
+            "Refusing signals.health kill refresh: non-champion "
+            "target_allocations under champion hard rule"
+        )
+        return
+
+    payload["health"] = health
+    # Partial rewrite must advance top-level generated_at (mtime honesty)
+    from datetime import datetime, timezone
+    now_utc = datetime.now(timezone.utc).isoformat()
+    payload["generated_at"] = now_utc
+    payload["content_patched_at"] = now_utc
+    payload["content_patch_source"] = "health_kill_refresh"
+    # Clear sticky full-run git sha — partial ≠ full dashboard generation
+    try:
+        from src.dashboard.generator import _apply_partial_patch_git_sha_honesty
+
+        _apply_partial_patch_git_sha_honesty(
+            payload, patch_source="health_kill_refresh"
+        )
+    except Exception:  # noqa: BLE001 — never fail kill refresh on import
+        prior = payload.get("generator_git_sha")
+        if prior:
+            payload.setdefault("last_full_generator_git_sha", prior)
+        payload["generator_git_sha"] = None
+        payload["generator_git_sha_status"] = "partial_patch"
+    # After honesty stamp, concentration lag flag is definitive for this path
+    if isinstance(payload.get("health"), dict):
+        payload["health"]["ensemble_may_lag_full_generate"] = True
 
     try:
         # Fan-out private twin when DATA_DIR is a real directory (or file already

@@ -18,7 +18,6 @@ import numpy as np
 
 from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB, REGIME_OVERRIDES, sqlite_connect
 from src.strategy.regime_allocation import (
-    get_regime_allocation_with_override,
     normalize_allocation_regime,
 )
 from src.utils import safe_get, classify_vix_regime
@@ -2160,11 +2159,7 @@ class DashboardGenerator:
             total_value = 100000  # Initial
             cash = 100000
         
-        # Target allocation based on regime
-        if os.environ.get("REGIME_ALLOC_ENABLED", "0") == "1":
-            target_alloc = get_regime_allocation_with_override(current_regime)
-        else:
-            target_alloc = REGIME_OVERRIDES.get(current_regime) or BASE_ALLOCATION
+        target_alloc = self._resolve_live_target_allocations_for_regime(current_regime)
         
         # Pending orders (tail read only)
         orders = []
@@ -3667,19 +3662,49 @@ class DashboardGenerator:
         }
 
     @staticmethod
+    def _resolve_live_target_allocations_for_regime(
+        current_regime: str,
+    ) -> Dict[str, float]:
+        """Return the only currently approved order-routing target allocation."""
+        _ = current_regime
+        return dict(BASE_ALLOCATION)
+
+    @staticmethod
+    def _build_regime_allocation_diagnostic(current_regime: str) -> Dict[str, Any]:
+        """Expose regime-derived allocation candidates without routing them."""
+        allocation_regime = normalize_allocation_regime(current_regime) or "normal"
+        candidate = REGIME_OVERRIDES.get(current_regime)
+        return {
+            "schema_version": "regime-allocation-diagnostic/v1",
+            "role": "advisory_non_routed",
+            "live_authoritative": False,
+            "routed": False,
+            "allocation_regime": allocation_regime,
+            "candidate_target_allocations": dict(candidate or BASE_ALLOCATION),
+            "canonical_controller": "signals.json.target_allocations",
+            "description": (
+                "Regime allocation candidate is diagnostic only; current hard rule "
+                "keeps live target_allocations at the champion baseline."
+            ),
+        }
+
+    @staticmethod
     def _build_regime_authority(
         current_regime: str,
         target_alloc: Dict[str, float],
     ) -> Dict[str, Any]:
-        """Document the live regime controller and advisory role of advanced regimes."""
+        """Document the routed target allocation controller and advisory regimes."""
         return {
             "schema_version": "regime-authority/v1",
-            "live_controller": "classify_vix_regime",
-            "live_controller_module": "src.utils.classify_vix_regime",
+            "live_controller": "signals.json.target_allocations",
+            "live_controller_module": "src.broker.order_router",
             "live_regime": current_regime,
             "allocation_regime": normalize_allocation_regime(current_regime) or "normal",
             "routed_surface": "target_allocations",
             "target_allocations": target_alloc,
+            "regime_controller": "classify_vix_regime",
+            "regime_controller_module": "src.utils.classify_vix_regime",
+            "regime_routed": False,
             "advanced_regime_signals": {
                 "two_stage_regime": {
                     "role": "advisory_shadow",
@@ -4303,6 +4328,9 @@ class DashboardGenerator:
             "target_allocations": target_alloc,
             "allocation_surface_roles": self._build_allocation_surface_roles(),
             "regime_authority": self._build_regime_authority(current_regime, target_alloc),
+            "regime_allocation_diagnostic": self._build_regime_allocation_diagnostic(
+                current_regime
+            ),
             "current_positions": positions,
             "cash": round(cash, 2),
             "total_value": round(total_value, 2),

@@ -227,6 +227,23 @@ class TestLoadSignals:
             assert len(signals) == 3
             assert {s.symbol for s in signals} == {"SPY", "GLD", "TLT"}
 
+    def test_load_signals_consumes_exact_target_allocations(self):
+        with tempfile.TemporaryDirectory() as d:
+            signals_file = os.path.join(d, "signals.json")
+            with open(signals_file, "w") as f:
+                json.dump(
+                    {"target_allocations": {"SPY": 0.30, "GLD": 0.45, "TLT": 0.25}},
+                    f,
+                )
+
+            router = OrderRouter(signals_file=signals_file, data_dir=d)
+            loaded = {
+                signal.symbol: signal.target_allocation
+                for signal in router.load_signals()
+            }
+
+            assert loaded == {"SPY": 0.30, "GLD": 0.45, "TLT": 0.25}
+
     def test_load_missing_file(self):
         with tempfile.TemporaryDirectory() as d:
             router = OrderRouter(signals_file="/nonexistent/file.json", data_dir=d)
