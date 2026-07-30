@@ -21,6 +21,7 @@ const VIEWPORTS = [
   { width: 1024, height: 900 },
   { width: 768, height: 900 },
   { width: 390, height: 900 },
+  { width: 320, height: 900 },
 ] as const;
 
 type DashboardTabLabel = (typeof TAB_LABELS)[number];
