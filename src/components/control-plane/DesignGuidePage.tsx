@@ -8,6 +8,7 @@ import { CommandPalette } from './CommandPalette';
 import { ContextRail } from './ContextRail';
 import { MetricCard } from './MetricCard';
 import { NavigationRail } from './NavigationRail';
+import { OverflowRegion } from './OverflowRegion';
 import { StatusBadge } from './StatusBadge';
 import { WorkspaceHeader } from './WorkspaceHeader';
 
@@ -16,6 +17,7 @@ const exampleActions = [
     id: 'guide:warning',
     tab: 'health' as const,
     severity: 'warning' as const,
+    attention: 'advisory' as const,
     title: 'Regime transition data is stale',
     source: 'Signal freshness',
     message: 'The advisory regime-transition feed missed its expected update.',
@@ -25,6 +27,7 @@ const exampleActions = [
     id: 'guide:critical',
     tab: 'risk' as const,
     severity: 'critical' as const,
+    attention: 'action' as const,
     title: 'Order routing is halted',
     source: 'Kill authority',
     message: 'The current kill policy blocks new paper orders.',
@@ -108,6 +111,31 @@ export function DesignGuidePage() {
         </div>
         <ActionCenter incidents={exampleActions} />
         <ActionCenter incidents={[]} />
+      </Section>
+
+      <Section title="Overflow and advisory regions">
+        <OverflowRegion label="Design guide sample table">
+          <table className="positions-table">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Shares</th>
+                <th>Value</th>
+                <th>Weight</th>
+                <th>Unrealized P&amp;L</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>SPY</td>
+                <td>46.00</td>
+                <td>$46,000</td>
+                <td>46.0%</td>
+                <td>$0</td>
+              </tr>
+            </tbody>
+          </table>
+        </OverflowRegion>
       </Section>
 
       <Section title="Navigation and workspace header">

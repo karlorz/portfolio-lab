@@ -111,8 +111,8 @@ export const EntropySchema = z.object({
   normalized_score: z.number(),
   concentration_risk: z.enum(['critical', 'high', 'medium', 'low', 'good']),
   hhi_index: z.number(),
-  correlation_entropy: z.optional(z.number()),
-  participation_ratio: z.optional(z.number()),
+  correlation_entropy: z.optional(z.nullable(z.number())),
+  participation_ratio: z.optional(z.nullable(z.number())),
 });
 
 // ---------------------------------------------------------------------------
@@ -835,11 +835,23 @@ export const AlternativeDataSchema = z.object({
 }).passthrough();
 
 export const FactorRotationSignalSchema = z.object({
-  selected_factors: z.array(z.string()),
-  allocation: z.record(z.string(), z.number()),
-  signal_strength: z.number(),
-  recommendation: z.string(),
-}).passthrough();
+  selected_factors: z.optional(z.array(z.string())),
+  allocation: z.optional(z.record(z.string(), z.unknown())),
+  signal_strength: z.optional(z.unknown()),
+  recommendation: z.optional(z.string()),
+}).passthrough().superRefine((data, ctx) => {
+  const hasProductionSignal =
+    data.selected_factors !== undefined
+    || data.allocation !== undefined
+    || data.signal_strength !== undefined
+    || data.recommendation !== undefined;
+  if (!hasProductionSignal) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'factor_rotation must include at least one production signal field',
+    });
+  }
+});
 
 export const StackingEnsembleSchema = z.object({
   active: z.boolean(),
@@ -956,7 +968,7 @@ export const FactorRotationDashboardSchema = z.object({
   selected_factors: z.array(z.string()),
   signal_strength: z.number(),
   factor_allocations: z.record(z.string(), z.number()),
-  backtest_finding: z.string(),
+  backtest_finding: z.optional(z.string()),
 }).passthrough();
 
 export const CollarSchema = z.object({
@@ -1128,12 +1140,15 @@ const AdvancedRegimeSignalAuthoritySchema = z.object({
 
 export const RegimeAuthoritySchema = z.object({
   schema_version: z.literal('regime-authority/v1'),
-  live_controller: z.literal('classify_vix_regime'),
-  live_controller_module: z.literal('src.utils.classify_vix_regime'),
+  live_controller: z.literal('signals.json.target_allocations'),
+  live_controller_module: z.literal('src.broker.order_router'),
   live_regime: z.string(),
   allocation_regime: z.string(),
   routed_surface: z.literal('target_allocations'),
   target_allocations: z.record(z.string(), z.number()),
+  regime_controller: z.optional(z.literal('classify_vix_regime')),
+  regime_controller_module: z.optional(z.literal('src.utils.classify_vix_regime')),
+  regime_routed: z.optional(z.literal(false)),
   advanced_regime_signals: z.object({
     two_stage_regime: AdvancedRegimeSignalAuthoritySchema,
     bocd_regime: AdvancedRegimeSignalAuthoritySchema,

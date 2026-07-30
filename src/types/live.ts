@@ -33,10 +33,10 @@ export interface HedgeSelectorData {
 }
 
 export interface FactorRotationSignalData {
-  selected_factors: string[];
-  allocation: Record<string, number>;
-  signal_strength: number;
-  recommendation: string;
+  selected_factors?: string[];
+  allocation?: Record<string, unknown>;
+  signal_strength?: unknown;
+  recommendation?: string;
   [key: string]: unknown;
 }
 
@@ -51,12 +51,15 @@ export interface AdvancedRegimeSignalAuthority {
 
 export interface RegimeAuthority {
   schema_version: 'regime-authority/v1';
-  live_controller: 'classify_vix_regime';
-  live_controller_module: 'src.utils.classify_vix_regime';
+  live_controller: 'signals.json.target_allocations';
+  live_controller_module: 'src.broker.order_router';
   live_regime: string;
   allocation_regime: string;
   routed_surface: 'target_allocations';
   target_allocations: Record<string, number>;
+  regime_controller?: 'classify_vix_regime';
+  regime_controller_module?: 'src.utils.classify_vix_regime';
+  regime_routed?: false;
   advanced_regime_signals: {
     two_stage_regime: AdvancedRegimeSignalAuthority;
     bocd_regime: AdvancedRegimeSignalAuthority;

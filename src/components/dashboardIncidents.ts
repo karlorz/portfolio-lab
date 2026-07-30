@@ -27,6 +27,7 @@ export interface DashboardIncident {
   id: string;
   tab: IncidentTab;
   severity: IncidentSeverity;
+  attention: 'action' | 'advisory';
   title: string;
   source: string;
   currentValue?: string;
@@ -148,6 +149,7 @@ function mapAlertToIncident(alert: Alert): DashboardIncident | null {
     id: `alert:${stableId}`,
     tab: 'overview',
     severity,
+    attention: alert.requires_action === false && type !== 'kill_switch' ? 'advisory' : 'action',
     title,
     source: formatAlertSource(type),
     currentValue: extractAlertCurrentValue(alert),
@@ -191,6 +193,7 @@ function mapPersistedIncidentToDashboard(incident: IncidentLifecycleIncident): D
     id: `persisted:${incident.channel}:${incident.incident_id}`,
     tab: 'health',
     severity: incidentSeverity(incident.severity),
+    attention: 'action',
     title: incidentTitle(incident.channel),
     source: 'Incident lifecycle',
     currentValue: `State: ${incident.state}`,
@@ -220,6 +223,7 @@ export function buildRiskIncidents(signals: SignalsData | null): DashboardIncide
       id: isSevere ? 'risk:garch-cvar:severe-tail-risk' : 'risk:garch-cvar:elevated-tail-risk',
       tab: 'risk',
       severity: isSevere ? 'critical' : 'warning',
+      attention: 'action',
       title: isSevere ? 'Severe Tail Risk' : 'Elevated Tail Risk',
       source: 'GARCH CVaR',
       currentValue: `${cvarRatio.toFixed(2)}x CVaR/VaR`,
@@ -244,6 +248,7 @@ function buildHealthIncidents(health: HealthData | null): DashboardIncident[] {
       id: `health:system:${health.system_status}`,
       tab: 'health',
       severity: isCritical ? 'critical' : 'warning',
+      attention: 'action',
       title: isCritical ? 'Critical System Health' : 'Degraded System Health',
       source: 'Health check',
       currentValue: `System ${health.system_status}`,
@@ -276,6 +281,7 @@ export function buildDecisionIncidents(signals: SignalsData | null): DashboardIn
       id: 'decisions:staleness',
       tab: 'decisions',
       severity: 'warning',
+      attention: 'action',
       title: 'Stale signals in last cycle',
       source: 'Decision replay',
       currentValue: `${staleList.length} stale`,
@@ -298,6 +304,7 @@ export function buildDecisionIncidents(signals: SignalsData | null): DashboardIn
       id: 'decisions:smart-rebalance-hold',
       tab: 'decisions',
       severity: 'info',
+      attention: 'advisory',
       title: 'Rebalance held',
       source: 'Smart rebalance',
       currentValue: String(smart.decision),

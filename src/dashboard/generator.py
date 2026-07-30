@@ -1673,14 +1673,10 @@ class DashboardGenerator:
                 prices[sym] = []
             prices[sym].append({"d": row[1], "p": row[2]})
         
-        # Get regime history
-        cursor.execute("""
-            SELECT date, regime, vix_level FROM regime_log
-            WHERE date >= date('now', '-90 days')
-            ORDER BY detected_at
-        """)
-        
-        regimes = [{"d": row[0], "r": row[1], "v": row[2]} for row in cursor.fetchall()]
+        # Canonical daily regime history is JSONL; SQLite may be empty/stale.
+        from src.regime.regime_history import load_daily_regime_history
+
+        regimes = load_daily_regime_history(DATA_DIR / "regime_log.json").records[-90:]
         
         # Get paper portfolio performance (from JSONL log — tail read only)
         perf_log = DATA_DIR / "performance.jsonl"

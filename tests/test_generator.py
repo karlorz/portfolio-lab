@@ -5347,19 +5347,28 @@ class TestPerformanceJSONRegime:
     """Test regime data in generate_performance_json."""
 
     def test_regime_data_included(self, tmp_path):
-        """Regime data from DB is included in performance output."""
+        """Regime data from canonical JSONL is included in performance output."""
         gen, _ = _make_generator(tmp_path)
-        conn = gen.conn
-        recent = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-        conn.execute("INSERT INTO regime_log VALUES (?, ?, ?, ?)",
-                     (recent, "normal", 15.0, datetime.now().isoformat()))
-        conn.commit()
+        recent = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
+        (tmp_path / "regime_log.json").write_text(
+            json.dumps(
+                {
+                    "regime": "NORMAL",
+                    "vix_level": 15.0,
+                    "detected_at": f"{recent}T12:00:00+00:00",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
-            path = gen.generate_performance_json()
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_performance_json()
         with open(path) as f:
             data = json.load(f)
         assert len(data["regimes"]) >= 1
         assert data["regimes"][0]["r"] == "normal"
+        assert data["regimes"][0] == {"d": recent, "r": "normal", "v": 15.0}
         gen.conn.close()
 
     def test_paper_portfolio_from_log(self, tmp_path):
