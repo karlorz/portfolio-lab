@@ -1,8 +1,10 @@
 #!/bin/bash
 # cron-app-build.sh - Build Vite app with latest dashboard data
-# Protected by cron_guard: load-gate (max 5), flock, 600s timeout, 3GB ulimit
+# Protected by cron_guard: load-gate (max 5), flock, 600s timeout, 8GB ulimit
 PROJECT_DIR="${PORTFOLIO_LAB_PROJECT_DIR:-/root/projects/portfolio-lab}"
-source "$PROJECT_DIR/scripts/cron_guard.sh"
+# Bun/Vite needs an 8GB virtual-address-space envelope on this host even
+# though its resident memory stays well below that limit during the build.
+CRON_GUARD_MEMORY_MB=8192 source "$PROJECT_DIR/scripts/cron_guard.sh"
 source "$PROJECT_DIR/scripts/cron/hermes_status.sh"
 
 if cron_guard_start "pf-build" 600; then

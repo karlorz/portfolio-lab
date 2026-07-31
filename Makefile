@@ -520,7 +520,7 @@ build:
 	@echo "=== App Build: $$(date) ==="; \
 	START=$$(date +%s); \
 	export PATH="$$HOME/.bun/bin:$$PATH"; \
-	cd $(PROJECT_DIR) && ulimit -v 3145728 && timeout 600 sh -c 'bun run tsc --noEmit 2>&1 | tee -a $(DATA_DIR)/build.log && bun run build 2>&1 | tee -a $(DATA_DIR)/build.log'; \
+	cd $(PROJECT_DIR) && ulimit -v 8388608 && timeout 600 bash -o pipefail -c 'bun run tsc --noEmit 2>&1 | tee -a $(DATA_DIR)/build.log && bun run build 2>&1 | tee -a $(DATA_DIR)/build.log'; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
