@@ -56,7 +56,7 @@
   },
   "_meta": {
     "schema": "ensemble-weights/v1",
-    "last_freshness_stamp": "2026-07-29T13:47:11.337030",
+    "last_freshness_stamp": "2026-07-31T19:47:10.171894",
     "stamp_reason": "adaptive_update",
     "regime_count": 5,
     "content_identity": "unchanged",
