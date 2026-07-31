@@ -213,6 +213,19 @@ def _patch_monitor_report_kill_open(
 def _atomic_write_json_path(path: Path, payload: dict[str, Any]) -> None:
     """Write JSON at 0o644 (prefer signal_authority atomic helper)."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        from src.dashboard.public_projection import (
+            is_public_output_path,
+            prepare_payload_for_write,
+        )
+
+        payload = prepare_payload_for_write(
+            payload,
+            path,
+            public=is_public_output_path(path),
+        )
+    except Exception:  # noqa: BLE001 - preserve health fallback behavior
+        pass
     text = json.dumps(payload, indent=2) + "\n"
     try:
         from src.monitor.signal_authority import _atomic_write_text
@@ -1466,7 +1479,7 @@ def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
             )
             wrote_ops = False
         if not wrote_ops:
-            ops_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+            _atomic_write_json_path(ops_path, report)
             try:
                 import os
 
@@ -1570,9 +1583,7 @@ def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
                     )
                     wrote_health = False
                 if not wrote_health:
-                    public_health.write_text(
-                        json.dumps(payload, indent=2) + "\n", encoding="utf-8"
-                    )
+                    _atomic_write_json_path(public_health, payload)
                     try:
                         import os
 
@@ -1607,15 +1618,7 @@ def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
                             repo_filename="health_ops.json",
                         )
                     except Exception:  # noqa: BLE001
-                        ops_path.write_text(
-                            json.dumps(report_fail, indent=2) + "\n", encoding="utf-8"
-                        )
-                        try:
-                            import os
-
-                            os.chmod(ops_path, 0o644)
-                        except OSError:
-                            pass
+                        _atomic_write_json_path(ops_path, report_fail)
                 except Exception:  # noqa: BLE001
                     pass
 
@@ -2217,7 +2220,7 @@ def reconcile_graduation_cb_projection(
     payload["graduation_cb_reconciled_at"] = datetime.now(timezone.utc).isoformat()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        _atomic_write_json_path(path, payload)
     except OSError as exc:
         logger.warning(
             "Failed to reconcile graduation CB projection at %s: %s", path, exc

@@ -324,8 +324,18 @@ class TaskerStore:
 
         if not multi_ok:
             self.public_status_path.parent.mkdir(parents=True, exist_ok=True)
+            from src.monitor.signal_authority import (
+                is_ephemeral_write_path,
+                serialize_json_payload,
+            )
+
             self.public_status_path.write_text(
-                json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+                serialize_json_payload(
+                    payload,
+                    output_path=self.public_status_path,
+                    public=not is_ephemeral_write_path(self.public_status_path),
+                ),
+                encoding="utf-8",
             )
             try:
                 import os

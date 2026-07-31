@@ -126,6 +126,20 @@ interface LiveDashboardProps {
   onViewChange?: (view: IncidentTab) => void;
 }
 
+interface ReleaseMetadata {
+  source_git_sha?: string;
+  build_time_utc?: string;
+}
+
+function parseReleaseMetadata(value: unknown): ReleaseMetadata | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const sourceGitSha = typeof raw.source_git_sha === 'string' ? raw.source_git_sha : undefined;
+  const buildTimeUtc = typeof raw.build_time_utc === 'string' ? raw.build_time_utc : undefined;
+  if (!sourceGitSha && !buildTimeUtc) return null;
+  return { source_git_sha: sourceGitSha, build_time_utc: buildTimeUtc };
+}
+
 function formatAllocationSurfaceRoute(role: AllocationSurfaceRole): string {
   if (role.execution_blocked || role.role === 'execution_blocked' || role.kill_switch_enabled) {
     const level = role.kill_switch_level ? ` (${role.kill_switch_level})` : '';
@@ -214,6 +228,7 @@ export function LiveDashboard({
   const [regimeGateData, setRegimeGateData] = useState<RegimeGateData | null>(null);
   const [tsmomData, setTsmomData] = useState<TSMOMData | null>(null);
   const [crossAssetRVData, setCrossAssetRVData] = useState<CrossAssetRVData | null>(null);
+  const [releaseMetadata, setReleaseMetadata] = useState<ReleaseMetadata | null>(null);
   const optionalFetchTimestamps = useRef<Partial<Record<TabType, number>>>({});
   const coreFetchGeneration = useRef(0);
   const optionalFetchGenerations = useRef<Partial<Record<TabType, number>>>({});
@@ -308,6 +323,18 @@ export function LiveDashboard({
       if (requestGeneration === coreFetchGeneration.current) setError(endpointError);
     } catch (err) {
       if (requestGeneration === coreFetchGeneration.current) setError('Failed to load live data');
+    }
+  };
+
+  const fetchReleaseMetadata = async () => {
+    try {
+      const response = await fetch('/_release.json');
+      const raw = await safeParseJson(response);
+      setReleaseMetadata(parseReleaseMetadata(raw));
+    } catch {
+      // The release manifest is an integrity disclosure, not a core data
+      // dependency. Static previews may not publish it.
+      setReleaseMetadata(null);
     }
   };
 
@@ -449,6 +476,10 @@ export function LiveDashboard({
   }, [refreshInterval]);
 
   useEffect(() => {
+    fetchReleaseMetadata();
+  }, []);
+
+  useEffect(() => {
     fetchOptionalDataForTab(activeTab);
     const interval = setInterval(() => fetchOptionalDataForTab(activeTab, true), refreshInterval * 1000);
     return () => clearInterval(interval);
@@ -506,6 +537,22 @@ export function LiveDashboard({
   );
   const targetAllocationRole = signals?.allocation_surface_roles?.surfaces.target_allocations;
   const ensembleVotingRole = signals?.allocation_surface_roles?.surfaces.ensemble_voting;
+  const runtimeProvenance = signals?.runtime_provenance ?? health?.runtime_provenance ?? null;
+  const runtimeArtifact = [
+    runtimeProvenance?.artifact_id ?? signals?.artifact_id ?? 'signals.json',
+    `plane=${runtimeProvenance?.plane ?? signals?.plane ?? 'public'}`,
+    runtimeProvenance?.generated_at ?? signals?.generated_at ?? signals?.timestamp ?? 'timestamp unavailable',
+  ].join(' · ');
+  const runtimeStatus = [
+    `generator=${runtimeProvenance?.generator_git_sha_status ?? signals?.generator_git_sha_status ?? 'unavailable'}`,
+    runtimeProvenance?.generator_git_sha
+      ? `sha=${runtimeProvenance.generator_git_sha}`
+      : (signals?.generator_git_sha ? `sha=${signals.generator_git_sha}` : null),
+    health?.system_status ? `system=${health.system_status}` : null,
+  ].filter(Boolean).join(' · ');
+  const staticRelease = releaseMetadata
+    ? `sha=${releaseMetadata.source_git_sha ?? 'unavailable'} · built=${releaseMetadata.build_time_utc ?? 'unavailable'}`
+    : 'Unavailable · /_release.json';
 
   return (
     <div className="live-dashboard">
@@ -556,6 +603,12 @@ export function LiveDashboard({
           routed={targetAllocationRole?.routed}
           freshness={lastUpdate ? `Core data refreshed at ${lastUpdate}` : 'Awaiting core data refresh'}
           openIncidentCount={incidentSummary?.incidents?.filter((incident) => incident.state !== 'resolved').length ?? 0}
+          runtimeProvenance={{
+            staticRelease,
+            runtimeArtifact,
+            runtimeStatus: runtimeStatus || 'Unavailable',
+            orderAuthority: 'signals.json.target_allocations → src.broker.order_router',
+          }}
           onIncidentSelect={(incident) => changeView(incident.tab)}
         />
         <div className="tab-content">

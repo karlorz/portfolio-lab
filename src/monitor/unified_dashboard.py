@@ -1272,10 +1272,20 @@ def _save_unified_dashboard(dashboard: Dict[str, Any]) -> list:
             save_results_json(dashboard, output_path=str(private_path))
         except Exception:  # noqa: BLE001
             pass
-        # Atomic write so readers never see partial JSON
+        # Atomic plane-specific write so private diagnostic paths do not cross
+        # into the public unified-dashboard artifact.
+        from src.monitor.signal_authority import (
+            is_ephemeral_write_path,
+            serialize_json_payload,
+        )
+
         tmp_path = public_path.with_suffix(".json.tmp")
         tmp_path.write_text(
-            json.dumps(dashboard, indent=2, default=str) + "\n",
+            serialize_json_payload(
+                dashboard,
+                output_path=public_path,
+                public=not is_ephemeral_write_path(public_path),
+            ),
             encoding="utf-8",
         )
         tmp_path.replace(public_path)
@@ -1298,10 +1308,14 @@ def _save_unified_dashboard(dashboard: Dict[str, Any]) -> list:
             if isinstance(pc, dict):
                 pc["section_score"] = score
                 # Persist score into both trees (finalize already wrote body once)
-                from src.backtest.metrics import save_results_json as _save_ud
+                from src.monitor.signal_authority import write_json_multi_dest
 
-                _save_ud(dashboard, output_path=str(private_path))
-                _save_ud(dashboard, output_path=str(public_path))
+                write_json_multi_dest(
+                    dashboard,
+                    private_path=private_path,
+                    public_path=public_path,
+                    soft_mirror_repo=False,
+                )
         except Exception:  # noqa: BLE001 — never block save on post-sync stamp
             pass
         logger.info(

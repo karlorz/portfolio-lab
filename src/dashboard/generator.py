@@ -625,17 +625,18 @@ def finalize_dual_write_provenance_after_sync(
     if not write_json:
         return stamped
 
-    body = json.dumps(stamped, indent=2, default=str) + "\n"
     try:
-        priv.parent.mkdir(parents=True, exist_ok=True)
-        tmp_p = priv.with_suffix(priv.suffix + ".postsync.tmp")
-        tmp_p.write_text(body, encoding="utf-8")
-        tmp_p.replace(priv)
-        if not paths_identical:
-            pub.parent.mkdir(parents=True, exist_ok=True)
-            tmp_u = pub.with_suffix(pub.suffix + ".postsync.tmp")
-            tmp_u.write_text(body, encoding="utf-8")
-            tmp_u.replace(pub)
+        # Keep private diagnostics and public logical references separate.  A
+        # single serialized body here used to reintroduce absolute private
+        # paths after the normal fan-out had projected them.
+        from src.monitor.signal_authority import write_json_multi_dest
+
+        write_json_multi_dest(
+            stamped,
+            private_path=priv,
+            public_path=pub,
+            soft_mirror_repo=False,
+        )
         # Second pass: mtimes now both post-sync; refresh lag/hash once more
         stamped = _attach_dual_write_provenance(
             stamped,
@@ -651,14 +652,12 @@ def finalize_dual_write_provenance_after_sync(
             ),
             lag_threshold_seconds=lag_threshold_seconds,
         )
-        body2 = json.dumps(stamped, indent=2, default=str) + "\n"
-        tmp_p = priv.with_suffix(priv.suffix + ".postsync.tmp")
-        tmp_p.write_text(body2, encoding="utf-8")
-        tmp_p.replace(priv)
-        if not paths_identical:
-            tmp_u = pub.with_suffix(pub.suffix + ".postsync.tmp")
-            tmp_u.write_text(body2, encoding="utf-8")
-            tmp_u.replace(pub)
+        write_json_multi_dest(
+            stamped,
+            private_path=priv,
+            public_path=pub,
+            soft_mirror_repo=False,
+        )
     except OSError:
         # Best-effort; return last stamped payload even if rewrite fails
         pass

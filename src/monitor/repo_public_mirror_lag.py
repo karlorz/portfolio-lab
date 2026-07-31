@@ -615,6 +615,22 @@ def _atomic_write_json_doc(path: Path, doc: dict[str, Any]) -> None:
     Reuses signal_authority._atomic_write_text (mkstemp + chmod) rather than
     bare write_text+replace, which inherits 0600 and broke HTTPS on signals.
     """
+    # Restamping is a post-write producer in its own right.  Apply the same
+    # public projection boundary as the normal fan-out writers; otherwise a
+    # harmless mirror-lag refresh can reintroduce the private source/dest paths
+    # that the initial public write removed.
+    public_output = False
+    try:
+        from src.dashboard.public_projection import (
+            is_public_output_path,
+            prepare_payload_for_write,
+        )
+
+        public_output = is_public_output_path(path)
+        doc = prepare_payload_for_write(doc, path, public=public_output)
+    except Exception:
+        if public_output:
+            raise
     text = json.dumps(doc, indent=2) + "\n"
     try:
         from src.monitor.signal_authority import _atomic_write_text

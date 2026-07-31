@@ -8,7 +8,15 @@ interface ContextRailProps {
   routed?: boolean;
   freshness?: string;
   openIncidentCount?: number;
+  runtimeProvenance?: RuntimeProvenanceDisclosure;
   onIncidentSelect?: (incident: DashboardIncident) => void;
+}
+
+export interface RuntimeProvenanceDisclosure {
+  staticRelease?: string;
+  runtimeArtifact?: string;
+  runtimeStatus?: string;
+  orderAuthority?: string;
 }
 
 export function ContextRail({
@@ -16,6 +24,7 @@ export function ContextRail({
   routed,
   freshness = 'Awaiting refresh',
   openIncidentCount = 0,
+  runtimeProvenance,
   onIncidentSelect,
 }: ContextRailProps) {
   return (
@@ -32,6 +41,27 @@ export function ContextRail({
       <details open>
         <summary>Open incidents</summary>
         <p className="context-rail-stat">{openIncidentCount}</p>
+      </details>
+      <details open>
+        <summary>Runtime provenance</summary>
+        <dl className="context-rail-provenance">
+          <div className="context-rail-provenance-row">
+            <dt>Static release</dt>
+            <dd>{runtimeProvenance?.staticRelease || 'Unavailable'}</dd>
+          </div>
+          <div className="context-rail-provenance-row">
+            <dt>Runtime artifact</dt>
+            <dd>{runtimeProvenance?.runtimeArtifact || 'Unavailable'}</dd>
+          </div>
+          <div className="context-rail-provenance-row">
+            <dt>Runtime status</dt>
+            <dd>{runtimeProvenance?.runtimeStatus || 'Unavailable'}</dd>
+          </div>
+          <div className="context-rail-provenance-row">
+            <dt>Order authority</dt>
+            <dd>{runtimeProvenance?.orderAuthority || 'Unavailable'}</dd>
+          </div>
+        </dl>
       </details>
     </aside>
   );

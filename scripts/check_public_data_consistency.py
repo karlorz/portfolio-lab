@@ -6,12 +6,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from src.dashboard.public_projection import find_public_internal_paths
 from src.monitor.market_data_consistency import reconcile_compact_prices_with_market_db
 
 
@@ -45,6 +47,9 @@ PROVENANCE_CONTRACT_FILES = (
 )
 # Status values that claim a successful full stamp without null sha
 _PROVENANCE_FULL_STATUSES = frozenset({"full", "full_generate"})
+_INTERNAL_PATH_TEXT_RE = re.compile(
+    r"(?:/root/|/home/|/Users/|/private/|/tmp/|/var/www/|/opt/|/srv/|/mnt/|[A-Za-z]:[\\/])"
+)
 
 # Artifacts that emit provenance_completeness dual-write blocks (Batch AS/AT/AV/AW/AY)
 DUAL_WRITE_PROVENANCE_FILES = (
@@ -646,6 +651,42 @@ def _check_dual_write_provenance_completeness(
             )
 
 
+def _check_public_internal_paths(public_data: Path, errors: list[str]) -> None:
+    """Fail closed when any served JSON still exposes an internal path.
+
+    This deliberately scans every JSON artifact, including the otherwise
+    unmanaged index hash cache.  Producer allowlists are easy to outgrow; the
+    public tree itself is the security/disclosure boundary.
+    """
+    if not public_data.exists():
+        return
+    for path in sorted(public_data.rglob("*.json")):
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            # Other consistency checks own malformed required artifacts.  The
+            # path gate has no value to add until JSON can be traversed.
+            continue
+        # Avoid recursively walking large market-data blobs when they contain
+        # no host-path token at all.  The full traversal remains fail-closed
+        # for any candidate file.
+        if not _INTERNAL_PATH_TEXT_RE.search(raw):
+            continue
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        for pointer, value in find_public_internal_paths(payload):
+            try:
+                relative = path.relative_to(public_data).as_posix()
+            except ValueError:
+                relative = path.name
+            errors.append(
+                "public/data/"
+                f"{relative}{pointer} exposes internal absolute path {value!r}"
+            )
+
+
 def check_public_data_consistency(
     app_dir: str | Path,
     *,
@@ -698,6 +739,7 @@ def check_public_data_consistency(
     _check_critical_health_has_slo_alert(public_data, health, errors)
     _check_kill_and_graduation_alerts(root, public_data, errors)
     _check_generator_git_sha_provenance(public_data, errors, warnings)
+    _check_public_internal_paths(public_data, errors)
 
     return ConsistencyResult(ok=not errors, errors=errors, warnings=warnings)
 

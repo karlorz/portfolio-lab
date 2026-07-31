@@ -171,7 +171,12 @@ def refresh_public_health_cron_section(
 
     payload["cron_section_refreshed_at"] = datetime.now(timezone.utc).isoformat()
     try:
-        health_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        from src.monitor.signal_authority import serialize_json_payload
+
+        health_path.write_text(
+            serialize_json_payload(payload, output_path=health_path, public=True),
+            encoding="utf-8",
+        )
         # Batch IA: public health dual-write must stay Caddy-readable
         try:
             import os
@@ -280,8 +285,15 @@ def refresh_public_health_cron_section(
                     # Fallback: public-only with 0644 (tests without TA fixture).
                     import os
 
+                    from src.monitor.signal_authority import serialize_json_payload
+
                     signals_path.write_text(
-                        json.dumps(signals, indent=2) + "\n", encoding="utf-8"
+                        serialize_json_payload(
+                            signals,
+                            output_path=signals_path,
+                            public=True,
+                        ),
+                        encoding="utf-8",
                     )
                     try:
                         os.chmod(signals_path, 0o644)

@@ -438,9 +438,19 @@ def save_labs_scorecards(
     public_dir_path = Path(public_dir)
     target_path = Path(output_path) if output_path is not None else public_dir_path / LABS_SCORECARDS_FILENAME
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(target_path, "w") as f:
-        json.dump(scorecards, f, indent=2, sort_keys=True)
-        f.write("\n")
+    from src.monitor.signal_authority import (
+        is_ephemeral_write_path,
+        serialize_json_payload,
+    )
+
+    target_path.write_text(
+        serialize_json_payload(
+            scorecards,
+            output_path=target_path,
+            public=not is_ephemeral_write_path(target_path),
+        ),
+        encoding="utf-8",
+    )
     logger.info("Labs scorecards written: %s (%d rows)", target_path, len(scorecards))
     return target_path
 

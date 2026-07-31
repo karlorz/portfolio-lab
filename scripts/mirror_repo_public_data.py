@@ -72,8 +72,11 @@ DEFAULT_FILE_GLOBS: tuple[str, ...] = (
     "prices.json",
     "yields.json",
     "tasker_status.json",
-    "attribution/latest.json",
-    "explainability/explainability_latest.json",
+    # The public index discovers every dated attribution shard, not only the
+    # latest pointer.  Mirror the governed nested trees as a bounded glob so
+    # index entries always resolve in the checkout mirror.
+    "attribution/*.json",
+    "explainability/*.json",
 )
 
 # The health job writes this artifact after evaluating mirror lag. Comparing
@@ -192,6 +195,35 @@ def resolve_mirror_paths(
     return source_root / rel, dest_root / rel
 
 
+def expand_mirror_file_specs(
+    source_root: Path,
+    files: Sequence[str],
+) -> tuple[str, ...]:
+    """Expand the small set of supported nested-tree mirror globs.
+
+    Flat artifact names retain their existing missing-file reporting.  A
+    nested glob with no matches is simply absent because those trees are
+    optional public surfaces; every matching JSON file is copied explicitly.
+    """
+    expanded: list[str] = []
+    seen: set[str] = set()
+    for spec in files:
+        if not any(token in spec for token in ("*", "?", "[")):
+            candidates = (spec,)
+        else:
+            candidates = tuple(
+                path.relative_to(source_root).as_posix()
+                for path in sorted(source_root.glob(spec))
+                if path.is_file()
+            )
+        for relative in candidates:
+            if relative in seen:
+                continue
+            seen.add(relative)
+            expanded.append(relative)
+    return tuple(expanded)
+
+
 # Health documents that carry nested repo_public_mirror_lag* SLIs and must be
 # restamped after a soft-mirror so sticky false-critical does not freeze.
 # Batch HO: signals.json nests the SLI under health (compact operator surface).
@@ -226,6 +258,7 @@ def mirror_repo_public_data(
     )
     source_root = Path(source_root)
     dest_root = Path(dest_root)
+    files = expand_mirror_file_specs(source_root, files)
     if not source_root.is_dir():
         report.errors.append(f"source root missing: {source_root}")
         return report
@@ -364,7 +397,7 @@ def lag_report(
 ) -> list[dict[str, Any]]:
     """Compare generator_git_sha (or presence) between source and dest."""
     rows: list[dict[str, Any]] = []
-    for rel in files:
+    for rel in expand_mirror_file_specs(Path(source_root), files):
         try:
             src, dst = resolve_mirror_paths(rel, Path(source_root), Path(dest_root))
         except ValueError:

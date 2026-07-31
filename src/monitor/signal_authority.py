@@ -269,12 +269,40 @@ class MultiDestWriteResult:
     skipped_reason: Optional[str] = None
 
 
-def serialize_signals_payload(payload: Mapping[str, Any]) -> str:
-    """Canonical, browser-parseable JSON body used for multi-dest equality."""
+def _public_projection_enabled(path: Path | str | None) -> bool:
+    """Enable disclosure projection for real public trees, not old fixtures.
+
+    Existing pytest fan-out tests intentionally assert byte-identical twins and
+    use isolated ``/tmp`` destinations. Production roots remain fail-closed;
+    callers can force the policy for an isolated fixture with the environment
+    switch used by projection contract tests.
+    """
+    if os.environ.get("PORTFOLIO_LAB_FORCE_PUBLIC_PROJECTION", "0") == "1":
+        return True
+    return not is_ephemeral_write_path(path)
+
+
+def serialize_signals_payload(
+    payload: Mapping[str, Any],
+    *,
+    output_path: Path | str | None = None,
+    public: bool = False,
+    add_runtime_provenance: bool | None = None,
+) -> str:
+    """Canonical, browser-parseable JSON for one destination plane."""
     try:
         from src.backtest.metrics import _json_serializer as _default
     except Exception:  # noqa: BLE001 — keep fan-out usable offline
         _default = str  # type: ignore[assignment]
+    from src.dashboard.public_projection import prepare_payload_for_write
+
+    prepared = prepare_payload_for_write(
+        payload,
+        output_path,
+        public=public,
+        add_runtime_provenance=add_runtime_provenance,
+        plane="public" if public else "private",
+    )
 
     def strict_json_value(value: Any) -> Any:
         if isinstance(value, Mapping):
@@ -286,7 +314,7 @@ def serialize_signals_payload(payload: Mapping[str, Any]) -> str:
         return value
 
     return json.dumps(
-        strict_json_value(dict(payload)),
+        strict_json_value(dict(prepared)),
         indent=2,
         default=_default,
         allow_nan=False,
@@ -302,7 +330,7 @@ def write_signals_multi_dest(
     soft_mirror_repo: bool = True,
     validate: bool = True,
 ) -> MultiDestWriteResult:
-    """Validate authority, serialize once, fan-out same bytes to dests.
+    """Validate authority and fan-out plane-specific serialized bodies.
 
     Raises ``AuthorityValidationError`` before any write when validation fails
     (callers that want soft-skip should catch). Existing good files are left
@@ -311,7 +339,6 @@ def write_signals_multi_dest(
     if validate:
         validate_authority_payload(payload)
 
-    text = serialize_signals_payload(payload)
     result = MultiDestWriteResult()
 
     pub = Path(public_path) if public_path is not None else None
@@ -327,6 +354,22 @@ def write_signals_multi_dest(
         default_repo_signals_path() if auto_repo else None
     )
 
+    public_text = serialize_signals_payload(
+        payload,
+        output_path=pub,
+        public=_public_projection_enabled(pub),
+    ) if pub is not None else None
+    private_text = serialize_signals_payload(
+        payload,
+        output_path=priv,
+        public=False,
+    ) if priv is not None else None
+    repo_text = serialize_signals_payload(
+        payload,
+        output_path=repo,
+        public=_public_projection_enabled(repo),
+    ) if repo is not None else None
+
     if pub is not None:
         if _should_skip_production_ssot_write(pub):
             logger.warning(
@@ -335,7 +378,7 @@ def write_signals_multi_dest(
             )
             result.skipped_reason = f"public:pytest-ssot-guard:{pub}"
         else:
-            _atomic_write_text(pub, text)
+            _atomic_write_text(pub, public_text or "")
             result.wrote_public = True
             result.public_path = str(pub)
 
@@ -354,7 +397,7 @@ def write_signals_multi_dest(
                         else reason
                     )
                 else:
-                    _atomic_write_text(priv, text)
+                    _atomic_write_text(priv, private_text or "")
                     result.wrote_private = True
                     result.private_path = str(priv)
         except OSError as exc:
@@ -379,7 +422,7 @@ def write_signals_multi_dest(
                     else reason
                 )
             else:
-                _atomic_write_text(repo, text)
+                _atomic_write_text(repo, repo_text or "")
                 result.wrote_repo = True
                 result.repo_path = str(repo)
         except OSError as exc:
@@ -407,12 +450,27 @@ def try_write_signals_multi_dest(
         return MultiDestWriteResult(skipped_reason=str(exc))
 
 
-def serialize_json_payload(payload: Mapping[str, Any] | Any) -> str:
-    """Canonical JSON body for non-authority multi-dest fan-out (alerts, etc.)."""
+def serialize_json_payload(
+    payload: Mapping[str, Any] | Any,
+    *,
+    output_path: Path | str | None = None,
+    public: bool = False,
+    add_runtime_provenance: bool | None = None,
+) -> str:
+    """Canonical JSON body for one non-authority destination plane."""
     try:
         from src.backtest.metrics import _json_serializer as _default
     except Exception:  # noqa: BLE001
         _default = str  # type: ignore[assignment]
+    from src.dashboard.public_projection import prepare_payload_for_write
+
+    payload = prepare_payload_for_write(
+        payload,
+        output_path,
+        public=public,
+        add_runtime_provenance=add_runtime_provenance,
+        plane="public" if public else "private",
+    )
     if isinstance(payload, Mapping):
         body: Any = dict(payload)
     else:
@@ -429,13 +487,12 @@ def write_json_multi_dest(
     soft_mirror_repo: bool = True,
     repo_filename: str | None = None,
 ) -> MultiDestWriteResult:
-    """Serialize once and fan-out same bytes (no authority gate).
+    """Serialize and fan-out plane-specific bodies (no authority gate).
 
     Batch HN: alerts.json and other operator JSON need the same 0o644 multi-dest
     contract as signals so health dual-write cannot leave repo public/data stale
     or sticky 0600 under Caddy.
     """
-    text = serialize_json_payload(payload)
     result = MultiDestWriteResult()
 
     pub = Path(public_path) if public_path is not None else None
@@ -453,6 +510,22 @@ def write_json_multi_dest(
     else:
         repo = None
 
+    public_text = serialize_json_payload(
+        payload,
+        output_path=pub,
+        public=_public_projection_enabled(pub),
+    ) if pub is not None else None
+    private_text = serialize_json_payload(
+        payload,
+        output_path=priv,
+        public=False,
+    ) if priv is not None else None
+    repo_text = serialize_json_payload(
+        payload,
+        output_path=repo,
+        public=_public_projection_enabled(repo),
+    ) if repo is not None else None
+
     if pub is not None:
         if _should_skip_production_ssot_write(pub):
             logger.warning(
@@ -461,7 +534,7 @@ def write_json_multi_dest(
             )
             result.skipped_reason = f"public:pytest-ssot-guard:{pub}"
         else:
-            _atomic_write_text(pub, text)
+            _atomic_write_text(pub, public_text or "")
             result.wrote_public = True
             result.public_path = str(pub)
 
@@ -480,7 +553,7 @@ def write_json_multi_dest(
                         else reason
                     )
                 else:
-                    _atomic_write_text(priv, text)
+                    _atomic_write_text(priv, private_text or "")
                     result.wrote_private = True
                     result.private_path = str(priv)
         except OSError as exc:
@@ -505,7 +578,7 @@ def write_json_multi_dest(
                     else reason
                 )
             else:
-                _atomic_write_text(repo, text)
+                _atomic_write_text(repo, repo_text or "")
                 result.wrote_repo = True
                 result.repo_path = str(repo)
         except OSError as exc:

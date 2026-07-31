@@ -166,6 +166,12 @@ export function DesignGuidePage() {
                   incidents={exampleActions}
                   freshness="Core data refreshed at 11:40 CST"
                   openIncidentCount={1}
+                  runtimeProvenance={{
+                    staticRelease: 'sha=7f3c1d2 · built=2026-07-31T03:40Z',
+                    runtimeArtifact: 'signals.json · plane=public · generated=11:40 CST',
+                    runtimeStatus: 'generator=full_generate · system=healthy',
+                    orderAuthority: 'signals.json.target_allocations → src.broker.order_router',
+                  }}
                 />
               )}
             >

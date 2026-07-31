@@ -396,8 +396,19 @@ def run_replay_batch(
 
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(rows, f, indent=2)
+    from src.monitor.signal_authority import (
+        is_ephemeral_write_path,
+        serialize_json_payload,
+    )
+
+    path.write_text(
+        serialize_json_payload(
+            rows,
+            output_path=path,
+            public=not is_ephemeral_write_path(path),
+        ),
+        encoding="utf-8",
+    )
     return ReplayBatchResult(output_path=path, rows=tuple(rows), duplicate_targets=duplicate_targets)
 
 
@@ -418,8 +429,19 @@ def _validate_replay_report_rows(payload: Any) -> list[dict[str, Any]]:
 
 def _write_replay_rows(rows: Sequence[Mapping[str, Any]], output_path: Path) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w") as f:
-        json.dump([dict(row) for row in rows], f, indent=2)
+    from src.monitor.signal_authority import (
+        is_ephemeral_write_path,
+        serialize_json_payload,
+    )
+
+    output_path.write_text(
+        serialize_json_payload(
+            [dict(row) for row in rows],
+            output_path=output_path,
+            public=not is_ephemeral_write_path(output_path),
+        ),
+        encoding="utf-8",
+    )
     return output_path
 
 

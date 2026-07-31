@@ -455,9 +455,20 @@ def main():
         except Exception:  # noqa: BLE001 — never block dual-write
             pass
         # Atomic write: temp + rename (same FS) so readers never see partial JSON
+        from src.monitor.signal_authority import (
+            is_ephemeral_write_path,
+            serialize_json_payload,
+        )
+
         tmp_path = public_garch_path.with_suffix(".json.tmp")
-        with open(tmp_path, "w") as f:
-            json.dump(public_payload, f, indent=2, default=str)
+        tmp_path.write_text(
+            serialize_json_payload(
+                public_payload,
+                output_path=public_garch_path,
+                public=not is_ephemeral_write_path(public_garch_path),
+            ),
+            encoding="utf-8",
+        )
         tmp_path.replace(public_garch_path)
         # Re-attach provenance post-write on public only (do not rewrite private)
         try:
@@ -476,8 +487,14 @@ def main():
                 ),
             )
             tmp_path = public_garch_path.with_suffix(".json.tmp")
-            with open(tmp_path, "w") as f:
-                json.dump(public_payload, f, indent=2, default=str)
+            tmp_path.write_text(
+                serialize_json_payload(
+                    public_payload,
+                    output_path=public_garch_path,
+                    public=not is_ephemeral_write_path(public_garch_path),
+                ),
+                encoding="utf-8",
+            )
             tmp_path.replace(public_garch_path)
         except Exception:  # noqa: BLE001
             pass
@@ -493,8 +510,14 @@ def main():
 
             risk_public_body = _stamp_generator_git_sha(risk_public_body)
             tmp_risk = public_risk_path.with_suffix(".json.tmp")
-            with open(tmp_risk, "w") as f:
-                json.dump(risk_public_body, f, indent=2, default=str)
+            tmp_risk.write_text(
+                serialize_json_payload(
+                    risk_public_body,
+                    output_path=public_risk_path,
+                    public=not is_ephemeral_write_path(public_risk_path),
+                ),
+                encoding="utf-8",
+            )
             tmp_risk.replace(public_risk_path)
             # Post-sync twin: rewrite private+public with honest lag/hash
             finalize_dual_write_provenance_after_sync(
@@ -513,8 +536,14 @@ def main():
             # Fallback: best-effort public copy without provenance rewrite
             try:
                 tmp_risk = public_risk_path.with_suffix(".json.tmp")
-                with open(tmp_risk, "w") as f:
-                    json.dump(risk_public_body, f, indent=2, default=str)
+                tmp_risk.write_text(
+                    serialize_json_payload(
+                        risk_public_body,
+                        output_path=public_risk_path,
+                        public=not is_ephemeral_write_path(public_risk_path),
+                    ),
+                    encoding="utf-8",
+                )
                 tmp_risk.replace(public_risk_path)
                 print(f"  Public risk_metrics: {public_risk_path} (no post-sync stamp)")
             except OSError:

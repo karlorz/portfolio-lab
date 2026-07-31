@@ -887,6 +887,20 @@ def save_results_json(
     else:
         return
 
+    # Public artifacts have a smaller disclosure surface than private monitor
+    # files.  Apply the shared projection here as a last-mile guard for legacy
+    # producers that still call save_results_json directly.
+    try:
+        from src.dashboard.public_projection import (
+            is_public_output_path,
+            prepare_payload_for_write,
+        )
+
+        if is_public_output_path(path):
+            data = prepare_payload_for_write(data, path, public=True)
+    except Exception as projection_exc:  # noqa: BLE001 - preserve legacy saves
+        logger.warning("Public payload projection failed for %s: %s", path, projection_exc)
+
     if experiment_manifest is not None:
         from src.research.experiment_manifest import save_experiment_result_json
 
