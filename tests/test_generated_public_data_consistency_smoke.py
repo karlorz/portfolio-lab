@@ -356,6 +356,8 @@ def test_public_data_quality_cli_accepts_clean_app_dir_prices(tmp_path: Path, ca
     exit_code = data_quality_cli.main([
         "--app-dir",
         str(tmp_path),
+        "--public-dir",
+        str(tmp_path / "public" / "data"),
         "--reference-date",
         "2026-06-12",
     ])

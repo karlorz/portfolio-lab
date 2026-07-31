@@ -3,6 +3,7 @@ import {
   AdaptiveSizingSchema,
   BlackLittermanSchema,
   EnsembleVotingSchema,
+  FactorRotationSignalSchema,
   GarchCvarSchema,
   IcDecaySchema,
   MarlStatusSchema,
@@ -122,12 +123,15 @@ function makeBaseSignals(overrides: Record<string, unknown> = {}) {
     },
     regime_authority: {
       schema_version: 'regime-authority/v1',
-      live_controller: 'classify_vix_regime',
-      live_controller_module: 'src.utils.classify_vix_regime',
+      live_controller: 'signals.json.target_allocations',
+      live_controller_module: 'src.broker.order_router',
       live_regime: 'vol_spike',
       allocation_regime: 'high_vol',
       routed_surface: 'target_allocations',
-      target_allocations: { SPY: 0.38, GLD: 0.42, TLT: 0.20 },
+      target_allocations: { SPY: 0.46, GLD: 0.38, TLT: 0.16 },
+      regime_controller: 'classify_vix_regime',
+      regime_controller_module: 'src.utils.classify_vix_regime',
+      regime_routed: false,
       advanced_regime_signals: {
         two_stage_regime: { role: 'advisory_shadow', routed: false },
         bocd_regime: { role: 'advisory_shadow', routed: false },
@@ -622,6 +626,31 @@ describe('signals.ts Zod schemas (non-ML contract)', () => {
     }
   });
 
+  it('FactorRotationSignalSchema accepts production, partial, and malformed numeric payloads', () => {
+    const production = FactorRotationSignalSchema.safeParse({
+      selected_factors: ['VLUE', 'VBR'],
+      allocation: { VLUE: 0.27, VBR: 0.73 },
+      signal_strength: 0.53,
+      recommendation: 'Rotate to Value',
+    });
+    const partial = FactorRotationSignalSchema.safeParse({
+      selected_factors: ['QUAL'],
+      recommendation: 'Hold quality sleeve',
+    });
+    const malformedNumeric = FactorRotationSignalSchema.safeParse({
+      selected_factors: ['VLUE'],
+      allocation: { VLUE: 'not-a-number' },
+      signal_strength: 'bad',
+      recommendation: 'Advisory data degraded',
+    });
+    const emptyLegacy = FactorRotationSignalSchema.safeParse({ active: true });
+
+    expect(production.success).toBe(true);
+    expect(partial.success).toBe(true);
+    expect(malformedNumeric.success).toBe(true);
+    expect(emptyLegacy.success).toBe(false);
+  });
+
   it('SignalsDataSchema preserves ML source freshness and frozen benchmark metadata', () => {
     const parsed = SignalsDataSchema.safeParse(makeBaseSignals({
       ml_signals: {
@@ -700,11 +729,11 @@ describe('signals.ts Zod schemas (non-ML contract)', () => {
     const parsed = SignalsDataSchema.safeParse(makeBaseSignals({
       regime_authority: {
         schema_version: 'regime-authority/v1',
-        live_controller: 'classify_vix_regime',
+        live_controller: 'signals.json.target_allocations',
         live_regime: 'vol_spike',
         allocation_regime: 'high_vol',
         routed_surface: 'target_allocations',
-        target_allocations: { SPY: 0.38, GLD: 0.42, TLT: 0.20 },
+        target_allocations: { SPY: 0.46, GLD: 0.38, TLT: 0.16 },
         advanced_regime_signals: {
           two_stage_regime: { role: 'advisory_shadow', routed: 'no' },
         },
@@ -717,12 +746,15 @@ describe('signals.ts Zod schemas (non-ML contract)', () => {
   it('RegimeAuthoritySchema requires boolean published availability disclosure', () => {
     const base = {
       schema_version: 'regime-authority/v1',
-      live_controller: 'classify_vix_regime',
-      live_controller_module: 'src.utils.classify_vix_regime',
+      live_controller: 'signals.json.target_allocations',
+      live_controller_module: 'src.broker.order_router',
       live_regime: 'normal',
       allocation_regime: 'normal',
       routed_surface: 'target_allocations',
       target_allocations: { SPY: 0.46, GLD: 0.38, TLT: 0.16 },
+      regime_controller: 'classify_vix_regime',
+      regime_controller_module: 'src.utils.classify_vix_regime',
+      regime_routed: false,
       advanced_regime_signals: {
         two_stage_regime: {
           role: 'advisory_shadow',

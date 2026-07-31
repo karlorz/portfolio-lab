@@ -22,7 +22,6 @@ import numpy as np
 from src.backtest.metrics import BacktestResult, save_results_json
 from src.backtest.rolling_vol import precomputed_rolling_volatility
 from src.paths import BASE_ALLOCATION, DATA_DIR, MARKET_DB, sqlite_connect
-from src.utils import safe_get
 
 
 __all__ = ['RealDataBacktest', 'run_real_data_backtest']
@@ -40,7 +39,10 @@ class RealDataBacktest:
     def _load_market_data(self) -> Dict[str, Dict]:
         """Load real price data from market.db."""
         db_path = self.DATA_DIR / "market.db"
-        if not db_path.exists():
+        # An explicitly overridden DATA_DIR is authoritative for tests and
+        # callers using an isolated database.  Only use MARKET_DB as a
+        # compatibility fallback for the class's default path.
+        if not db_path.exists() and self.DATA_DIR == DATA_DIR:
             db_path = Path(MARKET_DB)
         if not db_path.exists():
             logger.error("market.db not found")
@@ -77,6 +79,45 @@ class RealDataBacktest:
 
         return data
 
+    @staticmethod
+    def _empty_result(
+        *,
+        recommendation: str,
+        data_start: str = "N/A",
+        data_end: str = "N/A",
+        trading_days: int = 0,
+    ) -> BacktestResult:
+        """Return the stable zero-metric shape used when a run cannot proceed."""
+        return BacktestResult(
+            total_return=0.0,
+            cagr=0.0,
+            volatility=0.0,
+            sharpe_ratio=0.0,
+            max_drawdown=0.0,
+            baseline_sharpe=0.0,
+            sharpe_improvement=0.0,
+            extras={
+                "timestamp": datetime.now().isoformat(),
+                "data_start": data_start,
+                "data_end": data_end,
+                "trading_days": trading_days,
+                "baseline_cagr": 0.0,
+                "baseline_vol": 0.0,
+                "baseline_max_dd": 0.0,
+                "baseline_total_return": 0.0,
+                "collar_sharpe": 0.0,
+                "collar_dd": 0.0,
+                "crypto_sharpe": 0.0,
+                "bond_dur_sharpe": 0.0,
+                "dd_improvement": 0.0,
+                "collar_days_pct": 0.0,
+                "crypto_days_pct": 0.0,
+                "avg_tlt_sleeve_pct": 0.0,
+                "meets_target": False,
+                "recommendation": recommendation,
+            },
+        )
+
     def _compute_returns(self, prices: List[float]) -> List[float]:
         return [(prices[i] / prices[i-1] - 1) for i in range(1, len(prices))]
 
@@ -87,6 +128,35 @@ class RealDataBacktest:
             fallback_vol=0.20,
             warmup_std_min_index=2,
         )
+
+    @staticmethod
+    def _align_prices_to_dates(
+        series: Dict | None,
+        target_dates: List[str],
+        fallback: List[float] | None = None,
+    ) -> List[float]:
+        """Align a price series to the portfolio calendar, carrying values forward.
+
+        Market data sources do not share a calendar or history start.  Core
+        assets are expected to contain every target date; optional assets may
+        use the supplied fallback until their first observation and then carry
+        the last observation across non-trading-day gaps.
+        """
+        if not series:
+            return list(fallback or [])
+
+        by_date = dict(zip(series.get("dates", []), series.get("prices", [])))
+        aligned: List[float] = []
+        prior: float | None = None
+        for index, date in enumerate(target_dates):
+            if date in by_date:
+                prior = float(by_date[date])
+            if prior is None:
+                if fallback is None:
+                    raise ValueError(f"price series has no value for target date {date}")
+                prior = float(fallback[index])
+            aligned.append(prior)
+        return aligned
 
     def _collar_signal(self, vix: float) -> float:
         """VIX-based collar: reduce SPY when vol elevated."""
@@ -123,42 +193,39 @@ class RealDataBacktest:
         """Run backtest with real market data."""
         data = self._load_market_data()
 
-        if not data or "SPY" not in data:
+        if not data or not all(asset in data for asset in ("SPY", "GLD", "TLT")):
             logger.error("No market data available")
-            return BacktestResult(
-                total_return=0.0, cagr=0.0, volatility=0.0, sharpe_ratio=0.0,
-                max_drawdown=0.0, baseline_sharpe=0.0, sharpe_improvement=0.0,
-                extras={
-                    "timestamp": datetime.now().isoformat(),
-                    "data_start": "N/A",
-                    "data_end": "N/A",
-                    "trading_days": 0,
-                    "baseline_cagr": 0.0,
-                    "baseline_vol": 0.0,
-                    "baseline_max_dd": 0.0,
-                    "baseline_total_return": 0.0,
-                    "collar_sharpe": 0.0,
-                    "collar_dd": 0.0,
-                    "crypto_sharpe": 0.0,
-                    "bond_dur_sharpe": 0.0,
-                    "dd_improvement": 0.0,
-                    "collar_days_pct": 0.0,
-                    "crypto_days_pct": 0.0,
-                    "avg_tlt_sleeve_pct": 0.0,
-                    "meets_target": False,
-                    "recommendation": "No data available",
-                },
-            )
+            return self._empty_result(recommendation="No data available")
 
-        # Align all series to common dates
-        dates = data["SPY"]["dates"]
-        spy_p = data["SPY"]["prices"]
-        gld_p = data["GLD"]["prices"]
-        tlt_p = data["TLT"]["prices"]
-        ief_p = safe_get(data, "IEF", "prices", default=tlt_p)
-        btc_p = safe_get(data, "BTC", "prices", default=spy_p)
-        eth_p = safe_get(data, "ETH", "prices", default=spy_p)
-        vix_d = safe_get(data, "VIX", "prices", default=[18.0] * len(spy_p))
+        # Align all series to the core portfolio calendar.  Crypto is
+        # optional, but if it is present the simulation starts when the last
+        # present crypto series begins instead of pairing 2017 prices with
+        # 2005 SPY dates.
+        spy_dates = data["SPY"]["dates"]
+        if not spy_dates:
+            logger.error("No SPY dates available for backtest")
+            return self._empty_result(recommendation="No data available")
+        common_dates = set(spy_dates)
+        for asset in ("GLD", "TLT"):
+            common_dates.intersection_update(data[asset]["dates"])
+        optional_starts = [
+            series["dates"][0]
+            for asset in ("BTC", "ETH")
+            if (series := data.get(asset)) and series.get("dates")
+        ]
+        start_date = max(optional_starts, default=spy_dates[0])
+        dates = [date for date in spy_dates if date in common_dates and date >= start_date]
+        if not dates:
+            logger.error("No common core market dates available for backtest")
+            return self._empty_result(recommendation="No common market dates")
+
+        spy_p = self._align_prices_to_dates(data["SPY"], dates)
+        gld_p = self._align_prices_to_dates(data["GLD"], dates)
+        tlt_p = self._align_prices_to_dates(data["TLT"], dates)
+        ief_p = self._align_prices_to_dates(data.get("IEF"), dates, tlt_p)
+        btc_p = self._align_prices_to_dates(data.get("BTC"), dates, spy_p)
+        eth_p = self._align_prices_to_dates(data.get("ETH"), dates, spy_p)
+        vix_d = self._align_prices_to_dates(data.get("VIX"), dates, [18.0] * len(dates))
 
         spy_r = self._compute_returns(spy_p)
         gld_r = self._compute_returns(gld_p)
@@ -170,7 +237,10 @@ class RealDataBacktest:
         btc_vol = self._compute_rolling_vol(btc_r, 30)
         eth_vol = self._compute_rolling_vol(eth_r, 30)
 
-        n = min(len(spy_r), len(gld_r), len(tlt_r), len(dates)) - 1
+        n = min(
+            len(spy_r), len(gld_r), len(tlt_r), len(ief_r),
+            len(btc_r), len(eth_r), len(dates),
+        ) - 1
         warmup = 180  # Need 6 months for momentum
 
         base_val = 1.0
@@ -256,29 +326,11 @@ class RealDataBacktest:
 
         if days < 30:
             logger.error("Insufficient data for backtest")
-            return BacktestResult(
-                total_return=0.0, cagr=0.0, volatility=0.0, sharpe_ratio=0.0,
-                max_drawdown=0.0, baseline_sharpe=0.0, sharpe_improvement=0.0,
-                extras={
-                    "timestamp": datetime.now().isoformat(),
-                    "data_start": dates[0],
-                    "data_end": dates[-1],
-                    "trading_days": days,
-                    "baseline_cagr": 0.0,
-                    "baseline_vol": 0.0,
-                    "baseline_max_dd": 0.0,
-                    "baseline_total_return": 0.0,
-                    "collar_sharpe": 0.0,
-                    "collar_dd": 0.0,
-                    "crypto_sharpe": 0.0,
-                    "bond_dur_sharpe": 0.0,
-                    "dd_improvement": 0.0,
-                    "collar_days_pct": 0.0,
-                    "crypto_days_pct": 0.0,
-                    "avg_tlt_sleeve_pct": 0.0,
-                    "meets_target": False,
-                    "recommendation": "Insufficient data",
-                },
+            return self._empty_result(
+                recommendation="Insufficient data",
+                data_start=dates[0],
+                data_end=dates[-1],
+                trading_days=days,
             )
 
         b_cagr = np.mean(daily_base) * 252

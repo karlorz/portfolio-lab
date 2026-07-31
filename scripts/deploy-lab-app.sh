@@ -27,6 +27,7 @@ WEB_ROOT="${PORTFOLIO_LAB_WEB_ROOT:-$(env_default PORTFOLIO_LAB_WEB_ROOT)}"
 WEB_ROOT="${WEB_ROOT:-/var/www/portfolio-lab}"
 PUBLIC_ROOT="${PORTFOLIO_LAB_PUBLIC_ROOT:-$(env_default PORTFOLIO_LAB_PUBLIC_ROOT)}"
 PUBLIC_ROOT="${PUBLIC_ROOT:-${WEB_ROOT}}"
+RELEASE_DIR="${PORTFOLIO_LAB_RELEASE_DIR:-$(env_default PORTFOLIO_LAB_RELEASE_DIR)}"
 TASKER_HOST="${TASKER_HOST:-$(env_default TASKER_HOST)}"
 TASKER_HOST="${TASKER_HOST:-127.0.0.1}"
 TASKER_PORT="${TASKER_PORT:-$(env_default TASKER_PORT)}"
@@ -59,8 +60,8 @@ Usage:
 Host-native deploy/update for a Proxmox LXC or Linux VM. The default path:
   1. fast-forwards the local git checkout when possible
   2. installs Python/frontend dependencies
-  3. builds dist/
-  4. publishes dist/ to the configured web root
+  3. builds a verified static release from a clean detached git worktree
+  4. publishes the verified release to the configured web root while preserving /data/*
   5. installs/restarts a systemd tasker service
   6. writes a managed Caddy site block for ${APP_HOST}
   7. installs ${UPDATE_COMMAND_PATH} for future in-container updates
@@ -70,6 +71,7 @@ Options:
   --app-dir <path>              Project checkout path (default: ${APP_DIR})
   --web-root <path>             Static web root (default: ${WEB_ROOT})
   --public-root <path>          Public data root for /data/* (default: ${PUBLIC_ROOT})
+  --release-dir <path>          Verified static release dir (default: /tmp/portfolio-lab-release-<HEAD>)
   --tasker-host <host>          Tasker bind host (default: ${TASKER_HOST})
   --tasker-port <port>          Tasker API port (default: ${TASKER_PORT})
   --service-name <name>         systemd service name (default: ${SERVICE_NAME})
@@ -79,7 +81,7 @@ Options:
   --skip-git                   Do not run git pull --ff-only
   --skip-deps                  Do not run uv/bun dependency install
   --skip-data                  Do not refresh public/data via bun run fetch-data
-  --skip-build                 Do not build frontend dist/
+  --skip-build                 Do not build a new static release; verify and publish --release-dir
   --skip-service               Do not install/restart tasker systemd service
   --skip-caddy                 Do not write/reload Caddy config
   --skip-update-command        Do not install the in-container update command
@@ -139,6 +141,7 @@ while [ $# -gt 0 ]; do
     --app-dir) APP_DIR="${2:-}"; shift 2 ;;
     --web-root) WEB_ROOT="${2:-}"; shift 2 ;;
     --public-root) PUBLIC_ROOT="${2:-}"; shift 2 ;;
+    --release-dir) RELEASE_DIR="${2:-}"; shift 2 ;;
     --tasker-host) TASKER_HOST="${2:-}"; shift 2 ;;
     --tasker-port) TASKER_PORT="${2:-}"; shift 2 ;;
     --service-name) SERVICE_NAME="${2:-}"; shift 2 ;;
@@ -240,14 +243,12 @@ install_dependencies() {
 
 build_frontend() {
   [ "$SKIP_BUILD" = "0" ] || return 0
-  log "Building frontend dist"
-  if command -v bun >/dev/null 2>&1; then
-    run_app_cmd bun run build
-  elif command -v npm >/dev/null 2>&1; then
-    run_app_cmd npm run build
-  else
-    die "Missing frontend package manager: install bun or npm"
-  fi
+  prepare_release_dir
+  log "Building verified static release at ${RELEASE_DIR}"
+  need_cmd git
+  run_app_cmd ./scripts/python_runtime.sh scripts/build_lab_release.py \
+    --repo-dir "$APP_DIR" \
+    --release-dir "$RELEASE_DIR"
 }
 
 refresh_dashboard_data() {
@@ -271,12 +272,42 @@ check_fred_readiness() {
 check_public_data_consistency() {
   log "Checking public data consistency before publish"
   if [ "$SKIP_DATA" = "1" ]; then
-    warn "--skip-data set; validating existing public/data and dist/data artifacts"
+    warn "--skip-data set; validating existing public/data artifacts"
   fi
-  # Checkout public/data is intentional here (pre-publish). Live WWW SSOT is
-  # separate; ops audits must set PUBLIC_DATA_DIR or --public-dir.
+  # Immutable static release identity excludes /data/**, so this deploy path
+  # audits the live public data tree in place instead of the checkout mirror.
   run_app_cmd ./scripts/python_runtime.sh scripts/check_public_data_consistency.py \
-    --app-dir "$APP_DIR" --allow-repo-public-data
+    --app-dir "$APP_DIR" --public-dir "${PUBLIC_ROOT}/data" --skip-dist-data-match
+}
+
+prepare_release_dir() {
+  if [ -n "$RELEASE_DIR" ]; then
+    return 0
+  fi
+  if [ "$DRY_RUN" = "1" ]; then
+    RELEASE_DIR="/tmp/portfolio-lab-release-HEAD"
+    return 0
+  fi
+  need_cmd git
+  local source_sha
+  source_sha="$(git -C "$APP_DIR" rev-parse --verify HEAD)"
+  RELEASE_DIR="${TMPDIR:-/tmp}/portfolio-lab-release-${source_sha}"
+}
+
+verify_static_release() {
+  prepare_release_dir
+  if [ "$DRY_RUN" = "1" ]; then
+    log "[dry-run] Would verify static release ${RELEASE_DIR}"
+    return 0
+  fi
+  [ -d "$RELEASE_DIR" ] || die "Missing verified release dir ${RELEASE_DIR}; run without --skip-build or pass --release-dir"
+  local source_sha
+  source_sha="$(git -C "$APP_DIR" rev-parse --verify HEAD)"
+  log "Verifying static release ${RELEASE_DIR}"
+  run_app_cmd ./scripts/python_runtime.sh scripts/verify_lab_release.py \
+    --release-dir "$RELEASE_DIR" \
+    --expected-source-sha "$source_sha" \
+    --repo-dir "$APP_DIR"
 }
 
 mirror_repo_public_data_from_live() {
@@ -309,19 +340,20 @@ mirror_repo_public_data_from_live() {
 }
 
 publish_dist() {
-  if [ "$DRY_RUN" != "1" ] && [ ! -d "${APP_DIR}/dist" ]; then
-    die "Missing ${APP_DIR}/dist; run without --skip-build or build first"
+  prepare_release_dir
+  if [ "$DRY_RUN" != "1" ] && [ ! -d "$RELEASE_DIR" ]; then
+    die "Missing verified release dir ${RELEASE_DIR}; run without --skip-build or pass --release-dir"
   fi
 
-  log "Publishing static app to ${WEB_ROOT}"
+  log "Publishing verified static app from ${RELEASE_DIR} to ${WEB_ROOT}"
   run_cmd mkdir -p "$WEB_ROOT"
   if command -v rsync >/dev/null 2>&1; then
-    run_cmd rsync -a --delete "${APP_DIR}/dist/" "${WEB_ROOT}/"
+    run_cmd rsync -a --delete --exclude='/data/' --exclude='/data/**' "${RELEASE_DIR}/" "${WEB_ROOT}/"
   else
     if [ "$DRY_RUN" = "1" ]; then
-      log "[dry-run] Would copy ${APP_DIR}/dist/ to ${WEB_ROOT}/ with tar"
+      log "[dry-run] Would copy ${RELEASE_DIR}/ to ${WEB_ROOT}/ with tar, excluding data/"
     else
-      tar -C "${APP_DIR}/dist" -cf - . | tar -C "$WEB_ROOT" -xf -
+      tar -C "$RELEASE_DIR" --exclude='./data' -cf - . | tar -C "$WEB_ROOT" -xf -
     fi
   fi
 }
@@ -486,6 +518,7 @@ main() {
   mirror_repo_public_data_from_live
   build_frontend
   check_public_data_consistency
+  verify_static_release
   publish_dist
   install_tasker_service
   write_caddy_config

@@ -93,3 +93,22 @@ def test_cron_status_maps_both_137_and_139_to_oom() -> None:
     assert bare not in text
     # At least health + eval share the dual mapping
     assert text.count(dual) >= 10
+
+
+def test_build_recipe_propagates_pipeline_failures() -> None:
+    """The logged typecheck/build pipelines must not mask producer failures."""
+    text = MAKEFILE.read_text()
+    body = makefile_recipe(text, "build")
+
+    assert "timeout 600 bash -o pipefail -c" in body
+    assert "bun run tsc --noEmit 2>&1 | tee -a $(DATA_DIR)/build.log" in body
+    assert "bun run build 2>&1 | tee -a $(DATA_DIR)/build.log" in body
+    assert "ulimit -v 8388608" in body
+
+
+def test_scheduled_app_build_has_the_same_bun_memory_envelope() -> None:
+    """Manual and scheduled production builds must not diverge on Bun's cap."""
+    wrapper = (PROJECT_ROOT / "scripts" / "cron" / "portfolio-lab-app-build.sh").read_text()
+
+    assert "8GB ulimit" in wrapper
+    assert 'CRON_GUARD_MEMORY_MB=8192 source "$PROJECT_DIR/scripts/cron_guard.sh"' in wrapper

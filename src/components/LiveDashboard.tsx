@@ -22,7 +22,6 @@ import type { CryptoData } from './CryptoAllocationPanel';
 import type { CalendarData } from './CalendarSeasonalityPanel';
 import type { AllocationSurfaceRole, EnsembleVotingData } from './EnsembleVotingPanel';
 import type { AlternativeData } from './AlternativeDataPanel';
-import type { FactorRotationData } from './FactorRotationPanel';
 import type { StackingEnsembleData } from './StackingEnsemblePanel';
 import type { ConvexityHarvestData } from './ConvexityHarvestPanel';
 import type { LLMSentimentData } from './LLMSentimentPanel';
@@ -33,9 +32,9 @@ import type { KurtosisData } from './KurtosisRegimePanel';
 import type { VolatilityParityData } from './VolatilityParityPanel';
 import { summarizeHealthOperations } from './healthOperations';
 import { IncidentSummary } from './IncidentSummary';
-import { ActionCenter } from './control-plane/ActionCenter';
 import { AllocationSpine } from './control-plane/AllocationSpine';
 import { ContextRail } from './control-plane/ContextRail';
+import { OverflowRegion } from './control-plane/OverflowRegion';
 import {
   buildDashboardIncidents,
   getIncidentsForTab,
@@ -459,13 +458,13 @@ export function LiveDashboard({
     return signals?.total_value || 100000;
   }, [signals]);
 
-  const regimeColor = useMemo(() => {
+  const regimeTone = useMemo(() => {
     const r = signals?.regime?.regime;
     switch (r) {
-      case 'crisis': return '#ef4444';
-      case 'vol_spike': return '#f59e0b';
-      case 'low_vol': return '#10b981';
-      default: return '#3b82f6';
+      case 'crisis': return 'critical';
+      case 'vol_spike': return 'warning';
+      case 'low_vol': return 'success';
+      default: return 'info';
     }
   }, [signals]);
 
@@ -497,10 +496,6 @@ export function LiveDashboard({
     () => buildDashboardIncidents({ alerts, signals, health, incidentSummary }),
     [alerts, signals, health, incidentSummary],
   );
-  const overviewIncidents = useMemo(
-    () => getIncidentsForTab(dashboardIncidents, 'overview'),
-    [dashboardIncidents],
-  );
   const healthIncidents = useMemo(
     () => getIncidentsForTab(dashboardIncidents, 'health'),
     [dashboardIncidents],
@@ -520,8 +515,7 @@ export function LiveDashboard({
           <h2>Live Paper Trading</h2>
           <div className="status-bar">
             <span
-              className="regime-badge"
-              style={{ backgroundColor: regimeColor }}
+              className={`regime-badge regime-tone-${regimeTone}`}
             >
               {signals?.regime?.regime?.toUpperCase() || 'LOADING'}
             </span>
@@ -557,18 +551,18 @@ export function LiveDashboard({
 
       {/* Tab Content */}
       <div className="live-dashboard-layout">
-      <div className="tab-content">
+        <ContextRail
+          incidents={dashboardIncidents}
+          routed={targetAllocationRole?.routed}
+          freshness={lastUpdate ? `Core data refreshed at ${lastUpdate}` : 'Awaiting core data refresh'}
+          openIncidentCount={incidentSummary?.incidents?.filter((incident) => incident.state !== 'resolved').length ?? 0}
+          onIncidentSelect={(incident) => changeView(incident.tab)}
+        />
+        <div className="tab-content">
         {/* Overview Tab */}
         {activeTab === 'overview' && (
         <PanelErrorBoundary name="Overview">
           <div className="tab-panel overview-panel">
-            <div className="overview-mobile-actions">
-              <ActionCenter
-                incidents={overviewIncidents}
-                onSelect={(incident) => changeView(incident.tab)}
-              />
-            </div>
-
             {/* Portfolio Summary */}
             <div className="metrics-grid">
               <div className="metric-card primary">
@@ -581,7 +575,7 @@ export function LiveDashboard({
 
               <div className="metric-card">
                 <label>Regime</label>
-                <span className="value-display" style={{ color: regimeColor }}>
+                <span className={`value-display regime-text-${regimeTone}`}>
                   {signals?.regime?.regime?.toUpperCase()}
                 </span>
                 {signals?.regime?.vix && (
@@ -613,6 +607,7 @@ export function LiveDashboard({
               {signals?.current_positions && signals.current_positions.length > 0 && (
                 <div className="positions-section">
                   <h3>Current Positions</h3>
+                  <OverflowRegion label="Current positions table">
                   <table className="positions-table">
                     <thead>
                       <tr>
@@ -637,12 +632,14 @@ export function LiveDashboard({
                       ))}
                     </tbody>
                   </table>
+                  </OverflowRegion>
                 </div>
               )}
 
               {signals?.recent_orders && signals.recent_orders.length > 0 && (
                 <div className="orders-section">
                   <h3>Recent Orders</h3>
+                  <OverflowRegion label="Recent orders table">
                   <table className="orders-table">
                     <thead>
                       <tr>
@@ -665,6 +662,7 @@ export function LiveDashboard({
                       ))}
                     </tbody>
                   </table>
+                  </OverflowRegion>
                 </div>
               )}
             </div>
@@ -926,7 +924,7 @@ export function LiveDashboard({
               </div>
               <div className="dashboard-grid dashboard-grid-two analytics-panel-group">
                 <PanelErrorBoundary name="Analytics/Factor Rotation">
-                  <FactorRotationPanel data={(signals?.factor_rotation ?? null) as unknown as FactorRotationData | null} />
+                  <FactorRotationPanel data={signals?.factor_rotation ?? null} />
                 </PanelErrorBoundary>
                 <PanelErrorBoundary name="Analytics/Stacking Ensemble">
                   <StackingEnsemblePanel data={signals?.stacking_ensemble ?? null} />
@@ -1119,13 +1117,6 @@ export function LiveDashboard({
         </PanelErrorBoundary>
         )}
       </div>
-      <ContextRail
-        incidents={dashboardIncidents}
-        routed={targetAllocationRole?.routed}
-        freshness={lastUpdate ? `Core data refreshed at ${lastUpdate}` : 'Awaiting core data refresh'}
-        openIncidentCount={incidentSummary?.incidents?.filter((incident) => incident.state !== 'resolved').length ?? 0}
-        onIncidentSelect={(incident) => changeView(incident.tab)}
-      />
       </div>
     </div>
   );

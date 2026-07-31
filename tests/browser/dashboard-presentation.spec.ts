@@ -21,6 +21,7 @@ const VIEWPORTS = [
   { width: 1024, height: 900 },
   { width: 768, height: 900 },
   { width: 390, height: 900 },
+  { width: 320, height: 900 },
 ] as const;
 
 type DashboardTabLabel = (typeof TAB_LABELS)[number];
@@ -142,6 +143,73 @@ function collectPresentationConsoleFailures(page: Page): string[] {
   return consoleMessages;
 }
 
+function makeSignalsFixture(factorRotation: Record<string, unknown>) {
+  return {
+    timestamp: '2026-07-30T20:06:46Z',
+    generated_at: '2026-07-30T20:06:46Z',
+    regime: { regime: 'normal', vix: 18.67, detected: null },
+    latest_prices: { SPY: 635, GLD: 305, TLT: 88 },
+    current_positions: [],
+    target_allocations: { SPY: 0.46, GLD: 0.38, TLT: 0.16 },
+    regime_authority: {
+      schema_version: 'regime-authority/v1',
+      live_controller: 'signals.json.target_allocations',
+      live_controller_module: 'src.broker.order_router',
+      live_regime: 'normal',
+      allocation_regime: 'normal',
+      routed_surface: 'target_allocations',
+      target_allocations: { SPY: 0.46, GLD: 0.38, TLT: 0.16 },
+      regime_controller: 'classify_vix_regime',
+      regime_controller_module: 'src.utils.classify_vix_regime',
+      regime_routed: false,
+      advanced_regime_signals: {
+        two_stage_regime: { role: 'advisory_shadow', routed: false },
+        bocd_regime: { role: 'advisory_shadow', routed: false },
+        regime_transition: { role: 'advisory_shadow', routed: false },
+      },
+    },
+    cash: 0,
+    total_value: 100000,
+    recent_orders: [],
+    ml_signals: {
+      available: false,
+      timestamp: null,
+      predictions: {},
+      features: {},
+      grid_search: {
+        available: false,
+        timestamp: null,
+        top_allocation: null,
+        sharpe: null,
+        volatility: null,
+      },
+    },
+    marl_status: {
+      schema_version: 'marl-runtime-status/v1',
+      available: false,
+      timestamp: '2026-07-30T20:06:46Z',
+      runtime: {
+        version: 'unknown',
+        device: 'unknown',
+        agents_loaded: [],
+        signal_integrator_connected: false,
+        checkpoint_loaded: false,
+        inference_count: 0,
+        current_allocation: {},
+        graph_metrics: {},
+      },
+      execution_role: {
+        role: 'research_shadow_non_routed',
+        routed: false,
+        routed_by: null,
+        live_authoritative: false,
+        description: 'Research shadow only.',
+      },
+    },
+    factor_rotation: factorRotation,
+  };
+}
+
 test.describe('dashboard browser presentation smoke', () => {
   test('contains the live missing-title kill alert without losing authority or the React root', async ({ page }) => {
     const consoleMessages = collectPresentationConsoleFailures(page);
@@ -218,6 +286,55 @@ test.describe('dashboard browser presentation smoke', () => {
     expect(consoleMessages).toEqual([]);
   });
 
+  for (const scenario of [
+    {
+      name: 'production',
+      payload: {
+        selected_factors: ['VLUE', 'VBR'],
+        allocation: { VLUE: 0.27, VBR: 0.73 },
+        signal_strength: 0.53,
+        recommendation: 'Rotate to Value',
+      },
+      expected: 'Rotate to Value',
+    },
+    {
+      name: 'partial',
+      payload: {
+        selected_factors: ['QUAL'],
+        recommendation: 'Hold quality sleeve',
+      },
+      expected: 'Unavailable',
+    },
+    {
+      name: 'malformed numeric',
+      payload: {
+        selected_factors: ['VLUE'],
+        allocation: { VLUE: 'not-a-number' },
+        signal_strength: 'bad',
+        recommendation: 'Advisory data degraded',
+      },
+      expected: 'Advisory data degraded',
+    },
+  ] as const) {
+    test(`renders Factor Rotation ${scenario.name} payload without console failures`, async ({ page }) => {
+      const consoleMessages = collectPresentationConsoleFailures(page);
+      await page.route('**/data/signals.json', (route) => route.fulfill({
+        json: makeSignalsFixture(scenario.payload),
+      }));
+
+      await openDashboard(page, { width: 1200, height: 900 });
+      await dashboardTab(page, 'Analytics').click();
+
+      const panel = page.locator('.factor-rotation-card').first();
+      await expect(panel).toBeVisible();
+      await expect(panel).toContainText('Factor Rotation');
+      await expect(panel).toContainText('Advisory');
+      await expect(panel).toContainText(scenario.expected);
+      await expectNoDocumentOverflow(page);
+      expect(consoleMessages).toEqual([]);
+    });
+  }
+
   for (const viewport of VIEWPORTS) {
     test(`keeps workspace navigation usable without document overflow at ${viewport.width}px`, async ({ page }) => {
       const consoleMessages = collectPresentationConsoleFailures(page);
@@ -274,6 +391,55 @@ test.describe('dashboard browser presentation smoke', () => {
     await dashboardTab(page, 'Auction').click();
     await expectCardSurface(page, '.closing-auction-panel');
 
+    expect(consoleMessages).toEqual([]);
+  });
+
+  test('keeps action and advisory badges legible in the context rail', async ({ page }) => {
+    const consoleMessages = collectPresentationConsoleFailures(page);
+
+    await openDashboard(page, { width: 1200, height: 900 });
+    const badges = page.locator('.action-center .control-status');
+    await expect(badges).toHaveCount(6);
+
+    const badgeMetrics = await badges.evaluateAll((elements) => elements.map((element) => {
+      const computed = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return {
+        whiteSpace: computed.whiteSpace,
+        width: rect.width,
+        height: rect.height,
+        lineHeight: parseFloat(computed.lineHeight),
+      };
+    }));
+
+    for (const badge of badgeMetrics) {
+      expect(badge.whiteSpace).toBe('nowrap');
+      expect(badge.width).toBeGreaterThan(30);
+      expect(badge.height).toBeLessThanOrEqual(badge.lineHeight * 2.1);
+    }
+    expect(consoleMessages).toEqual([]);
+  });
+
+  test('keeps live authority provenance readable at 320px', async ({ page }) => {
+    const consoleMessages = collectPresentationConsoleFailures(page);
+
+    await openDashboard(page, { width: 320, height: 900 });
+    const authoritySource = page.locator('.authority-badge code').first();
+    await expect(authoritySource).toContainText('signals.json.target_allocations');
+
+    const sourceMetrics = await authoritySource.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        width: rect.width,
+        height: rect.height,
+        scrollWidth: element.scrollWidth,
+      };
+    });
+
+    expect(sourceMetrics.width).toBeGreaterThan(120);
+    expect(sourceMetrics.height).toBeLessThan(48);
+    expect(sourceMetrics.scrollWidth).toBeLessThanOrEqual(sourceMetrics.width + 1);
+    await expectNoDocumentOverflow(page);
     expect(consoleMessages).toEqual([]);
   });
 

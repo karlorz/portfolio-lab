@@ -37,6 +37,11 @@ Every script sources `cron_guard.sh` which provides 4-layer defense:
 ² Placeholder — no broker API wired yet.  
 ³ No web server consumers found (`/var/www/portfolio-lab` doesn't exist, no caddy/nginx config).
 
+The app-build wrapper is the one memory-cap exception: Bun/Vite requires an 8 GB
+virtual-address-space limit on the deployment host, so
+`portfolio-lab-app-build.sh` overrides the shared 3 GB default with
+`CRON_GUARD_MEMORY_MB=8192`. The other cron jobs retain the 3 GB guard.
+
 ## Staggered Schedule Design
 
 **Principle**: No two jobs fire at the same minute. Minimum 5-minute gap between jobs. Heavy jobs (eval 10 min) get clear buffer on both sides.

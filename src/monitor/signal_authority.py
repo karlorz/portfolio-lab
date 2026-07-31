@@ -18,6 +18,8 @@ from numbers import Real
 from pathlib import Path
 from typing import Any, Mapping, MutableMapping, Optional, Sequence
 
+from src.paths import BASE_ALLOCATION
+
 logger = logging.getLogger(__name__)
 
 AUTHORITY_REQUIRED_KEYS: tuple[str, ...] = ("target_allocations",)
@@ -25,6 +27,7 @@ AUTHORITY_REQUIRED_KEYS: tuple[str, ...] = ("target_allocations",)
 # Champion sleeve symbols (see src.paths.BASE_ALLOCATION). Non-champion keys
 # may appear under crisis/vol overrides; require at least these three weights.
 _CHAMPION_SYMBOLS: tuple[str, ...] = ("SPY", "GLD", "TLT")
+CHAMPION_TARGET_ALLOCATIONS: dict[str, float] = dict(BASE_ALLOCATION)
 _SUM_TOLERANCE = 1e-2  # allow mild float drift after renorm
 
 
@@ -76,6 +79,25 @@ def validate_authority_payload(
             raise AuthorityValidationError(
                 f"target_allocations missing required symbols: {missing}"
             )
+
+
+def is_champion_target_allocations(payload: Mapping[str, Any]) -> bool:
+    """Return True only for the currently approved champion live allocation."""
+    if not isinstance(payload, Mapping):
+        return False
+    ta = payload.get("target_allocations")
+    if not isinstance(ta, Mapping):
+        return False
+    if set(ta.keys()) != set(CHAMPION_TARGET_ALLOCATIONS.keys()):
+        return False
+    for sym, expected in CHAMPION_TARGET_ALLOCATIONS.items():
+        try:
+            observed = float(ta[sym])
+        except (TypeError, ValueError, KeyError):
+            return False
+        if not math.isfinite(observed) or abs(observed - expected) > 1e-9:
+            return False
+    return True
 
 
 def merge_signals_patch(
