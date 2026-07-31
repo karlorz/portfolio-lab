@@ -669,6 +669,7 @@ class PerformanceAttribution:
         public_dir = Path(PUBLIC_DATA_DIR) / "attribution"
         latest = public_dir / "latest.json"
         dated = public_dir / filename
+        reconciled_history: list[Path] = []
         paths_identical = False
         try:
             paths_identical = path.resolve() == latest.resolve()
@@ -731,6 +732,12 @@ class PerformanceAttribution:
                     save_results_json(payload, output_path=str(dated))
                 except Exception:  # noqa: BLE001
                     pass
+                # Private DATA_DIR is the attribution SSOT. Reconcile older
+                # dated shards before rebuilding the public index so a prior
+                # split-brain run cannot leave business values divergent.
+                reconciled_history = self.reconcile_public_history(
+                    public_root=public_dir.parent
+                )
                 # H19/BI: keep public index catalog current without full dashboard
                 try:
                     from src.dashboard.public_data_index import (
@@ -740,7 +747,7 @@ class PerformanceAttribution:
 
                     if refresh_public_data_index_after_partial_write(
                         public_dir=Path(_pub),
-                        extra_paths=[latest, dated],
+                        extra_paths=[latest, dated, *reconciled_history],
                         reason="attribution_dual_write",
                     ):
                         logger.info("Refreshed public index after attribution dual-write")
@@ -764,6 +771,81 @@ class PerformanceAttribution:
                 except Exception:  # noqa: BLE001
                     pass
         return path
+
+    def reconcile_public_history(
+        self,
+        *,
+        public_root: Path | None = None,
+    ) -> list[Path]:
+        """Reconcile dated public attribution shards from private SSOT.
+
+        Attribution reports are dual-written, but older deployments could
+        leave same-date private/public shards produced by different runs.
+        ``provenance_completeness`` describes the attempted write; it cannot
+        repair a later split-brain overwrite.  For every dated shard present
+        in both trees, private ``DATA_DIR`` remains authoritative and only a
+        business-value mismatch triggers a plane-aware rewrite.  Private
+        diagnostic paths remain private; public paths are projected by the
+        shared serializer.
+        """
+        from src.dashboard.generator import (
+            _attach_dual_write_provenance,
+            finalize_dual_write_provenance_after_sync,
+        )
+        from src.dashboard.public_projection import public_business_values_equal
+
+        public_attribution_dir = (
+            Path(public_root) if public_root is not None else Path(PUBLIC_DATA_DIR)
+        ) / "attribution"
+        if not public_attribution_dir.is_dir():
+            return []
+
+        reconciled: list[Path] = []
+        for private_path in sorted(self.attribution_dir.glob("attribution_*.json")):
+            public_path = public_attribution_dir / private_path.name
+            if not public_path.is_file():
+                continue
+            try:
+                private_payload = json.loads(private_path.read_text(encoding="utf-8"))
+                public_payload = json.loads(public_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise RuntimeError(
+                    f"cannot audit attribution dual-write {private_path.name}: {exc}"
+                ) from exc
+            if public_business_values_equal(private_payload, public_payload):
+                continue
+
+            logger.warning(
+                "Reconciling attribution business drift from private SSOT: %s",
+                private_path.name,
+            )
+            stamped = _attach_dual_write_provenance(
+                private_payload,
+                private_path=private_path,
+                public_path=public_path,
+                dual_write_attempted=True,
+                dual_write_ok=True,
+                paths_identical=False,
+                note="historical attribution SSOT reconciliation",
+            )
+            finalize_dual_write_provenance_after_sync(
+                stamped,
+                private_path=private_path,
+                public_path=public_path,
+                dual_write_ok=True,
+                note="historical attribution SSOT reconciliation",
+            )
+
+            reconciled_private = json.loads(private_path.read_text(encoding="utf-8"))
+            reconciled_public = json.loads(public_path.read_text(encoding="utf-8"))
+            if not public_business_values_equal(reconciled_private, reconciled_public):
+                raise RuntimeError(
+                    "attribution business equivalence failed after reconciliation: "
+                    f"{private_path.name}"
+                )
+            reconciled.append(public_path)
+
+        return reconciled
 
     def load_latest_report(self) -> Optional[AttributionReport]:
         """Load most recent attribution report."""

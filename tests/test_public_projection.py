@@ -36,6 +36,43 @@ def test_public_projection_rewrites_known_diagnostic_planes_without_business_dri
     assert find_public_internal_paths(public) == []
 
 
+def test_public_business_values_ignore_only_approved_metadata() -> None:
+    from src.dashboard.public_projection import (
+        public_business_values_equal,
+        project_public_business_values,
+    )
+
+    private = {
+        "status": "ok",
+        "target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
+        "timestamp": "2026-07-31T12:00:00+00:00",
+        "runtime_provenance": {"plane": "private", "generator_git_sha": "private"},
+        "provenance_completeness": {
+            "private_path": "/root/projects/portfolio-lab/data/signals.json",
+            "public_path": "/var/www/portfolio-lab/data/signals.json",
+        },
+    }
+    public = {
+        "status": "ok",
+        "target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
+        "timestamp": "2026-07-31T12:01:00+00:00",
+        "runtime_provenance": {"plane": "public", "generator_git_sha": "public"},
+        "provenance_completeness": {
+            "private_path": "data/signals.json",
+            "public_path": "data/signals.json",
+        },
+    }
+
+    assert public_business_values_equal(private, public)
+    assert project_public_business_values(private) == {
+        "status": "ok",
+        "target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
+    }
+
+    public["target_allocations"]["SPY"] = 0.45
+    assert not public_business_values_equal(private, public)
+
+
 def test_public_path_gate_finds_nested_and_key_paths() -> None:
     from src.dashboard.public_projection import find_public_internal_paths
 
