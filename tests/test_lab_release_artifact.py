@@ -163,3 +163,36 @@ def test_release_builder_refuses_dirty_git_source(tmp_path: Path) -> None:
         assert "Refusing to build release from dirty source tree" in str(exc)
     else:
         raise AssertionError("dirty source was accepted")
+
+
+def test_release_builder_allows_modified_scheduled_runtime_artifacts(tmp_path: Path) -> None:
+    builder = _load_script("build_lab_release")
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, stdout=subprocess.PIPE)
+    (tmp_path / "bun.lock").write_text("lock\n", encoding="utf-8")
+    (tmp_path / "package.json").write_text("{}\n", encoding="utf-8")
+    for relative in builder.GENERATED_RUNTIME_SOURCE_PATHS:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"generated": 1}\n', encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, stdout=subprocess.PIPE)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Portfolio Lab Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-m",
+            "init",
+        ],
+        cwd=tmp_path,
+        check=True,
+        stdout=subprocess.PIPE,
+    )
+
+    for relative in builder.GENERATED_RUNTIME_SOURCE_PATHS:
+        path = tmp_path / relative
+        path.write_text('{"generated": 2}\n', encoding="utf-8")
+
+    builder.ensure_clean_source(tmp_path)

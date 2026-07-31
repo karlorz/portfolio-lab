@@ -24,6 +24,19 @@ from verify_lab_release import (
 DEFAULT_BUILD_COMMAND = "bun run build"
 DEFAULT_INSTALL_COMMAND = "bun install --frozen-lockfile"
 
+# These files are deliberately tracked because scheduled writers use them as
+# runtime inputs, but the deploy refresh regenerates their provenance stamp
+# from the reviewed source SHA.  They are excluded from the static release
+# identity (see copy_static_tree), so a normal data refresh must not make an
+# otherwise reviewed source checkout undeployable.  Keep this allowlist exact:
+# implementation edits and all other source changes must still fail closed.
+GENERATED_RUNTIME_SOURCE_PATHS = frozenset(
+    {
+        "data/ensemble_weights.json",
+        "data/vix_term_structure.json",
+    }
+)
+
 
 def run(command: list[str], *, cwd: Path) -> str:
     completed = subprocess.run(
@@ -46,10 +59,35 @@ def full_git_sha(repo_dir: Path, ref: str) -> str:
 
 
 def ensure_clean_source(repo_dir: Path) -> None:
-    status = run(["git", "status", "--porcelain=v1"], cwd=repo_dir)
-    if status:
+    status = subprocess.run(
+        ["git", "status", "--porcelain=v1"],
+        cwd=repo_dir,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ).stdout.rstrip("\n")
+    if not status:
+        return
+
+    unexpected: list[str] = []
+    for line in status.splitlines():
+        # Porcelain v1 starts with the two-character index/worktree status and
+        # a space.  Only ordinary modifications of the two known generated
+        # files are permitted; additions, deletions, renames, and untracked
+        # files remain deployment blockers.
+        status_code = line[:2]
+        path = line[3:] if len(line) >= 4 else ""
+        if status_code not in {" M", "M ", "MM"} or path not in GENERATED_RUNTIME_SOURCE_PATHS:
+            unexpected.append(line)
+
+    if unexpected:
         raise SystemExit(
-            "Refusing to build release from dirty source tree. Commit, stash, or remove changes first."
+            "Refusing to build release from dirty source tree. Commit, stash, or remove changes first. "
+            "Only modified scheduled runtime artifacts are exempt: "
+            + ", ".join(sorted(GENERATED_RUNTIME_SOURCE_PATHS))
+            + ". Unexpected changes:\n"
+            + "\n".join(unexpected)
         )
 
 
