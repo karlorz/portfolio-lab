@@ -394,6 +394,55 @@ test.describe('dashboard browser presentation smoke', () => {
     expect(consoleMessages).toEqual([]);
   });
 
+  test('keeps action and advisory badges legible in the context rail', async ({ page }) => {
+    const consoleMessages = collectPresentationConsoleFailures(page);
+
+    await openDashboard(page, { width: 1200, height: 900 });
+    const badges = page.locator('.action-center .control-status');
+    await expect(badges).toHaveCount(6);
+
+    const badgeMetrics = await badges.evaluateAll((elements) => elements.map((element) => {
+      const computed = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return {
+        whiteSpace: computed.whiteSpace,
+        width: rect.width,
+        height: rect.height,
+        lineHeight: parseFloat(computed.lineHeight),
+      };
+    }));
+
+    for (const badge of badgeMetrics) {
+      expect(badge.whiteSpace).toBe('nowrap');
+      expect(badge.width).toBeGreaterThan(30);
+      expect(badge.height).toBeLessThanOrEqual(badge.lineHeight * 2.1);
+    }
+    expect(consoleMessages).toEqual([]);
+  });
+
+  test('keeps live authority provenance readable at 320px', async ({ page }) => {
+    const consoleMessages = collectPresentationConsoleFailures(page);
+
+    await openDashboard(page, { width: 320, height: 900 });
+    const authoritySource = page.locator('.authority-badge code').first();
+    await expect(authoritySource).toContainText('signals.json.target_allocations');
+
+    const sourceMetrics = await authoritySource.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        width: rect.width,
+        height: rect.height,
+        scrollWidth: element.scrollWidth,
+      };
+    });
+
+    expect(sourceMetrics.width).toBeGreaterThan(120);
+    expect(sourceMetrics.height).toBeLessThan(48);
+    expect(sourceMetrics.scrollWidth).toBeLessThanOrEqual(sourceMetrics.width + 1);
+    await expectNoDocumentOverflow(page);
+    expect(consoleMessages).toEqual([]);
+  });
+
   test('keeps loaded Analytics child panels within mobile viewport', async ({ page }) => {
     const consoleMessages = collectPresentationConsoleFailures(page);
 
