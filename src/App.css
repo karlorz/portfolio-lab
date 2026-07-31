@@ -1637,7 +1637,11 @@ button.incident-row:hover {
   font-size: 1rem;
   display: flex;
   align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
   gap: 10px;
+  overflow-wrap: anywhere;
 }
 
 .health-panel .status-badge {
@@ -1645,6 +1649,7 @@ button.incident-row:hover {
   padding: 2px 8px;
   border-radius: 10px;
   color: var(--surface-canvas);
+  overflow-wrap: anywhere;
 }
 
 .health-panel .status-tone-success,
@@ -1678,6 +1683,7 @@ button.incident-row:hover {
 
 .health-panel .expand-btn {
   display: inline-grid;
+  flex: 0 0 36px;
   min-width: 36px;
   min-height: 36px;
   place-items: center;

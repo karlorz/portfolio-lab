@@ -142,4 +142,16 @@ describe('control-plane design contracts', () => {
     expect(chat).toContain('Ask about your portfolio…');
     expect(chat).toContain('role="log"');
   });
+
+  it('contains long health status disclosures beside the expansion control on narrow viewports', () => {
+    const css = read('src/App.css');
+    const headingRule = css.match(/\.health-panel \.panel-header h3 \{([\s\S]*?)\n\}/)?.[1] ?? '';
+    const buttonRule = css.match(/\.health-panel \.expand-btn \{([\s\S]*?)\n\}/)?.[1] ?? '';
+
+    expect(headingRule).toContain('min-width: 0;');
+    expect(headingRule).toContain('flex: 1 1 auto;');
+    expect(headingRule).toContain('flex-wrap: wrap;');
+    expect(headingRule).toContain('overflow-wrap: anywhere;');
+    expect(buttonRule).toContain('flex: 0 0 36px;');
+  });
 });
