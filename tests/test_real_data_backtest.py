@@ -8,6 +8,7 @@ import math
 import sqlite3
 from dataclasses import asdict
 from dataclasses import dataclass
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict
 
@@ -168,6 +169,59 @@ class TestRealDataBacktest:
         """Integer prices produce float returns."""
         rets = bt._compute_returns([100, 110, 105])
         assert all(isinstance(r, float) for r in rets)
+
+    def test_align_prices_to_dates_carries_forward_optional_series(self, bt):
+        """Optional series can start later than the core portfolio calendar."""
+        aligned = bt._align_prices_to_dates(
+            {"dates": ["2021-01-02", "2021-01-04"], "prices": [10.0, 12.0]},
+            ["2021-01-01", "2021-01-02", "2021-01-03", "2021-01-04"],
+            [1.0, 2.0, 3.0, 4.0],
+        )
+
+        assert aligned == [1.0, 10.0, 10.0, 12.0]
+
+    def test_run_with_shorter_optional_series(self, bt, monkeypatch):
+        """Real data runs when crypto histories are shorter than SPY."""
+        start = date(2021, 1, 1)
+        dates = [(start + timedelta(days=index)).isoformat() for index in range(400)]
+
+        def series(prices_dates, start):
+            return {"dates": prices_dates, "prices": [start + index for index in range(len(prices_dates))]}
+
+        monkeypatch.setattr(
+            bt,
+            "_load_market_data",
+            lambda: {
+                "SPY": series(dates, 100.0),
+                "GLD": series(dates, 200.0),
+                "TLT": series(dates, 300.0),
+                "IEF": series(dates, 250.0),
+                "BTC": series(dates[100:], 400.0),
+                "ETH": series(dates[180:], 500.0),
+                "VIX": series(dates, 18.0),
+            },
+        )
+
+        result = bt.run()
+
+        assert result.extras["trading_days"] > 0
+
+    def test_run_with_no_common_core_dates_returns_safe_result(self, bt, monkeypatch):
+        """Disjoint core calendars should not raise while building result metadata."""
+        monkeypatch.setattr(
+            bt,
+            "_load_market_data",
+            lambda: {
+                "SPY": {"dates": ["2021-01-01"], "prices": [100.0]},
+                "GLD": {"dates": ["2021-01-02"], "prices": [200.0]},
+                "TLT": {"dates": ["2021-01-03"], "prices": [300.0]},
+            },
+        )
+
+        result = bt.run()
+
+        assert result.extras["trading_days"] == 0
+        assert result.extras["recommendation"] == "No common market dates"
 
     def test_compute_rolling_vol(self, bt):
         rng = np.random.RandomState(42)

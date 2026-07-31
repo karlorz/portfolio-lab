@@ -36,13 +36,14 @@ scripts/deploy-lab-app.sh --dry-run
 Build and verify a static release without publishing:
 
 ```bash
+PROJECT_DIR="${PORTFOLIO_LAB_PROJECT_DIR:-$(pwd)}"
 scripts/python_runtime.sh scripts/build_lab_release.py \
-  --repo-dir /root/projects/portfolio-lab \
+  --repo-dir "$PROJECT_DIR" \
   --release-dir /tmp/portfolio-lab-release-$(git rev-parse --verify HEAD)
 scripts/python_runtime.sh scripts/verify_lab_release.py \
   --release-dir /tmp/portfolio-lab-release-$(git rev-parse --verify HEAD) \
   --expected-source-sha "$(git rev-parse --verify HEAD)" \
-  --repo-dir /root/projects/portfolio-lab
+  --repo-dir "$PROJECT_DIR"
 ```
 
 Publish an already-built verified release:
