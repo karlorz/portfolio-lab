@@ -135,6 +135,21 @@ def _json_serializer(obj: Any) -> Any:
     return backtest_json_serializer(obj)
 
 
+def _write_json_payload(path: Path, payload: Mapping[str, Any]) -> None:
+    """Write one strict JSON body, applying the public projection when needed."""
+    from src.dashboard.public_projection import is_public_output_path
+    from src.monitor.signal_authority import serialize_json_payload
+
+    path.write_text(
+        serialize_json_payload(
+            payload,
+            output_path=path,
+            public=is_public_output_path(path),
+        ),
+        encoding="utf-8",
+    )
+
+
 def save_experiment_result_json(
     data: Mapping[str, Any],
     output_path: str | Path,
@@ -169,16 +184,13 @@ def save_experiment_result_json(
     if manifest_mode == "embedded":
         payload = dict(data)
         payload["_provenance"] = manifest
-        with open(path, "w") as f:
-            json.dump(payload, f, indent=2, default=_json_serializer)
+        _write_json_payload(path, payload)
         return path
 
     if manifest_mode == "sidecar":
-        with open(path, "w") as f:
-            json.dump(dict(data), f, indent=2, default=_json_serializer)
+        _write_json_payload(path, dict(data))
         sidecar_path = manifest_sidecar_path(path)
-        with open(sidecar_path, "w") as f:
-            json.dump(manifest, f, indent=2, default=_json_serializer)
+        _write_json_payload(sidecar_path, manifest)
         return sidecar_path
 
     raise ValueError("manifest_mode must be 'embedded' or 'sidecar'")
@@ -302,8 +314,7 @@ def _backfill_experiment_manifest_summary(
             )
             continue
 
-        with open(sidecar_path, "w") as f:
-            json.dump(manifest, f, indent=2, default=_json_serializer)
+        _write_json_payload(sidecar_path, manifest)
         written.append(str(sidecar_path))
         artifacts.append(
             {

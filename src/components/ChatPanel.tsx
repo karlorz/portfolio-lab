@@ -15,11 +15,24 @@ const SUGGESTED_QUERIES: ChatSuggestion[] = [
   { label: 'Risk metrics', query: 'What are my VaR and CVaR numbers?', category: 'risk' },
 ];
 
-export function ChatPanel({ expanded = false, onToggleExpand }: ChatPanelProps) {
+export function ChatPanel({ expanded: expandedProp, onToggleExpand }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [internalExpanded, setInternalExpanded] = useState(expandedProp ?? false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const isControlled = expandedProp !== undefined && onToggleExpand !== undefined;
+  const expanded = isControlled ? expandedProp : internalExpanded;
+  const headingId = 'portfolio-assistant-heading';
+  const contentId = 'portfolio-assistant-content';
+
+  const toggleExpand = () => {
+    if (onToggleExpand) {
+      onToggleExpand();
+      return;
+    }
+    setInternalExpanded((current) => !current);
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -84,81 +97,93 @@ export function ChatPanel({ expanded = false, onToggleExpand }: ChatPanelProps) 
     }
   };
 
-  if (!expanded) {
-    return (
-      <div className="chat-panel collapsed" onClick={onToggleExpand}>
-        <div className="panel-header">
-          <h3>Portfolio Assistant</h3>
-          <span className="expand-hint">Click to expand</span>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="chat-panel expanded">
-      <div className="panel-header" onClick={onToggleExpand}>
-        <h3>Portfolio Assistant</h3>
-        <button className="collapse-btn">&#9660;</button>
-      </div>
-
-      <div className="chat-messages">
-        {messages.length === 0 && (
-          <div className="chat-welcome">
-            <p>Ask me anything about your portfolio:</p>
-            <div className="suggestion-chips">
-              {SUGGESTED_QUERIES.map((sq) => (
-                <button
-                  key={sq.query}
-                  className="suggestion-chip"
-                  onClick={() => handleSuggestionClick(sq)}
-                  disabled={loading}
-                >
-                  {sq.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {messages.map((msg) => (
-          <div key={msg.id} className={`chat-message ${msg.role}`}>
-            <div className="message-role">
-              {msg.role === 'user' ? 'You' : 'Assistant'}
-            </div>
-            <div className="message-content">
-              {msg.content.split('\n').map((line, i) => (
-                <p key={i}>{line}</p>
-              ))}
-            </div>
-          </div>
-        ))}
-
-        {loading && (
-          <div className="chat-message assistant">
-            <div className="message-role">Assistant</div>
-            <div className="message-content loading-dots">
-              <span>.</span><span>.</span><span>.</span>
-            </div>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
-      </div>
-
-      <form className="chat-input-form" onSubmit={handleSubmit}>
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask about your portfolio..."
-          disabled={loading}
-          className="chat-input"
-        />
-        <button type="submit" disabled={loading || !input.trim()} className="chat-send-btn">
-          Send
+    <section
+      className={`chat-panel ${expanded ? 'expanded' : 'collapsed'}`}
+      aria-labelledby={headingId}
+    >
+      <div className="panel-header">
+        <h3 id={headingId}>Portfolio Assistant</h3>
+        <button
+          type="button"
+          className="panel-toggle"
+          aria-expanded={expanded}
+          aria-controls={contentId}
+          aria-label={`${expanded ? 'Collapse' : 'Expand'} Portfolio Assistant`}
+          onClick={toggleExpand}
+        >
+          <span className="expand-hint">{expanded ? 'Collapse' : 'Expand'}</span>
+          <span aria-hidden="true">{expanded ? '▼' : '▶'}</span>
         </button>
-      </form>
-    </div>
+      </div>
+
+      <div
+        id={contentId}
+        className="chat-panel-content"
+        hidden={!expanded}
+      >
+        <div className="chat-messages" role="log" aria-live="polite" aria-label="Portfolio assistant messages">
+          {messages.length === 0 && (
+            <div className="chat-welcome">
+              <p>Ask me anything about your portfolio:</p>
+              <div className="suggestion-chips">
+                {SUGGESTED_QUERIES.map((sq) => (
+                  <button
+                    key={sq.query}
+                    type="button"
+                    className="suggestion-chip"
+                    onClick={() => handleSuggestionClick(sq)}
+                    disabled={loading}
+                  >
+                    {sq.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {messages.map((msg) => (
+            <div key={msg.id} className={`chat-message ${msg.role}`}>
+              <div className="message-role">
+                {msg.role === 'user' ? 'You' : 'Assistant'}
+              </div>
+              <div className="message-content">
+                {msg.content.split('\n').map((line, i) => (
+                  <p key={i}>{line}</p>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          {loading && (
+            <div className="chat-message assistant">
+              <div className="message-role">Assistant</div>
+              <div className="message-content loading-dots" role="status" aria-live="polite">
+                Loading…
+              </div>
+            </div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
+
+        <form className="chat-input-form" onSubmit={handleSubmit}>
+          <input
+            type="text"
+            name="question"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Ask about your portfolio…"
+            aria-label="Ask the portfolio assistant"
+            autoComplete="off"
+            disabled={loading}
+            className="chat-input"
+          />
+          <button type="submit" disabled={loading || !input.trim()} className="chat-send-btn">
+            Send
+          </button>
+        </form>
+      </div>
+    </section>
   );
 }

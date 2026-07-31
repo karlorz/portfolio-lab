@@ -8,31 +8,44 @@ interface HealthPanelProps {
   onToggleExpand?: () => void;
 }
 
+type StatusTone = 'success' | 'info' | 'warning' | 'critical' | 'neutral';
+
+function getStatusTone(status: string | null | undefined): StatusTone {
+  switch (status) {
+    case 'healthy':
+    case 'fresh':
+    case 'ok':
+      return 'success';
+    case 'scheduled':
+      return 'info';
+    case 'warning':
+    case 'stale':
+    case 'degraded':
+      return 'warning';
+    case 'critical':
+    case 'error':
+    case 'unavailable':
+      return 'critical';
+    default:
+      return 'neutral';
+  }
+}
+
+function statusToneClass(status: string | null | undefined): string {
+  return `status-tone-${getStatusTone(status)}`;
+}
+
 export function HealthPanel({ health, expanded = false, onToggleExpand }: HealthPanelProps) {
   if (!health) {
     return (
       <div className="health-panel loading">
         <div className="panel-header">
           <h3>System Health</h3>
-          <span className="loading-text">Loading...</span>
+          <span className="loading-text" role="status" aria-live="polite">Loading…</span>
         </div>
       </div>
     );
   }
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'healthy': return '#10b981';
-      case 'fresh': return '#10b981';
-      case 'ok': return '#10b981';
-      case 'scheduled': return '#3b82f6';
-      case 'warning': return '#f59e0b';
-      case 'stale': return '#f59e0b';
-      case 'critical': return '#ef4444';
-      case 'error': return '#ef4444';
-      default: return '#6b7280';
-    }
-  };
 
   const formatTime = (isoString: string | null) => {
     if (!isoString) return 'Never';
@@ -59,41 +72,40 @@ export function HealthPanel({ health, expanded = false, onToggleExpand }: Health
     ([_, d]) => d.status === 'critical'
   );
   const operationsSummary = summarizeHealthOperations(health);
+  const dualWriteStatus = operationsSummary.dualWrite.status === 'ok'
+    ? 'healthy'
+    : operationsSummary.dualWrite.status === 'warning'
+      ? 'warning'
+      : operationsSummary.dualWrite.status === 'critical'
+        ? 'critical'
+        : 'unknown';
 
   return (
     <div className="health-panel">
-      <div className="panel-header" onClick={onToggleExpand}>
+      <div className="panel-header">
         <h3>
           System Health
-          <span 
-            className="status-badge"
-            style={{ backgroundColor: getStatusColor(health.system_status) }}
-          >
+          <span className={`status-badge ${statusToneClass(health.system_status)}`}>
             {health.system_status?.toUpperCase()}
           </span>
           {operationsSummary.dualWrite.status !== 'absent' && (
             <span
-              className="status-badge dual-write-badge"
+              className={`status-badge dual-write-badge ${statusToneClass(dualWriteStatus)}`}
               title={operationsSummary.dualWrite.detail ?? operationsSummary.dualWrite.label}
-              style={{
-                backgroundColor: getStatusColor(
-                  operationsSummary.dualWrite.status === 'ok'
-                    ? 'healthy'
-                    : operationsSummary.dualWrite.status === 'warning'
-                      ? 'warning'
-                      : operationsSummary.dualWrite.status === 'critical'
-                        ? 'critical'
-                        : 'unknown',
-                ),
-                marginLeft: '0.4rem',
-              }}
             >
               {operationsSummary.dualWrite.label}
             </span>
           )}
         </h3>
-        <button className="expand-btn">
-          {expanded ? '▼' : '▶'}
+        <button
+          type="button"
+          className="expand-btn"
+          aria-expanded={expanded}
+          aria-controls="health-panel-details"
+          aria-label={`${expanded ? 'Collapse' : 'Expand'} system health details`}
+          onClick={() => onToggleExpand?.()}
+        >
+          <span aria-hidden="true">{expanded ? '▼' : '▶'}</span>
         </button>
       </div>
 
@@ -107,37 +119,24 @@ export function HealthPanel({ health, expanded = false, onToggleExpand }: Health
           </div>
           <div className="health-summary">
             <div className="summary-item">
-              <span className="dot" style={{ backgroundColor: '#10b981' }}></span>
+              <span className="dot status-dot status-tone-success" aria-hidden="true"></span>
               <span>{freshAssets.length} fresh</span>
             </div>
             <div className="summary-item">
-              <span className="dot" style={{ backgroundColor: '#f59e0b' }}></span>
+              <span className="dot status-dot status-tone-warning" aria-hidden="true"></span>
               <span>{staleAssets.length} stale</span>
             </div>
             <div className="summary-item">
-              <span className="dot" style={{ backgroundColor: '#ef4444' }}></span>
+              <span className="dot status-dot status-tone-critical" aria-hidden="true"></span>
               <span>{criticalAssets.length} critical</span>
             </div>
             <div className="summary-item">
-              <span className="dot" style={{ backgroundColor: '#3b82f6' }}></span>
+              <span className="dot status-dot status-tone-info" aria-hidden="true"></span>
               <span>{operationsSummary.scheduler.totalJobs} scheduled jobs, {operationsSummary.scheduler.failedJobs} failed</span>
             </div>
             {operationsSummary.dualWrite.status !== 'absent' && (
               <div className="summary-item">
-                <span
-                  className="dot"
-                  style={{
-                    backgroundColor: getStatusColor(
-                      operationsSummary.dualWrite.status === 'ok'
-                        ? 'healthy'
-                        : operationsSummary.dualWrite.status === 'warning'
-                          ? 'warning'
-                          : operationsSummary.dualWrite.status === 'critical'
-                            ? 'critical'
-                            : 'unknown',
-                    ),
-                  }}
-                ></span>
+                <span className={`dot status-dot ${statusToneClass(dualWriteStatus)}`} aria-hidden="true"></span>
                 <span>{operationsSummary.dualWrite.label}</span>
               </div>
             )}
@@ -145,8 +144,12 @@ export function HealthPanel({ health, expanded = false, onToggleExpand }: Health
         </>
       )}
 
-      {expanded && (
-        <div className="health-details">
+      <div
+        id="health-panel-details"
+        className="health-details"
+        aria-hidden={!expanded}
+        hidden={!expanded}
+      >
           <div className="section operations-summary-section">
             <h4>Operations Summary</h4>
             <div className="operations-summary-grid">
@@ -203,10 +206,7 @@ export function HealthPanel({ health, expanded = false, onToggleExpand }: Health
                     <div className="job-next-run">
                       Next: {formatTime(job.next_run)}
                     </div>
-                    <span 
-                      className="job-status"
-                      style={{ backgroundColor: getStatusColor(job.status) }}
-                    >
+                    <span className={`job-status ${statusToneClass(job.status)}`}>
                       {job.status}
                     </span>
                   </div>
@@ -232,10 +232,7 @@ export function HealthPanel({ health, expanded = false, onToggleExpand }: Health
                       title={`Calendar age: ${data.days_stale}d`}
                     >
                       <span className="symbol">{symbol}</span>
-                      <span
-                        className="status-dot"
-                        style={{ backgroundColor: getStatusColor(data.status) }}
-                      ></span>
+                      <span className={`status-dot ${statusToneClass(data.status)}`} aria-hidden="true"></span>
                       <span className="days">{lagDays}d lag</span>
                       <span className="date">{data.last_update}</span>
                     </div>
@@ -249,8 +246,7 @@ export function HealthPanel({ health, expanded = false, onToggleExpand }: Health
           <div className="last-updated">
             Health data: {formatTime(health.generated_at)}
           </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }

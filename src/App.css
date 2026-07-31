@@ -1630,7 +1630,6 @@ button.incident-row:hover {
   justify-content: space-between;
   padding: 15px 20px;
   border-bottom: 1px solid #334155;
-  cursor: pointer;
 }
 
 .health-panel .panel-header h3 {
@@ -1645,15 +1644,55 @@ button.incident-row:hover {
   font-size: 0.7rem;
   padding: 2px 8px;
   border-radius: 10px;
-  color: #fff;
+  color: var(--surface-canvas);
+}
+
+.health-panel .status-tone-success,
+.health-panel .status-tone-success.status-dot {
+  background-color: var(--status-success);
+}
+
+.health-panel .status-tone-info,
+.health-panel .status-tone-info.status-dot {
+  background-color: var(--status-info);
+}
+
+.health-panel .status-tone-warning,
+.health-panel .status-tone-warning.status-dot {
+  background-color: var(--status-warning);
+}
+
+.health-panel .status-tone-critical,
+.health-panel .status-tone-critical.status-dot {
+  background-color: var(--status-critical);
+}
+
+.health-panel .status-tone-neutral,
+.health-panel .status-tone-neutral.status-dot {
+  background-color: var(--border-strong);
+}
+
+.health-panel .dual-write-badge {
+  margin-left: 0.4rem;
 }
 
 .health-panel .expand-btn {
+  display: inline-grid;
+  min-width: 36px;
+  min-height: 36px;
+  place-items: center;
   background: transparent;
-  border: none;
-  color: #94a3b8;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-secondary);
   font-size: 1rem;
   cursor: pointer;
+}
+
+.health-panel .expand-btn:hover {
+  border-color: var(--border-subtle);
+  background: var(--surface-elevated);
+  color: var(--text-primary);
 }
 
 .health-panel .health-summary {
@@ -1842,8 +1881,28 @@ button.incident-row:hover {
   font-size: 0.65rem;
   padding: 2px 8px;
   border-radius: 10px;
-  color: #fff;
+  color: var(--surface-canvas);
   text-transform: uppercase;
+}
+
+.health-panel .job-status.status-tone-success {
+  background-color: var(--status-success);
+}
+
+.health-panel .job-status.status-tone-info {
+  background-color: var(--status-info);
+}
+
+.health-panel .job-status.status-tone-warning {
+  background-color: var(--status-warning);
+}
+
+.health-panel .job-status.status-tone-critical {
+  background-color: var(--status-critical);
+}
+
+.health-panel .job-status.status-tone-neutral {
+  background-color: var(--border-strong);
 }
 
 /* ===== Data Freshness Grid ===== */
@@ -1875,6 +1934,26 @@ button.incident-row:hover {
   border-radius: 50%;
 }
 
+.health-panel .freshness-item .status-dot.status-tone-success {
+  background-color: var(--status-success);
+}
+
+.health-panel .freshness-item .status-dot.status-tone-info {
+  background-color: var(--status-info);
+}
+
+.health-panel .freshness-item .status-dot.status-tone-warning {
+  background-color: var(--status-warning);
+}
+
+.health-panel .freshness-item .status-dot.status-tone-critical {
+  background-color: var(--status-critical);
+}
+
+.health-panel .freshness-item .status-dot.status-tone-neutral {
+  background-color: var(--border-strong);
+}
+
 .freshness-item .days {
   color: #94a3b8;
   font-size: 0.75rem;
@@ -1888,6 +1967,146 @@ button.incident-row:hover {
 
 .freshness-item.status-critical {
   border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+/* ===== Portfolio Assistant ===== */
+.chat-panel {
+  overflow: hidden;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.chat-panel .panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 52px;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.chat-panel .panel-header h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.chat-panel .panel-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.chat-panel .panel-toggle:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+}
+
+.chat-panel-content {
+  display: grid;
+  min-height: 260px;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.chat-messages {
+  min-height: 220px;
+  max-height: 520px;
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+
+.chat-welcome p {
+  margin-top: 0;
+  color: var(--text-secondary);
+}
+
+.suggestion-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.suggestion-chip,
+.chat-send-btn {
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.suggestion-chip:hover,
+.chat-send-btn:hover:not(:disabled) {
+  border-color: var(--authority-accent);
+  color: var(--text-primary);
+}
+
+.suggestion-chip:disabled,
+.chat-send-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.chat-message {
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-canvas);
+}
+
+.chat-message.user {
+  border-color: color-mix(in oklch, var(--authority-accent) 42%, var(--border-subtle));
+  background: color-mix(in oklch, var(--authority-accent) 9%, var(--surface-canvas));
+}
+
+.message-role {
+  margin-bottom: var(--space-1);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.message-content p {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.chat-input-form {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.chat-input {
+  min-width: 0;
+  flex: 1;
+  min-height: 38px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-canvas);
+  color: var(--text-primary);
+}
+
+.chat-input::placeholder {
+  color: var(--text-muted);
 }
 
 /* ===== Regime Timeline ===== */

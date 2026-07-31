@@ -125,4 +125,21 @@ describe('control-plane design contracts', () => {
     expect(dashboard).toContain('regime-text-');
     expect(css).toContain('font-variant-numeric: tabular-nums');
   });
+
+  it('keeps health and assistant expansion controls semantic and token-backed', () => {
+    const health = read('src/components/HealthPanel.tsx');
+    const chat = read('src/components/ChatPanel.tsx');
+
+    for (const source of [health, chat]) {
+      expect(source).toContain('aria-expanded={expanded}');
+      expect(source).toContain('aria-controls=');
+      expect(source).toContain('type="button"');
+      expect(source).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+      expect(source).not.toContain('onClick={onToggleExpand}');
+    }
+    expect(health).toContain('Loading…');
+    expect(health).toContain('status-tone-');
+    expect(chat).toContain('Ask about your portfolio…');
+    expect(chat).toContain('role="log"');
+  });
 });

@@ -2,6 +2,20 @@ import { z } from 'zod';
 import type { Alert, AlertsData, SignalsData } from '../types/live';
 
 // ---------------------------------------------------------------------------
+// Runtime provenance
+// ---------------------------------------------------------------------------
+export const RuntimeProvenanceSchema = z.object({
+  schema_version: z.optional(z.string()),
+  artifact_id: z.optional(z.nullable(z.string())),
+  plane: z.optional(z.nullable(z.string())),
+  generated_at: z.optional(z.nullable(z.string())),
+  generator_git_sha: z.optional(z.nullable(z.string())),
+  generator_git_sha_status: z.optional(z.nullable(z.string())),
+  last_full_generator_git_sha: z.optional(z.nullable(z.string())),
+  patch_source: z.optional(z.nullable(z.string())),
+}).passthrough();
+
+// ---------------------------------------------------------------------------
 // Regime
 // ---------------------------------------------------------------------------
 export const RegimeSchema = z.object({
@@ -1194,6 +1208,13 @@ const SignalsDataObjectSchema = z.object({
   target_allocations: z.record(z.string(), z.number()),
   allocation_surface_roles: z.optional(AllocationSurfaceRolesSchema),
   regime_authority: z.optional(RegimeAuthoritySchema),
+  artifact_id: z.optional(z.nullable(z.string())),
+  plane: z.optional(z.nullable(z.string())),
+  generator_git_sha: z.optional(z.nullable(z.string())),
+  generator_git_sha_status: z.optional(z.nullable(z.string())),
+  last_full_generator_git_sha: z.optional(z.nullable(z.string())),
+  patch_source: z.optional(z.nullable(z.string())),
+  runtime_provenance: z.optional(z.nullable(RuntimeProvenanceSchema)),
   cash: z.number(),
   total_value: z.number(),
   recent_orders: z.array(RecentOrderSchema),
@@ -1470,8 +1491,8 @@ const CronJobStatusSchema = z.object({
   schedule: z.string(),
   last_run: z.nullable(z.string()),
   next_run: z.nullable(z.string()),
-  status: z.enum(['ok', 'error', 'unknown']),
-  state: z.enum(['scheduled', 'paused', 'running']),
+  status: z.enum(['ok', 'error', 'unknown', 'disabled']),
+  state: z.enum(['scheduled', 'paused', 'running', 'manual_only']),
   backend: z.optional(z.string()),
   source: z.optional(z.string()),
   error: z.optional(z.string()),
@@ -1533,7 +1554,9 @@ const DataPipelineSloSchema = z.object({
 const SignalHealthSectionSchema = z.object({
   timestamp: z.optional(z.string()),
   summary: z.optional(z.record(z.string(), z.unknown())),
-  scores: z.optional(z.record(z.string(), z.number())),
+  // Current health producers publish diagnostic score objects (value,
+  // status, reason, and provenance), while older snapshots used scalars.
+  scores: z.optional(z.record(z.string(), z.unknown())),
   alerts: z.optional(z.array(z.unknown())),
   overall_health: z.optional(z.string()),
   error: z.optional(z.string()),
@@ -1556,6 +1579,13 @@ export const HealthDataSchema = z.object({
   data_freshness: z.record(z.string(), DataFreshnessSchema),
   system_status: z.enum(['healthy', 'warning', 'critical', 'degraded']),
   generated_at: z.string(),
+  artifact_id: z.optional(z.nullable(z.string())),
+  plane: z.optional(z.nullable(z.string())),
+  generator_git_sha: z.optional(z.nullable(z.string())),
+  generator_git_sha_status: z.optional(z.nullable(z.string())),
+  last_full_generator_git_sha: z.optional(z.nullable(z.string())),
+  patch_source: z.optional(z.nullable(z.string())),
+  runtime_provenance: z.optional(z.nullable(RuntimeProvenanceSchema)),
   scheduler_status: z.optional(SchedulerStatusSchema),
   data_pipeline_slo: z.optional(DataPipelineSloSchema),
   signal_health: z.optional(SignalHealthSectionSchema),

@@ -82,13 +82,25 @@ def _parse_generated_at(value: Any) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _reject_non_standard_json_constant(value: str) -> None:
+    raise ValueError(f"non-standard JSON constant: {value}")
+
+
+def _load_json_value(path: Path) -> Any | None:
+    """Load one JSON artifact with browser/Node-compatible number syntax."""
+    return json.loads(
+        path.read_text(encoding="utf-8"),
+        parse_constant=_reject_non_standard_json_constant,
+    )
+
+
 def _load_json(path: Path, errors: list[str]) -> dict[str, Any] | None:
     if not path.exists():
         errors.append(f"{path} is missing")
         return None
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        payload = _load_json_value(path)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         errors.append(f"{path} is not valid JSON: {exc}")
         return None
     if not isinstance(payload, dict):
@@ -279,10 +291,17 @@ def _check_public_json_artifacts_are_indexed(
     public_index: dict[str, Any] | None,
     errors: list[str],
 ) -> None:
-    if public_index is None or not public_data.exists():
+    if not public_data.exists():
         return
-    indexed = _indexed_public_paths(public_index)
+    indexed = _indexed_public_paths(public_index) if public_index is not None else set()
     for path in sorted(public_data.rglob("*.json")):
+        try:
+            _load_json_value(path)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            errors.append(f"{path} is not valid JSON: {exc}")
+            continue
+        if public_index is None:
+            continue
         try:
             relative_path = path.relative_to(public_data).as_posix()
         except ValueError:
@@ -673,8 +692,11 @@ def _check_public_internal_paths(public_data: Path, errors: list[str]) -> None:
         if not _INTERNAL_PATH_TEXT_RE.search(raw):
             continue
         try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError:
+            payload = json.loads(
+                raw,
+                parse_constant=_reject_non_standard_json_constant,
+            )
+        except (json.JSONDecodeError, ValueError):
             continue
         for pointer, value in find_public_internal_paths(payload):
             try:
@@ -722,11 +744,16 @@ def check_public_data_consistency(
     source_manifest = _load_json(source_manifest_path, errors)
     public_index = _load_json(public_data / "index.json", errors)
     health = _load_json(public_data / "health.json", errors)
+
+    # Strictly parse the complete public JSON tree before any index, path, or
+    # provenance checks. This makes malformed nested shards fail closed even
+    # when the index itself is missing or malformed.
+    _check_public_json_artifacts_are_indexed(public_data, public_index, errors)
+
     _check_timestamp_order(source_manifest, public_index, errors)
     _check_source_manifest_identity(source_manifest_path, source_manifest, public_index, errors)
     _check_present_index_entries_resolve(public_data, public_index, errors)
     _check_source_manifest_quality_artifacts_are_indexed(source_manifest, public_index, errors)
-    _check_public_json_artifacts_are_indexed(public_data, public_index, errors)
     # dist/ vs public/ only applies when auditing the checkout public tree
     repo_public = (root / "public" / "data").resolve()
     try:

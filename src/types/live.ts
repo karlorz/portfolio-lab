@@ -515,12 +515,12 @@ export interface CronJobStatus {
   schedule: string;
   last_run: string | null;
   next_run: string | null;
-  status: 'ok' | 'error' | 'unknown';
-  state: 'scheduled' | 'paused' | 'running';
+  status: 'ok' | 'error' | 'unknown' | 'disabled';
+  state: 'scheduled' | 'paused' | 'running' | 'manual_only';
   backend?: string;
   source?: string;
   error?: string;
-  duration_seconds?: number;
+  duration_seconds?: number | null;
 }
 
 export interface SchedulerStatus {

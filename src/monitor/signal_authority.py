@@ -304,17 +304,8 @@ def serialize_signals_payload(
         plane="public" if public else "private",
     )
 
-    def strict_json_value(value: Any) -> Any:
-        if isinstance(value, Mapping):
-            return {key: strict_json_value(item) for key, item in value.items()}
-        if isinstance(value, (list, tuple)):
-            return [strict_json_value(item) for item in value]
-        if isinstance(value, Real) and not isinstance(value, bool):
-            return value if math.isfinite(float(value)) else None
-        return value
-
     return json.dumps(
-        strict_json_value(dict(prepared)),
+        normalize_json_value(dict(prepared)),
         indent=2,
         default=_default,
         allow_nan=False,
@@ -450,6 +441,24 @@ def try_write_signals_multi_dest(
         return MultiDestWriteResult(skipped_reason=str(exc))
 
 
+def normalize_json_value(value: Any) -> Any:
+    """Recursively make JSON values finite without mutating the input.
+
+    Python's JSON encoder accepts ``NaN`` and infinities by default even
+    though browsers reject those tokens.  Diagnostic numeric values have no
+    truthful JSON representation when they are non-finite, so preserve the
+    object shape and publish them as ``null``.  ``allow_nan=False`` below is
+    still the final guard for any numeric type this normalizer does not know.
+    """
+    if isinstance(value, Mapping):
+        return {key: normalize_json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [normalize_json_value(item) for item in value]
+    if isinstance(value, Real) and not isinstance(value, bool):
+        return value if math.isfinite(float(value)) else None
+    return value
+
+
 def serialize_json_payload(
     payload: Mapping[str, Any] | Any,
     *,
@@ -475,7 +484,12 @@ def serialize_json_payload(
         body: Any = dict(payload)
     else:
         body = payload
-    return json.dumps(body, indent=2, default=_default) + "\n"
+    return json.dumps(
+        normalize_json_value(body),
+        indent=2,
+        default=_default,
+        allow_nan=False,
+    ) + "\n"
 
 
 def write_json_multi_dest(

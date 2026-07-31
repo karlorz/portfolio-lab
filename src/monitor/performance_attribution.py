@@ -21,10 +21,12 @@ Usage:
 
 import json
 import logging
+import math
 import sqlite3
 from src.paths import sqlite_connect, PUBLIC_DATA_DIR
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
+from numbers import Real
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import numpy as np
@@ -121,7 +123,9 @@ class AttributionReport:
         return asdict(self)
 
     def to_json(self) -> str:
-        return json.dumps(self.to_dict(), indent=2, default=str)
+        from src.monitor.signal_authority import serialize_json_payload
+
+        return serialize_json_payload(self.to_dict(), public=False)
 
 
 class PerformanceAttribution:
@@ -801,6 +805,14 @@ class PerformanceAttribution:
             return []
 
         reconciled: list[Path] = []
+
+        def contains_non_finite(value: Any) -> bool:
+            if isinstance(value, dict):
+                return any(contains_non_finite(child) for child in value.values())
+            if isinstance(value, (list, tuple)):
+                return any(contains_non_finite(child) for child in value)
+            return isinstance(value, Real) and not isinstance(value, bool) and not math.isfinite(float(value))
+
         for private_path in sorted(self.attribution_dir.glob("attribution_*.json")):
             public_path = public_attribution_dir / private_path.name
             if not public_path.is_file():
@@ -812,7 +824,11 @@ class PerformanceAttribution:
                 raise RuntimeError(
                     f"cannot audit attribution dual-write {private_path.name}: {exc}"
                 ) from exc
-            if public_business_values_equal(private_payload, public_payload):
+            if (
+                public_business_values_equal(private_payload, public_payload)
+                and not contains_non_finite(private_payload)
+                and not contains_non_finite(public_payload)
+            ):
                 continue
 
             logger.warning(

@@ -213,20 +213,14 @@ def _patch_monitor_report_kill_open(
 def _atomic_write_json_path(path: Path, payload: dict[str, Any]) -> None:
     """Write JSON at 0o644 (prefer signal_authority atomic helper)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        from src.dashboard.public_projection import (
-            is_public_output_path,
-            prepare_payload_for_write,
-        )
+    from src.dashboard.public_projection import is_public_output_path
+    from src.monitor.signal_authority import serialize_json_payload
 
-        payload = prepare_payload_for_write(
-            payload,
-            path,
-            public=is_public_output_path(path),
-        )
-    except Exception:  # noqa: BLE001 - preserve health fallback behavior
-        pass
-    text = json.dumps(payload, indent=2) + "\n"
+    text = serialize_json_payload(
+        payload,
+        output_path=path,
+        public=is_public_output_path(path),
+    )
     try:
         from src.monitor.signal_authority import _atomic_write_text
 
