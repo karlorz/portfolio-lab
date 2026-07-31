@@ -27,6 +27,7 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from src.backtest.metrics import save_results_json
+from src.monitor.signal_authority import serialize_json_payload
 from src.paths import DATA_DIR, ATTRIBUTION_DIR
 
 
@@ -40,6 +41,8 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+_ENSEMBLE_REGIME_NAMES = frozenset({"crisis", "high_vol", "low_vol", "normal", "recovery"})
 
 STATE_FILE = DATA_DIR / "adaptive_weights_state.json"
 
@@ -590,7 +593,10 @@ def stamp_ensemble_weights_freshness(
         return result
 
     now = datetime.now().isoformat()
-    regime_keys = [k for k in raw if not str(k).startswith("_") and isinstance(raw.get(k), dict)]
+    regime_keys = [
+        k for k in raw
+        if str(k) in _ENSEMBLE_REGIME_NAMES and isinstance(raw.get(k), dict)
+    ]
     meta = raw.get("_meta") if isinstance(raw.get("_meta"), dict) else {}
     meta = {
         **meta,
@@ -604,7 +610,6 @@ def stamp_ensemble_weights_freshness(
             "Live target_allocations remain champion baseline unless separately promoted."
         ),
     }
-    out = {k: v for k, v in raw.items() if not str(k).startswith("_") or k == "_meta"}
     # Preserve regimes; set _meta last
     out = {k: v for k, v in raw.items() if k != "_meta"}
     out["_meta"] = meta
@@ -612,7 +617,23 @@ def stamp_ensemble_weights_freshness(
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(path.suffix + ".tmp")
-        save_results_json(out, output_path=str(tmp))
+        # Serialize against the final logical path while writing to the
+        # temporary path. Otherwise the shared provenance helper correctly
+        # describes the implementation detail (ensemble_weights.json.tmp)
+        # instead of the artifact that survives os.replace().
+        tmp.write_text(
+            serialize_json_payload(
+                out,
+                output_path=path,
+                public=False,
+                add_runtime_provenance=True,
+            ),
+            encoding="utf-8",
+        )
+        try:
+            os.chmod(tmp, 0o644)
+        except OSError:
+            pass
         tmp.replace(path)
     except (OSError, TypeError, ValueError) as exc:
         result["error"] = str(exc)

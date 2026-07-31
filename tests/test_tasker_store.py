@@ -1,7 +1,8 @@
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from src.tasker.models import TaskDefinition
+from src.tasker.models import RUN_ERROR, RUN_SUCCESS, TaskDefinition
 from src.tasker.registry import TaskRegistry
 from src.tasker.store import TaskerStore
 
@@ -89,6 +90,72 @@ def test_store_tracks_run_lifecycle_and_health_failures(tmp_path):
     assert after_success["state"]["last_status"] == "success"
     assert after_success["state"]["failure_count"] == 1
     assert after_success["state"]["consecutive_failures"] == 0
+
+
+def test_store_finish_run_is_idempotent_for_terminal_rows(tmp_path):
+    registry = _registry()
+    store = _store(tmp_path)
+    store.sync_registry(registry)
+
+    run = store.create_run("portfolio-lab-health", ["make", "health"], trigger="service-recovery")
+    store.mark_run_running(run["run_id"], pid=99999999)
+
+    assert store.finish_run(
+        run["run_id"],
+        status=RUN_ERROR,
+        exit_code=None,
+        duration_seconds=61.5,
+        error="orphaned_run: process is no longer alive",
+    ) is True
+    first = store.get_run(run["run_id"])
+    first_state = store.get_task("portfolio-lab-health", registry)["state"]
+
+    # A runner thread and the service reconciler may race. The first terminal
+    # transition wins, and a repeated call must not overwrite the result or
+    # increment task health a second time.
+    assert store.finish_run(
+        run["run_id"],
+        status=RUN_SUCCESS,
+        exit_code=0,
+        duration_seconds=0.1,
+    ) is False
+    second = store.get_run(run["run_id"])
+    second_state = store.get_task("portfolio-lab-health", registry)["state"]
+
+    assert second["status"] == RUN_ERROR
+    assert second["error"] == first["error"]
+    assert second["finished_at"] == first["finished_at"]
+    assert second_state["failure_count"] == first_state["failure_count"] == 1
+    assert second_state["consecutive_failures"] == first_state["consecutive_failures"] == 1
+
+
+def test_store_status_mirrors_expose_terminal_reconciled_run(tmp_path):
+    registry = _registry()
+    store = _store(tmp_path)
+    store.sync_registry(registry)
+    run = store.create_run("portfolio-lab-health", ["make", "health"], trigger="service-recovery")
+    old_started_at = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    store.mark_run_running(run["run_id"], pid=99999999, started_at=old_started_at)
+    store.finish_run(
+        run["run_id"],
+        status=RUN_ERROR,
+        exit_code=None,
+        duration_seconds=300.0,
+        error="orphaned_run: dead pid after grace",
+    )
+
+    payload = store.write_status_mirrors(registry)
+    task = next(item for item in payload["tasks"] if item["id"] == "portfolio-lab-health")
+    recent = next(item for item in payload["recent_runs"] if item["run_id"] == run["run_id"])
+    cron = json.loads((tmp_path / "data" / "cron_status.json").read_text(encoding="utf-8"))
+    cron_task = next(item for item in cron["jobs"] if item["name"] == "portfolio-lab-health")
+
+    assert task["last_status"] == RUN_ERROR
+    assert task["last_run_id"] == run["run_id"]
+    assert recent["status"] == RUN_ERROR
+    assert recent["finished_at"] is not None
+    assert cron_task["status"] == RUN_ERROR
+    assert cron_task["last_run"] == recent["finished_at"]
 
 
 def test_store_lists_recent_runs_with_limit(tmp_path):

@@ -21,8 +21,10 @@ from src.tasker.models import (
     RUN_BLOCKED,
     RUN_CANCELLED,
     RUN_ERROR,
+    RUN_RUNNING,
     RUN_SUCCESS,
     RUN_TIMEOUT,
+    TERMINAL_RUN_STATUSES,
 )
 from src.tasker.registry import TaskRegistry
 
@@ -126,16 +128,30 @@ class TaskerStore:
             )
         return self.get_run(run_id)
 
-    def mark_run_running(self, run_id: str, pid: int) -> None:
+    def mark_run_running(self, run_id: str, pid: int, started_at: str | None = None) -> None:
         now = _utc_now()
+        started = started_at or now
         with self._connect() as conn:
+            run = conn.execute("SELECT task_id, status FROM task_runs WHERE run_id = ?", (run_id,)).fetchone()
+            if run is None:
+                raise KeyError(f"Unknown run: {run_id}")
+            if run["status"] in TERMINAL_RUN_STATUSES:
+                return
             conn.execute(
                 """
                 UPDATE task_runs
                 SET status = 'running', pid = ?, started_at = ?, updated_at = ?
                 WHERE run_id = ?
                 """,
-                (pid, now, now, run_id),
+                (pid, started, now, run_id),
+            )
+            conn.execute(
+                """
+                UPDATE task_state
+                SET last_started_at = ?, updated_at = ?
+                WHERE task_id = ?
+                """,
+                (started, now, run["task_id"]),
             )
 
     def finish_run(
@@ -145,21 +161,35 @@ class TaskerStore:
         exit_code: int | None,
         duration_seconds: float,
         error: str | None = None,
-    ) -> None:
+    ) -> bool:
         finished_at = _utc_now()
         with self._connect() as conn:
             run = conn.execute("SELECT * FROM task_runs WHERE run_id = ?", (run_id,)).fetchone()
             if run is None:
                 raise KeyError(f"Unknown run: {run_id}")
-            conn.execute(
+            if run["status"] in TERMINAL_RUN_STATUSES:
+                return False
+            updated = conn.execute(
                 """
                 UPDATE task_runs
                 SET status = ?, exit_code = ?, duration_seconds = ?, error = ?, finished_at = ?, updated_at = ?
-                WHERE run_id = ?
+                WHERE run_id = ? AND status = ?
                 """,
-                (status, exit_code, duration_seconds, error, finished_at, finished_at, run_id),
-            )
+                (status, exit_code, duration_seconds, error, finished_at, finished_at, run_id, run["status"]),
+            ).rowcount
+            if updated != 1:
+                return False
             self._update_task_health(conn, run["task_id"], run_id, status, exit_code, duration_seconds, finished_at)
+        return True
+
+    def list_running_runs(self) -> list[dict[str, Any]]:
+        """Return durable runs that still claim to be active."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM task_runs WHERE status = ? ORDER BY created_at ASC",
+                (RUN_RUNNING,),
+            ).fetchall()
+        return [self._run_row_to_dict(row) for row in rows]
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         with self._connect() as conn:

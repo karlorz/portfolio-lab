@@ -195,6 +195,53 @@ class EnsembleVote:
 # Falls back to hardcoded defaults if file is missing or invalid.
 
 
+# ``ensemble_weights.json`` is a flat business map for the five Regime values,
+# with additive runtime provenance emitted by the shared JSON serializer. Keep
+# this allowlist local to the consumer so adding a producer diagnostic does not
+# silently promote it into a business regime.
+ENSEMBLE_WEIGHT_METADATA_KEYS = frozenset(
+    {
+        "artifact_id",
+        "plane",
+        "generated_at",
+        "timestamp",
+        "updated_at",
+        "created_at",
+        "checked_at",
+        "last_updated",
+        "reconciled_at",
+        "ssot_reconciled_at",
+        "ssot_reconcile_source",
+        "generator_git_sha",
+        "generator_git_sha_status",
+        "last_full_generator_git_sha",
+        "generator_git_sha_reason",
+        "patch_source",
+        "content_patch_source",
+        "runtime_provenance",
+        "provenance_completeness",
+        "schema_version",
+        "private_path",
+        "public_path",
+        "private_mtime",
+        "public_mtime",
+        "private_content_hash",
+        "public_content_hash",
+        "dual_write_lag_seconds",
+        "dual_write_lag_stale",
+        "dual_write_lag_threshold_seconds",
+        "dual_write_lag_unit",
+        "repo_public_mirror_source",
+        "repo_public_mirror_dest",
+        "repo_public_mirror_lag",
+        "repo_public_mirror_lagging_count",
+        "repo_public_mirror_total",
+        "mirror_lag_restamped_at",
+        "private_health_report",
+    }
+)
+
+
 def _build_hardcoded_weights() -> Dict[Regime, Dict[SignalSource, float]]:
     """Return the hardcoded default regime weights (fallback)."""
     return {
@@ -256,17 +303,61 @@ def _build_hardcoded_weights() -> Dict[Regime, Dict[SignalSource, float]]:
     }
 
 
-def _load_regime_weights() -> Dict[Regime, Dict[SignalSource, float]]:
+def _extract_ensemble_business_payload(
+    raw: Any,
+    weights_path: Path,
+) -> Dict[str, Dict[str, Any]] | None:
+    """Separate regime maps from known additive runtime metadata.
+
+    Unknown non-metadata keys are treated as schema drift and fail closed to
+    the existing hardcoded weights. This keeps diagnostics visible while
+    preventing an arbitrary object from becoming a new business regime.
+    """
+    if not isinstance(raw, dict):
+        logger.warning(
+            "Invalid ensemble weights payload in %s: expected an object, using hardcoded defaults",
+            weights_path,
+        )
+        return None
+
+    regime_names = {regime.value for regime in Regime}
+    business: Dict[str, Dict[str, Any]] = {}
+    for key, value in raw.items():
+        key_str = str(key)
+        if key_str.startswith("_") or key_str in ENSEMBLE_WEIGHT_METADATA_KEYS:
+            continue
+        if key_str not in regime_names:
+            logger.warning(
+                "Unknown ensemble weight key '%s' in %s; using hardcoded defaults",
+                key_str,
+                weights_path,
+            )
+            return None
+        if not isinstance(value, dict):
+            logger.warning(
+                "Invalid regime map '%s' in %s: expected an object, using hardcoded defaults",
+                key_str,
+                weights_path,
+            )
+            return None
+        business[key_str] = value
+    return business
+
+
+def _load_regime_weights(
+    weights_file: Optional[str] = None,
+) -> Dict[Regime, Dict[SignalSource, float]]:
     """Load REGIME_WEIGHTS from JSON config file.
 
     Supports ENSEMBLE_WEIGHTS_FILE env var override (same pattern as
     PAPER_CONFIG in evaluator.py). Falls back to hardcoded defaults
     if the file doesn't exist or contains invalid data.
     """
-    weights_file = os.environ.get(
-        "ENSEMBLE_WEIGHTS_FILE",
-        str(DATA_DIR / "ensemble_weights.json")
-    )
+    if weights_file is None:
+        weights_file = os.environ.get(
+            "ENSEMBLE_WEIGHTS_FILE",
+            str(DATA_DIR / "ensemble_weights.json")
+        )
     weights_path = Path(weights_file)
 
     if not weights_path.exists():
@@ -286,30 +377,65 @@ def _load_regime_weights() -> Dict[Regime, Dict[SignalSource, float]]:
         )
         return _build_hardcoded_weights()
 
+    business = _extract_ensemble_business_payload(raw, weights_path)
+    if business is None:
+        return _build_hardcoded_weights()
+
+    expected_regimes = {regime.value for regime in Regime}
+    if set(business) != expected_regimes:
+        logger.warning(
+            "Invalid ensemble regime set in %s: missing=%s extra=%s; using hardcoded defaults",
+            weights_path,
+            sorted(expected_regimes - set(business)),
+            sorted(set(business) - expected_regimes),
+        )
+        return _build_hardcoded_weights()
+
+    expected_sources = {source.value for source in SignalSource}
     regime_weights: Dict[Regime, Dict[SignalSource, float]] = {}
-    for regime_name, sources in raw.items():
-        # Batch CS: skip _meta / underscore metadata keys without warning noise
-        if str(regime_name).startswith("_"):
-            continue
+    for regime_name, sources in business.items():
         try:
             regime = Regime(regime_name)
         except ValueError:
+            # The extraction boundary above owns this diagnostic. Keep this
+            # branch defensive if Regime changes between the two operations.
+            logger.warning("Unknown ensemble regime '%s' in %s", regime_name, weights_path)
+            return _build_hardcoded_weights()
+
+        source_names = {str(source_name) for source_name in sources}
+        if source_names != expected_sources:
             logger.warning(
-                "Unknown regime '%s' in %s, skipping", regime_name, weights_path
+                "Invalid source map for regime '%s' in %s: missing=%s extra=%s; "
+                "using hardcoded defaults",
+                regime_name,
+                weights_path,
+                sorted(expected_sources - source_names),
+                sorted(source_names - expected_sources),
             )
-            continue
+            return _build_hardcoded_weights()
 
         regime_dict: Dict[SignalSource, float] = {}
         for source_name, weight in sources.items():
             try:
                 source = SignalSource(source_name)
-            except ValueError:
+                numeric_weight = float(weight)
+            except (TypeError, ValueError):
                 logger.warning(
-                    "Unknown signal source '%s' in %s, skipping",
-                    source_name, weights_path
+                    "Invalid signal source weight '%s': %r in %s; using hardcoded defaults",
+                    source_name,
+                    weight,
+                    weights_path,
                 )
-                continue
-            regime_dict[source] = weight
+                return _build_hardcoded_weights()
+            if not np.isfinite(numeric_weight) or numeric_weight < 0:
+                logger.warning(
+                    "Invalid signal source weight '%s': %r in %s; using hardcoded defaults",
+                    source_name,
+                    weight,
+                    weights_path,
+                )
+                return _build_hardcoded_weights()
+            regime_dict[source] = numeric_weight
 
         regime_weights[regime] = regime_dict
 

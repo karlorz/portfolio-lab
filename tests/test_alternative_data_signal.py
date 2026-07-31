@@ -448,6 +448,76 @@ class TestFullPipeline:
         assert loaded.source == "alternative_data"
         mock_generator.signals_dir = original_dir
 
+    def test_load_latest_signal_filters_runtime_provenance(self, mock_generator, tmp_path, monkeypatch):
+        """Production serializer metadata stays outside the six business fields."""
+        from src.dashboard import public_projection
+
+        mock_generator.signals_dir = tmp_path
+        mock_generator.state_dir = tmp_path
+        monkeypatch.setenv("PORTFOLIO_LAB_ALT_DATA_AUTO_PROJECT", "0")
+        monkeypatch.setattr(public_projection, "_is_known_runtime_path", lambda _path: True)
+
+        original = mock_generator.generate_signal()
+        loaded = mock_generator.load_latest_signal()
+
+        assert loaded is not None
+        assert set(asdict(loaded)) == {
+            "source", "regime", "probability", "confidence", "timestamp", "raw_data"
+        }
+        assert loaded.source == original.source
+        assert mock_generator.last_signal_provenance["artifact_id"] == "alternative_data_latest.json"
+        assert mock_generator.last_signal_provenance["runtime_provenance"]["plane"] == "private"
+        assert mock_generator.get_signal_snapshot().is_active is True
+
+    def test_invalid_business_payload_is_unavailable(self, mock_generator, tmp_path):
+        mock_generator.signals_dir = tmp_path
+        (tmp_path / "alternative_data_latest.json").write_text(
+            json.dumps(
+                {
+                    "source": "alternative_data",
+                    "regime": "bull",
+                    "probability": 0.7,
+                    "confidence": 0.8,
+                    "timestamp": datetime.now().isoformat(),
+                    "raw_data": {},
+                    "unexpected_business_field": "not metadata",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="unknown alternative-data signal fields"):
+            mock_generator.load_latest_signal()
+        snapshot = mock_generator.get_signal_snapshot()
+        assert snapshot.is_active is False
+        assert snapshot.confidence == 0.0
+        assert "unavailable" in snapshot.explanation
+
+    @pytest.mark.parametrize(
+        "signal_kwargs",
+        [
+            {"confidence": 0.1, "timestamp": datetime.now().isoformat()},
+            {"confidence": 0.8, "timestamp": (datetime.now() - timedelta(hours=72)).isoformat()},
+        ],
+    )
+    def test_low_confidence_or_stale_signal_is_unavailable(self, mock_generator, tmp_path, signal_kwargs):
+        mock_generator.signals_dir = tmp_path
+        payload = {
+            "source": "alternative_data",
+            "regime": "bull",
+            "probability": 0.7,
+            "confidence": signal_kwargs["confidence"],
+            "timestamp": signal_kwargs["timestamp"],
+            "raw_data": {},
+        }
+        (tmp_path / "alternative_data_latest.json").write_text(json.dumps(payload), encoding="utf-8")
+
+        snapshot = mock_generator.get_signal_snapshot()
+
+        assert snapshot.is_active is False
+        assert snapshot.value == 0.0
+        assert "unavailable" in snapshot.explanation
+
     def test_validate_fresh_signal(self, mock_generator):
         """Fresh signal passes validation."""
         signal = mock_generator.generate_signal()

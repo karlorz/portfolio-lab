@@ -1,6 +1,8 @@
 import json
+import os
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -185,3 +187,57 @@ def test_runner_clears_thread_after_timeout_kill(tmp_path):
     completed = runner.wait_for_run(run["run_id"], timeout_seconds=5)
     assert completed["status"] == "timeout"
     assert run["run_id"] not in runner._threads
+
+
+def test_runner_reconciles_only_an_old_dead_pid(tmp_path):
+    registry = _registry([sys.executable, "-c", "pass"])
+    store = _store(tmp_path)
+    store.sync_registry(registry)
+    runner = TaskRunner(registry=registry, store=store, project_root=tmp_path)
+
+    run = store.create_run("env-task", registry.get("env-task").command, trigger="service-recovery")
+    started_at = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    store.mark_run_running(run["run_id"], pid=99999999, started_at=started_at)
+
+    reconciled = runner.reconcile_orphaned_runs(grace_seconds=30)
+    completed = store.get_run(run["run_id"])
+    task = store.get_task("env-task", registry)["state"]
+
+    assert reconciled == [run["run_id"]]
+    assert completed["status"] == "error"
+    assert completed["finished_at"] is not None
+    assert completed["duration_seconds"] >= 300
+    assert "orphaned_run" in (completed["error"] or "")
+    assert task["last_status"] == "error"
+    assert task["last_run_id"] == run["run_id"]
+    assert task["failure_count"] == 1
+    assert task["consecutive_failures"] == 1
+    assert runner.reconcile_orphaned_runs(grace_seconds=30) == []
+    assert store.get_task("env-task", registry)["state"]["failure_count"] == 1
+
+
+def test_runner_preserves_a_live_pid_even_after_grace(tmp_path):
+    registry = _registry([sys.executable, "-c", "pass"])
+    store = _store(tmp_path)
+    store.sync_registry(registry)
+    runner = TaskRunner(registry=registry, store=store, project_root=tmp_path)
+
+    run = store.create_run("env-task", registry.get("env-task").command, trigger="service-recovery")
+    started_at = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    store.mark_run_running(run["run_id"], pid=os.getpid(), started_at=started_at)
+
+    assert runner.reconcile_orphaned_runs(grace_seconds=0) == []
+    assert store.get_run(run["run_id"])["status"] == "running"
+
+
+def test_runner_preserves_a_dead_pid_during_bounded_grace(tmp_path):
+    registry = _registry([sys.executable, "-c", "pass"])
+    store = _store(tmp_path)
+    store.sync_registry(registry)
+    runner = TaskRunner(registry=registry, store=store, project_root=tmp_path)
+
+    run = store.create_run("env-task", registry.get("env-task").command, trigger="service-recovery")
+    store.mark_run_running(run["run_id"], pid=99999999)
+
+    assert runner.reconcile_orphaned_runs(grace_seconds=60) == []
+    assert store.get_run(run["run_id"])["status"] == "running"

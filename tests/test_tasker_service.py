@@ -74,10 +74,15 @@ class _RaisingStore:
 class _RecordingRunner:
     def __init__(self):
         self.started = []
+        self.reconciled = []
 
     def start_task(self, task_id, trigger="scheduled"):
         self.started.append(task_id)
         return {"run_id": f"run-{task_id}"}
+
+    def reconcile_orphaned_runs(self, *, now=None):
+        self.reconciled.append(now)
+        return []
 
 
 class _StubRegistry:
@@ -110,3 +115,17 @@ def test_tick_swallows_store_error_so_scheduler_thread_survives():
     # status mirrors still written even though one task errored.
     assert store.wrote_mirrors is True
 
+
+def test_tick_reconciles_orphaned_runs_before_scheduling_and_mirroring():
+    from datetime import datetime, timezone
+
+    reg = _StubRegistry([])
+    store = _RaisingStore()
+    runner = _RecordingRunner()
+    svc = service.TaskerService(registry=reg, store=store, runner=runner)
+    now = datetime.now(timezone.utc)
+
+    svc.tick(now)
+
+    assert runner.reconciled == [now]
+    assert store.wrote_mirrors is True

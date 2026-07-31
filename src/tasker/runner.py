@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import errno
+import logging
 import os
 import signal
 import subprocess
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +25,15 @@ from src.tasker.models import (
 )
 from src.tasker.registry import TaskRegistry
 from src.tasker.store import TaskerStore
+
+logger = logging.getLogger(__name__)
+
+
+# A service restart must not immediately declare a process lost: the child can
+# be between exec/initialisation and the first durable heartbeat. Keep this
+# bounded so a dead row cannot hold the single worker forever.
+ORPHAN_RUN_GRACE_SECONDS = 60.0
+MAX_ORPHAN_RUN_GRACE_SECONDS = 300.0
 
 
 class TaskRunner:
@@ -51,14 +63,155 @@ class TaskRunner:
         if state["paused"]:
             raise RuntimeError(f"Task is paused: {task_id}")
 
+        # A fresh service process has no in-memory thread map. Reconcile only
+        # rows that are old enough and provably dead before accepting work;
+        # otherwise a durable orphan would be silently bypassed.
+        self.reconcile_orphaned_runs()
         with self._lock:
             if any(thread.is_alive() for thread in self._threads.values()):
+                raise RuntimeError("tasker worker is busy")
+            if self.store.list_running_runs():
                 raise RuntimeError("tasker worker is busy")
             run = self.store.create_run(task_id, task.command, trigger=trigger, retry_of=retry_of)
             thread = threading.Thread(target=self._run_subprocess, args=(run["run_id"],), daemon=True)
             self._threads[run["run_id"]] = thread
             thread.start()
             return run
+
+    def reconcile_orphaned_runs(
+        self,
+        *,
+        now: datetime | None = None,
+        grace_seconds: float = ORPHAN_RUN_GRACE_SECONDS,
+    ) -> list[str]:
+        """Finalize durable RUNNING rows whose worker process is gone.
+
+        This is deliberately conservative. A row is eligible only when its
+        start age exceeds a bounded grace period, it is not owned by a local
+        runner thread/process, and its PID is no longer alive. Live or
+        ambiguous PIDs are preserved so PID reuse or a service restart cannot
+        turn an active task into a false failure.
+        """
+        observed_at = now or datetime.now(timezone.utc)
+        if observed_at.tzinfo is None:
+            observed_at = observed_at.replace(tzinfo=timezone.utc)
+        observed_at = observed_at.astimezone(timezone.utc)
+        try:
+            requested_grace = float(grace_seconds)
+        except (TypeError, ValueError):
+            requested_grace = ORPHAN_RUN_GRACE_SECONDS
+        grace = max(0.0, min(requested_grace, MAX_ORPHAN_RUN_GRACE_SECONDS))
+
+        reconciled: list[str] = []
+        for run in self.store.list_running_runs():
+            run_id = run["run_id"]
+            if self._local_runner_owns_run(run_id, run.get("pid")):
+                continue
+            age_seconds = self._run_age_seconds(run, observed_at)
+            if age_seconds is None or age_seconds < grace:
+                continue
+            if self._process_is_alive(run.get("pid")):
+                # The ownership probe is intentionally observed even when the
+                # process is not ours: a live PID is never safe to finalize.
+                owned = self._process_belongs_to_run(run.get("pid"), run_id)
+                logger.debug(
+                    "Preserving live tasker run %s (pid=%s, owned=%s, age=%.1fs)",
+                    run_id,
+                    run.get("pid"),
+                    owned,
+                    age_seconds,
+                )
+                continue
+
+            error = (
+                "orphaned_run: tasker process is no longer alive after "
+                f"{age_seconds:.1f}s (pid={run.get('pid')!r}, grace={grace:.1f}s)"
+            )
+            try:
+                transitioned = self.store.finish_run(
+                    run_id,
+                    status=RUN_ERROR,
+                    exit_code=None,
+                    duration_seconds=age_seconds,
+                    error=error,
+                )
+            except KeyError:
+                logger.info("Tasker run %s disappeared during orphan reconciliation", run_id)
+                continue
+            if transitioned:
+                reconciled.append(run_id)
+                logger.warning("Finalized orphaned tasker run %s: %s", run_id, error)
+        return reconciled
+
+    def _run_age_seconds(self, run: dict[str, Any], now: datetime) -> float | None:
+        started_at = run.get("started_at")
+        if not started_at:
+            return None
+        try:
+            started = datetime.fromisoformat(str(started_at))
+        except (TypeError, ValueError):
+            logger.warning(
+                "Cannot reconcile tasker run %s with invalid started_at=%r",
+                run.get("run_id"),
+                started_at,
+            )
+            return None
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        return max(0.0, (now - started.astimezone(timezone.utc)).total_seconds())
+
+    def _local_runner_owns_run(self, run_id: str, pid: int | None) -> bool:
+        with self._lock:
+            process = self._processes.get(run_id)
+            thread = self._threads.get(run_id)
+        if process is not None and (pid is None or process.pid == pid):
+            return True
+        # A child may have exited while its runner thread is still recording
+        # the terminal result. Do not race that thread with reconciliation.
+        return thread is not None and thread.is_alive()
+
+    def _process_is_alive(self, pid: int | None) -> bool:
+        try:
+            normalized_pid = int(pid)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            # Missing or malformed ownership is ambiguous, not proof of a
+            # dead worker. Preserve the durable row for an operator/repair
+            # path rather than falsely finalizing it.
+            return True
+        if normalized_pid <= 0:
+            return True
+        try:
+            os.kill(normalized_pid, 0)
+        except ProcessLookupError:
+            return False
+        except OSError as exc:
+            if exc.errno == errno.ESRCH:
+                return False
+            # EPERM and unknown OS errors are treated as alive/ambiguous. A
+            # false preserve is safer than finalizing a process we cannot
+            # inspect.
+            return True
+        return True
+
+    def _process_belongs_to_run(self, pid: int | None, run_id: str) -> bool:
+        """Best-effort Linux ownership check used only for diagnostics.
+
+        The tasker injects TASKER_RUN_ID into every child environment. A live
+        process without that marker is still preserved; this method never
+        converts an ownership uncertainty into a terminal result.
+        """
+        try:
+            normalized_pid = int(pid)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return False
+        if normalized_pid <= 0:
+            return False
+        try:
+            environ = Path(f"/proc/{normalized_pid}/environ").read_bytes().split(b"\0")
+        except (OSError, ValueError):
+            return False
+        marker = f"TASKER_RUN_ID={run_id}".encode()
+        return marker in environ
 
     def cancel_run(self, run_id: str, grace_seconds: float = 5.0) -> bool:
         process = self._processes.get(run_id)
