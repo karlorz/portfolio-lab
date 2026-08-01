@@ -1,6 +1,7 @@
 import type {
   DataPipelineRunbookAction,
   HealthData,
+  IcDecaySummary,
   ProvenanceCompleteness,
 } from '../types/live';
 
@@ -53,6 +54,20 @@ export interface HealthOperationsSummary {
       actions: HealthOperationsRunbookAction[];
     } | null;
   } | null;
+  signalQuality: {
+    status: 'healthy' | 'warning' | 'critical' | 'unknown';
+    label: string;
+    criticalSignals: string[];
+    warningSignals: string[];
+    resolvedSignalCount: number;
+    minObservations: number;
+    stagedPendingLabel: string;
+    historicalPendingLabel: string;
+    evidenceLabel: string;
+    authorityLabel: string;
+    controlEffect: string;
+    routingControl: string;
+  };
   /** Dual-write lag / ok badge (provenance_completeness). */
   dualWrite: DualWriteProvenanceSummary;
   topCauses: string[];
@@ -61,6 +76,50 @@ export interface HealthOperationsSummary {
 const normalizeSystemStatus = (status: string | undefined): string => (
   status === 'healthy' ? 'healthy' : status ?? 'unknown'
 );
+
+function summarizeSignalQuality(summary: IcDecaySummary | undefined): HealthOperationsSummary['signalQuality'] {
+  if (!summary) {
+    return {
+      status: 'unknown',
+      label: 'Signal quality unavailable',
+      criticalSignals: [],
+      warningSignals: [],
+      resolvedSignalCount: 0,
+      minObservations: 0,
+      stagedPendingLabel: 'Staged pending labels: unavailable',
+      historicalPendingLabel: 'Historical unlabeled rows: unavailable',
+      evidenceLabel: 'Evidence freshness: unavailable',
+      authorityLabel: 'Routing authority: unavailable',
+      controlEffect: 'Control effect: unavailable',
+      routingControl: 'Routing control: unavailable',
+    };
+  }
+  const status = summary.status === 'critical' || summary.status === 'warning' || summary.status === 'healthy'
+    ? summary.status
+    : 'unknown';
+  const label = status === 'unknown'
+    ? `Signal quality ${summary.status}`
+    : `Signal quality ${status}`;
+  const evidenceTime = summary.evidence_generated_at ? ` · ${summary.evidence_generated_at}` : '';
+  return {
+    status,
+    label,
+    criticalSignals: summary.critical_signals,
+    warningSignals: summary.warning_signals,
+    resolvedSignalCount: summary.resolved_signal_count,
+    minObservations: summary.min_observations,
+    stagedPendingLabel:
+      `Staged pending labels: ${summary.staged_pending_predictions} `
+      + `(${summary.staged_pending_scope}${summary.staged_date ? ` · ${summary.staged_date}` : ''})`,
+    historicalPendingLabel:
+      `Historical unlabeled rows: ${summary.historical_unlabeled_rows} `
+      + `(${summary.historical_unlabeled_scope}; ${summary.historical_unlabeled_dates} dates)`,
+    evidenceLabel: `Evidence: ${summary.evidence_freshness}${evidenceTime}`,
+    authorityLabel: `Routing authority: ${summary.routing_authority}`,
+    controlEffect: `Paper control effect: ${summary.control_effect}`,
+    routingControl: `Execution control: ${summary.routing_control}`,
+  };
+}
 
 const runbookScopeLabel = (action: DataPipelineRunbookAction): string => {
   if (action.artifact) return `${action.dimension}/${action.artifact}`;
@@ -333,6 +392,7 @@ export function summarizeHealthOperations(
     ? `System ${normalizeSystemStatus(health.system_status)}: ${dualWritePrimary}; scheduler ${schedulerStatus}`
     : headline;
   const headerTextFinal = `${headlineFinal} (${totalJobs} scheduled jobs, ${failedJobs} failed)`;
+  const signalQuality = summarizeSignalQuality(health.ic_decay_summary);
 
   return {
     headline: headlineFinal,
@@ -356,6 +416,7 @@ export function summarizeHealthOperations(
       label: sloLabel,
       runbook,
     } : null,
+    signalQuality,
     dualWrite,
     topCauses: mergedCauses,
   };

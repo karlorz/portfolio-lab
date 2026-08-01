@@ -14,6 +14,7 @@ import {
   SignalsDataSchema,
   StackingEnsembleSchema,
   SmartRebalanceSchema,
+  validateAlertsData,
   YieldCurveSchema,
 } from '../../src/schemas/signals';
 
@@ -283,6 +284,25 @@ describe('signals.ts Zod schemas (non-ML contract)', () => {
       label_horizon: 'SPY close-to-close forward return',
     });
     expect(good.success).toBe(true);
+  });
+
+  it('normalizes producer-shaped critical alerts without dropping severity', () => {
+    const result = validateAlertsData({
+      generated_at: '2026-08-01T09:16:15Z',
+      alerts: [{
+        level: 'critical',
+        type: 'kill_switch',
+        title: 'PAPER Kill Switch Triggered',
+        message: '2 signal(s) with CRITICAL IC decay',
+        requires_action: true,
+        incident_id: 'ic-decay-1',
+        kill_switch_level: 'halt',
+      }],
+    });
+
+    expect(result?.alerts).toHaveLength(1);
+    expect(result?.alerts[0]?.level).toBe('critical');
+    expect(result?.alerts[0]?.type).toBe('kill_switch');
   });
 
   it('SignalWFESchema accepts pending resolved-history state', () => {

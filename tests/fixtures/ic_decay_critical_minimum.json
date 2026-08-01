@@ -1,0 +1,126 @@
+{
+  "schema_version": "ic-decay-incident-evidence/v1",
+  "generated_at": "2026-08-01T09:40:23.653343+00:00",
+  "status": "critical",
+  "ic_decay_threshold": 0.05,
+  "min_observations": 20,
+  "signals": {
+    "ensemble_consensus": {
+      "ic_rolling": 0.0391,
+      "ic_trend": "unknown",
+      "observations": 20,
+      "min_obs_for_status": 20,
+      "status": "critical"
+    },
+    "ensemble_duration": {
+      "ic_rolling": 0.0045,
+      "ic_trend": "unknown",
+      "observations": 20,
+      "min_obs_for_status": 20,
+      "status": "critical"
+    },
+    "ensemble_equity": {
+      "ic_rolling": 0.0692,
+      "ic_trend": "unknown",
+      "observations": 20,
+      "min_obs_for_status": 20,
+      "status": "warning"
+    },
+    "ensemble_gold": {
+      "ic_rolling": 0.203,
+      "ic_trend": "unknown",
+      "observations": 20,
+      "min_obs_for_status": 20,
+      "status": "healthy"
+    },
+    "alternative_data": {
+      "ic_rolling": null,
+      "ic_trend": "unknown",
+      "observations": 4,
+      "min_obs_for_status": 20,
+      "status": "insufficient_data"
+    },
+    "behavioral_sentiment": {
+      "ic_rolling": -0.1684,
+      "ic_trend": "unknown",
+      "observations": 19,
+      "min_obs_for_status": 20,
+      "status": "insufficient_data"
+    },
+    "factor_rotation": {
+      "ic_rolling": -0.1298,
+      "ic_trend": "unknown",
+      "observations": 19,
+      "min_obs_for_status": 20,
+      "status": "insufficient_data"
+    },
+    "fred_macro": {
+      "ic_rolling": null,
+      "ic_trend": "unknown",
+      "observations": 4,
+      "min_obs_for_status": 20,
+      "status": "insufficient_data"
+    }
+  },
+  "resolved_signal_count": 8,
+  "staged_pending_predictions": {
+    "count": 7,
+    "date": "2026-08-01",
+    "signal_names": [
+      "behavioral_sentiment",
+      "ensemble_consensus",
+      "ensemble_duration",
+      "ensemble_equity",
+      "ensemble_gold",
+      "factor_rotation",
+      "fred_macro"
+    ],
+    "scope": "ic_staged_date_window"
+  },
+  "historical_unlabeled_backlog": {
+    "rows": 1663,
+    "dates": 2,
+    "oldest_date": "2026-07-31",
+    "scope": "historical_db_unlabeled_rows",
+    "predicate": "signal_predictions.actual_direction IS NULL"
+  },
+  "polarity_post_fix_cohort": {
+    "policy": "shadow_ic_post_fix_no_auto_invert",
+    "auto_invert_policy": "disabled",
+    "force_wake_policy": "disabled",
+    "cohorts": [
+      {
+        "source": "alternative_data",
+        "status": "cohort_ready_for_shadow_ic",
+        "min_labeled": 10,
+        "labeled": 322,
+        "pending_labels": 167,
+        "ic_polarity_cohort": -0.667
+      },
+      {
+        "source": "cross_asset_regime_arb",
+        "status": "cohort_ready_for_shadow_ic",
+        "min_labeled": 10,
+        "labeled": 1144,
+        "pending_labels": 187,
+        "ic_polarity_cohort": -0.4366
+      },
+      {
+        "source": "unified_overlay",
+        "status": "cohort_ready_for_shadow_ic",
+        "min_labeled": 10,
+        "labeled": 1616,
+        "pending_labels": 187,
+        "ic_polarity_cohort": null
+      }
+    ]
+  },
+  "control_effect": {
+    "mode": "paper",
+    "paper_control": "paper_warning",
+    "routing_control": "routing_blocked",
+    "kill_switch_level": "halt",
+    "routing_authority": "signals.json.target_allocations -> src.broker.order_router",
+    "marl_live_authoritative": false
+  }
+}

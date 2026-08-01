@@ -3502,6 +3502,43 @@ class TestSignalsJSONEdgeCases:
 class TestHealthJSONEdgeCases:
     """Test generate_health_json edge cases."""
 
+    def test_health_projects_bounded_ic_decay_summary(self, tmp_path, monkeypatch):
+        """Public health carries bounded quality evidence without raw history."""
+        gen, _ = _make_generator(tmp_path)
+        fixture = json.loads(
+            (Path(__file__).parent / "fixtures" / "ic_decay_critical_minimum.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        raw_report = {
+            "status": fixture["status"],
+            "signals": fixture["signals"],
+            "pending_predictions": fixture["staged_pending_predictions"]["count"],
+            "pending_scope": fixture["staged_pending_predictions"]["scope"],
+            "staged_prediction_names": fixture["staged_pending_predictions"]["signal_names"],
+            "staged_date": fixture["staged_pending_predictions"]["date"],
+            "pending_rows": fixture["historical_unlabeled_backlog"]["rows"],
+            "pending_rows_scope": fixture["historical_unlabeled_backlog"]["scope"],
+            "pending_dates": fixture["historical_unlabeled_backlog"]["dates"],
+        }
+        monkeypatch.setattr(
+            "src.monitor.ic_decay_monitor.compute_ic_decay_report",
+            lambda: raw_report,
+        )
+
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_health_json()
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+        summary = data["ic_decay_summary"]
+        assert summary["status"] == "critical"
+        assert summary["critical_signals"] == ["ensemble_consensus", "ensemble_duration"]
+        assert summary["staged_pending_predictions"] == 7
+        assert summary["historical_unlabeled_rows"] == 1663
+        assert "historical_database" not in json.dumps(summary)
+        gen.conn.close()
+
     def test_cron_fallback(self, tmp_path):
         """No cron_status.json does not invent scheduled cron jobs."""
         gen, _ = _make_generator(tmp_path)

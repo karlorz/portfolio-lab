@@ -6,13 +6,19 @@ import {
 import { workspaceHref } from '../../hooks/useWorkspaceLocation';
 
 interface NavigationRailProps {
+  id?: string;
+  open?: boolean;
   active: WorkspaceId;
   onNavigate: (workspace: WorkspaceId) => void;
 }
 
-export function NavigationRail({ active, onNavigate }: NavigationRailProps) {
+export function NavigationRail({ id, open = false, active, onNavigate }: NavigationRailProps) {
   return (
-    <nav className="navigation-rail" aria-label="Portfolio Lab workspaces">
+    <nav
+      id={id}
+      className={`navigation-rail${open ? ' navigation-rail-open' : ''}`}
+      aria-label="Portfolio Lab workspaces"
+    >
       {WORKSPACE_GROUPS.map((group) => (
         <section key={group.label} className="navigation-group">
           <h2>{group.label}</h2>

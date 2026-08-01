@@ -2636,6 +2636,23 @@ def run_health_check() -> dict:
         "service": "portfolio-lab",
         "scope": "operational_readiness",
     }
+    # IC quality is a bounded advisory projection. Its control labels mirror
+    # the existing disk kill authority; IC status never changes routing here.
+    try:
+        from src.monitor.ic_decay_monitor import (
+            build_ic_decay_summary,
+            compute_ic_decay_report,
+            ic_control_projection,
+        )
+
+        control = ic_control_projection(kill_switch)
+        report["ic_decay_summary"] = build_ic_decay_summary(
+            compute_ic_decay_report(),
+            evidence_generated_at=report["timestamp"],
+            **control,
+        )
+    except Exception as exc:  # noqa: BLE001 — quality disclosure is additive
+        logger.warning("IC quality summary projection skipped: %s", exc)
     if isinstance(grad_cb, dict):
         # Batch EL/EM: surface SH block reason + mark projection source so
         # operators see why streak freezes without opening private SSOT.

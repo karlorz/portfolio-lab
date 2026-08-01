@@ -309,6 +309,7 @@ export interface SignalsData {
     }>;
     resolved_signal_count?: number;
     pending_predictions?: number;
+    staged_prediction_names?: string[];
     staged_date?: string | null;
     label_horizon?: string;
     error?: string;
@@ -356,7 +357,7 @@ export interface PerformanceEntry {
 }
 
 export interface Alert {
-  level: 'success' | 'warning' | 'error' | 'info';
+  level: 'success' | 'warning' | 'error' | 'critical' | 'info';
   type: string;
   title: string;
   message: string;
@@ -464,6 +465,7 @@ export interface HealthData {
   generated_at: string;
   scheduler_status?: SchedulerStatus;
   data_pipeline_slo?: DataPipelineSlo;
+  ic_decay_summary?: IcDecaySummary;
   kill_switch?: KillSwitchHealth;
   open_incidents?: OpenIncidentsHealth;
   /** Code tip that produced this artifact (when stamped). */
@@ -475,6 +477,36 @@ export interface HealthData {
   /** Dual-write lag / split-brain forensics (health_ops or dual-write producers). */
   provenance_completeness?: ProvenanceCompleteness | null;
   error?: string;
+}
+
+export interface IcDecaySummary {
+  status:
+    | 'healthy'
+    | 'warning'
+    | 'critical'
+    | 'insufficient_resolved_history'
+    | 'waiting_for_forward_returns'
+    | 'no_data'
+    | 'unknown';
+  critical_signals: string[];
+  warning_signals: string[];
+  insufficient_data_signals?: string[];
+  resolved_signal_count: number;
+  min_observations: number;
+  staged_pending_predictions: number;
+  staged_pending_signal_names?: string[];
+  staged_date: string | null;
+  staged_pending_scope: string;
+  historical_unlabeled_rows: number;
+  historical_unlabeled_dates: number;
+  historical_unlabeled_oldest_date?: string | null;
+  historical_unlabeled_scope: string;
+  evidence_generated_at?: string | null;
+  evidence_freshness: string;
+  routing_authority: string;
+  routing_control: string;
+  control_effect: string;
+  kill_switch_level?: string | null;
 }
 
 export interface DataPipelineSlo {

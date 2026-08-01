@@ -17,6 +17,7 @@ const TAB_LABELS = [
 ] as const;
 
 const VIEWPORTS = [
+  { width: 1440, height: 900 },
   { width: 1200, height: 900 },
   { width: 1024, height: 900 },
   { width: 768, height: 900 },
@@ -46,7 +47,13 @@ async function openDashboard(page: Page, viewport = { width: 1200, height: 900 }
   await page.setViewportSize(viewport);
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Live Paper Trading' })).toBeVisible();
-  await expect(page.getByRole('navigation', { name: 'Portfolio Lab workspaces' })).toBeVisible();
+  const navigation = page.getByRole('navigation', { name: 'Portfolio Lab workspaces' });
+  if (viewport.width <= 720) {
+    await expect(page.getByRole('button', { name: 'Menu' })).toBeVisible();
+    await expect(navigation).not.toBeVisible();
+    await page.getByRole('button', { name: 'Menu' }).click();
+  }
+  await expect(navigation).toBeVisible();
 }
 
 async function expectNoDocumentOverflow(page: Page) {
@@ -280,9 +287,175 @@ test.describe('dashboard browser presentation smoke', () => {
     await expect(page.locator('.allocation-spine')).toContainText('SPY');
     await expect(page.locator('.allocation-spine')).toContainText('46%');
     await expect(page.locator('.allocation-spine')).toContainText('Research shadow · non-routed');
+    await expect(page.locator('.metric-card.primary')).not.toContainText('Cash:');
     const operatorContext = page.getByRole('complementary', { name: 'Operator context' });
     await expect(operatorContext.getByText('Kill Switch', { exact: true })).toBeVisible();
     await expect(operatorContext.getByText('Review kill-switch state before placing new orders.')).toBeVisible();
+    expect(consoleMessages).toEqual([]);
+  });
+
+  test('renders the bounded IC evidence brief in the first-view cockpit', async ({ page }) => {
+    const consoleMessages = collectPresentationConsoleFailures(page);
+    const signalsFixture = {
+      ...makeSignalsFixture({
+        selected_factors: ['VLUE'],
+        allocation: { VLUE: 1 },
+        signal_strength: 0.5,
+        recommendation: 'Hold value sleeve',
+      }),
+      ic_decay: {
+        status: 'critical',
+        signals: {
+          ensemble_duration: {
+            ic_rolling: 0.0045,
+            ic_trend: 'unknown',
+            observations: 20,
+            status: 'critical',
+          },
+          ensemble_consensus: {
+            ic_rolling: 0.0391,
+            ic_trend: 'unknown',
+            observations: 20,
+            status: 'critical',
+          },
+          ensemble_equity: {
+            ic_rolling: 0.0692,
+            ic_trend: 'unknown',
+            observations: 20,
+            status: 'warning',
+          },
+        },
+      },
+    };
+    const healthFixture = {
+      cron_jobs: [],
+      data_freshness: {},
+      system_status: 'critical',
+      generated_at: '2026-08-01T09:40:23Z',
+      kill_switch: {
+        status: 'critical',
+        enabled: true,
+        level: 'halt',
+        reason: 'unresolved_incident:ic_decay',
+        mode: 'paper',
+      },
+      ic_decay_summary: {
+        status: 'critical',
+        critical_signals: ['ensemble_consensus', 'ensemble_duration'],
+        warning_signals: ['ensemble_equity'],
+        insufficient_data_signals: [],
+        resolved_signal_count: 4,
+        min_observations: 20,
+        staged_pending_predictions: 7,
+        staged_pending_signal_names: ['ensemble_consensus', 'ensemble_duration'],
+        staged_date: '2026-08-01',
+        staged_pending_scope: 'ic_staged_date_window',
+        historical_unlabeled_rows: 1663,
+        historical_unlabeled_dates: 2,
+        historical_unlabeled_oldest_date: '2026-07-31',
+        historical_unlabeled_scope: 'historical_db_unlabeled_rows',
+        evidence_generated_at: '2026-08-01T09:40:23Z',
+        evidence_freshness: 'captured_runtime_snapshot',
+        routing_authority: 'advisory_only',
+        routing_control: 'routing_blocked',
+        control_effect: 'paper_warning',
+        kill_switch_level: 'halt',
+      },
+    };
+
+    await page.route('**/data/signals.json', (route) => route.fulfill({ json: signalsFixture }));
+    await page.route('**/data/health.json', (route) => route.fulfill({ json: healthFixture }));
+    await page.route('**/data/alerts.json', (route) => route.fulfill({
+      json: { generated_at: '2026-08-01T09:40:23Z', alerts: [] },
+    }));
+    await page.route('**/data/incidents.json', (route) => route.fulfill({
+      json: {
+        generated_at: '2026-08-01T09:40:23Z',
+        open_count: 0,
+        incidents: [],
+        metrics: {
+          incident_frequency: 0,
+          open_count: 0,
+          resolved_count: 0,
+          mean_mttr_seconds: null,
+        },
+      },
+    }));
+
+    await openDashboard(page, { width: 1024, height: 900 });
+    const brief = page.locator('.operator-brief');
+    await expect(brief).toContainText('Market regime');
+    await expect(brief).toContainText('Normal');
+    await expect(brief).toContainText('Signal quality: Critical');
+    await expect(brief).toContainText('ensemble_duration IC 0.0045 (20/20)');
+    await expect(brief).toContainText('Staged pending labels: 7');
+    await expect(brief).toContainText('Historical unlabeled rows: 1663');
+    await expect(brief).toContainText('Routing blocked · kill halt');
+    await expect(brief.getByRole('button', { name: 'Review IC evidence' })).toBeVisible();
+    expect(consoleMessages).toEqual([]);
+  });
+
+  test('keeps mobile navigation collapsed until requested and restores focusable content', async ({ page }) => {
+    const consoleMessages = collectPresentationConsoleFailures(page);
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.goto('/');
+
+    const menu = page.getByRole('button', { name: 'Menu' });
+    const navigation = page.getByRole('navigation', { name: 'Portfolio Lab workspaces' });
+    await expect(menu).toHaveAttribute('aria-expanded', 'false');
+    await expect(navigation).not.toBeVisible();
+
+    await menu.click();
+    await expect(menu).toHaveAttribute('aria-expanded', 'true');
+    await expect(navigation).toBeVisible();
+    await menu.click();
+    await expect(menu).toHaveAttribute('aria-expanded', 'false');
+    await expect(navigation).not.toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Live Paper Trading' })).toBeVisible();
+    expect(consoleMessages).toEqual([]);
+  });
+
+  test('keeps keyboard focus usable at a 400% zoom approximation', async ({ page }) => {
+    const consoleMessages = collectPresentationConsoleFailures(page);
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.goto('/');
+
+    const menu = page.getByRole('button', { name: 'Menu' });
+    await menu.focus();
+    await expect(menu).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('navigation', { name: 'Portfolio Lab workspaces' })).toBeVisible();
+    await page.keyboard.press('Tab');
+    await expect(page.locator(':focus')).toBeVisible();
+
+    // Playwright does not expose browser UI zoom, so use CSS zoom to exercise
+    // the same dense/reflow surfaces without changing application data.
+    await page.evaluate(() => {
+      document.documentElement.style.zoom = '4';
+    });
+    await expect(menu).toBeVisible();
+    await expect(page.locator('#root')).not.toBeEmpty();
+    expect(await page.locator(':focus').count()).toBe(1);
+    expect(consoleMessages).toEqual([]);
+  });
+
+  test('loads every primary operator data request successfully', async ({ page }) => {
+    const consoleMessages = collectPresentationConsoleFailures(page);
+    const primaryPaths = [
+      '/data/signals.json',
+      '/data/dashboard.json',
+      '/data/alerts.json',
+      '/data/stats.json',
+      '/data/health.json',
+      '/data/incidents.json',
+      '/data/health_ops.json',
+    ];
+    const responses = primaryPaths.map((path) => page.waitForResponse((response) => (
+      new URL(response.url()).pathname === path && response.status() === 200
+    )));
+
+    await openDashboard(page, { width: 1024, height: 900 });
+    await Promise.all(responses);
     expect(consoleMessages).toEqual([]);
   });
 
@@ -343,10 +516,17 @@ test.describe('dashboard browser presentation smoke', () => {
       await expectNoDocumentOverflow(page);
 
       for (const label of TAB_LABELS) {
+        if (viewport.width <= 720) {
+          const navigation = page.getByRole('navigation', { name: 'Portfolio Lab workspaces' });
+          if (!(await navigation.isVisible())) {
+            await page.getByRole('button', { name: 'Menu' }).click();
+            await expect(navigation).toBeVisible();
+          }
+        }
         const tab = dashboardTab(page, label);
         await expect(tab).toBeVisible();
         await tab.click();
-        await expect(tab).toHaveAttribute('aria-current', 'page');
+        await expect(page.locator('.navigation-rail a').filter({ hasText: label })).toHaveAttribute('aria-current', 'page');
         await waitForLoadedDashboardTab(page, label);
         await expectNoDocumentOverflow(page);
       }
@@ -371,7 +551,8 @@ test.describe('dashboard browser presentation smoke', () => {
     await expectCardSurface(page, '.risk-card');
 
     await dashboardTab(page, 'Analytics').click();
-    await expect(page.locator('.analytics-summary')).toBeVisible();
+    await waitForLoadedDashboardTab(page, 'Analytics');
+    await expect(page.locator('.analytics-summary')).toBeVisible({ timeout: 20_000 });
     await expectStyledSurface(page, '.underwater-chart');
     await expectStyledSurface(page, '.rolling-metrics-chart');
     await expectStyledSurface(page, '.crisis-overlay');
@@ -421,6 +602,25 @@ test.describe('dashboard browser presentation smoke', () => {
       expect(badge.width).toBeGreaterThan(30);
       expect(badge.height).toBeLessThanOrEqual(badge.lineHeight * 2.1);
     }
+    expect(consoleMessages).toEqual([]);
+  });
+
+  test('keeps action totals consistent with the named condition collection', async ({ page }) => {
+    const consoleMessages = collectPresentationConsoleFailures(page);
+    await openDashboard(page, { width: 1024, height: 900 });
+
+    const actionCenter = page.locator('.action-center');
+    const overflow = actionCenter.locator('.action-list-overflow');
+    await expect.poll(async () => actionCenter.evaluate((element) => {
+      const countLabel = element.querySelector('.control-count')?.getAttribute('aria-label') ?? '';
+      const overflowText = element.querySelector('.action-list-overflow')?.textContent ?? '';
+      const count = countLabel.match(/^(\d+) actions required$/)?.[1];
+      const overflowCount = overflowText.match(/;\s*(\d+) actions required/)?.[1];
+      if (!overflowText) return count ? 'consistent' : countLabel;
+      return count && overflowCount && count === overflowCount ? 'consistent' : `${countLabel} / ${overflowText}`;
+    })).toBe('consistent');
+    if (await overflow.count() > 0) await expect(overflow).toContainText('conditions');
+    await expect(actionCenter).toContainText('Action Center');
     expect(consoleMessages).toEqual([]);
   });
 

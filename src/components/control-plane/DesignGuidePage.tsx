@@ -113,6 +113,39 @@ export function DesignGuidePage() {
         <ActionCenter incidents={[]} />
       </Section>
 
+      <Section title="Quality evidence brief">
+        <section className="operator-brief operator-brief-critical" aria-labelledby="guide-operator-brief-title">
+          <div className="operator-brief-header">
+            <div>
+              <p className="control-eyebrow">Current control state</p>
+              <h2 id="guide-operator-brief-title">Operator brief</h2>
+            </div>
+            <span className="operator-brief-status operator-brief-status-critical">Signal quality: Critical</span>
+          </div>
+          <div className="operator-brief-grid">
+            <div className="operator-brief-item">
+              <span>Market regime</span>
+              <strong>Normal</strong>
+            </div>
+            <div className="operator-brief-item">
+              <span>Signal quality</span>
+              <strong>2 critical signals</strong>
+              <small>ensemble_duration · ensemble_consensus · n=20/20</small>
+            </div>
+            <div className="operator-brief-item">
+              <span>Execution control</span>
+              <strong>Routing blocked · kill halt</strong>
+              <small>Routing authority: advisory_only</small>
+            </div>
+          </div>
+          <div className="operator-brief-evidence">
+            <p><strong>Evidence</strong> 7 staged pending labels · 1,663 historical unlabeled rows</p>
+            <p>Captured runtime snapshot · paper_warning control effect</p>
+            <button type="button" className="operator-brief-action">Review IC evidence</button>
+          </div>
+        </section>
+      </Section>
+
       <Section title="Overflow and advisory regions">
         <OverflowRegion label="Design guide sample table">
           <table className="positions-table">

@@ -744,6 +744,12 @@ def _compact_health_summary(report: Dict) -> Dict:
     # matches signals.broker.kill_switch without requiring broker-only reads.
     summary.update(project_compact_kill_fields(report))
 
+    # Keep the IC quality plane available to compact consumers without copying
+    # the raw signal-history report into signals.health.
+    ic_summary = report.get("ic_decay_summary")
+    if isinstance(ic_summary, dict):
+        summary["ic_decay_summary"] = dict(ic_summary)
+
     # Batch BN: surface signal_health rollup so compact view discloses 0/N healthy
     signal_health = report.get("signal_health")
     if isinstance(signal_health, dict):
@@ -6232,6 +6238,24 @@ class DashboardGenerator:
         open_incidents = load_open_incidents_summary(DATA_DIR)
         health_data["kill_switch"] = kill_fields
         health_data["open_incidents"] = open_incidents
+
+        # Additive bounded IC quality projection. Keep paper-control effect and
+        # routing authority explicit; do not derive target allocations here.
+        try:
+            from src.monitor.ic_decay_monitor import (
+                build_ic_decay_summary,
+                compute_ic_decay_report,
+                ic_control_projection,
+            )
+
+            control = ic_control_projection(kill_fields)
+            health_data["ic_decay_summary"] = build_ic_decay_summary(
+                compute_ic_decay_report(),
+                evidence_generated_at=health_data["generated_at"],
+                **control,
+            )
+        except Exception as exc:  # noqa: BLE001 — quality disclosure is additive
+            logger.warning("IC quality summary projection skipped: %s", exc)
 
         # Overall system health
         # Exclude portfolio-lab-health self-errors so sticky tasker mirrors of

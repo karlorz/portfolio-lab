@@ -152,6 +152,14 @@ function formatAllocationSurfaceRoute(role: AllocationSurfaceRole): string {
 
 export { formatAllocationSurfaceRoute };
 
+function formatRegimeLabel(regime: string | undefined): string {
+  if (!regime) return 'Loading';
+  return regime
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
+}
+
 function isBehavioralSentimentData(value: unknown): value is BehavioralSentimentData {
   if (!value || typeof value !== 'object') return false;
   const data = value as Record<string, unknown>;
@@ -553,6 +561,21 @@ export function LiveDashboard({
   const staticRelease = releaseMetadata
     ? `sha=${releaseMetadata.source_git_sha ?? 'unavailable'} · built=${releaseMetadata.build_time_utc ?? 'unavailable'}`
     : 'Unavailable · /_release.json';
+  const signalQuality = healthOperationsSummary?.signalQuality;
+  const qualityStatus = signalQuality?.status ?? 'unknown';
+  const qualitySignals = [
+    ...(signalQuality?.criticalSignals ?? []),
+    ...(signalQuality?.warningSignals ?? []),
+  ];
+  const executionBlocked = Boolean(
+    targetAllocationRole?.execution_blocked
+      || targetAllocationRole?.kill_switch_enabled
+      || health?.kill_switch?.enabled,
+  );
+  const executionLevel = targetAllocationRole?.kill_switch_level ?? health?.kill_switch?.level;
+  const executionLabel = executionBlocked
+    ? `Routing blocked${executionLevel ? ` · kill ${executionLevel}` : ''}`
+    : 'Routing available';
 
   return (
     <div className="live-dashboard">
@@ -596,6 +619,60 @@ export function LiveDashboard({
         marlAuthoritative={signals?.marl_status?.execution_role?.live_authoritative ?? false}
       />
 
+      <section
+        className={`operator-brief operator-brief-${qualityStatus}`}
+        aria-labelledby="operator-brief-title"
+      >
+        <div className="operator-brief-header">
+          <div>
+            <p className="control-eyebrow">Current control state</p>
+            <h2 id="operator-brief-title">Operator brief</h2>
+          </div>
+          <span className={`operator-brief-status operator-brief-status-${qualityStatus}`}>
+            Signal quality: {qualityStatus === 'unknown' ? 'Unknown' : qualityStatus.charAt(0).toUpperCase() + qualityStatus.slice(1)}
+          </span>
+        </div>
+        <div className="operator-brief-grid">
+          <div className="operator-brief-item">
+            <span>Market regime</span>
+            <strong>{formatRegimeLabel(signals?.regime?.regime)}</strong>
+          </div>
+          <div className="operator-brief-item">
+            <span>Signal quality</span>
+            <strong>{signalQuality?.label ?? 'Signal quality unavailable'}</strong>
+            <small>
+              {qualitySignals.length > 0
+                ? `${qualitySignals.length} affected signal${qualitySignals.length === 1 ? '' : 's'} · ${signalQuality?.resolvedSignalCount ?? 0} qualified`
+                : 'No reviewable IC condition reported'}
+            </small>
+          </div>
+          <div className="operator-brief-item">
+            <span>Execution control</span>
+            <strong>{executionLabel}</strong>
+            <small>{signalQuality?.authorityLabel ?? 'Routing authority: unavailable'}</small>
+          </div>
+        </div>
+        {signalQuality && signalQuality.status !== 'unknown' && (
+          <div className="operator-brief-evidence">
+            <p>
+              <strong>Affected signals</strong>{' '}
+              {qualitySignals.length > 0
+                ? qualitySignals.map((name) => {
+                  const row = signals?.ic_decay?.signals?.[name];
+                  const ic = typeof row?.ic_rolling === 'number' ? row.ic_rolling.toFixed(4) : 'n/a';
+                  return `${name} IC ${ic} (${row?.observations ?? 'n/a'}/${signalQuality.minObservations})`;
+                }).join(' · ')
+                : 'none'}
+            </p>
+            <p>{signalQuality.stagedPendingLabel} · {signalQuality.historicalPendingLabel}</p>
+            <p>{signalQuality.evidenceLabel} · {signalQuality.controlEffect}</p>
+            <button type="button" className="operator-brief-action" onClick={() => changeView('health')}>
+              Review IC evidence
+            </button>
+          </div>
+        )}
+      </section>
+
       {/* Tab Content */}
       <div className="live-dashboard-layout">
         <ContextRail
@@ -621,7 +698,7 @@ export function LiveDashboard({
               <div className="metric-card primary">
                 <label>Portfolio Value</label>
                 <span className="value-display">{formatCurrency(portfolioValue)}</span>
-                {signals?.cash && (
+                {typeof signals?.cash === 'number' && signals.cash > 0 && (
                   <small>Cash: {formatCurrency(signals.cash)}</small>
                 )}
               </div>

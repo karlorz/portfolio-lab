@@ -1,6 +1,7 @@
 import type {
   Alert,
   HealthData,
+  IcDecaySummary,
   IncidentLifecycleIncident,
   IncidentLifecycleSummary,
   SignalsData,
@@ -125,6 +126,7 @@ function alertNextAction(alert: Alert, severity: IncidentSeverity): string | und
 
 function alertSeverity(alert: Alert): IncidentSeverity | null {
   if (alert.type === 'kill_switch') return 'critical';
+  if (alert.level === 'critical') return 'critical';
   if (alert.level === 'error') return 'critical';
   if (alert.level === 'warning') return 'warning';
   if (alert.level === 'info' && alert.requires_action) return 'info';
@@ -186,29 +188,112 @@ function persistedIncidentNextAction(incident: IncidentLifecycleIncident): strin
   return 'Review the incident lifecycle record before the next paper-trading decision.';
 }
 
-function mapPersistedIncidentToDashboard(incident: IncidentLifecycleIncident): DashboardIncident | null {
+function qualitySignalValue(
+  signals: SignalsData | null,
+  name: string,
+  minimum: number,
+): string {
+  const row = signals?.ic_decay?.signals?.[name];
+  if (!row) return name;
+  const value = typeof row.ic_rolling === 'number' ? row.ic_rolling.toFixed(4) : 'n/a';
+  return `${name} IC ${value} (${row.observations}/${minimum} observations)`;
+}
+
+function buildIcDecayIncident(
+  summary: IcDecaySummary | undefined,
+  signals: SignalsData | null,
+): DashboardIncident | null {
+  if (!summary || !['critical', 'warning'].includes(summary.status)) return null;
+  const severity: IncidentSeverity = summary.status === 'critical' ? 'critical' : 'warning';
+  const critical = summary.critical_signals ?? [];
+  const warning = summary.warning_signals ?? [];
+  const attentionSignals = [...critical, ...warning];
+  const currentValue = attentionSignals.length > 0
+    ? attentionSignals.map((name) => qualitySignalValue(signals, name, summary.min_observations)).join('; ')
+    : `${severity} quality status`;
+  const pending = `${summary.staged_pending_predictions} staged pending labels in ${summary.staged_pending_scope}`;
+  const historical = `${summary.historical_unlabeled_rows} historical unlabeled rows in ${summary.historical_unlabeled_scope}`;
+
+  return {
+    id: 'quality:ic-decay',
+    tab: 'health',
+    severity,
+    attention: 'action',
+    title: 'Signal quality: IC decay',
+    source: 'IC decay monitor',
+    currentValue,
+    threshold: `Minimum observations: ${summary.min_observations}`,
+    message: `${critical.length} critical IC signal(s): ${critical.join(', ') || 'none'}; ${pending}; ${historical}.`,
+    nextAction: 'Review IC evidence and the post-fix cohort before trusting new votes; do not auto-invert or change allocations.',
+    timestamp: summary.evidence_generated_at ?? undefined,
+  };
+}
+
+function mapPersistedIncidentToDashboard(
+  incident: IncidentLifecycleIncident,
+  icSummary?: IcDecaySummary,
+  signals: SignalsData | null = null,
+  forceCritical = false,
+): DashboardIncident | null {
   if (incident.state === 'resolved') return null;
+  const qualityIncident = incident.channel === 'ic_decay'
+    ? buildIcDecayIncident(icSummary, signals)
+    : null;
+  const severity = forceCritical && incident.channel === 'ic_decay'
+    ? 'critical'
+    : incidentSeverity(incident.severity);
 
   return {
     id: `persisted:${incident.channel}:${incident.incident_id}`,
     tab: 'health',
-    severity: incidentSeverity(incident.severity),
+    severity,
     attention: 'action',
     title: incidentTitle(incident.channel),
     source: 'Incident lifecycle',
-    currentValue: `State: ${incident.state}`,
-    threshold: `Severity: ${incident.severity}`,
-    message: incident.message,
-    nextAction: persistedIncidentNextAction(incident),
-    timestamp: incident.updated_at || incident.created_at,
+    currentValue: qualityIncident?.currentValue ?? `State: ${incident.state}`,
+    threshold: qualityIncident?.threshold ?? `Severity: ${incident.severity}`,
+    message: qualityIncident
+      ? `${incident.message} ${qualityIncident.message}`
+      : incident.message,
+    nextAction: qualityIncident?.nextAction ?? persistedIncidentNextAction(incident),
+    timestamp: qualityIncident?.timestamp ?? incident.updated_at ?? incident.created_at,
   };
 }
 
-function buildPersistedIncidents(summary: IncidentLifecycleSummary | null | undefined): DashboardIncident[] {
+function buildPersistedIncidents(
+  summary: IncidentLifecycleSummary | null | undefined,
+  icSummary?: IcDecaySummary,
+  signals: SignalsData | null = null,
+  forceCriticalIcIncident = false,
+): DashboardIncident[] {
   if (!summary) return [];
   return summary.incidents
-    .map(mapPersistedIncidentToDashboard)
+    .map((incident) => mapPersistedIncidentToDashboard(
+      incident,
+      icSummary,
+      signals,
+      forceCriticalIcIncident,
+    ))
     .filter((incident): incident is DashboardIncident => incident !== null);
+}
+
+function isDuplicateIcAlert(
+  alert: Alert,
+  summary: IncidentLifecycleSummary | null | undefined,
+): boolean {
+  if (alert.type !== 'ic_decay' && alert.type !== 'kill_switch') return false;
+  const openIcIncidents = summary?.incidents.filter(
+    (incident) => incident.channel === 'ic_decay' && incident.state !== 'resolved',
+  ) ?? [];
+  if (openIcIncidents.length === 0) return false;
+
+  const identityMatches = typeof alert.incident_id === 'string'
+    && openIcIncidents.some((incident) => incident.incident_id === alert.incident_id);
+  if (identityMatches || alert.type === 'ic_decay') return true;
+
+  return alert.type === 'kill_switch'
+    && (alert.reason === 'unresolved_incident:ic_decay'
+      || /\bic\s+decay\b/i.test(alert.message));
 }
 
 export function buildRiskIncidents(signals: SignalsData | null): DashboardIncident[] {
@@ -318,11 +403,31 @@ export function buildDecisionIncidents(signals: SignalsData | null): DashboardIn
 }
 
 export function buildDashboardIncidents(inputs: DashboardIncidentInputs): DashboardIncident[] {
+  const duplicateIcAlerts = inputs.alerts.filter((alert) => isDuplicateIcAlert(
+    alert,
+    inputs.incidentSummary,
+  ));
+  const persisted = buildPersistedIncidents(
+    inputs.incidentSummary,
+    inputs.health?.ic_decay_summary,
+    inputs.signals,
+    duplicateIcAlerts.some((alert) => alertSeverity(alert) === 'critical'),
+  );
+  const hasPersistedIcIncident = persisted.some((incident) => incident.id.startsWith('persisted:ic_decay:'));
+  const derivedQuality = hasPersistedIcIncident
+    ? []
+    : [buildIcDecayIncident(inputs.health?.ic_decay_summary, inputs.signals)].filter(
+      (incident): incident is DashboardIncident => incident !== null,
+    );
   return sortIncidents([
-    ...buildPersistedIncidents(inputs.incidentSummary),
-    ...inputs.alerts.map(mapAlertToIncident).filter((incident): incident is DashboardIncident => incident !== null),
+    ...persisted,
+    ...inputs.alerts
+      .filter((alert) => !isDuplicateIcAlert(alert, inputs.incidentSummary))
+      .map(mapAlertToIncident)
+      .filter((incident): incident is DashboardIncident => incident !== null),
     ...buildRiskIncidents(inputs.signals),
     ...buildHealthIncidents(inputs.health),
+    ...derivedQuality,
     ...buildDecisionIncidents(inputs.signals),
   ]);
 }
