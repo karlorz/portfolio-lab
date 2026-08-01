@@ -16,6 +16,7 @@ interface AppShellProps {
 
 export function AppShell({ workspace, onNavigate, spine, context, refreshedAt, children }: AppShellProps) {
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [navigationOpen, setNavigationOpen] = useState(false);
   const paletteInvoker = useRef<HTMLButtonElement>(null);
   const openPalette = useCallback(() => setPaletteOpen(true), []);
   useCommandPaletteShortcut(openPalette);
@@ -23,6 +24,11 @@ export function AppShell({ workspace, onNavigate, spine, context, refreshedAt, c
   const closePalette = () => {
     setPaletteOpen(false);
     window.requestAnimationFrame(() => paletteInvoker.current?.focus());
+  };
+
+  const navigate = (nextWorkspace: WorkspaceId) => {
+    setNavigationOpen(false);
+    onNavigate(nextWorkspace);
   };
 
   return (
@@ -33,20 +39,37 @@ export function AppShell({ workspace, onNavigate, spine, context, refreshedAt, c
           <span className="control-plane-brand-mark" aria-hidden="true">PL</span>
           <span>Portfolio Lab</span>
         </a>
-        <button
-          ref={paletteInvoker}
-          className="command-palette-trigger"
-          type="button"
-          onClick={openPalette}
-          aria-keyshortcuts="Control+K Meta+K"
-        >
-          <span className="command-palette-label">Navigate</span>
-          <kbd>⌘ K</kbd>
-        </button>
+        <div className="control-plane-masthead-actions">
+          <button
+            className="mobile-navigation-trigger"
+            type="button"
+            aria-expanded={navigationOpen}
+            aria-controls="portfolio-workspace-navigation"
+            onClick={() => setNavigationOpen((open) => !open)}
+          >
+            <span aria-hidden="true">☰</span>
+            <span>Menu</span>
+          </button>
+          <button
+            ref={paletteInvoker}
+            className="command-palette-trigger"
+            type="button"
+            onClick={openPalette}
+            aria-keyshortcuts="Control+K Meta+K"
+          >
+            <span className="command-palette-label">Navigate</span>
+            <kbd>⌘ K</kbd>
+          </button>
+        </div>
       </header>
       {spine}
       <div className={`control-plane-grid ${context ? 'control-plane-grid-with-context' : 'control-plane-grid-no-context'}`}>
-        <NavigationRail active={workspace} onNavigate={onNavigate} />
+        <NavigationRail
+          id="portfolio-workspace-navigation"
+          open={navigationOpen}
+          active={workspace}
+          onNavigate={navigate}
+        />
         <main id="workspace-main" className="workspace-main">
           <WorkspaceHeader workspace={workspace} refreshedAt={refreshedAt} />
           {children}

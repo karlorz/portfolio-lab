@@ -39,8 +39,8 @@ export function ContextRail({
         <p>{freshness}</p>
       </details>
       <details open>
-        <summary>Open incidents</summary>
-        <p className="context-rail-stat">{openIncidentCount}</p>
+        <summary>Persisted incidents</summary>
+        <p className="context-rail-stat" aria-label="Persisted open incident count">{openIncidentCount}</p>
       </details>
       <details open>
         <summary>Runtime provenance</summary>

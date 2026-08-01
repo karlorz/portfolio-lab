@@ -241,4 +241,9 @@ describe('LiveDashboard lazy tab panel contract', () => {
     expect(source).not.toContain('System: {health.system_status}');
     expect(source).not.toContain('${health.cron_jobs.length} jobs');
   });
+
+  it('does not render numeric zero as an unlabeled cash child', () => {
+    expect(source).toContain("typeof signals?.cash === 'number' && signals.cash > 0");
+    expect(source).not.toContain('{signals?.cash && (');
+  });
 });

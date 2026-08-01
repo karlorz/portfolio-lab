@@ -1035,9 +1035,16 @@ describe('AlertsDataSchema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('rejects invalid alert level', () => {
+  it('accepts producer critical alert level', () => {
     const data = validAlerts();
     data.alerts[0].level = 'critical' as any;
+    const result = AlertsDataSchema.safeParse(data);
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects unknown alert level', () => {
+    const data = validAlerts();
+    data.alerts[0].level = 'emergency' as any;
     const result = AlertsDataSchema.safeParse(data);
     expect(result.success).toBe(false);
   });
@@ -1228,6 +1235,37 @@ describe('HealthDataSchema', () => {
     expect(result.success).toBe(true);
     expect(result.data?.signal_health?.overall_health).toBe('degraded');
     expect(result.data?.fred_readiness?.ready).toBe(true);
+  });
+
+  it('accepts the bounded IC quality summary projection', () => {
+    const data = {
+      ...validHealth(),
+      ic_decay_summary: {
+        status: 'critical',
+        critical_signals: ['ensemble_duration'],
+        warning_signals: [],
+        insufficient_data_signals: ['alternative_data'],
+        resolved_signal_count: 2,
+        min_observations: 20,
+        staged_pending_predictions: 7,
+        staged_pending_signal_names: ['ensemble_duration'],
+        staged_date: '2026-08-01',
+        staged_pending_scope: 'ic_staged_date_window',
+        historical_unlabeled_rows: 1663,
+        historical_unlabeled_dates: 2,
+        historical_unlabeled_oldest_date: '2026-07-31',
+        historical_unlabeled_scope: 'historical_db_unlabeled_rows',
+        evidence_generated_at: '2026-08-01T09:40:23Z',
+        evidence_freshness: 'captured_runtime_snapshot',
+        routing_authority: 'advisory_only',
+        routing_control: 'routing_blocked',
+        control_effect: 'paper_warning',
+        kill_switch_level: 'halt',
+      },
+    };
+    const result = HealthDataSchema.safeParse(data);
+    expect(result.success).toBe(true);
+    expect(result.data?.ic_decay_summary?.staged_pending_predictions).toBe(7);
   });
 
   it('accepts unavailable signal_health fallback', () => {

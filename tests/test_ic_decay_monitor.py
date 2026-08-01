@@ -7,6 +7,7 @@ import pytest
 
 from src.monitor.ic_decay_monitor import (
     ICMonitor,
+    build_ic_decay_summary,
     compute_ic_decay_report,
     _spearman_rank_correlation,
 )
@@ -389,3 +390,80 @@ def test_ic_decay_report_tags_pending_scopes(tmp_path, monkeypatch):
     assert report["pending_scope"] == "ic_staged_date_window"
     assert report["pending_rows"] == 100
     assert report["pending_rows_scope"] == "historical_db_unlabeled_rows"
+
+
+def _load_ic_decay_evidence_fixture() -> dict:
+    fixture_path = Path(__file__).parent / "fixtures" / "ic_decay_critical_minimum.json"
+    return json.loads(fixture_path.read_text(encoding="utf-8"))
+
+
+def _raw_report_from_evidence_fixture(fixture: dict) -> dict:
+    staged = fixture["staged_pending_predictions"]
+    backlog = fixture["historical_unlabeled_backlog"]
+    return {
+        "status": fixture["status"],
+        "signals": fixture["signals"],
+        "resolved_signal_count": fixture["resolved_signal_count"],
+        "pending_predictions": staged["count"],
+        "pending_scope": staged["scope"],
+        "staged_prediction_names": staged["signal_names"],
+        "staged_date": staged["date"],
+        "pending_rows": backlog["rows"],
+        "pending_rows_scope": backlog["scope"],
+        "pending_dates": backlog["dates"],
+        "oldest_unresolved_date": backlog["oldest_date"],
+    }
+
+
+def test_critical_row_at_minimum_observations_is_reviewable_not_hidden() -> None:
+    fixture = _load_ic_decay_evidence_fixture()
+    report = _raw_report_from_evidence_fixture(fixture)
+
+    summary = build_ic_decay_summary(
+        report,
+        evidence_generated_at=fixture["generated_at"],
+        control_effect="paper_warning",
+    )
+
+    assert summary["status"] == "critical"
+    assert summary["critical_signals"] == ["ensemble_consensus", "ensemble_duration"]
+    assert summary["warning_signals"] == ["ensemble_equity"]
+    assert summary["min_observations"] == 20
+    assert summary["resolved_signal_count"] == 4
+    assert summary["evidence_generated_at"] == fixture["generated_at"]
+    assert summary["evidence_freshness"] == "captured_runtime_snapshot"
+
+
+def test_insufficient_data_rows_remain_non_paging() -> None:
+    fixture = _load_ic_decay_evidence_fixture()
+    summary = build_ic_decay_summary(
+        _raw_report_from_evidence_fixture(fixture),
+        evidence_generated_at=fixture["generated_at"],
+        control_effect="paper_warning",
+    )
+
+    assert summary["insufficient_data_signals"] == [
+        "alternative_data",
+        "behavioral_sentiment",
+        "factor_rotation",
+        "fred_macro",
+    ]
+    assert not set(summary["insufficient_data_signals"]) & set(summary["critical_signals"])
+    assert not set(summary["insufficient_data_signals"]) & set(summary["warning_signals"])
+
+
+def test_ic_summary_keeps_staged_and_historical_pending_scopes_distinct() -> None:
+    fixture = _load_ic_decay_evidence_fixture()
+    summary = build_ic_decay_summary(
+        _raw_report_from_evidence_fixture(fixture),
+        evidence_generated_at=fixture["generated_at"],
+        control_effect="paper_warning",
+    )
+
+    assert summary["staged_pending_predictions"] == 7
+    assert summary["staged_date"] == "2026-08-01"
+    assert summary["staged_pending_scope"] == "ic_staged_date_window"
+    assert summary["historical_unlabeled_rows"] == 1663
+    assert summary["historical_unlabeled_dates"] == 2
+    assert summary["historical_unlabeled_scope"] == "historical_db_unlabeled_rows"
+    assert summary["staged_pending_scope"] != summary["historical_unlabeled_scope"]

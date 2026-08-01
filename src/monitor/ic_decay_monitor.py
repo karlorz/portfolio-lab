@@ -35,7 +35,7 @@ import json
 import os
 from collections import deque
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 
@@ -45,7 +45,14 @@ from src.paths import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ICMonitor", "compute_ic_decay_report", "advisory_factor_half_life_table", "ADVISORY_FACTOR_HALF_LIFE_DAYS"]
+__all__ = [
+    "ICMonitor",
+    "build_ic_decay_summary",
+    "compute_ic_decay_report",
+    "ic_control_projection",
+    "advisory_factor_half_life_table",
+    "ADVISORY_FACTOR_HALF_LIFE_DAYS",
+]
 
 # Configurable via environment variables
 IC_WINDOW_SIZE = int(os.environ.get("IC_MONITOR_WINDOW", "60"))
@@ -253,6 +260,15 @@ class ICMonitor:
             return 0
         predictions = self._staged.get("predictions", {})
         return len(predictions) if isinstance(predictions, dict) else 0
+
+    def get_staged_prediction_names(self) -> List[str]:
+        """Return bounded names for the currently staged IC predictions."""
+        if not self._staged:
+            return []
+        predictions = self._staged.get("predictions", {})
+        if not isinstance(predictions, dict):
+            return []
+        return sorted(str(name) for name in predictions if str(name).strip())
 
     def compute_ic(self, signal_name: str) -> Optional[float]:
         """Compute rolling IC for a specific signal.
@@ -480,6 +496,8 @@ def compute_ic_decay_report() -> Dict[str, Any]:
     monitor.load_state()
     signals = monitor.compute_decay_report()
     pending = monitor.get_staged_prediction_count()
+    get_staged_names = getattr(monitor, "get_staged_prediction_names", None)
+    staged_prediction_names = get_staged_names() if callable(get_staged_names) else []
     if signals:
         statuses = [row.get("status") for row in signals.values()]
         if any(status == "critical" for status in statuses):
@@ -501,6 +519,7 @@ def compute_ic_decay_report() -> Dict[str, Any]:
         "resolved_signal_count": len(signals),
         "pending_predictions": pending,
         "pending_scope": "ic_staged_date_window",
+        "staged_prediction_names": staged_prediction_names,
         "pending_rows": backlog.get("pending_rows", 0),
         "pending_rows_scope": "historical_db_unlabeled_rows",
         "pending_dates": backlog.get("pending_dates", 0),
@@ -515,4 +534,113 @@ def compute_ic_decay_report() -> Dict[str, Any]:
         "staged_date": monitor.get_staged_date(),
         "label_horizon": "SPY close-to-close forward return from staged market-data date to latest available SPY row",
         "advisory_factor_half_life": advisory_factor_half_life_table(),
+    }
+
+
+def build_ic_decay_summary(
+    report: Mapping[str, Any] | None,
+    *,
+    evidence_generated_at: Optional[str] = None,
+    evidence_freshness: str = "captured_runtime_snapshot",
+    control_effect: str = "unknown",
+    routing_authority: str = "advisory_only",
+    routing_control: str = "unknown",
+    kill_switch_level: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Project IC evidence into a bounded operator-facing quality summary.
+
+    The raw IC report remains available on ``signals.json`` for diagnostics.
+    This projection deliberately carries only named signal states and bounded
+    counters needed to review the incident. It never contains prediction rows,
+    database contents, or a routing decision derived from IC status.
+    """
+    source = report if isinstance(report, Mapping) else {}
+    raw_signals = source.get("signals")
+    signals = raw_signals if isinstance(raw_signals, Mapping) else {}
+
+    critical: list[str] = []
+    warning: list[str] = []
+    insufficient: list[str] = []
+    qualified_count = 0
+    minimums: list[int] = []
+    for raw_name, raw_row in signals.items():
+        if not isinstance(raw_row, Mapping):
+            continue
+        name = str(raw_name).strip()
+        if not name:
+            continue
+        status = str(raw_row.get("status") or "").lower()
+        if status == "critical":
+            critical.append(name)
+            qualified_count += 1
+        elif status == "warning":
+            warning.append(name)
+            qualified_count += 1
+        elif status == "healthy":
+            qualified_count += 1
+        elif status == "insufficient_data":
+            insufficient.append(name)
+        try:
+            minimums.append(int(raw_row.get("min_obs_for_status")))
+        except (TypeError, ValueError):
+            pass
+
+    def _bounded_int(key: str, default: int = 0) -> int:
+        try:
+            return max(0, int(source.get(key) or default))
+        except (TypeError, ValueError):
+            return default
+
+    staged_names = source.get("staged_prediction_names")
+    if isinstance(staged_names, (list, tuple, set)):
+        staged_signal_names = sorted(
+            {str(name).strip() for name in staged_names if str(name).strip()}
+        )
+    else:
+        staged_signal_names = []
+
+    summary: Dict[str, Any] = {
+        "status": str(source.get("status") or "unknown"),
+        "critical_signals": sorted(set(critical)),
+        "warning_signals": sorted(set(warning)),
+        "insufficient_data_signals": sorted(set(insufficient)),
+        "resolved_signal_count": qualified_count,
+        "min_observations": min(minimums) if minimums else IC_MIN_OBS_FOR_STATUS,
+        "staged_pending_predictions": _bounded_int("pending_predictions"),
+        "staged_pending_signal_names": staged_signal_names,
+        "staged_date": source.get("staged_date"),
+        "staged_pending_scope": str(
+            source.get("pending_scope") or "ic_staged_date_window"
+        ),
+        "historical_unlabeled_rows": _bounded_int("pending_rows"),
+        "historical_unlabeled_dates": _bounded_int("pending_dates"),
+        "historical_unlabeled_oldest_date": source.get("oldest_unresolved_date"),
+        "historical_unlabeled_scope": str(
+            source.get("pending_rows_scope") or "historical_db_unlabeled_rows"
+        ),
+        "evidence_generated_at": evidence_generated_at
+        or source.get("generated_at"),
+        "evidence_freshness": evidence_freshness,
+        "routing_authority": routing_authority,
+        "routing_control": routing_control,
+        "control_effect": control_effect,
+    }
+    if kill_switch_level is not None:
+        summary["kill_switch_level"] = str(kill_switch_level)
+    return summary
+
+
+def ic_control_projection(kill_fields: Mapping[str, Any] | None) -> Dict[str, Any]:
+    """Describe the existing paper control alongside advisory IC quality."""
+    kill = kill_fields if isinstance(kill_fields, Mapping) else {}
+    enabled = bool(kill.get("enabled"))
+    mode = str(kill.get("mode") or "").lower()
+    return {
+        "control_effect": "paper_warning"
+        if enabled and mode == "paper"
+        else "routing_blocked"
+        if enabled
+        else "none",
+        "routing_control": "routing_blocked" if enabled else "available",
+        "kill_switch_level": kill.get("level"),
     }

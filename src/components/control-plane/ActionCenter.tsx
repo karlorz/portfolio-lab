@@ -58,7 +58,9 @@ export function ActionCenter({ incidents, onSelect, limit }: ActionCenterProps) 
         </ol>
       )}
       {limit && incidents.length > limit && (
-        <p className="action-list-overflow">Showing {limit} of {incidents.length} actions.</p>
+        <p className="action-list-overflow">
+          Showing {limit} of {incidents.length} conditions; {actionCount} actions required.
+        </p>
       )}
     </section>
   );

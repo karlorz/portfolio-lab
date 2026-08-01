@@ -107,6 +107,25 @@ describe('dashboard incident derivation', () => {
     });
   });
 
+  it('keeps producer-shaped critical alerts as critical dashboard incidents', () => {
+    const incidents = buildDashboardIncidents({
+      alerts: [alert({
+        level: 'critical' as Alert['level'],
+        type: 'ic_decay',
+        title: 'IC decay requires review',
+        message: 'ensemble_duration and ensemble_consensus are below the IC gate.',
+      })],
+      signals: null,
+      health: null,
+    });
+
+    expect(incidents).toHaveLength(1);
+    expect(incidents[0]).toMatchObject({
+      severity: 'critical',
+      source: 'IC decay monitor',
+    });
+  });
+
   it('derives a critical Risk incident when GARCH CVaR ratio is severe', () => {
     const incidents = buildRiskIncidents(signalsWithCvar(3));
 
@@ -297,6 +316,179 @@ describe('dashboard incident derivation', () => {
     expect(incidents[0]?.nextAction).toContain('Health');
     expect(getTabIncidentBadge(incidents, 'overview')).toEqual({ count: 1, severity: 'critical' });
     expect(getTabIncidentBadge(incidents, 'health')).toEqual({ count: 1, severity: 'critical' });
+  });
+
+  it('deduplicates the persisted IC incident and the derived quality condition', () => {
+    const signals = {
+      timestamp: '2026-08-01T09:16:18Z',
+      ic_decay: {
+        status: 'critical',
+        signals: {
+          ensemble_duration: { ic_rolling: 0.0045, ic_trend: 'unknown', observations: 20, status: 'critical' },
+          ensemble_consensus: { ic_rolling: 0.0391, ic_trend: 'unknown', observations: 20, status: 'critical' },
+        },
+      },
+    } as SignalsData;
+    const healthWithQuality = {
+      ...health('healthy'),
+      ic_decay_summary: {
+        status: 'critical',
+        critical_signals: ['ensemble_consensus', 'ensemble_duration'],
+        warning_signals: [],
+        resolved_signal_count: 2,
+        min_observations: 20,
+        staged_pending_predictions: 7,
+        staged_date: '2026-08-01',
+        staged_pending_scope: 'ic_staged_date_window',
+        historical_unlabeled_rows: 1663,
+        historical_unlabeled_dates: 2,
+        historical_unlabeled_scope: 'historical_db_unlabeled_rows',
+        evidence_generated_at: '2026-08-01T09:40:23Z',
+        evidence_freshness: 'captured_runtime_snapshot',
+        routing_authority: 'advisory_only',
+        control_effect: 'paper_warning',
+      },
+    } as HealthData;
+    const persisted = incidentSummary({
+      incidents: [{
+        incident_id: 'ic-decay-1',
+        channel: 'ic_decay',
+        severity: 'p0',
+        state: 'firing',
+        message: 'IC quality event retained for review.',
+        details: {},
+        created_at: '2026-08-01T09:00:00Z',
+        updated_at: '2026-08-01T09:16:15Z',
+        resolved_at: null,
+        resolution_notes: null,
+        mttr_seconds: null,
+      }],
+    });
+
+    const incidents = buildDashboardIncidents({
+      alerts: [],
+      signals,
+      health: healthWithQuality,
+      incidentSummary: persisted,
+    });
+
+    expect(incidents.filter((incident) => incident.source === 'Incident lifecycle')).toHaveLength(1);
+    expect(incidents.filter((incident) => incident.source === 'IC decay monitor')).toHaveLength(0);
+    expect(incidents[0]?.message).toContain('ensemble_duration');
+    expect(incidents[0]?.currentValue).toContain('0.0045');
+  });
+
+  it('derives one reviewable IC condition when no persisted incident exists', () => {
+    const qualityHealth = {
+      ...health('healthy'),
+      ic_decay_summary: {
+        status: 'critical',
+        critical_signals: ['ensemble_consensus', 'ensemble_duration'],
+        warning_signals: [],
+        resolved_signal_count: 2,
+        min_observations: 20,
+        staged_pending_predictions: 7,
+        staged_date: '2026-08-01',
+        staged_pending_scope: 'ic_staged_date_window',
+        historical_unlabeled_rows: 1663,
+        historical_unlabeled_dates: 2,
+        historical_unlabeled_scope: 'historical_db_unlabeled_rows',
+        evidence_generated_at: '2026-08-01T09:40:23Z',
+        evidence_freshness: 'captured_runtime_snapshot',
+        routing_authority: 'advisory_only',
+        control_effect: 'paper_warning',
+      },
+    } as HealthData;
+
+    const incidents = buildDashboardIncidents({
+      alerts: [],
+      signals: null,
+      health: qualityHealth,
+    });
+
+    expect(incidents).toHaveLength(1);
+    expect(incidents[0]).toMatchObject({
+      id: 'quality:ic-decay',
+      tab: 'health',
+      severity: 'critical',
+      title: 'Signal quality: IC decay',
+    });
+  });
+
+  it('merges a matching critical IC kill alert into one persisted critical incident', () => {
+    const qualityHealth = {
+      ...health('healthy'),
+      ic_decay_summary: {
+        status: 'warning',
+        critical_signals: [],
+        warning_signals: ['ensemble_equity'],
+        resolved_signal_count: 1,
+        min_observations: 20,
+        staged_pending_predictions: 7,
+        staged_date: '2026-08-01',
+        staged_pending_scope: 'ic_staged_date_window',
+        historical_unlabeled_rows: 1663,
+        historical_unlabeled_dates: 2,
+        historical_unlabeled_scope: 'historical_db_unlabeled_rows',
+        evidence_generated_at: '2026-08-01T09:40:23Z',
+        evidence_freshness: 'captured_runtime_snapshot',
+        routing_authority: 'advisory_only',
+        routing_control: 'routing_blocked',
+        control_effect: 'paper_warning',
+      },
+    } as HealthData;
+    const persisted = incidentSummary({
+      incidents: [{
+        incident_id: 'ic-decay-1',
+        channel: 'ic_decay',
+        severity: 'p1',
+        state: 'firing',
+        message: 'IC quality event retained for review.',
+        details: {},
+        created_at: '2026-08-01T09:00:00Z',
+        updated_at: '2026-08-01T09:16:15Z',
+        resolved_at: null,
+        resolution_notes: null,
+        mttr_seconds: null,
+      }],
+    });
+
+    const incidents = buildDashboardIncidents({
+      alerts: [alert({
+        level: 'critical',
+        type: 'kill_switch',
+        incident_id: 'ic-decay-1',
+        reason: 'unresolved_incident:ic_decay',
+        title: 'PAPER Kill Switch Triggered',
+        message: 'IC decay remains unresolved.',
+      })],
+      signals: null,
+      health: qualityHealth,
+      incidentSummary: persisted,
+    });
+
+    expect(incidents).toHaveLength(1);
+    expect(incidents[0]).toMatchObject({
+      id: 'persisted:ic_decay:ic-decay-1',
+      severity: 'critical',
+      source: 'Incident lifecycle',
+    });
+    expect(incidents.some((incident) => incident.id.startsWith('alert:'))).toBe(false);
+  });
+
+  it('names the collection behind Action Center counts', () => {
+    const incidents = [
+      alert({ type: 'one', level: 'warning', title: 'One' }),
+      alert({ type: 'two', level: 'warning', title: 'Two' }),
+      alert({ type: 'three', level: 'warning', title: 'Three' }),
+      alert({ type: 'four', level: 'warning', title: 'Four' }),
+      alert({ type: 'advisory', level: 'warning', title: 'Advisory', requires_action: false }),
+    ].map((row) => buildDashboardIncidents({ alerts: [row], signals: null, health: null })[0]!);
+    const html = renderToStaticMarkup(React.createElement(ActionCenter, { incidents, limit: 3 }));
+
+    expect(html).toContain('4 actions required');
+    expect(html).toContain('Showing 3 of 5 conditions');
+    expect(html).not.toContain('Showing 3 of 5 actions');
   });
 
   it('derives Decisions-tab incidents from staleness and smart rebalance hold', () => {

@@ -676,6 +676,39 @@ export const IcDecaySchema = z.object({
   error: z.optional(z.string()),
 }).passthrough();
 
+// Bounded IC quality projection carried by private/public health surfaces.
+// This is intentionally separate from the raw signals.ic_decay report.
+export const IcDecaySummarySchema = z.object({
+  status: z.enum([
+    'healthy',
+    'warning',
+    'critical',
+    'insufficient_resolved_history',
+    'waiting_for_forward_returns',
+    'no_data',
+    'unknown',
+  ]),
+  critical_signals: z.array(z.string()),
+  warning_signals: z.array(z.string()),
+  insufficient_data_signals: z.optional(z.array(z.string())),
+  resolved_signal_count: z.number(),
+  min_observations: z.number(),
+  staged_pending_predictions: z.number(),
+  staged_pending_signal_names: z.optional(z.array(z.string())),
+  staged_date: z.nullable(z.string()),
+  staged_pending_scope: z.string(),
+  historical_unlabeled_rows: z.number(),
+  historical_unlabeled_dates: z.number(),
+  historical_unlabeled_oldest_date: z.optional(z.nullable(z.string())),
+  historical_unlabeled_scope: z.string(),
+  evidence_generated_at: z.optional(z.nullable(z.string())),
+  evidence_freshness: z.string(),
+  routing_authority: z.string(),
+  routing_control: z.string(),
+  control_effect: z.string(),
+  kill_switch_level: z.optional(z.nullable(z.string())),
+}).passthrough();
+
 // ---------------------------------------------------------------------------
 // SignalWFESchema — Per-signal walk-forward validation
 // ---------------------------------------------------------------------------
@@ -1328,7 +1361,7 @@ export const DashboardDataSchema = z.object({
 // ---------------------------------------------------------------------------
 // AlertsDataSchema — /data/alerts.json
 // ---------------------------------------------------------------------------
-const AlertLevelSchema = z.enum(['success', 'warning', 'error', 'info']);
+const AlertLevelSchema = z.enum(['success', 'warning', 'error', 'critical', 'info']);
 
 /**
  * Tolerant producer-facing alert contract. Health-only jobs historically omit
@@ -1589,6 +1622,7 @@ export const HealthDataSchema = z.object({
   scheduler_status: z.optional(SchedulerStatusSchema),
   data_pipeline_slo: z.optional(DataPipelineSloSchema),
   signal_health: z.optional(SignalHealthSectionSchema),
+  ic_decay_summary: z.optional(IcDecaySummarySchema),
   fred_readiness: z.optional(FredReadinessSectionSchema),
   error: z.optional(z.string()),
 }).passthrough();
