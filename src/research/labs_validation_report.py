@@ -34,7 +34,11 @@ def _display_path(path: Path, project_root: Path) -> str:
     try:
         return path.resolve().relative_to(project_root.resolve()).as_posix()
     except ValueError:
-        return path.as_posix()
+        # Public validation rows may originate in the live WWW tree or another
+        # worker checkout. Keep the row useful without exposing that host path.
+        from src.dashboard.public_projection import logical_reference
+
+        return logical_reference(path)
 
 
 def _generated_at(value: datetime | str | None) -> str:
@@ -230,7 +234,17 @@ def save_labs_validation_report(
         max_errors_per_result=max_errors_per_result,
     )
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(target_path, "w") as f:
-        json.dump(report, f, indent=2, sort_keys=True)
-        f.write("\n")
+    from src.monitor.signal_authority import (
+        is_ephemeral_write_path,
+        serialize_json_payload,
+    )
+
+    target_path.write_text(
+        serialize_json_payload(
+            report,
+            output_path=target_path,
+            public=not is_ephemeral_write_path(target_path),
+        ),
+        encoding="utf-8",
+    )
     return target_path

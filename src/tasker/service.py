@@ -41,6 +41,7 @@ class TaskerService:
             self._stop.wait(15)
 
     def tick(self, now: datetime) -> None:
+        self.reconcile_orphaned_runs(now=now)
         minute_key = now.replace(second=0, microsecond=0).isoformat()
         for task in self.registry.due_tasks(now):
             fired_key = (task.id, minute_key)
@@ -67,6 +68,16 @@ class TaskerService:
         except Exception as exc:  # noqa: BLE001 - mirror writes must not kill the loop
             logger.exception("Tasker status mirror write failed: %s", exc)
 
+    def reconcile_orphaned_runs(self, *, now: datetime | None = None) -> list[str]:
+        reconciler = getattr(self.runner, "reconcile_orphaned_runs", None)
+        if reconciler is None:
+            return []
+        try:
+            return list(reconciler(now=now))
+        except Exception as exc:  # noqa: BLE001 - reconciliation must not kill scheduler
+            logger.exception("Tasker orphan reconciliation failed: %s", exc)
+            return []
+
 
 def build_service() -> tuple[TaskerService, object]:
     registry = load_task_registry()
@@ -74,6 +85,13 @@ def build_service() -> tuple[TaskerService, object]:
     store.sync_registry(registry)
     runner = TaskRunner(registry=registry, store=store)
     service = TaskerService(registry=registry, store=store, runner=runner)
+    # Reconcile before the API is exposed so a restart immediately repairs the
+    # durable state and mirrors even when the scheduler is disabled.
+    service.reconcile_orphaned_runs()
+    try:
+        store.write_status_mirrors(registry)
+    except Exception as exc:  # noqa: BLE001 - startup mirrors are best effort
+        logger.exception("Tasker startup status mirror write failed: %s", exc)
     app = create_app(registry=registry, store=store, runner=runner)
     return service, app
 

@@ -95,6 +95,14 @@ export interface VolatilityParitySignalData {
 
 export interface SignalsData {
   timestamp: string;
+  generated_at?: string;
+  artifact_id?: string | null;
+  plane?: string | null;
+  generator_git_sha?: string | null;
+  generator_git_sha_status?: string | null;
+  last_full_generator_git_sha?: string | null;
+  patch_source?: string | null;
+  runtime_provenance?: RuntimeProvenance | null;
   regime: {
     regime: string;
     vix: number | null;
@@ -436,6 +444,19 @@ export interface ProvenanceCompleteness {
   [key: string]: unknown;
 }
 
+/** Additive runtime identity shared by public operator artifacts. */
+export interface RuntimeProvenance {
+  schema_version?: string;
+  artifact_id?: string | null;
+  plane?: 'public' | 'private' | 'unknown' | string | null;
+  generated_at?: string | null;
+  generator_git_sha?: string | null;
+  generator_git_sha_status?: string | null;
+  last_full_generator_git_sha?: string | null;
+  patch_source?: string | null;
+  [key: string]: unknown;
+}
+
 export interface HealthData {
   cron_jobs: CronJobStatus[];
   data_freshness: Record<string, DataFreshness>;
@@ -448,6 +469,9 @@ export interface HealthData {
   /** Code tip that produced this artifact (when stamped). */
   generator_git_sha?: string | null;
   generator_git_sha_status?: string | null;
+  artifact_id?: string | null;
+  plane?: string | null;
+  runtime_provenance?: RuntimeProvenance | null;
   /** Dual-write lag / split-brain forensics (health_ops or dual-write producers). */
   provenance_completeness?: ProvenanceCompleteness | null;
   error?: string;
@@ -491,12 +515,12 @@ export interface CronJobStatus {
   schedule: string;
   last_run: string | null;
   next_run: string | null;
-  status: 'ok' | 'error' | 'unknown';
-  state: 'scheduled' | 'paused' | 'running';
+  status: 'ok' | 'error' | 'unknown' | 'disabled';
+  state: 'scheduled' | 'paused' | 'running' | 'manual_only';
   backend?: string;
   source?: string;
   error?: string;
-  duration_seconds?: number;
+  duration_seconds?: number | null;
 }
 
 export interface SchedulerStatus {

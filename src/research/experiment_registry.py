@@ -380,8 +380,19 @@ def save_labs_registry(
 
     output_path = Path(public_dir) / LABS_REGISTRY_FILENAME
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w") as f:
-        json.dump(registry, f, indent=2, sort_keys=True)
+    from src.monitor.signal_authority import (
+        is_ephemeral_write_path,
+        serialize_json_payload,
+    )
+
+    output_path.write_text(
+        serialize_json_payload(
+            registry,
+            output_path=output_path,
+            public=not is_ephemeral_write_path(output_path),
+        ),
+        encoding="utf-8",
+    )
     logger.info("Labs registry written: %s (%d rows)", output_path, len(registry["experiments"]))
     return output_path
 

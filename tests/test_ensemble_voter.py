@@ -244,6 +244,83 @@ class TestRegimeWeights:
             for source in survivors:
                 assert source in weights, f"{source} missing from {regime}"
 
+    @staticmethod
+    def _provenance_bearing_payload():
+        payload = {
+            regime.value: {
+                source.value: round((index + 1) / 100, 6)
+                for index, source in enumerate(SignalSource)
+            }
+            for regime in Regime
+        }
+        payload.update(
+            {
+                "_meta": {"schema": "ensemble-weights/v1"},
+                "artifact_id": "ensemble_weights.json",
+                "plane": "private",
+                "generated_at": "2026-08-01T00:00:00+00:00",
+                "generator_git_sha": "abc1234",
+                "generator_git_sha_status": "full_generate",
+                "last_full_generator_git_sha": "abc1234",
+                "runtime_provenance": {
+                    "schema_version": "runtime-provenance/v1",
+                    "artifact_id": "ensemble_weights.json",
+                    "plane": "private",
+                },
+            }
+        )
+        return payload
+
+    def test_loader_separates_known_provenance_from_regime_business_maps(self, tmp_path, caplog):
+        from src.strategy.ensemble_voter import _load_regime_weights
+
+        payload = self._provenance_bearing_payload()
+        path = tmp_path / "ensemble_weights.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+        with caplog.at_level(logging.WARNING, logger="src.strategy.ensemble_voter"):
+            loaded = _load_regime_weights(str(path))
+
+        assert set(loaded) == set(Regime)
+        for regime in Regime:
+            assert set(loaded[regime]) == set(SignalSource)
+            for source in SignalSource:
+                assert loaded[regime][source] == pytest.approx(
+                    payload[regime.value][source.value]
+                )
+        assert "Unknown regime" not in caplog.text
+
+    def test_loader_falls_back_for_unknown_business_key(self, tmp_path, caplog):
+        from src.strategy.ensemble_voter import _build_hardcoded_weights, _load_regime_weights
+
+        payload = self._provenance_bearing_payload()
+        payload["unexpected_business_regime"] = {
+            "cross_asset_rv": 0.5,
+        }
+        path = tmp_path / "ensemble_weights.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+        with caplog.at_level(logging.WARNING, logger="src.strategy.ensemble_voter"):
+            loaded = _load_regime_weights(str(path))
+
+        assert loaded == _build_hardcoded_weights()
+        assert "Unknown ensemble weight key" in caplog.text
+        assert "unexpected_business_regime" in caplog.text
+
+    def test_loader_falls_back_for_malformed_source_map(self, tmp_path, caplog):
+        from src.strategy.ensemble_voter import _build_hardcoded_weights, _load_regime_weights
+
+        payload = self._provenance_bearing_payload()
+        del payload[Regime.NORMAL.value][SignalSource.CROSS_ASSET_RV.value]
+        path = tmp_path / "ensemble_weights.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+        with caplog.at_level(logging.WARNING, logger="src.strategy.ensemble_voter"):
+            loaded = _load_regime_weights(str(path))
+
+        assert loaded == _build_hardcoded_weights()
+        assert "Invalid source map" in caplog.text
+
     def test_crisis_cross_asset_rv_high(self):
         """v9.31: CROSS_ASSET_RV remains dominant in CRISIS regime."""
         assert REGIME_WEIGHTS[Regime.CRISIS][SignalSource.CROSS_ASSET_RV] >= 0.25

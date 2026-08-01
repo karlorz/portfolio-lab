@@ -35,6 +35,8 @@ def test_stamp_refreshes_mtime_and_meta(tmp_path: Path) -> None:
     assert meta["content_identity"] == "unchanged"
     assert meta["regime_count"] == 2
     assert "last_freshness_stamp" in meta
+    assert disk["artifact_id"] == "ensemble_weights.json"
+    assert disk["runtime_provenance"]["artifact_id"] == "ensemble_weights.json"
 
 
 def test_stamp_missing_file(tmp_path: Path) -> None:

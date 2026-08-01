@@ -887,6 +887,22 @@ def save_results_json(
     else:
         return
 
+    # Public artifacts have a smaller disclosure surface than private monitor
+    # files.  Apply the shared projection here as a last-mile guard for legacy
+    # producers that still call save_results_json directly.
+    public_output = False
+    try:
+        from src.dashboard.public_projection import (
+            is_public_output_path,
+            prepare_payload_for_write,
+        )
+
+        public_output = is_public_output_path(path)
+        if public_output:
+            data = prepare_payload_for_write(data, path, public=True)
+    except Exception as projection_exc:  # noqa: BLE001 - preserve legacy saves
+        logger.warning("Public payload projection failed for %s: %s", path, projection_exc)
+
     if experiment_manifest is not None:
         from src.research.experiment_manifest import save_experiment_result_json
 
@@ -898,9 +914,16 @@ def save_results_json(
 
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with open(path, 'w') as f:
-            json.dump(data, f, indent=2, default=_json_serializer)
-            f.flush()
+        from src.monitor.signal_authority import serialize_json_payload
+
+        path.write_text(
+            serialize_json_payload(
+                data,
+                output_path=path,
+                public=public_output,
+            ),
+            encoding="utf-8",
+        )
         # Batch HZ: normalize mode so public dashboard dual-writes via
         # save_results_json never leave sticky 0600 (Caddy 403). Safe for
         # private backtest artifacts on lab hosts (not secrets).
@@ -908,7 +931,7 @@ def save_results_json(
             os.chmod(path, _PUBLIC_JSON_MODE)
         except OSError as chmod_exc:
             logger.warning("chmod %s after save_results_json failed: %s", path, chmod_exc)
-    except (OSError, TypeError) as e:
+    except (OSError, TypeError, ValueError) as e:
         logger.error("Failed to save results to %s: %s", path, e)
         raise
 

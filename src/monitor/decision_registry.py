@@ -684,23 +684,39 @@ def publish_decision_registry_json(
     source_present=false / bytes lag forever. Dual-write both trees.
     """
     snapshot = build_decision_registry_snapshot(registry=registry)
-    body = json.dumps(snapshot, indent=2, sort_keys=True)
     out = Path(public_dir) / DECISION_REGISTRY_JSON
     out.parent.mkdir(parents=True, exist_ok=True)
-    with open(out, "w") as f:
-        f.write(body)
+    priv_root = Path(private_dir) if private_dir is not None else Path(DATA_DIR)
+    private_out = priv_root / DECISION_REGISTRY_JSON
+    # Keep isolated pytest fixtures byte-identical, while real public roots
+    # receive the shared logical-reference projection and additive provenance.
+    from src.monitor.signal_authority import (
+        _public_projection_enabled,
+        serialize_json_payload,
+    )
+
+    public_body = serialize_json_payload(
+        snapshot,
+        output_path=out,
+        public=_public_projection_enabled(out),
+    )
+    private_body = serialize_json_payload(
+        snapshot,
+        output_path=private_out,
+        public=False,
+    )
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(public_body)
     logger.info(
         "Decision registry JSON written: %s (%d decisions)",
         out,
         snapshot["counts"]["decisions"],
     )
     # Private SSOT for mirror lag / repo-local consumers
-    priv_root = Path(private_dir) if private_dir is not None else Path(DATA_DIR)
-    private_out = priv_root / DECISION_REGISTRY_JSON
     try:
         if private_out.resolve() != out.resolve():
             private_out.parent.mkdir(parents=True, exist_ok=True)
-            private_out.write_text(body, encoding="utf-8")
+            private_out.write_text(private_body, encoding="utf-8")
             logger.info("Decision registry JSON dual-wrote private: %s", private_out)
     except OSError as exc:
         logger.warning("Decision registry private dual-write failed: %s", exc)

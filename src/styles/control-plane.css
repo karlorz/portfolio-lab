@@ -605,6 +605,36 @@
   font-size: 24px;
 }
 
+.context-rail-provenance {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.context-rail-provenance-row {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-1);
+}
+
+.context-rail-provenance dt {
+  color: var(--text-muted);
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.context-rail-provenance dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+  font-family: var(--font-data);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 .control-metric-value {
   margin-top: var(--space-2);
   font-family: var(--font-data);

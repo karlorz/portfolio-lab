@@ -118,7 +118,9 @@ def _hash_cache_key(path: Path, public_dir: Path) -> str:
     try:
         return path.resolve().relative_to(public_dir.resolve()).as_posix()
     except ValueError:
-        return str(path.resolve())
+        from src.dashboard.public_projection import logical_reference
+
+        return logical_reference(path)
 
 
 def _load_hash_cache(cache_path: Path | None) -> dict[str, dict[str, Any]]:
@@ -144,6 +146,9 @@ def _write_hash_cache(cache_path: Path | None, files: dict[str, dict[str, Any]] 
         "schema_version": PUBLIC_DATA_HASH_CACHE_SCHEMA_VERSION,
         "files": files,
     }
+    from src.dashboard.public_projection import project_public_paths
+
+    payload = project_public_paths(payload)
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = cache_path.with_suffix(cache_path.suffix + ".tmp")
@@ -697,9 +702,12 @@ def _labs_shard_payload(payload: Any, row_key: str | None, rows: list[Any]) -> A
 
 
 def _write_json_file(path: Path, payload: Any) -> None:
-    with open(path, "w") as f:
-        json.dump(payload, f, indent=2, sort_keys=True)
-        f.write("\n")
+    from src.monitor.signal_authority import serialize_json_payload
+
+    path.write_text(
+        serialize_json_payload(payload, output_path=path, public=True),
+        encoding="utf-8",
+    )
 
 
 def _write_labs_pagination_shards(
@@ -1035,7 +1043,12 @@ def refresh_public_data_index_after_partial_write(
         # Atomic write
         tmp = index_path.with_suffix(".json.tmp")
         index_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
+        from src.monitor.signal_authority import serialize_json_payload
+
+        tmp.write_text(
+            serialize_json_payload(index, output_path=index_path, public=True),
+            encoding="utf-8",
+        )
         tmp.replace(index_path)
         return index
     except Exception:  # noqa: BLE001 — never block dual-write callers

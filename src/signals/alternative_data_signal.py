@@ -99,6 +99,41 @@ class EnsembleSignal:
     raw_data: dict
 
 
+# ``EnsembleSignal`` is a small business envelope.  Runtime serializers may
+# add provenance beside it, but those fields must not become constructor
+# arguments or silently turn into signal semantics.
+ENSEMBLE_SIGNAL_FIELDS = frozenset(
+    {
+        "source",
+        "regime",
+        "probability",
+        "confidence",
+        "timestamp",
+        "raw_data",
+    }
+)
+
+ALTERNATIVE_DATA_PROVENANCE_FIELDS = frozenset(
+    {
+        "artifact_id",
+        "plane",
+        "generated_at",
+        "updated_at",
+        "created_at",
+        "checked_at",
+        "generator_git_sha",
+        "generator_git_sha_status",
+        "last_full_generator_git_sha",
+        "generator_git_sha_reason",
+        "patch_source",
+        "content_patch_source",
+        "runtime_provenance",
+        "provenance_completeness",
+        "schema_version",
+    }
+)
+
+
 # ---------------------------------------------------------------------------
 # Signal Generator
 # ---------------------------------------------------------------------------
@@ -113,6 +148,10 @@ class AlternativeDataSignalGenerator:
         self.state_dir = DATA_DIR
         self._prices: Optional[Dict[str, List[Dict]]] = None
         self.weights = dict(COMPONENT_WEIGHTS)
+        # Provenance is intentionally kept separate from the business signal.
+        # Consumers that need artifact diagnostics can inspect this attribute;
+        # the ensemble dataclass remains exactly six fields.
+        self.last_signal_provenance: Dict[str, Any] = {}
 
     # ---- Data loading ----
 
@@ -607,18 +646,106 @@ class AlternativeDataSignalGenerator:
     def load_latest_signal(self) -> Optional[EnsembleSignal]:
         """Load most recent signal from disk."""
         latest_file = self.signals_dir / "alternative_data_latest.json"
+        self.last_signal_provenance = {}
         if not latest_file.exists():
             return None
-        with open(latest_file) as f:
-            data = json.load(f)
-        return EnsembleSignal(**data)
+        try:
+            with open(latest_file, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"alternative-data signal unavailable: {exc}") from exc
+
+        if not isinstance(data, dict):
+            raise ValueError("alternative-data signal payload must be an object")
+
+        missing = sorted(ENSEMBLE_SIGNAL_FIELDS - data.keys())
+        if missing:
+            raise ValueError(
+                "missing alternative-data signal fields: " + ", ".join(missing)
+            )
+
+        unknown = sorted(
+            key
+            for key in data.keys()
+            if key not in ENSEMBLE_SIGNAL_FIELDS
+            and not (isinstance(key, str) and key.startswith("_"))
+            and key not in ALTERNATIVE_DATA_PROVENANCE_FIELDS
+        )
+        if unknown:
+            logger.warning(
+                "Unknown alternative-data signal fields: %s",
+                ", ".join(str(key) for key in unknown),
+            )
+            raise ValueError(
+                "unknown alternative-data signal fields: "
+                + ", ".join(str(key) for key in unknown)
+            )
+
+        self.last_signal_provenance = {
+            key: data[key]
+            for key in data.keys()
+            if key not in ENSEMBLE_SIGNAL_FIELDS
+        }
+
+        source = data["source"]
+        regime = data["regime"]
+        timestamp = data["timestamp"]
+        raw_data = data["raw_data"]
+        if not isinstance(source, str) or not source.strip():
+            raise ValueError("alternative-data signal source must be a non-empty string")
+        if not isinstance(regime, str) or not regime.strip():
+            raise ValueError("alternative-data signal regime must be a non-empty string")
+        if not isinstance(timestamp, str) or not timestamp.strip():
+            raise ValueError("alternative-data signal timestamp must be a non-empty string")
+        if not isinstance(raw_data, dict):
+            raise ValueError("alternative-data signal raw_data must be an object")
+
+        numeric: Dict[str, float] = {}
+        for field in ("probability", "confidence"):
+            value = data[field]
+            if isinstance(value, bool):
+                raise ValueError(f"alternative-data signal {field} must be numeric")
+            try:
+                numeric[field] = float(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"alternative-data signal {field} must be numeric"
+                ) from exc
+            if not math.isfinite(numeric[field]) or not 0.0 <= numeric[field] <= 1.0:
+                raise ValueError(
+                    f"alternative-data signal {field} must be finite in [0, 1]"
+                )
+
+        return EnsembleSignal(
+            source=source,
+            regime=regime,
+            probability=numeric["probability"],
+            confidence=numeric["confidence"],
+            timestamp=timestamp,
+            raw_data=raw_data,
+        )
 
     def validate_signal(self, signal: EnsembleSignal) -> bool:
         """Validate signal meets quality criteria."""
-        if signal.confidence < 0.3:
+        try:
+            confidence = float(signal.confidence)
+            probability = float(signal.probability)
+        except (TypeError, ValueError):
             return False
-        ts = str(signal.timestamp).replace("Z", "+00:00")
-        signal_time = datetime.fromisoformat(ts)
+        if (
+            not math.isfinite(confidence)
+            or not math.isfinite(probability)
+            or not 0.0 <= probability <= 1.0
+            or not 0.0 <= confidence <= 1.0
+        ):
+            return False
+        if confidence < 0.3:
+            return False
+        try:
+            ts = str(signal.timestamp).replace("Z", "+00:00")
+            signal_time = datetime.fromisoformat(ts)
+        except (TypeError, ValueError):
+            return False
         if signal_time.tzinfo is None:
             # Naive timestamps are host wall-clock (test/common convention).
             # Attach local timezone before converting to UTC so CST/UTC hosts
@@ -635,8 +762,21 @@ class AlternativeDataSignalGenerator:
     def get_signal_snapshot(self):
         """Return latest signal as canonical SignalSnapshot for typed pipeline consumption."""
         from src.signals.signal_snapshot import SignalSnapshot
-        signal = self.load_latest_signal()
+        try:
+            signal = self.load_latest_signal()
+        except (OSError, TypeError, ValueError) as exc:
+            logger.warning("Alternative data signal unavailable: %s", exc)
+            signal = None
         if signal is None:
+            return SignalSnapshot(
+                source="alternative_data",
+                timestamp=_utc_now_iso(),
+                value=0.0,
+                confidence=0.0,
+                is_active=False,
+                explanation="Alternative data signal unavailable",
+            )
+        if not self.validate_signal(signal):
             return SignalSnapshot(
                 source="alternative_data",
                 timestamp=_utc_now_iso(),

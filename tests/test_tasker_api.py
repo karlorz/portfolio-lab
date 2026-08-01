@@ -65,6 +65,22 @@ def test_api_serves_tasker_status_tasks_and_task_detail(tmp_path):
     assert task.get_json()["definition"]["command"] == ["make", "health"]
 
 
+def test_api_projects_private_run_paths_to_logical_references(tmp_path):
+    client, store, _ = _client(tmp_path)
+    run = store.create_run("portfolio-lab-health", ["make", "health"], trigger="manual")
+
+    status = client.get("/api/tasker/status")
+    runs = client.get("/api/runs")
+    detail = client.get(f"/api/runs/{run['run_id']}")
+
+    for response in (status, runs, detail):
+        assert response.status_code == 200
+        assert str(tmp_path) not in response.get_data(as_text=True)
+
+    assert runs.get_json()["runs"][0]["log_path"] == f"internal/{run['run_id']}.log"
+    assert detail.get_json()["log_path"] == f"internal/{run['run_id']}.log"
+
+
 def test_api_rejects_mutations_without_admin_token(tmp_path):
     client, _, _ = _client(tmp_path)
 

@@ -110,7 +110,11 @@ class SkewState:
 
     @classmethod
     def from_dict(cls, d: dict) -> "SkewState":
-        return cls(**d)
+        # Runtime state files may carry additive provenance fields.  State
+        # deserialization owns the business schema and must ignore those
+        # fields so a newer writer does not make an older reader unusable.
+        valid_fields = {field.name for field in cls.__dataclass_fields__.values()}
+        return cls(**{key: value for key, value in d.items() if key in valid_fields})
 
 
 class SkewEngine:

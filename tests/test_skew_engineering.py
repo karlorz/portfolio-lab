@@ -1173,7 +1173,10 @@ class TestErrorAndEdgePaths:
         """_save_state OSError should be logged."""
         engine = SkewEngine()
         metrics = SkewMetrics(symbol="SPY", timestamp="2026-01-01T00:00:00")
-        with patch("builtins.open", side_effect=OSError("Disk full")):
+        with patch(
+            "src.monitor.skew_engineering.save_results_json",
+            side_effect=OSError("Disk full"),
+        ):
             caplog.clear()
             engine._save_state(metrics)
             assert len(caplog.records) > 0

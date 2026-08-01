@@ -445,6 +445,11 @@ class IncidentManager:
             if not paths_identical and not skip_dual_for_isolation:
                 public_summary.parent.mkdir(parents=True, exist_ok=True)
                 tmp = public_summary.with_suffix(".json.tmp")
+                from src.monitor.signal_authority import (
+                    is_ephemeral_write_path,
+                    serialize_json_payload,
+                )
+
                 # Refresh dual_write_ok=True into body for public tree
                 try:
                     from src.dashboard.generator import _attach_dual_write_provenance
@@ -466,7 +471,12 @@ class IncidentManager:
                     self.summary_path.write_text(body, encoding="utf-8")
                 except Exception:  # noqa: BLE001
                     pass
-                tmp.write_text(body, encoding="utf-8")
+                public_body = serialize_json_payload(
+                    summary,
+                    output_path=public_summary,
+                    public=not is_ephemeral_write_path(public_summary),
+                )
+                tmp.write_text(public_body, encoding="utf-8")
                 tmp.replace(public_summary)
                 dual_ok = True
                 # Batch CJ: post-sync lag/hash so sticky dual_write_lag_stale clears
