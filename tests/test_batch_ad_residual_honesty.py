@@ -163,7 +163,7 @@ def test_garch_cvar_timestamp_is_utc_aware():
 
 def test_two_stage_unavailable_uses_null_metrics_not_zeros():
     # Source contract: unavailable two_stage uses null metric slots
-    src = Path("src/dashboard/generator.py").read_text(encoding="utf-8")
+    src = Path("src/dashboard/signal_section_builder.py").read_text(encoding="utf-8")
     assert "generator_returned_none" in src
     assert '"confidence": None' in src
     assert '"regime": None' in src

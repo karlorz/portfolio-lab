@@ -44,8 +44,8 @@ def test_smart_rebalance_status_discloses_budget_units(tmp_path):
     assert status["remaining_budget_ratio"] == pytest.approx(0.005)
 
 
-def test_generator_smart_rebalance_emits_budget_unit_fields():
-    src = Path("src/dashboard/generator.py").read_text(encoding="utf-8")
+def test_signal_section_builder_emits_smart_rebalance_budget_unit_fields():
+    src = Path("src/dashboard/signal_section_builder.py").read_text(encoding="utf-8")
     assert "'remaining_budget_pct_unit': 'percent_of_portfolio'" in src
     assert "'remaining_budget_ratio_unit': 'portfolio_fraction'" in src
     assert "'annual_cost_limit_pct': 0.5" in src

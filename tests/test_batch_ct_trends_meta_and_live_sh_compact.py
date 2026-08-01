@@ -79,7 +79,7 @@ def test_compact_prefers_live_quality_disclosure_over_stale_summary() -> None:
 
 
 def test_generate_signals_rebuilds_signal_health_for_compact() -> None:
-    """Source contract: generate_signals_json rebuilds SH before compact."""
-    src = Path("src/dashboard/generator.py").read_text(encoding="utf-8")
+    """Source contract: signal postprocessing rebuilds SH before compact."""
+    src = Path("src/dashboard/signal_section_builder.py").read_text(encoding="utf-8")
     assert "Batch CT: canonical WWW health.json may embed" in src
     assert 'health_report["signal_health"] = build_signal_health_section' in src

@@ -1318,6 +1318,24 @@ describe('HealthDataSchema', () => {
     expect(result.data?.data_pipeline_slo?.runbook?.top_cause?.code).toBe('stale_prices');
   });
 
+  it('accepts an unavailable data pipeline SLO fallback payload', () => {
+    const data = {
+      ...validHealth(),
+      data_pipeline_slo: {
+        schema_version: 'data-pipeline-slo/v1',
+        status: 'warning' as const,
+        top_dimension: 'unknown',
+        error: 'source_manifest.json missing',
+        dimensions: {},
+      },
+    };
+
+    const result = HealthDataSchema.safeParse(data);
+
+    expect(result.success).toBe(true);
+    expect(result.data?.data_pipeline_slo?.error).toContain('source_manifest.json');
+  });
+
   it('rejects missing cron_jobs', () => {
     const { cron_jobs, ...rest } = validHealth();
     const result = HealthDataSchema.safeParse(rest);
