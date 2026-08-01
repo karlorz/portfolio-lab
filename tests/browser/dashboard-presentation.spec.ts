@@ -526,7 +526,7 @@ test.describe('dashboard browser presentation smoke', () => {
         const tab = dashboardTab(page, label);
         await expect(tab).toBeVisible();
         await tab.click();
-        await expect(page.locator('.navigation-rail a').filter({ hasText: label })).toHaveAttribute('aria-current', 'page');
+        await expect(tab).toHaveAttribute('aria-current', 'page');
         await waitForLoadedDashboardTab(page, label);
         await expectNoDocumentOverflow(page);
       }

@@ -86,7 +86,7 @@ describe('validateAlertsData', () => {
         alerts: [
           healthJobKillAlert(),
           { type: 'kill_switch', level: 'warning', message: '   ' },
-          { type: 'kill_switch', level: 'critical', message: 'Bad level' },
+          { type: 'kill_switch', level: 'fatal', message: 'Bad level' },
         ],
         count: 3,
         generated_at: GENERATED_AT,
