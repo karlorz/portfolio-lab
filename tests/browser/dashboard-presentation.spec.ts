@@ -511,13 +511,13 @@ test.describe('dashboard browser presentation smoke', () => {
   for (const viewport of VIEWPORTS) {
     test(`keeps workspace navigation usable without document overflow at ${viewport.width}px`, async ({ page }) => {
       const consoleMessages = collectPresentationConsoleFailures(page);
+      const navigation = page.getByRole('navigation', { name: 'Portfolio Lab workspaces' });
 
       await openDashboard(page, viewport);
       await expectNoDocumentOverflow(page);
 
       for (const label of TAB_LABELS) {
         if (viewport.width <= 720) {
-          const navigation = page.getByRole('navigation', { name: 'Portfolio Lab workspaces' });
           if (!(await navigation.isVisible())) {
             await page.getByRole('button', { name: 'Menu' }).click();
             await expect(navigation).toBeVisible();
@@ -526,8 +526,16 @@ test.describe('dashboard browser presentation smoke', () => {
         const tab = dashboardTab(page, label);
         await expect(tab).toBeVisible();
         await tab.click();
-        await expect(tab).toHaveAttribute('aria-current', 'page');
         await waitForLoadedDashboardTab(page, label);
+        if (viewport.width <= 720) {
+          // Selecting a workspace closes the mobile menu. Reopen it before
+          // checking the active link so the assertion matches the user flow.
+          await expect(navigation).not.toBeVisible();
+          await page.getByRole('button', { name: 'Menu' }).click();
+          await expect(dashboardTab(page, label)).toHaveAttribute('aria-current', 'page');
+        } else {
+          await expect(tab).toHaveAttribute('aria-current', 'page');
+        }
         await expectNoDocumentOverflow(page);
       }
 
