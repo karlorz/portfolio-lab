@@ -327,21 +327,57 @@ describe('market data fetcher source provenance', () => {
     expect(JSON.stringify(manifestRows)).not.toContain('query2.finance.yahoo.com');
   });
 
-  it('converts multi-symbol price rows to chronological backtest rows', () => {
+  it('falls back from an unavailable configured placeholder provider to Yahoo', async () => {
+    const originalPrimary = process.env.MARKET_DATA_PRIMARY_PROVIDER;
+    process.env.MARKET_DATA_PRIMARY_PROVIDER = 'Polygon';
+
+    try {
+      const result = await fetchAllDataWithSummary(['SPY'], '2024-01-01', '2024-01-02', {
+        fetchImpl: async () => new Response(JSON.stringify(yahooPayload(407)), { status: 200 }),
+        maxAttempts: 1,
+        backoffMs: 0,
+        delayMs: 0,
+      });
+
+      expect(result.data.SPY[0]?.adjClose).toBe(407);
+      expect(result.summary).toMatchObject({
+        provider: 'Yahoo Finance',
+        primary_provider: 'Polygon',
+        fallback_provider: 'Yahoo Finance',
+        provider_chain: ['Polygon', 'Yahoo Finance'],
+        status: 'degraded',
+      });
+      expect(result.summary.failure_counts.not_configured).toBe(1);
+      expect(result.summary.symbols[0]).toMatchObject({
+        symbol: 'SPY',
+        provider: 'Yahoo Finance',
+        fallback_reason: 'not_configured',
+        provider_chain: ['Polygon', 'Yahoo Finance'],
+      });
+    } finally {
+      if (originalPrimary === undefined) {
+        delete process.env.MARKET_DATA_PRIMARY_PROVIDER;
+      } else {
+        process.env.MARKET_DATA_PRIMARY_PROVIDER = originalPrimary;
+      }
+    }
+  });
+
+  it('converts adjusted closes to chronological multi-symbol backtest rows', () => {
     const rows = convertToBacktestFormat({
       GLD: [
-        { date: '2024-01-03', open: 192, high: 194, low: 191, close: 193, adjClose: 193, volume: 1 },
-        { date: '2024-01-01', open: 190, high: 192, low: 189, close: 191, adjClose: 191, volume: 1 },
+        { date: '2024-01-03', open: 192, high: 194, low: 191, close: 193, adjClose: 195, volume: 1 },
+        { date: '2024-01-01', open: 190, high: 192, low: 189, close: 191, adjClose: 194, volume: 1 },
       ],
       SPY: [
-        { date: '2024-01-02', open: 470, high: 472, low: 469, close: 471, adjClose: 471, volume: 1 },
+        { date: '2024-01-02', open: 470, high: 472, low: 469, close: 471, adjClose: 474, volume: 1 },
       ],
     });
 
     expect(rows).toEqual([
-      { date: '2024-01-01', symbol: 'GLD', price: 191 },
-      { date: '2024-01-02', symbol: 'SPY', price: 471 },
-      { date: '2024-01-03', symbol: 'GLD', price: 193 },
+      { date: '2024-01-01', symbol: 'GLD', price: 194 },
+      { date: '2024-01-02', symbol: 'SPY', price: 474 },
+      { date: '2024-01-03', symbol: 'GLD', price: 195 },
     ]);
   });
 

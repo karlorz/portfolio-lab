@@ -1417,11 +1417,11 @@ class TestConstants:
 
 
 def test_live_payload_prefers_research_caveats_not_backtest_finding():
-    """Generator contract: live behavioral block must not ship free-text backtest_finding."""
+    """Builder contract: live behavioral block must not ship free-text backtest_finding."""
     import ast
     from pathlib import Path
 
-    src = Path("src/dashboard/generator.py").read_text(encoding="utf-8")
+    src = Path("src/dashboard/signal_section_builder.py").read_text(encoding="utf-8")
     # Static contract: research_caveats present; bare backtest_finding key removed from behavioral block
     assert "research_caveats" in src
     # The behavioral section must not assign backtest_finding= (other dashboards may still)

@@ -3107,6 +3107,28 @@ class TestPerformanceJSONEdgeCases:
 class TestSignalsJSONEdgeCases:
     """Test generate_signals_json edge cases."""
 
+    def test_signal_section_helpers_delegate_to_builder(self, tmp_path):
+        """The generator keeps orchestration while its collaborator owns sections."""
+        gen, _ = _make_generator(tmp_path)
+        builder = MagicMock()
+        context = {"current_regime": "NORMAL"}
+        base = {"target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}}
+        optional = {**base, "rebalance_health": {}}
+        final = {**optional, "health": {"status": "ok"}}
+        builder.build_base_sections.return_value = base
+        builder.build_optional_sections.return_value = optional
+        builder.apply_postprocessors.return_value = final
+
+        with patch.object(gen, "_get_signal_section_builder", return_value=builder):
+            assert gen._build_base_signal_sections(context) is base
+            assert gen._build_optional_signal_sections(base, context) is optional
+            assert gen._apply_signal_postprocessors(optional, context) is final
+
+        builder.build_base_sections.assert_called_once_with(context)
+        builder.build_optional_sections.assert_called_once_with(base, context)
+        builder.apply_postprocessors.assert_called_once_with(optional, context)
+        gen.conn.close()
+
     def test_generate_signals_json_is_thin_coordinator(self):
         """generate_signals_json delegates section work to focused helpers."""
         source = inspect.getsource(DashboardGenerator.generate_signals_json)
@@ -6707,7 +6729,7 @@ def test_load_entropy_data_no_hardcoded_correlation(tmp_path, monkeypatch):
 
 def test_factor_rotation_signal_is_canonical_not_dual_authority():
     """Canonical factor_rotation carries authority tags; dashboard is alias-only."""
-    src = Path("src/dashboard/generator.py").read_text(encoding="utf-8")
+    src = Path("src/dashboard/signal_section_builder.py").read_text(encoding="utf-8")
     assert 'alias_of": "factor_rotation"' in src or "alias_of" in src
     assert "live_authoritative" in src
     assert "research_caveats" in src
