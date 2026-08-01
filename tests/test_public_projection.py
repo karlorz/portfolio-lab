@@ -166,10 +166,10 @@ def test_public_mirror_lag_restamp_keeps_public_paths_logical(
                 "repo_public_mirror_lagging_count": 0,
                 "repo_public_mirror_total": 1,
                 "repo_public_mirror_source": "/var/www/portfolio-lab/data",
-                "repo_public_mirror_dest": "/root/projects/portfolio-lab/public/data",
+                "repo_public_mirror_dest": str(PROJECT_ROOT / "public" / "data"),
                 "repo_public_mirror_lag": {
                     "source": "/var/www/portfolio-lab/data",
-                    "dest": "/root/projects/portfolio-lab/public/data",
+                    "dest": str(PROJECT_ROOT / "public" / "data"),
                 },
             }
         ),
@@ -183,7 +183,7 @@ def test_public_mirror_lag_restamp_keeps_public_paths_logical(
             "total": 1,
             "lagging_paths": [],
             "source": "/var/www/portfolio-lab/data",
-            "dest": "/root/projects/portfolio-lab/public/data",
+            "dest": str(PROJECT_ROOT / "public" / "data"),
         },
     )
 
