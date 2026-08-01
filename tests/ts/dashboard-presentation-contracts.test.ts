@@ -158,11 +158,14 @@ describe('dashboard presentation source contracts', () => {
     expect(browserSmoke).toContain("'.explainability-panel'");
     expect(browserSmoke).toContain("'Labs': ['.labs-panel .positions-table'");
     expect(browserSmoke).toContain("'Decisions': ['.decision-replay-panel'");
-    expect(browserSmoke).toMatch(
-      /await tab\.click\(\);\s*await expect\(tab\)\.toHaveAttribute\('aria-current', 'page'\)/,
+    expect(browserSmoke).toContain('await tab.click();');
+    expect(browserSmoke).toContain('await waitForLoadedDashboardTab(page, label);');
+    expect(browserSmoke).toContain("await expect(tab).toHaveAttribute('aria-current', 'page');");
+    expect(browserSmoke).toContain(
+      "await expect(dashboardTab(page, label)).toHaveAttribute('aria-current', 'page');",
     );
     expect(browserSmoke).toMatch(
-      /await expect\(tab\)\.toHaveAttribute\('aria-current', 'page'\);\s*await waitForLoadedDashboardTab\(page, label\);\s*await expectNoDocumentOverflow\(page\);/,
+      /await waitForLoadedDashboardTab\(page, label\);[\s\S]*?await expectNoDocumentOverflow\(page\);/,
     );
   });
 
