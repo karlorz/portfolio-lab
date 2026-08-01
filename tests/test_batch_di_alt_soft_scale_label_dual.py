@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import math
+from datetime import datetime, timezone
 
 from src.signals.alternative_data_signal import AlternativeDataSignalGenerator
 from src.signals.health_tracker import SignalHealthTracker
@@ -16,7 +17,7 @@ def test_alt_snapshot_soft_scales_composite() -> None:
     composite = 0.2889
     soft = math.tanh(composite / 0.5)
     signal = SimpleNamespace(
-        timestamp="2026-07-22T00:00:00+00:00",
+        timestamp=datetime.now(timezone.utc).isoformat(),
         confidence=0.61,
         probability=0.8,
         regime="bull",

@@ -5,6 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from src.paths import PROJECT_ROOT
+
+
+PROJECT_DATA_DIR = PROJECT_ROOT / "data"
+
 
 def test_public_projection_rewrites_known_diagnostic_planes_without_business_drift() -> None:
     from src.dashboard.public_projection import (
@@ -14,11 +19,11 @@ def test_public_projection_rewrites_known_diagnostic_planes_without_business_dri
 
     private = {
         "target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
-        "history_source": "/root/projects/portfolio-lab/data/regime_log.json",
+        "history_source": str(PROJECT_DATA_DIR / "regime_log.json"),
         "scheduler_source": "/root/.hermes/cron/jobs.json",
-        "log_path": "/root/projects/portfolio-lab/data/tasker_logs/run-abc.log",
+        "log_path": str(PROJECT_DATA_DIR / "tasker_logs" / "run-abc.log"),
         "provenance_completeness": {
-            "private_path": "/root/projects/portfolio-lab/data/signals.json",
+            "private_path": str(PROJECT_DATA_DIR / "signals.json"),
             "public_path": "/var/www/portfolio-lab/data/signals.json",
         },
     }
@@ -48,7 +53,7 @@ def test_public_business_values_ignore_only_approved_metadata() -> None:
         "timestamp": "2026-07-31T12:00:00+00:00",
         "runtime_provenance": {"plane": "private", "generator_git_sha": "private"},
         "provenance_completeness": {
-            "private_path": "/root/projects/portfolio-lab/data/signals.json",
+            "private_path": str(PROJECT_DATA_DIR / "signals.json"),
             "public_path": "/var/www/portfolio-lab/data/signals.json",
         },
     }
@@ -77,7 +82,7 @@ def test_public_path_gate_finds_nested_and_key_paths() -> None:
     from src.dashboard.public_projection import find_public_internal_paths
 
     payload = {
-        "files./root/projects/portfolio-lab/data/dashboard.json": {
+        f"files.{PROJECT_DATA_DIR / 'dashboard.json'}": {
             "path": "/var/www/portfolio-lab/data/dashboard.json",
         }
     }
@@ -96,7 +101,7 @@ def test_public_fanout_projects_only_public_body(tmp_path: Path, monkeypatch) ->
     public_path = tmp_path / "public" / "health.json"
     payload = {
         "status": "healthy",
-        "source": "/root/projects/portfolio-lab/data/cron_status.json",
+        "source": str(PROJECT_DATA_DIR / "cron_status.json"),
     }
 
     result = write_json_multi_dest(
@@ -109,7 +114,7 @@ def test_public_fanout_projects_only_public_body(tmp_path: Path, monkeypatch) ->
     assert result.wrote_private and result.wrote_public
     private = json.loads(private_path.read_text())
     public = json.loads(public_path.read_text())
-    assert private["source"] == "/root/projects/portfolio-lab/data/cron_status.json"
+    assert private["source"] == str(PROJECT_DATA_DIR / "cron_status.json")
     assert public["source"] == "data/cron_status.json"
     assert private["status"] == public["status"]
 
@@ -209,7 +214,7 @@ def test_decision_registry_public_projection_preserves_private_diagnostics(
             timestamp_utc="2026-07-31T00:00:00+00:00",
             name="projection regression",
             artifacts={
-                "output_path": "/root/projects/portfolio-lab/data/.promote_to_live"
+                "output_path": str(PROJECT_DATA_DIR / ".promote_to_live")
             },
         )
     )
@@ -225,5 +230,5 @@ def test_decision_registry_public_projection_preserves_private_diagnostics(
     public_path = public_payload["recent_experiments"][0]["artifacts"]["output_path"]
     private_path = private_payload["recent_experiments"][0]["artifacts"]["output_path"]
     assert public_path == "data/.promote_to_live"
-    assert private_path == "/root/projects/portfolio-lab/data/.promote_to_live"
+    assert private_path == str(PROJECT_DATA_DIR / ".promote_to_live")
     assert find_public_internal_paths(public_payload) == []
