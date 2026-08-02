@@ -19,6 +19,7 @@ import os
 import sys
 from collections import deque
 from datetime import datetime
+from numbers import Real
 from pathlib import Path
 from typing import Any, Dict, Optional, NamedTuple
 
@@ -741,12 +742,26 @@ class GraduationChecklist:
             )
         return True, None
 
+    @staticmethod
+    def _summary_sharpe(state: Dict) -> Optional[float]:
+        """Return the authoritative summary Sharpe when it is finite and real."""
+        summary = state.get("paper_trading_summary", {})
+        if not isinstance(summary, dict):
+            return None
+
+        value = summary.get("sharpe")
+        if isinstance(value, bool) or not isinstance(value, Real):
+            return None
+
+        sharpe = float(value)
+        return sharpe if np.isfinite(sharpe) else None
+
     def _check_sharpe(self, state: Dict) -> CheckResult:
         """Check rolling Sharpe ratio."""
         # Prefer pre-computed summary
-        summary = state.get("paper_trading_summary", {})
-        if summary.get("sharpe", 0) > 0:
-            sharpe = float(summary["sharpe"])
+        summary_sharpe = self._summary_sharpe(state)
+        if summary_sharpe is not None:
+            sharpe = summary_sharpe
         else:
             portfolio = state.get("portfolio", {})
             history = portfolio.get("history", [])
@@ -1157,8 +1172,9 @@ class GraduationChecklist:
 
         # Prefer pre-computed summary for Sharpe
         summary = state.get("paper_trading_summary", {})
-        if summary.get("sharpe", 0) > 0:
-            sharpe = float(summary["sharpe"])
+        summary_sharpe = self._summary_sharpe(state)
+        if summary_sharpe is not None:
+            sharpe = summary_sharpe
             n_days = int(summary.get("days_tracked", 0) or 0)
         else:
             # Compute Sharpe from portfolio history (same as _check_sharpe)
@@ -1429,8 +1445,9 @@ class GraduationChecklist:
 
         # Get Sharpe from the same source as _check_sharpe (raw, no silent zero)
         summary = state.get("paper_trading_summary", {})
-        if summary.get("sharpe", 0) > 0:
-            sharpe = float(summary["sharpe"])
+        summary_sharpe = self._summary_sharpe(state)
+        if summary_sharpe is not None:
+            sharpe = summary_sharpe
             n_days = int(summary.get("days_tracked", 0) or 0)
         else:
             portfolio = state.get("portfolio", {})

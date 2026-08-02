@@ -204,6 +204,61 @@ class TestSharpeCheck:
         assert result.passed is False
 
 
+class TestGraduationSharpeSummarySsot:
+    """All Sharpe-derived gates must use the same finite summary value."""
+
+    @staticmethod
+    def _state(summary_sharpe=...):
+        summary = {"days_tracked": 72}
+        if summary_sharpe is not ...:
+            summary["sharpe"] = summary_sharpe
+        return {
+            "paper_trading_summary": summary,
+            "portfolio": {"history": _make_daily_history(63, daily_return=0.001)},
+        }
+
+    @pytest.mark.parametrize("summary_sharpe", [-1.2553, 0.0])
+    def test_sharpe_gate_uses_finite_non_positive_summary(self, summary_sharpe):
+        result = GraduationChecklist()._check_sharpe(self._state(summary_sharpe))
+
+        assert result.passed is False
+        assert result.value == round(summary_sharpe, 2)
+
+    def test_dsr_uses_negative_summary_and_summary_observation_count(self):
+        with patch(
+            "src.backtest.metrics.compute_deflated_sharpe_ratio",
+            return_value=0.1234,
+        ) as compute_dsr:
+            result = GraduationChecklist()._check_dsr(self._state(-1.2553))
+
+        assert result.value == 0.1234
+        compute_dsr.assert_called_once_with(
+            sharpe_ratio=-1.2553,
+            n_trials=94,
+            n_observations=72 * 252,
+        )
+
+    def test_ci_uses_negative_summary_and_summary_observation_count(self):
+        result = GraduationChecklist()._check_sharpe_ci(self._state(-1.2553))
+        expected_se = np.sqrt((1 + 0.5 * (-1.2553) ** 2) / 72)
+        expected_lower = -1.2553 - 1.15 * expected_se
+
+        assert result.value == round(expected_lower, 4)
+
+    @pytest.mark.parametrize(
+        "invalid_sharpe",
+        [..., None, True, "-1.2553", np.nan, np.inf, -np.inf],
+        ids=["missing", "null", "boolean", "string", "nan", "positive-inf", "negative-inf"],
+    )
+    def test_invalid_summary_sharpe_falls_back_to_history(self, invalid_sharpe):
+        checklist = GraduationChecklist()
+        expected = checklist._check_sharpe(self._state(...))
+
+        result = checklist._check_sharpe(self._state(invalid_sharpe))
+
+        assert result == expected
+
+
 # ---------------------------------------------------------------------------
 # GraduationChecklist — Drawdown
 # ---------------------------------------------------------------------------
