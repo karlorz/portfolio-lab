@@ -756,7 +756,10 @@ class TestExportExtended:
             probability_neutral=0.1, fallback_used=False,
         )
         integrator.prediction_history.append(pred)
-        with patch("builtins.open", side_effect=PermissionError("denied")):
+        with patch(
+            "src.signals.stacking_integrator.save_results_json",
+            side_effect=PermissionError("denied"),
+        ):
             result = integrator.export_prediction_log(Path('/nonexistent/dir/file.json'))
         assert result is False
     """Extended accuracy stats tests."""
@@ -1835,7 +1838,10 @@ class TestExportEdgeCases:
                                    probability_bullish=0.8, probability_bearish=0.1,
                                    probability_neutral=0.1, fallback_used=False)
         integrator.prediction_history.append(pred)
-        with patch("builtins.open", side_effect=PermissionError("denied")):
+        with patch(
+            "src.signals.stacking_integrator.save_results_json",
+            side_effect=PermissionError("denied"),
+        ):
             result = integrator.export_prediction_log(Path("/nonexistent_dir/file.json"))
         assert result is False
 

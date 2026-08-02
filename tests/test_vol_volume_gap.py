@@ -130,6 +130,7 @@ class TestComputeFeatures:
         features = compute_features(prices)
         assert features is not None
         assert isinstance(features.daily_return, float)
+
         assert isinstance(features.volume_anomaly, float)
         assert isinstance(features.return_vol_ratio, float)
         assert features.regime == DayRegime.UNKNOWN
@@ -1204,7 +1205,13 @@ class TestSaveLoadErrorPaths:
         logger = logging.getLogger("src.regime.vol_volume_gap")
         logger.addHandler(handler)
         try:
-            monkeypatch.setattr("builtins.open", lambda *a, **kw: (_ for _ in ()).throw(OSError("permission denied")))
+            def fail_save(*args, **kwargs):
+                raise OSError("permission denied")
+
+            monkeypatch.setattr(
+                "src.regime.vol_volume_gap.save_results_json",
+                fail_save,
+            )
             result = {"status": "ok"}
             save_state(result, Path("/fake/path/state.json"))
             log_output = log_capture.getvalue()
@@ -1283,4 +1290,3 @@ class TestNegativePriceSeries:
         features = compute_features(prices)
         assert features is not None
         assert isinstance(features.daily_return, float)
-
