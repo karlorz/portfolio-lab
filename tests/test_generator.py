@@ -1612,11 +1612,11 @@ class TestCrossAssetRVJSON:
             unavailable_pairs={
                 "gld_btc": {
                     "coverage_status": "unavailable",
-                    "missing_symbols": ["BTC"],
+                    "missing_symbols": ["BTC-USD"],
                     "reason": "missing_or_all_nan_symbol",
                 },
             },
-            missing_symbols=["BTC"],
+            missing_symbols=["BTC-USD"],
             risk_on_score=0.4,
             duration_score=0.0,
             overall_conviction=0.73,
@@ -1638,8 +1638,8 @@ class TestCrossAssetRVJSON:
         assert data["pairs"][0]["pair_name"] == "spy_gld"
         assert data["available_pair_count"] == 1
         assert data["unavailable_pair_count"] == 1
-        assert data["unavailable_pairs"]["gld_btc"]["missing_symbols"] == ["BTC"]
-        assert data["missing_symbols"] == ["BTC"]
+        assert data["unavailable_pairs"]["gld_btc"]["missing_symbols"] == ["BTC-USD"]
+        assert data["missing_symbols"] == ["BTC-USD"]
         gen.conn.close()
 
 

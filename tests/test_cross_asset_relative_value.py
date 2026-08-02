@@ -34,7 +34,6 @@ from src.paths import DATA_DIR
 @pytest.fixture
 def sample_prices(tmp_path):
     """Create a realistic price JSON file for testing."""
-    import string as s
     dates = []
     base = datetime(2026, 1, 1)
     for i in range(200):
@@ -53,8 +52,8 @@ def sample_prices(tmp_path):
                 for d in dates],
         "GLD": [{"d": d, "p": 180.0 * (1 + np.random.normal(0.0002, 0.007))}
                 for d in dates],
-        "BTC": [{"d": d, "p": 40000.0 * (1 + np.random.normal(0.001, 0.03))}
-                for d in dates],
+        "BTC-USD": [{"d": d, "p": 40000.0 * (1 + np.random.normal(0.001, 0.03))}
+                    for d in dates],
         "TLT": [{"d": d, "p": 95.0 * (1 + np.random.normal(0.0001, 0.006))}
                 for d in dates],
         "IEF": [{"d": d, "p": 105.0 * (1 + np.random.normal(0.0001, 0.004))}
@@ -76,8 +75,14 @@ def sample_prices(tmp_path):
 
 
 @pytest.fixture
-def scanner(sample_prices):
-    return CrossAssetRVScanner(data_dir=sample_prices)
+def scanner(sample_prices, monkeypatch):
+    """Use the fixture's prices instead of ambient public runtime data."""
+    import src.data.price_cache as price_cache
+
+    monkeypatch.setattr(price_cache, "PRICES_JSON", sample_prices / "prices.json")
+    price_cache.invalidate_price_cache()
+    yield CrossAssetRVScanner(data_dir=sample_prices)
+    price_cache.invalidate_price_cache()
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +275,9 @@ class TestConfig:
         assert len(CROSS_ASSET_PAIRS) == 5
         expected = {"spy_qqq", "spy_efa", "gld_btc", "tlt_ief", "spy_gld"}
         assert set(CROSS_ASSET_PAIRS.keys()) == expected
+
+    def test_gld_btc_uses_canonical_market_data_symbol(self):
+        assert CROSS_ASSET_PAIRS["gld_btc"][:2] == ("GLD", "BTC-USD")
 
     def test_pair_structure(self):
         for name, (a, b, desc) in CROSS_ASSET_PAIRS.items():
@@ -566,7 +574,7 @@ class TestPairScanningExtended:
         n = LOOKBACK * 3
         scanner.prices = {
             "GLD": np.linspace(180.0, 210.0, n),
-            "BTC": np.full(n, np.nan),
+            "BTC-USD": np.full(n, np.nan),
         }
         scanner.dates = [f"2026-01-{(i % 28) + 1:02d}" for i in range(n)]
 
@@ -579,7 +587,30 @@ class TestPairScanningExtended:
         assert signal.available_pair_count == 0
         assert signal.unavailable_pair_count == len(CROSS_ASSET_PAIRS)
         assert signal.unavailable_pairs["gld_btc"]["coverage_status"] == "unavailable"
-        assert signal.unavailable_pairs["gld_btc"]["missing_symbols"] == ["BTC"]
+        assert signal.unavailable_pairs["gld_btc"]["missing_symbols"] == ["BTC-USD"]
+
+    def test_scan_pair_uses_covered_canonical_btc_data(self, tmp_path):
+        """Canonical BTC-USD history makes the stable gld_btc pair scannable."""
+        scanner = CrossAssetRVScanner(data_dir=tmp_path / "canonical_btc")
+        n = LOOKBACK * 3
+        scanner.prices = {
+            "GLD": np.linspace(180.0, 210.0, n),
+            "BTC-USD": np.linspace(40_000.0, 52_000.0, n),
+        }
+        scanner.dates = [f"2026-01-{(i % 28) + 1:02d}" for i in range(n)]
+        valid = np.zeros(n)
+        stds = np.ones(n)
+
+        with patch.object(
+            scanner,
+            "_compute_z_score",
+            return_value=(valid, valid, stds),
+        ):
+            reading = scanner.scan_pair("gld_btc")
+
+        assert reading is not None
+        assert reading.pair_name == "gld_btc"
+        assert reading.symbol_b == "BTC-USD"
 
 
 class TestSignalGenerationExtended:
@@ -1306,9 +1337,9 @@ class TestEnsembleSignalDetail:
     """Detailed tests for get_ensemble_signal calculations."""
 
     def _make_reading(self, pair_name, z_score, signal_value, conviction):
+        symbol_a, symbol_b, _ = CROSS_ASSET_PAIRS[pair_name]
         return PairReading(
-            pair_name=pair_name, symbol_a=pair_name.split("_")[0].upper(),
-            symbol_b=pair_name.split("_")[1].upper(),
+            pair_name=pair_name, symbol_a=symbol_a, symbol_b=symbol_b,
             return_a_60d=1.0, return_b_60d=0.5, return_differential=0.5,
             z_score=z_score, z_score_mean=0.0, z_score_std=1.0,
             signal_value=signal_value, regime="diverged_bull" if abs(z_score) > 2.0 else "neutral",
@@ -1425,7 +1456,7 @@ class TestDirectionalBias:
                 active=False, days_active=0, entry_zscore=0.0,
             ),
             "gld_btc": PairReading(
-                pair_name="gld_btc", symbol_a="GLD", symbol_b="BTC",
+                pair_name="gld_btc", symbol_a="GLD", symbol_b="BTC-USD",
                 return_a_60d=2.0, return_b_60d=4.0, return_differential=-2.0,
                 z_score=0.1, z_score_mean=0.0, z_score_std=1.0,
                 signal_value=0.0, regime="converged", conviction=0.0,
@@ -1448,7 +1479,7 @@ class TestDirectionalBias:
         }
         with patch.object(scanner, 'scan_pair', side_effect=lambda name: readings.get(name)):
             scanner.prices = {"SPY": np.ones(100), "QQQ": np.ones(100), "EFA": np.ones(100),
-                             "GLD": np.ones(100), "BTC": np.ones(100), "TLT": np.ones(100),
+                             "GLD": np.ones(100), "BTC-USD": np.ones(100), "TLT": np.ones(100),
                              "IEF": np.ones(100)}
             signal = scanner.scan_all()
         # risk_on = -spy_qqq.signal - spy_efa.signal*0.5 - spy_gld.signal*0.3
@@ -1473,7 +1504,7 @@ class TestDirectionalBias:
                 active=False, days_active=0, entry_zscore=0.0,
             ),
             "gld_btc": PairReading(
-                pair_name="gld_btc", symbol_a="GLD", symbol_b="BTC",
+                pair_name="gld_btc", symbol_a="GLD", symbol_b="BTC-USD",
                 return_a_60d=0.0, return_b_60d=0.0, return_differential=0.0,
                 z_score=0.0, z_score_mean=0.0, z_score_std=1.0,
                 signal_value=0.0, regime="converged", conviction=0.0,
@@ -1496,7 +1527,7 @@ class TestDirectionalBias:
         }
         with patch.object(scanner, 'scan_pair', side_effect=lambda name: readings.get(name)):
             scanner.prices = {"SPY": np.ones(100), "QQQ": np.ones(100), "EFA": np.ones(100),
-                             "GLD": np.ones(100), "BTC": np.ones(100), "TLT": np.ones(100),
+                             "GLD": np.ones(100), "BTC-USD": np.ones(100), "TLT": np.ones(100),
                              "IEF": np.ones(100)}
             signal = scanner.scan_all()
         # duration = tlt_ief.signal = -0.6
@@ -1615,7 +1646,7 @@ class TestScannerResilience:
         """Scanner with insufficient price data should return None for all pairs."""
         # Use scanner that loaded too-short data
         scanner.prices = {sym: np.array([100.0, 101.0]) for sym in
-                         ["SPY", "QQQ", "EFA", "GLD", "BTC", "TLT", "IEF"]}
+                         ["SPY", "QQQ", "EFA", "GLD", "BTC-USD", "TLT", "IEF"]}
         scanner.dates = ["2026-01-01", "2026-01-02"]
         reading = scanner.scan_pair("spy_qqq")
         assert reading is None
