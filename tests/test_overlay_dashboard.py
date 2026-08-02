@@ -1406,6 +1406,8 @@ class TestDataCollectionWithMocks:
         assert result["active"] is True
         assert result["total_crypto"] == 0.07
         assert result["btc_vol_regime"] == "normal"
+        assert result["role"] == "advisory_non_routed"
+        assert result["live_authoritative"] is False
 
     @patch("src.signals.crypto_momentum.generate_crypto_signal",
            side_effect=RuntimeError("BTC data unavailable"))
