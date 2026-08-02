@@ -46,7 +46,7 @@ __all__ = ['ZSCORE_ENTRY', 'ZSCORE_EXIT', 'LOOKBACK', 'MIN_HISTORY', 'PairReadin
 CROSS_ASSET_PAIRS: Dict[str, Tuple[str, str, str]] = {
     "spy_qqq": ("SPY", "QQQ", "US equity vs tech — tech outperforming → mean-revert"),
     "spy_efa": ("SPY", "EFA", "US vs international — US strong → international catch-up"),
-    "gld_btc": ("GLD", "BTC", "Gold vs digital gold — diverging stores of value"),
+    "gld_btc": ("GLD", "BTC-USD", "Gold vs digital gold — diverging stores of value"),
     "tlt_ief": ("TLT", "IEF", "Long vs intermediate duration — steepener/flattener"),
     "spy_gld": ("SPY", "GLD", "Equity vs gold — risk-on vs risk-off divergence"),
 }
