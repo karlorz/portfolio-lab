@@ -314,7 +314,12 @@ class TestBuildFactorReturns:
         }
 
         factor_rets = _build_factor_returns(prices)
-        assert "crypto" in factor_rets
+        expected = (
+            0.6 * np.diff(np.log(btc_prices))
+            + 0.4 * np.diff(np.log(eth_prices))
+        )
+        assert len(factor_rets["crypto"]) == n - 1
+        np.testing.assert_allclose(factor_rets["crypto"], expected)
 
     def test_all_symbols_missing_for_factor(self):
         """Factor with no matching symbols should produce empty array."""
