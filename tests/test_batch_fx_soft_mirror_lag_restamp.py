@@ -514,8 +514,12 @@ def test_dashboard_schema_demotes_system_status_on_lag_heal() -> None:
     assert out.get("ops_health_status") in {"ok", "healthy"}
 
 
-def test_restamp_on_disk_demotes_lag_only_warning(tmp_path) -> None:
+def test_restamp_on_disk_demotes_lag_only_warning(tmp_path, monkeypatch) -> None:
     from src.monitor.repo_public_mirror_lag import restamp_mirror_lag_on_health_documents
+
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setattr("src.monitor.health_check.DATA_DIR", data)
 
     ops = tmp_path / "health_ops.json"
     sticky = {

@@ -106,10 +106,11 @@ Run via `make test` (ML disabled) or `make test-ml`.
 
 ## E2E
 
-No e2e scripts yet. The project relies on per-script CLI runs
-(`python -m src.backtest.engine`, `bun run backtest`, etc.) and manual
-dashboard verification. Leave empty; trivial fast-path applies to most
-work items.
+The supported browser E2E path is the repository's disposable Playwright
+dashboard suite declared below as the conditional `browser_verification`
+fallback. It starts its own Vite server through `playwright.config.ts`; do not
+add a second harness or a repo-local personal Chrome profile. Global E2E stays
+empty so backend-only work retains the tiered test policy.
 
 ```yaml
 e2e_scripts: []
