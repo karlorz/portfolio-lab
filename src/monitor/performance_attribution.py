@@ -201,33 +201,42 @@ class PerformanceAttribution:
                         "explanation": row["explanation"],
                     })
 
-                # Also get ensemble votes to cross-reference
-                cursor.execute(
-                    """
-                    SELECT timestamp, regime, consensus, agreement_ratio, equity_bias,
-                           duration_bias, gold_bias, action, confidence, reasoning
-                    FROM ensemble_votes
-                    WHERE substr(timestamp, 1, 10) >= ?
-                    ORDER BY timestamp DESC
-                    LIMIT ?
-                    """,
-                    (cutoff, days * 4),
+                # Also get ensemble votes to cross-reference (optional table:
+                # minimal/older ensemble_signals.db schemas may lack it; the
+                # source_readings history must still load)
+                has_votes = (
+                    cursor.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='ensemble_votes'"
+                    ).fetchone()
+                    is not None
                 )
+                if has_votes:
+                    cursor.execute(
+                        """
+                        SELECT timestamp, regime, consensus, agreement_ratio, equity_bias,
+                               duration_bias, gold_bias, action, confidence, reasoning
+                        FROM ensemble_votes
+                        WHERE substr(timestamp, 1, 10) >= ?
+                        ORDER BY timestamp DESC
+                        LIMIT ?
+                        """,
+                        (cutoff, days * 4),
+                    )
 
-                for row in cursor.fetchall():
-                    history.append({
-                        "type": "ensemble_vote",
-                        "timestamp": row["timestamp"],
-                        "regime": row["regime"],
-                        "consensus": row["consensus"],
-                        "agreement_ratio": row["agreement_ratio"],
-                        "equity_bias": row["equity_bias"],
-                        "duration_bias": row["duration_bias"],
-                        "gold_bias": row["gold_bias"],
-                        "action": row["action"],
-                        "confidence": row["confidence"],
-                        "reasoning": row["reasoning"],
-                    })
+                    for row in cursor.fetchall():
+                        history.append({
+                            "type": "ensemble_vote",
+                            "timestamp": row["timestamp"],
+                            "regime": row["regime"],
+                            "consensus": row["consensus"],
+                            "agreement_ratio": row["agreement_ratio"],
+                            "equity_bias": row["equity_bias"],
+                            "duration_bias": row["duration_bias"],
+                            "gold_bias": row["gold_bias"],
+                            "action": row["action"],
+                            "confidence": row["confidence"],
+                            "reasoning": row["reasoning"],
+                        })
 
         except (KeyError, ValueError, TypeError, AttributeError, RuntimeError, sqlite3.Error) as e:
             logger.error("Error reading signal history: %s", e)

@@ -216,7 +216,10 @@ class TestComputeSignalCorrelationMatrix:
             for idx in range(20)
         }
 
+        calls = {"n": 0}
+
         def slow_pairwise_helper(_x, _y):
+            calls["n"] += 1
             time.sleep(0.001)
             return 0.0
 
@@ -230,7 +233,15 @@ class TestComputeSignalCorrelationMatrix:
         elapsed = time.perf_counter() - started
 
         assert len(result["correlation_penalties"]) == 20
-        assert elapsed < 0.05
+        # Deterministic intent check: the vectorized rank path must not fall
+        # back to the O(n^2) pairwise Spearman helper at all. Wall-clock
+        # bounds are load-sensitive under the full suite (3GB ulimit), so the
+        # call count is the primary guard.
+        assert calls["n"] == 0
+        # Loose backstop for pathological regressions (the vectorized path is
+        # milliseconds; a pairwise fallback with this sleeping helper would
+        # take >0.19s).
+        assert elapsed < 1.0
 
 
 class TestCorrelationPenaltyIntegration:
