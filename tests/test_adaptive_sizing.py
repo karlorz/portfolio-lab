@@ -35,6 +35,22 @@ def temp_data_dir(tmp_path):
     return data_dir
 
 
+def _isolate_live_regime_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin unit tests to the local-degradation path of _load_regime_state.
+
+    Since the live-SSOT refactor (_load_regime_state order: regime_state.json
+    -> signals.json -> classifier state -> VIX/market.db), the loader consults
+    live signals.json / market.db before local classifier state. Unit tests of
+    the local file handling must not depend on live regime state (it flips
+    with live data), so both live sources are patched out here.
+    """
+    monkeypatch.setattr(
+        "src.strategy.adaptive_sizing.AdaptiveSizer._load_regime_from_signals",
+        lambda self: None,
+    )
+    monkeypatch.setattr("src.paths.MARKET_DB", Path("/nonexistent/market.db"))
+
+
 @pytest.fixture
 def normal_regime_state(temp_data_dir):
     """Create a regime state file indicating NORMAL conditions."""
@@ -212,8 +228,9 @@ class TestRegimeAdjustments:
         assert decision.regime_adjustment["GLD"] > 0  # Increase GLD
         assert decision.regime_adjustment["TLT"] > 0  # Increase TLT
 
-    def test_regime_unknown(self, temp_data_dir):
+    def test_regime_unknown(self, temp_data_dir, monkeypatch):
         """UNKNOWN regime should produce zero adjustments."""
+        _isolate_live_regime_sources(monkeypatch)
         sizer = AdaptiveSizer(data_dir=temp_data_dir)
         decision = sizer.compute_allocation()
         # No regime state file -> unknown
@@ -1211,8 +1228,9 @@ class TestLoadRegimeStateExtended:
         assert regime == "unknown"
         assert conf == 0.3
 
-    def test_corrupted_regime_file_falls_to_unknown(self, tmp_path):
+    def test_corrupted_regime_file_falls_to_unknown(self, tmp_path, monkeypatch):
         """Corrupted JSON regime file should fall to unknown or fallback."""
+        _isolate_live_regime_sources(monkeypatch)
         data_dir = tmp_path / "data"
         data_dir.mkdir(parents=True, exist_ok=True)
         (data_dir / "regime_classifier_state.json").write_text("BROKEN JSON")
@@ -1221,8 +1239,9 @@ class TestLoadRegimeStateExtended:
         # May fall to VIX-based fallback (normal) or unknown
         assert regime in ("unknown", "normal")
 
-    def test_no_regime_file_falls_to_fallback(self, tmp_path):
+    def test_no_regime_file_falls_to_fallback(self, tmp_path, monkeypatch):
         """No regime file should return unknown or VIX-based fallback."""
+        _isolate_live_regime_sources(monkeypatch)
         data_dir = tmp_path / "data"
         data_dir.mkdir(parents=True, exist_ok=True)
         sizer = AdaptiveSizer(data_dir=data_dir)

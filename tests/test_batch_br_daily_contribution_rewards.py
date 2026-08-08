@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from src.strategy.ensemble_voter import EnsembleVoter
@@ -53,7 +54,13 @@ def test_compute_daily_contribution_rejects_zero_spread():
 
 
 def test_load_daily_contribution_from_ensemble_db(tmp_path: Path):
-    """Hermetic: seed ensemble_signals.db + daily_pnl for one identifying day."""
+    """Hermetic: seed ensemble_signals.db + daily_pnl for one identifying day.
+
+    Dates are relative to today so the fixture never drifts outside the
+    loader's recency window (cutoff = now - lookback_days).
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     db = tmp_path / "ensemble_signals.db"
     conn = sqlite3.connect(db)
     conn.execute(
@@ -65,12 +72,12 @@ def test_load_daily_contribution_from_ensemble_db(tmp_path: Path):
         """
     )
     rows = [
-        ("2026-07-20T16:00:00", "multi_speed_momentum", 0.4, 0.8, 0.2, 1.0, ""),
-        ("2026-07-20T16:00:00", "cross_asset_rv", -0.2, 0.7, 0.15, 1.0, ""),
-        ("2026-07-20T16:00:00", "unified_overlay", 0.1, 0.6, 0.25, 1.0, ""),
+        (f"{today}T16:00:00", "multi_speed_momentum", 0.4, 0.8, 0.2, 1.0, ""),
+        (f"{today}T16:00:00", "cross_asset_rv", -0.2, 0.7, 0.15, 1.0, ""),
+        (f"{today}T16:00:00", "unified_overlay", 0.1, 0.6, 0.25, 1.0, ""),
         # older day should not win
-        ("2026-07-19T16:00:00", "multi_speed_momentum", 0.9, 0.8, 0.2, 1.0, ""),
-        ("2026-07-19T16:00:00", "cross_asset_rv", 0.9, 0.7, 0.15, 1.0, ""),
+        (f"{yesterday}T16:00:00", "multi_speed_momentum", 0.9, 0.8, 0.2, 1.0, ""),
+        (f"{yesterday}T16:00:00", "cross_asset_rv", 0.9, 0.7, 0.15, 1.0, ""),
     ]
     conn.executemany(
         "INSERT INTO source_readings VALUES (?,?,?,?,?,?,?)",
@@ -81,12 +88,12 @@ def test_load_daily_contribution_from_ensemble_db(tmp_path: Path):
 
     pnl = tmp_path / "daily_pnl_latest.json"
     pnl.write_text(
-        json.dumps({"date": "2026-07-20", "daily_return": 0.01}),
+        json.dumps({"date": today, "daily_return": 0.01}),
         encoding="utf-8",
     )
     # Also jsonl so PerformanceAttribution paper returns path works
     (tmp_path / "daily_pnl.jsonl").write_text(
-        json.dumps({"date": "2026-07-20", "daily_return": 0.01}) + "\n",
+        json.dumps({"date": today, "daily_return": 0.01}) + "\n",
         encoding="utf-8",
     )
 
@@ -94,7 +101,7 @@ def test_load_daily_contribution_from_ensemble_db(tmp_path: Path):
     assert out is not None
     rewards, meta = out
     assert meta["reward_mode"] == "daily_contribution_source_rewards"
-    assert meta["as_of_date"] == "2026-07-20"
+    assert meta["as_of_date"] == today
     assert meta["live_authoritative"] is False
     assert len(rewards) >= 2
     assert rewards["multi_speed_momentum"] > rewards["cross_asset_rv"]
@@ -127,17 +134,18 @@ def test_load_preferred_source_rewards_prefers_daily_over_windowed(tmp_path: Pat
         )
         """
     )
+    today = datetime.now().strftime("%Y-%m-%d")
     conn.executemany(
         "INSERT INTO source_readings VALUES (?,?,?,?,?,?,?)",
         [
-            ("2026-07-21T12:00:00", "multi_speed_momentum", 0.5, 0.8, 0.2, 1.0, ""),
-            ("2026-07-21T12:00:00", "cross_asset_rv", 0.1, 0.7, 0.15, 1.0, ""),
+            (f"{today}T12:00:00", "multi_speed_momentum", 0.5, 0.8, 0.2, 1.0, ""),
+            (f"{today}T12:00:00", "cross_asset_rv", 0.1, 0.7, 0.15, 1.0, ""),
         ],
     )
     conn.commit()
     conn.close()
     (tmp_path / "daily_pnl.jsonl").write_text(
-        json.dumps({"date": "2026-07-21", "daily_return": -0.002}) + "\n",
+        json.dumps({"date": today, "daily_return": -0.002}) + "\n",
         encoding="utf-8",
     )
 
