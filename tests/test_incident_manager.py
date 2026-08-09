@@ -565,3 +565,88 @@ def test_manual_review_required_incident_survives_pass_alert(tmp_path):
     kill = json.loads((tmp_path / "kill_switch.json").read_text(encoding="utf-8"))
     assert kill["enabled"] is True
     assert kill["level"] == "halt"
+
+
+def test_legacy_ic_decay_incident_without_flag_survives_pass_alert(tmp_path):
+    """An ic_decay incident opened before the manual-review flag existed (e.g.
+    live incident 8115a9c1) must still not be auto-resolved by a PASS — the
+    channel policy holds regardless of the persisted flag."""
+    from datetime import datetime, timezone
+
+    from src.monitor.incident_manager import IncidentManager, IncidentState
+    from src.monitor.alerting import AlertChannel, AlertLevel
+
+    log_path = tmp_path / "incidents.jsonl"
+    kill_switch_path = tmp_path / "kill_switch.json"
+    # Seed the event log with a legacy "opened" event (pre-flag schema):
+    # manual_review_required absent -> False, exactly like the live incident
+    # opened before Task 2A shipped.
+    legacy = {
+        "event": "opened",
+        "event_timestamp": "2026-08-01T00:00:00+00:00",
+        "incident_id": "8115a9c1",
+        "channel": "ic_decay",
+        "severity": "p0",
+        "state": "firing",
+        "message": "4 signal(s) with CRITICAL IC decay",
+        "details": {},
+        "created_at": "2026-08-01T00:00:00+00:00",
+        "updated_at": "2026-08-01T00:00:00+00:00",
+        "alert_count": 429,
+        "kill_switch_level": "halt",
+    }
+    log_path.write_text(json.dumps(legacy, sort_keys=True) + "\n", encoding="utf-8")
+    kill_switch_path.write_text(
+        json.dumps(
+            {
+                "enabled": True,
+                "level": "halt",
+                "reason": "unresolved_incident:ic_decay",
+                "mode": "paper",
+                "timestamp": "2026-08-01T00:00:00+00:00",
+                "position_reduction": 1.0,
+                "source": "incident_lifecycle",
+                "incident_id": "8115a9c1",
+                "incident_channel": "ic_decay",
+                "incident_severity": "p0",
+                "incident_alert_count": 429,
+                "message": "4 signal(s) with CRITICAL IC decay",
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    manager = IncidentManager(
+        log_path=log_path,
+        summary_path=tmp_path / "incidents.json",
+        kill_switch_path=kill_switch_path,
+        escalation_cycles=1,
+    )
+    incidents = manager.open_incidents()
+    assert len(incidents) == 1
+    assert incidents[0].incident_id == "8115a9c1"
+    assert incidents[0].manual_review_required is False  # legacy flag absent
+
+    # A PASS (e.g. control-ineligible disclosure) must NOT auto-resolve the
+    # legacy incident: the ic_decay channel policy holds unconditionally.
+    manager.record_alert(
+        channel=AlertChannel.IC_DECAY,
+        level=AlertLevel.PASS,
+        message="IC decay critical but control-ineligible; no escalation",
+        now=datetime(2026, 8, 9, 0, 0, tzinfo=timezone.utc),
+    )
+    incidents = manager.open_incidents()
+    assert len(incidents) == 1
+    assert incidents[0].incident_id == "8115a9c1"
+    assert incidents[0].state == IncidentState.FIRING
+    assert incidents[0].manual_review_required is True  # flag backfilled on hold
+    # Kill switch stays armed (no resolution event -> no clear path).
+    kill = json.loads(kill_switch_path.read_text(encoding="utf-8"))
+    assert kill["enabled"] is True
+    assert kill["level"] == "halt"
+    # Hold event recorded; no fabricated resolution event.
+    events = [json.loads(line) for line in log_path.read_text().splitlines()]
+    assert events[-1]["event"] == "pass_held_for_manual_review"
+    assert events[-1]["manual_review_reason"] == "ic_evidence_correction"

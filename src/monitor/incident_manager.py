@@ -611,13 +611,19 @@ class IncidentManager:
         if existing is None:
             return None
 
-        if existing.manual_review_required:
-            # Task 2A: hold the incident for explicit operator review. Record
+        if existing.manual_review_required or channel == "ic_decay":
+            # Task 2A: evidence-correction channels (ic_decay) require explicit
+            # operator review; PASS alerts never auto-resolve them. The channel
+            # check is the guarantee — it also covers incidents opened before
+            # the flag existed (e.g. live incident 8115a9c1), whose persisted
+            # flag may still be False until their next non-PASS update. Record
             # the PASS attempt without fabricating a healthy resolution event.
+            hold_reason = existing.manual_review_reason or "ic_evidence_correction"
             logger.warning(
-                "Incident %s is manual-review-required (%s); PASS held, not resolved",
+                "Incident %s on channel %s held for manual review (%s); PASS not resolved",
                 existing.incident_id,
-                existing.manual_review_reason,
+                channel,
+                hold_reason,
             )
             self._append_event(
                 "pass_held_for_manual_review",
@@ -633,7 +639,7 @@ class IncidentManager:
                     alert_count=existing.alert_count,
                     kill_switch_level=existing.kill_switch_level,
                     manual_review_required=True,
-                    manual_review_reason=existing.manual_review_reason,
+                    manual_review_reason=hold_reason,
                 ),
             )
             return None
