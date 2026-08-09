@@ -10,21 +10,31 @@ def test_main_warning_exits_zero(monkeypatch):
     from src.monitor import health_check as hc
 
     monkeypatch.setattr(hc, "run_health_check", lambda: {"status": "warning", "checks": {}})
-    assert hc.main() == 0
+    assert hc.main([]) == 0
 
 
 def test_main_ok_exits_zero(monkeypatch):
     from src.monitor import health_check as hc
 
     monkeypatch.setattr(hc, "run_health_check", lambda: {"status": "ok", "checks": {}})
-    assert hc.main() == 0
+    assert hc.main([]) == 0
 
 
-def test_main_critical_exits_one(monkeypatch):
+def test_main_critical_publication_exits_zero_artifact_critical(monkeypatch):
+    """Task 3C: publication mode — a complete critical observation is a
+    SUCCESSFUL producer run (exit 0); severity lives in the artifact."""
     from src.monitor import health_check as hc
 
     monkeypatch.setattr(hc, "run_health_check", lambda: {"status": "critical", "checks": {}})
-    assert hc.main() == 1
+    assert hc.main([]) == 0
+
+
+def test_main_critical_probe_mode_exits_one(monkeypatch):
+    """Task 3C: probe mode preserves the legacy severity exit code."""
+    from src.monitor import health_check as hc
+
+    monkeypatch.setattr(hc, "run_health_check", lambda: {"status": "critical", "checks": {}})
+    assert hc.main(["--exit-mode", "probe"]) == 1
 
 
 def test_publish_ops_merge_stamps_generated_at(tmp_path, monkeypatch):
