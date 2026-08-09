@@ -2174,9 +2174,10 @@ class TestHealthJSON:
         gen.conn.close()
 
     def test_provider_latest_date_symbols_are_fresh_even_with_calendar_lag(self, tmp_path):
-        """Freshness status is relative to the provider's latest available date."""
+        """Freshness status is session-relative: a Friday bar on a Sunday as-of
+        is zero missed sessions even though calendar age is two days."""
         db_path = tmp_path / "market.db"
-        provider_latest = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+        provider_latest = "2026-08-07"  # fixed Friday
         conn = sqlite3.connect(str(db_path))
         conn.execute(
             "CREATE TABLE prices (symbol TEXT, date TEXT, close REAL, PRIMARY KEY (symbol, date))"
@@ -2190,29 +2191,42 @@ class TestHealthJSON:
         gen.conn.row_factory = sqlite3.Row
         (tmp_path / "cron_status.json").write_text('{"jobs": []}')
 
+        class _FrozenDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                # Sunday 2026-08-09 16:00 ET: Friday bars are fully fresh.
+                # Mimic real datetime.now(): naive without tz, aware with tz.
+                base = cls(2026, 8, 9, 20, 0)
+                return base.replace(tzinfo=tz) if tz is not None else base
+
         with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
             with patch("src.dashboard.generator.DATA_DIR", tmp_path):
-                path = gen.generate_health_json()
+                with patch(
+                    "src.dashboard.data_freshness_section.datetime", _FrozenDatetime
+                ):
+                    path = gen.generate_health_json()
 
         with open(path) as f:
             data = json.load(f)
         assert {item["status"] for item in data["data_freshness"].values()} == {"fresh"}
-        assert data["data_freshness"]["SPY"]["days_stale"] >= 2
+        assert data["data_freshness"]["SPY"]["days_stale"] == 2
         assert data["data_freshness"]["SPY"]["market_lag_days"] == 0
+        assert data["data_freshness"]["SPY"]["missed_market_sessions"] == 0
         assert data["data_freshness"]["SPY"]["latest_available_market_date"] == provider_latest
         gen.conn.close()
 
     def test_symbol_lagging_provider_latest_date_is_critical(self, tmp_path):
-        """A symbol behind the provider's latest date should still be flagged."""
+        """A symbol genuinely behind the provider's latest completed session
+        is flagged critical in missed-session units."""
         db_path = tmp_path / "market.db"
-        provider_latest = datetime.now() - timedelta(days=2)
-        lagging_date = provider_latest - timedelta(days=5)
+        provider_latest = "2026-08-07"  # fixed Friday
+        lagging_date = "2026-08-02"  # Sunday: bar's update session is Fri 2026-07-31
         conn = sqlite3.connect(str(db_path))
         conn.execute(
             "CREATE TABLE prices (symbol TEXT, date TEXT, close REAL, PRIMARY KEY (symbol, date))"
         )
-        conn.execute("INSERT INTO prices VALUES (?, ?, ?)", ("SPY", provider_latest.strftime("%Y-%m-%d"), 100.0))
-        conn.execute("INSERT INTO prices VALUES (?, ?, ?)", ("GLD", lagging_date.strftime("%Y-%m-%d"), 100.0))
+        conn.execute("INSERT INTO prices VALUES (?, ?, ?)", ("SPY", provider_latest, 100.0))
+        conn.execute("INSERT INTO prices VALUES (?, ?, ?)", ("GLD", lagging_date, 100.0))
         conn.commit()
         conn.close()
         gen = DashboardGenerator.__new__(DashboardGenerator)
@@ -2220,15 +2234,26 @@ class TestHealthJSON:
         gen.conn.row_factory = sqlite3.Row
         (tmp_path / "cron_status.json").write_text('{"jobs": []}')
 
+        class _FrozenDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                # Sunday 2026-08-09 16:00 ET.
+                base = cls(2026, 8, 9, 20, 0)
+                return base.replace(tzinfo=tz) if tz is not None else base
+
         with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
             with patch("src.dashboard.generator.DATA_DIR", tmp_path):
-                path = gen.generate_health_json()
+                with patch(
+                    "src.dashboard.data_freshness_section.datetime", _FrozenDatetime
+                ):
+                    path = gen.generate_health_json()
 
         with open(path) as f:
             data = json.load(f)
         assert data["data_freshness"]["SPY"]["status"] == "fresh"
         assert data["data_freshness"]["GLD"]["status"] == "critical"
         assert data["data_freshness"]["GLD"]["market_lag_days"] == 5
+        assert data["data_freshness"]["GLD"]["missed_market_sessions"] == 5
         gen.conn.close()
 
 
