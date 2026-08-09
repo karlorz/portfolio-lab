@@ -1853,9 +1853,10 @@ class DashboardGenerator:
            return that materialized since they were staged.
         2. Stage: store current predictions for resolution next run.
 
-        Uses SPY return as the forward return for all signals (SPY is the
-        primary portfolio driver). Saves monitor state to disk so IC data
-        survives across cron runs.
+        The legacy resolver uses one SPY return for all signals.  The monitor
+        now records that fact as observation metadata instead of implying the
+        label is aligned with every signal's intended target and horizon.
+        Saves monitor state to disk so IC data survives across cron runs.
         """
         try:
             from src.monitor.ic_decay_monitor import ICMonitor
@@ -1887,7 +1888,27 @@ class DashboardGenerator:
                         end_price = float(end_row[1])
                         if start_price > 0:
                             forward_return = (end_price / start_price) - 1.0
-                            n_resolved = monitor.resolve_staged(forward_return)
+                            cursor.execute(
+                                "SELECT MIN(date), COUNT(*) FROM prices WHERE symbol = 'SPY' "
+                                "AND date > ? AND date <= ?",
+                                (start_row[0], end_row[0]),
+                            )
+                            realized_range_row = cursor.fetchone()
+                            realized_start_date = (
+                                str(realized_range_row[0])
+                                if realized_range_row and realized_range_row[0]
+                                else None
+                            )
+                            realized_horizon_sessions = int(
+                                realized_range_row[1] or 0
+                            )
+                            n_resolved = monitor.resolve_staged(
+                                forward_return,
+                                resolved_date=str(end_row[0]),
+                                realized_start_date=realized_start_date,
+                                target_asset="SPY",
+                                realized_horizon_sessions=realized_horizon_sessions,
+                            )
                             logger.info(
                                 "IC decay: resolved %d staged predictions "
                                 "(%s → %s, forward return=%.4f%%)",

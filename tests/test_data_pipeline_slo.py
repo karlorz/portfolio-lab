@@ -342,6 +342,63 @@ def test_slo_warns_on_provider_fallback() -> None:
     assert slo["dimensions"]["provider"]["degraded_artifacts"] == ["prices.json"]
 
 
+def test_slo_accepts_fresh_successful_cached_provider_row() -> None:
+    source_manifest = {
+        "artifacts": [
+            {
+                "artifact": "yields.json",
+                "provider": "FRED",
+                "feed": "series/observations",
+                "source_mode": "cached",
+                "status": "success",
+                "failure_reason": None,
+                "fallback_reason": None,
+            }
+        ]
+    }
+
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=source_manifest,
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+    )
+
+    provider = slo["dimensions"]["provider"]
+    assert provider["status"] == "ok"
+    assert provider["degraded_artifacts"] == []
+    assert provider["message"] == "providers healthy"
+    assert slo["top_dimension"] != "provider"
+
+
+def test_slo_rejects_contradictory_successful_cached_provider_row() -> None:
+    source_manifest = {
+        "artifacts": [
+            {
+                "artifact": "yields.json",
+                "provider": "FRED",
+                "feed": "series/observations",
+                "source_mode": "cached",
+                "status": "success",
+                "failure_reason": "rate_limited",
+                "fallback_reason": None,
+            }
+        ]
+    }
+
+    slo = build_data_pipeline_slo(
+        health_data=_health(),
+        source_manifest=source_manifest,
+        public_index={"entries": []},
+        signal_staleness={"stale_signals": [], "unavailable_signals": []},
+    )
+
+    provider = slo["dimensions"]["provider"]
+    assert provider["status"] == "warning"
+    assert provider["degraded_artifacts"] == ["yields.json"]
+    assert provider["degraded_reasons"]["yields.json"]["failure_reason"] == "rate_limited"
+
+
 def test_slo_surfaces_fred_source_manifest_failure_reasons() -> None:
     source_manifest = {
         "artifacts": [

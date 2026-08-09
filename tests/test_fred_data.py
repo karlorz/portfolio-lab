@@ -122,6 +122,24 @@ class TestSeriesDefinitions:
         for regime, series_list in DEFAULT_FRED_SERIES.items():
             assert len(series_list) >= 3, f"{regime} has only {len(series_list)} indicators"
 
+    def test_series_mapping_excludes_retired_ids(self):
+        """Configured FRED requests must not reintroduce known-dead IDs."""
+        retired = {"BAASPREAD", "CLAIMS", "NAPMI", "OILPRICEx", "TBSPR"}
+        assert retired.isdisjoint(ALL_FRED_SERIES)
+        assert {"BAA10YM", "ICSA", "MCOILWTICO", "T10Y3MM"}.issubset(
+            ALL_FRED_SERIES
+        )
+
+    def test_replacement_metadata_preserves_verified_cadence_and_units(self):
+        assert SERIES_METADATA["BAA10YM"]["freq"] == "monthly"
+        assert SERIES_METADATA["ICSA"] == {
+            "name": "Initial Claims",
+            "freq": "weekly",
+            "units": "number, seasonally adjusted",
+        }
+        assert SERIES_METADATA["MCOILWTICO"]["freq"] == "monthly"
+        assert SERIES_METADATA["T10Y3MM"]["freq"] == "monthly"
+
 
 # ── Test: Cache Operations ───────────────────────────────────────────
 
@@ -369,18 +387,11 @@ class TestIndicatorComputation:
         result = mock_fetcher.compute_inflation_pressure(cache_ok=False)
         assert result is None
 
-    def test_compute_pmi_health(self, mock_fetcher):
-        """Should return latest NAPMI value."""
-        data = _make_series({"2024-01-01": 52.5})
-        mock_fetcher._fred_client.get_series.return_value = data
-        result = mock_fetcher.compute_pmi_health(cache_ok=False)
-        assert result == 52.5
-
-    def test_compute_pmi_health_no_data(self, mock_fetcher):
-        """Should return None when no PMI data."""
-        mock_fetcher._fred_client.get_series.return_value = pd.Series(dtype=float)
+    def test_compute_pmi_health_is_unavailable_without_dead_request(self, mock_fetcher):
+        """Retired ISM data must be unavailable instead of queried by a dead ID."""
         result = mock_fetcher.compute_pmi_health(cache_ok=False)
         assert result is None
+        mock_fetcher._fred_client.get_series.assert_not_called()
 
     def test_compute_monetary_stance_tight(self, mock_fetcher):
         """Fed rate >= 4.0 should be 'tight'."""
@@ -415,6 +426,7 @@ class TestIndicatorComputation:
         mock_fetcher._fred_client.get_series.return_value = data
         result = mock_fetcher.compute_credit_conditions(cache_ok=False)
         assert result == "tight"
+        mock_fetcher._fred_client.get_series.assert_called_once_with("BAA10YM")
 
     def test_compute_credit_conditions_normal(self, mock_fetcher):
         """BAA spread between 2.0 and 3.5 should be 'normal'."""
@@ -445,11 +457,9 @@ class TestIndicatorComputation:
                 return _make_series({"2024-01-01": 5.0})
             elif sid == "CPIAUCSL":
                 return _make_series({f"{y}-{m:02d}-01": 100.0 for y, m in _13_months})
-            elif sid == "NAPMI":
-                return _make_series({"2024-01-01": 52.0})
             elif sid == "FEDFUNDS":
                 return _make_series({"2024-01-01": 3.0})
-            elif sid == "BAASPREAD":
+            elif sid == "BAA10YM":
                 return _make_series({"2024-01-01": 2.0})
             else:
                 return _make_series({"2024-01-01": 100.0})
@@ -473,11 +483,9 @@ class TestRegimeSignalClassification:
                 return _make_series({"2024-01-01": 50.0})
             elif sid == "CPIAUCSL":
                 return _make_series({f"{y}-{m:02d}-01": 100.0 for y, m in [(2023,1),(2023,2),(2023,3),(2023,4),(2023,5),(2023,6),(2023,7),(2023,8),(2023,9),(2023,10),(2023,11),(2023,12),(2024,1)]})
-            elif sid == "NAPMI":
-                return _make_series({"2024-01-01": 42.0})
             elif sid == "FEDFUNDS":
                 return _make_series({"2024-01-01": 5.0})
-            elif sid == "BAASPREAD":
+            elif sid == "BAA10YM":
                 return _make_series({"2024-01-01": 4.5})
             else:
                 return pd.Series(dtype=float)
@@ -494,11 +502,9 @@ class TestRegimeSignalClassification:
                 return _make_series({"2024-01-01": 5.0})
             elif sid == "CPIAUCSL":
                 return _make_series({f"{y}-{m:02d}-01": 100.0 for y, m in _13_months})
-            elif sid == "NAPMI":
-                return _make_series({"2024-01-01": 52.0})
             elif sid == "FEDFUNDS":
                 return _make_series({"2024-01-01": 3.0})
-            elif sid == "BAASPREAD":
+            elif sid == "BAA10YM":
                 return _make_series({"2024-01-01": 1.5})
             else:
                 return pd.Series(dtype=float)
@@ -522,25 +528,26 @@ class TestRegimeSignalClassification:
         assert signal.indicators_observed is False
         assert signal.reason == "no_fred_indicators"
 
-    def test_low_vol_detection(self, mock_fetcher):
-        """Strong PMI + loose credit should indicate LOW_VOL."""
+    def test_retired_pmi_is_neutral_and_not_observed(self, mock_fetcher):
+        """Retired PMI stays absent while the stable numeric fallback remains neutral."""
         _13_months = [(2023,1),(2023,2),(2023,3),(2023,4),(2023,5),(2023,6),(2023,7),(2023,8),(2023,9),(2023,10),(2023,11),(2023,12),(2024,1)]
         def mock_get_series(sid, **kwargs):
             if sid == "RECPROUSM156N":
                 return _make_series({"2024-01-01": 2.0})
             elif sid == "CPIAUCSL":
                 return _make_series({f"{y}-{m:02d}-01": 100.0 for y, m in _13_months})
-            elif sid == "NAPMI":
-                return _make_series({"2024-01-01": 58.0})
             elif sid == "FEDFUNDS":
                 return _make_series({"2024-01-01": 2.0})
-            elif sid == "BAASPREAD":
+            elif sid == "BAA10YM":
                 return _make_series({"2024-01-01": 1.2})
             else:
                 return pd.Series(dtype=float)
         mock_fetcher._fred_client.get_series.side_effect = mock_get_series
         signal = mock_fetcher.compute_regime_signal(cache_ok=False)
-        assert signal.regime == "LOW_VOL"
+        assert signal.regime == "NORMAL"
+        assert "pmi" not in signal.indicators
+        assert signal.manufacturing_health == 50.0
+        assert all(call.args[0] != "NAPMI" for call in mock_fetcher._fred_client.get_series.call_args_list)
 
     def test_get_fred_signal_allows_empty_regime_on_error(self):
         """get_fred_signal should handle exceptions gracefully."""

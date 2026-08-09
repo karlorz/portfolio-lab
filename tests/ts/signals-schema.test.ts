@@ -286,6 +286,59 @@ describe('signals.ts Zod schemas (non-ML contract)', () => {
     expect(good.success).toBe(true);
   });
 
+  it('IcDecaySchema preserves the honest metric and alignment contract', () => {
+    const parsed = IcDecaySchema.safeParse({
+      status: 'critical',
+      signals: {
+        ensemble_gold: {
+          ic_rolling: -0.16,
+          ic_trend: 'unknown',
+          observations: 26,
+          status: 'critical',
+          metric_axis: 'time_series_rank_correlation',
+          metric_kind: 'correlation',
+          estimate_kind: 'descriptive',
+          alignment_status: 'misaligned',
+          alignment_reason: 'actual_target_spy_expected_gld',
+          inference_status: 'unavailable',
+          inference_reason: 'label_alignment_mismatch',
+          observation_count: 26,
+          observation_unit: 'pairs',
+          contract_version: 'ic-evaluation-contract/v2',
+          evaluation_contract: {
+            contract_version: 'ic-evaluation-contract/v2',
+            intended_metric_axis: 'time_series_rank_correlation',
+            intended_metric_kind: 'correlation',
+            target_asset: 'GLD',
+            target_basket: null,
+            intended_horizon_sessions: 1,
+            prediction_field: 'ensemble_voting.gold_bias',
+            prediction_transform: 'identity',
+          },
+        },
+      },
+    });
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) throw new Error('expected IC metric contract to parse');
+    expect(parsed.data.signals?.ensemble_gold?.alignment_status).toBe('misaligned');
+    expect(parsed.data.signals?.ensemble_gold?.evaluation_contract?.target_asset).toBe('GLD');
+  });
+
+  it('IcDecaySchema rejects an unknown metric axis', () => {
+    const parsed = IcDecaySchema.safeParse({
+      signals: {
+        bad: {
+          ic_rolling: 0.1,
+          ic_trend: 'stable',
+          observations: 20,
+          status: 'healthy',
+          metric_axis: 'forecast_t_stat',
+        },
+      },
+    });
+    expect(parsed.success).toBe(false);
+  });
+
   it('normalizes producer-shaped critical alerts without dropping severity', () => {
     const result = validateAlertsData({
       generated_at: '2026-08-01T09:16:15Z',

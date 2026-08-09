@@ -1261,11 +1261,49 @@ describe('HealthDataSchema', () => {
         routing_control: 'routing_blocked',
         control_effect: 'paper_warning',
         kill_switch_level: 'halt',
+        signal_evidence: {
+          ensemble_duration: {
+            ic_rolling: -0.05,
+            observations: 26,
+            status: 'critical',
+            metric_axis: 'time_series_rank_correlation',
+            metric_kind: 'correlation',
+            estimate_kind: 'descriptive',
+            alignment_status: 'misaligned',
+            inference_status: 'unavailable',
+            inference_reason: 'label_alignment_mismatch',
+            observation_count: 26,
+            observation_unit: 'pairs',
+            contract_version: 'ic-evaluation-contract/v2',
+            evaluation_contract: {
+              contract_version: 'ic-evaluation-contract/v2',
+              intended_metric_axis: 'time_series_rank_correlation',
+              intended_metric_kind: 'correlation',
+              target_asset: 'TLT',
+              target_basket: null,
+              intended_horizon_sessions: 1,
+              prediction_field: 'ensemble_voting.duration_bias',
+              prediction_transform: 'identity',
+            },
+            latest_observation_metadata: {
+              prediction_date: '2026-08-07',
+              resolved_date: '2026-08-08',
+              target_asset: 'SPY',
+              realized_horizon_sessions: 1,
+              metric_axis: 'time_series_rank_correlation',
+              metric_kind: 'correlation',
+              contract_version: 'ic-observation-metadata/v2',
+            },
+          },
+        },
       },
     };
     const result = HealthDataSchema.safeParse(data);
     expect(result.success).toBe(true);
     expect(result.data?.ic_decay_summary?.staged_pending_predictions).toBe(7);
+    expect(result.data?.ic_decay_summary?.signal_evidence?.ensemble_duration?.estimate_kind).toBe('descriptive');
+    expect(result.data?.ic_decay_summary?.signal_evidence?.ensemble_duration?.evaluation_contract?.target_asset).toBe('TLT');
+    expect(result.data?.ic_decay_summary?.signal_evidence?.ensemble_duration?.latest_observation_metadata?.target_asset).toBe('SPY');
   });
 
   it('accepts unavailable signal_health fallback', () => {

@@ -38,28 +38,26 @@ DEFAULT_FRED_SERIES: Dict[str, List[str]] = {
     "crisis": [
         "RECPROUSM156N",  # US Recession Probability
         "INDPRO",         # Industrial Production Index
-        "CLAIMS",         # Initial Claims
-        "BAASPREAD",      # BAA Corporate Bond Spread
+        "ICSA",           # Initial Claims
+        "BAA10YM",        # BAA Corporate Bond Spread (monthly)
     ],
     "high_vol": [
         "VIXCLS",         # CBOE Volatility Index (VIX)
-        "BAASPREAD",      # BAA Corporate Bond Spread
-        "OILPRICEx",      # Crude Oil Price
+        "BAA10YM",        # BAA Corporate Bond Spread (monthly)
+        "MCOILWTICO",     # Crude Oil Price (monthly)
     ],
     "inflation": [
         "CPIAUCSL",       # CPI All Urban Consumers
         "CPILFESL",       # CPI Less Food & Energy
         "FEDFUNDS",       # Federal Funds Rate
-        "TBSPR",          # 10Y-3M Treasury Spread
+        "T10Y3MM",        # 10Y-3M Treasury Spread (monthly)
     ],
     "recovery": [
         "INDPRO",         # Industrial Production Index
         "PAYEMS",         # All Employees: Total Nonfarm
         "RRSFS",          # Real Retail and Food Services Sales
-        "NAPMI",          # ISM Manufacturing PMI
     ],
     "low_vol": [
-        "NAPMI",          # ISM Manufacturing PMI
         "T10Y2Y",         # 10Y-2Y Treasury Spread
         "FEDFUNDS",       # Federal Funds Rate
         "DTWEXBGS",       # Trade Weighted US Dollar Index
@@ -75,17 +73,20 @@ ALL_FRED_SERIES: List[str] = sorted(set(
 SERIES_METADATA: Dict[str, Dict[str, Any]] = {
     "RECPROUSM156N": {"name": "Recession Probability", "freq": "monthly", "units": "percent"},
     "INDPRO": {"name": "Industrial Production Index", "freq": "monthly", "units": "index 2017=100"},
-    "CLAIMS": {"name": "Initial Claims", "freq": "weekly", "units": "thousands"},
-    "BAASPREAD": {"name": "BAA Corporate Bond Spread", "freq": "monthly", "units": "percent"},
+    "ICSA": {
+        "name": "Initial Claims",
+        "freq": "weekly",
+        "units": "number, seasonally adjusted",
+    },
+    "BAA10YM": {"name": "BAA Corporate Bond Spread", "freq": "monthly", "units": "percent"},
     "VIXCLS": {"name": "CBOE VIX Index", "freq": "monthly_avg", "units": "index"},
-    "OILPRICEx": {"name": "Crude Oil Price", "freq": "monthly", "units": "dollars/barrel"},
+    "MCOILWTICO": {"name": "Crude Oil Price", "freq": "monthly", "units": "dollars/barrel"},
     "CPIAUCSL": {"name": "CPI All Items", "freq": "monthly", "units": "index 1982-84=100"},
     "CPILFESL": {"name": "CPI Core", "freq": "monthly", "units": "index 1982-84=100"},
     "FEDFUNDS": {"name": "Federal Funds Rate", "freq": "monthly", "units": "percent"},
-    "TBSPR": {"name": "10Y-3M Treasury Spread", "freq": "monthly", "units": "percent"},
+    "T10Y3MM": {"name": "10Y-3M Treasury Spread", "freq": "monthly", "units": "percent"},
     "PAYEMS": {"name": "Nonfarm Payrolls", "freq": "monthly", "units": "thousands"},
     "RRSFS": {"name": "Real Retail Sales", "freq": "monthly", "units": "millions $"},
-    "NAPMI": {"name": "ISM Manufacturing PMI", "freq": "monthly", "units": "index"},
     "T10Y2Y": {"name": "10Y-2Y Treasury Spread", "freq": "monthly", "units": "percent"},
     "DTWEXBGS": {"name": "Trade Weighted USD Index", "freq": "monthly", "units": "index"},
 }
@@ -443,14 +444,14 @@ class FredMdFetcher:
 
     def compute_pmi_health(self, cache_ok: bool = True) -> Optional[float]:
         """
-        Get latest ISM Manufacturing PMI reading.
+        Report ISM Manufacturing PMI as unavailable.
 
-        PMI > 50 = expansion, < 50 = contraction.
+        FRED removed the ISM series family from every service in 2016. A proxy
+        or new provider would change the metric contract, so this fetcher does
+        not issue a request for the retired ``NAPMI`` identifier.
         """
-        pmi = self.get_series("NAPMI", cache_ok=cache_ok)
-        if len(pmi) == 0:
-            return None
-        return float(pmi.iloc[-1])
+        del cache_ok
+        return None
 
     def compute_monetary_stance(self, cache_ok: bool = True) -> str:
         """
@@ -475,7 +476,7 @@ class FredMdFetcher:
 
         Returns "tight", "normal", or "loose".
         """
-        spread = self.get_series("BAASPREAD", cache_ok=cache_ok)
+        spread = self.get_series("BAA10YM", cache_ok=cache_ok)
         if len(spread) == 0:
             return "unknown"
         val = float(spread.iloc[-1])

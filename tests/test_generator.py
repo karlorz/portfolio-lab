@@ -352,6 +352,10 @@ class TestPredictionLabelLifecycle:
 
         state = json.loads((tmp_path / "ic_monitor_state.json").read_text())
         assert state["__staged__"]["date"] == "2026-07-02"
+        equity_meta = state["__staged__"]["prediction_metadata"]["ensemble_equity"]
+        assert equity_meta["prediction_date"] == "2026-07-02"
+        assert equity_meta["prediction_field"] == "ensemble_voting.equity_bias"
+        assert equity_meta["prediction_transform"] == "identity"
 
     def test_record_ic_data_preserves_unresolved_staged_predictions_on_same_market_date(
         self, tmp_path, monkeypatch
@@ -406,7 +410,56 @@ class TestPredictionLabelLifecycle:
 
         state = json.loads(state_path.read_text())
         assert state["old_signal"] == [[0.5, pytest.approx(0.02)]]
+        resolved_meta = state["__observation_metadata__"]["old_signal"][0]
+        assert resolved_meta["prediction_date"] == "2026-07-02"
+        assert resolved_meta["realized_start_date"] == "2026-07-03"
+        assert resolved_meta["resolved_date"] == "2026-07-03"
+        assert resolved_meta["target_asset"] == "SPY"
+        assert resolved_meta["realized_horizon_sessions"] == 1
         assert state["__staged__"]["date"] == "2026-07-03"
+
+    def test_record_ic_data_counts_realized_market_sessions(self, tmp_path, monkeypatch):
+        """A multi-session label records the actual SPY session span."""
+        from src.monitor import ic_decay_monitor
+
+        state_path = tmp_path / "ic_monitor_state.json"
+        monkeypatch.setattr(ic_decay_monitor, "IC_STATE_PATH", state_path)
+        state_path.write_text(json.dumps({
+            "__staged__": {
+                "date": "2026-07-02",
+                "predictions": {"ensemble_equity": 0.5},
+                "prediction_metadata": {
+                    "ensemble_equity": {
+                        "prediction_date": "2026-07-02",
+                        "prediction_field": "ensemble_voting.equity_bias",
+                        "prediction_transform": "identity",
+                        "intended_horizon_sessions": 1,
+                        "metric_axis": "time_series_rank_correlation",
+                        "metric_kind": "correlation",
+                        "contract_version": "ic-observation-metadata/v2",
+                    },
+                },
+            },
+        }))
+        gen = self._make_spy_generator(
+            tmp_path,
+            [
+                ("2026-07-02", 100.0),
+                ("2026-07-03", 101.0),
+                ("2026-07-06", 103.0),
+            ],
+        )
+
+        try:
+            gen._record_ic_data(self._ic_output(value=-0.2))
+        finally:
+            gen.conn.close()
+
+        state = json.loads(state_path.read_text())
+        metadata = state["__observation_metadata__"]["ensemble_equity"][0]
+        assert metadata["realized_start_date"] == "2026-07-03"
+        assert metadata["resolved_date"] == "2026-07-06"
+        assert metadata["realized_horizon_sessions"] == 2
 
 
 class TestSignalStalenessNormalization:

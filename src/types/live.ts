@@ -49,6 +49,62 @@ export interface AdvancedRegimeSignalAuthority {
   [key: string]: unknown;
 }
 
+export type IcMetricAxis =
+  | 'time_series_rank_correlation'
+  | 'cross_sectional_ic'
+  | 'calibration_proper_score';
+
+export type IcMetricKind = 'correlation' | 'calibration_proper_score';
+
+export interface IcEvaluationContract {
+  contract_version: 'ic-evaluation-contract/v2';
+  intended_metric_axis: IcMetricAxis;
+  intended_metric_kind: IcMetricKind;
+  target_asset: string | null;
+  target_basket: string | null;
+  intended_horizon_sessions: number | null;
+  prediction_field: string | null;
+  prediction_transform: string | null;
+}
+
+export interface IcObservationMetadata {
+  prediction_date?: string;
+  realized_start_date?: string;
+  resolved_date?: string;
+  target_asset?: string;
+  intended_horizon_sessions?: number;
+  realized_horizon_sessions?: number;
+  prediction_field?: string;
+  prediction_transform?: string;
+  metric_axis?: IcMetricAxis;
+  metric_kind?: IcMetricKind;
+  contract_version?: 'ic-observation-metadata/v2';
+}
+
+export interface IcDecayEvidence {
+  ic_rolling?: number | null;
+  observations?: number;
+  status?: 'healthy' | 'warning' | 'critical' | 'insufficient_data';
+  metric_axis?: IcMetricAxis;
+  metric_kind?: IcMetricKind;
+  estimate_kind?: 'descriptive';
+  alignment_status?: 'aligned' | 'provisional' | 'misaligned' | 'ambiguous' | 'metric_mismatch' | 'undeclared';
+  alignment_reason?: string;
+  inference_status?: 'unavailable';
+  inference_reason?:
+    | 'legacy_rows_missing_alignment_metadata'
+    | 'observation_metadata_incomplete'
+    | 'label_alignment_mismatch'
+    | 'metric_contract_mismatch'
+    | 'evaluation_contract_missing'
+    | 'dependence_not_characterized';
+  observation_count?: number;
+  observation_unit?: 'pairs' | 'dates' | 'cross_sectional_periods';
+  contract_version?: 'ic-evaluation-contract/v2';
+  evaluation_contract?: IcEvaluationContract;
+  latest_observation_metadata?: IcObservationMetadata;
+}
+
 export interface RegimeAuthority {
   schema_version: 'regime-authority/v1';
   live_controller: 'signals.json.target_allocations';
@@ -306,7 +362,8 @@ export interface SignalsData {
       ic_trend: 'stable' | 'decaying' | 'improving' | 'unknown';
       observations: number;
       status: 'healthy' | 'warning' | 'critical' | 'insufficient_data';
-    }>;
+      min_obs_for_status?: number;
+    } & IcDecayEvidence>;
     resolved_signal_count?: number;
     pending_predictions?: number;
     staged_prediction_names?: string[];
@@ -507,6 +564,7 @@ export interface IcDecaySummary {
   routing_control: string;
   control_effect: string;
   kill_switch_level?: string | null;
+  signal_evidence?: Record<string, IcDecayEvidence>;
 }
 
 export interface DataPipelineSlo {

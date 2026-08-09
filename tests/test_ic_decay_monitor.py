@@ -3,9 +3,11 @@
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from src.monitor.ic_decay_monitor import (
+    IC_EVALUATION_CONTRACTS,
     ICMonitor,
     build_ic_decay_summary,
     compute_ic_decay_report,
@@ -38,16 +40,26 @@ class TestSpearmanRankCorrelation:
         # Should be somewhere between -1 and 1 but not extreme
         assert -1.0 <= r <= 1.0
 
-    def test_insufficient_data_returns_zero(self):
-        """Less than 5 data points should return 0.0."""
-        assert _spearman_rank_correlation([1, 2, 3], [1, 2, 3]) == 0.0
-        assert _spearman_rank_correlation([1, 2, 3, 4], [1, 2, 3, 4]) == 0.0
+    def test_insufficient_data_returns_none(self):
+        """Less than 5 data points has no defined monitor coefficient."""
+        assert _spearman_rank_correlation([1, 2, 3], [1, 2, 3]) is None
+        assert _spearman_rank_correlation([1, 2, 3, 4], [1, 2, 3, 4]) is None
 
-    def test_zero_variance_returns_zero(self):
-        """Constant values (zero variance) should return 0.0."""
+    def test_zero_variance_returns_none(self):
+        """Constant values have an undefined rank correlation."""
         x = [5, 5, 5, 5, 5]
         y = [1, 2, 3, 4, 5]
-        assert _spearman_rank_correlation(x, y) == 0.0
+        assert _spearman_rank_correlation(x, y) is None
+
+    def test_ties_use_average_midranks(self):
+        """Ties receive average ranks rather than arbitrary input-order ranks."""
+        x = [1, 1, 2, 3, 3]
+        y = [1, 2, 2, 3, 4]
+        expected = float(np.corrcoef(
+            [0.5, 0.5, 2.0, 3.5, 3.5],
+            [0.0, 1.5, 1.5, 3.0, 4.0],
+        )[0, 1])
+        assert _spearman_rank_correlation(x, y) == pytest.approx(expected)
 
     def test_nan_inf_values_handled(self):
         """NaN/inf values should be filtered out."""
@@ -58,9 +70,9 @@ class TestSpearmanRankCorrelation:
         # After filtering nan, 9 points remain — should still compute
         assert -1.0 <= r <= 1.0
 
-    def test_empty_arrays_return_zero(self):
-        """Empty arrays should return 0.0."""
-        assert _spearman_rank_correlation([], []) == 0.0
+    def test_empty_arrays_return_none(self):
+        """Empty arrays do not define a coefficient."""
+        assert _spearman_rank_correlation([], []) is None
 
 
 class TestICMonitor:
@@ -82,6 +94,16 @@ class TestICMonitor:
         monitor.record("test", 0.1, 0.01)
         monitor.record("test", 0.2, 0.02)
         assert monitor.compute_ic("test") is None
+
+    def test_compute_ic_constant_input_is_undefined(self):
+        monitor = ICMonitor()
+        for i in range(10):
+            monitor.record("constant", 1.0, float(i))
+
+        assert monitor.compute_ic("constant") is None
+        row = monitor.compute_decay_report()["constant"]
+        assert row["ic_rolling"] is None
+        assert row["status"] == "insufficient_data"
 
     def test_compute_ic_unknown_signal(self):
         """IC should be None for unknown signal."""
@@ -148,6 +170,125 @@ class TestICMonitor:
             assert "observations" in data
             assert "status" in data
             assert data["status"] in ("healthy", "warning", "critical", "insufficient_data")
+
+    def test_decay_report_discloses_metric_contract_without_inference(self):
+        monitor = ICMonitor(window_size=30, min_obs_for_status=5)
+        for i in range(10):
+            monitor.record("ensemble_equity", float(i), float(i) * 0.01)
+
+        row = monitor.compute_decay_report()["ensemble_equity"]
+
+        assert row["metric_axis"] == "time_series_rank_correlation"
+        assert row["metric_kind"] == "correlation"
+        assert row["estimate_kind"] == "descriptive"
+        assert row["alignment_status"] == "provisional"
+        assert row["inference_status"] == "unavailable"
+        assert row["inference_reason"] == "legacy_rows_missing_alignment_metadata"
+        assert row["observation_count"] == 10
+        assert row["observation_unit"] == "pairs"
+        assert row["evaluation_contract"]["target_asset"] == "SPY"
+        forbidden = {
+            "t_stat", "p_value", "mean_ic", "ic_std", "icir",
+            "effective_sample_size", "t_stat_nw",
+        }
+        assert forbidden.isdisjoint(row)
+
+    def test_complete_aligned_rows_still_fail_closed_on_dependence(self):
+        monitor = ICMonitor(window_size=30, min_obs_for_status=5)
+        for i in range(5):
+            monitor.record(
+                "ensemble_equity",
+                float(i),
+                float(i) * 0.01,
+                observation_metadata={
+                    "prediction_date": f"2026-08-{i + 1:02d}",
+                    "realized_start_date": f"2026-08-{i + 2:02d}",
+                    "resolved_date": f"2026-08-{i + 2:02d}",
+                    "target_asset": "SPY",
+                    "intended_horizon_sessions": 1,
+                    "realized_horizon_sessions": 1,
+                    "prediction_field": "ensemble_voting.equity_bias",
+                    "prediction_transform": "identity",
+                    "metric_axis": "time_series_rank_correlation",
+                    "metric_kind": "correlation",
+                    "contract_version": "ic-observation-metadata/v2",
+                },
+            )
+
+        row = monitor.compute_decay_report()["ensemble_equity"]
+        assert row["alignment_status"] == "aligned"
+        assert row["inference_status"] == "unavailable"
+        assert row["inference_reason"] == "dependence_not_characterized"
+
+    def test_complete_metadata_with_wrong_metric_axis_is_not_aligned(self):
+        monitor = ICMonitor(window_size=30, min_obs_for_status=5)
+        for i in range(5):
+            monitor.record(
+                "ensemble_equity",
+                float(i),
+                float(i) * 0.01,
+                observation_metadata={
+                    "prediction_date": f"2026-08-{i + 1:02d}",
+                    "realized_start_date": f"2026-08-{i + 2:02d}",
+                    "resolved_date": f"2026-08-{i + 2:02d}",
+                    "target_asset": "SPY",
+                    "intended_horizon_sessions": 1,
+                    "realized_horizon_sessions": 1,
+                    "prediction_field": "ensemble_voting.equity_bias",
+                    "prediction_transform": "identity",
+                    "metric_axis": "cross_sectional_ic",
+                    "metric_kind": "correlation",
+                    "contract_version": "ic-observation-metadata/v2",
+                },
+            )
+
+        row = monitor.compute_decay_report()["ensemble_equity"]
+        assert row["alignment_status"] == "misaligned"
+        assert row["inference_reason"] == "label_alignment_mismatch"
+
+    def test_partial_v2_metadata_has_specific_unavailable_reason(self):
+        monitor = ICMonitor(window_size=30, min_obs_for_status=5)
+        for i in range(5):
+            monitor.record(
+                "ensemble_equity",
+                float(i),
+                float(i) * 0.01,
+                observation_metadata={
+                    "prediction_date": f"2026-08-{i + 1:02d}",
+                    "metric_axis": "time_series_rank_correlation",
+                    "metric_kind": "correlation",
+                    "contract_version": "ic-observation-metadata/v2",
+                },
+            )
+
+        row = monitor.compute_decay_report()["ensemble_equity"]
+        assert row["alignment_status"] == "provisional"
+        assert row["inference_reason"] == "observation_metadata_incomplete"
+
+    def test_every_monitored_signal_has_a_versioned_contract(self):
+        assert set(IC_EVALUATION_CONTRACTS) == {
+            "ensemble_equity",
+            "ensemble_gold",
+            "ensemble_duration",
+            "ensemble_consensus",
+            "alternative_data",
+            "behavioral_sentiment",
+            "factor_rotation",
+            "fred_macro",
+        }
+        for contract in IC_EVALUATION_CONTRACTS.values():
+            assert contract["contract_version"] == "ic-evaluation-contract/v2"
+            assert contract["intended_metric_axis"] in {
+                "time_series_rank_correlation",
+                "cross_sectional_ic",
+                "calibration_proper_score",
+            }
+            assert contract["intended_metric_kind"] in {
+                "correlation",
+                "calibration_proper_score",
+            }
+            assert contract["prediction_field"]
+            assert contract["prediction_transform"]
 
     def test_decay_report_status_healthy(self):
         """High IC signal should get 'healthy' status."""
@@ -277,6 +418,41 @@ class TestICMonitor:
         assert monitor2.get_staged_date() == "2026-05-26"
         assert len(monitor2._data["sig_a"]) == 1
 
+    def test_observation_metadata_round_trips_without_invention(self, tmp_path):
+        monitor = ICMonitor(window_size=30)
+        monitor.record(
+            "ensemble_equity",
+            0.4,
+            0.01,
+            observation_metadata={
+                "prediction_date": "2026-08-06",
+                "realized_start_date": "2026-08-07",
+                "resolved_date": "2026-08-07",
+                "target_asset": "SPY",
+                "intended_horizon_sessions": 1,
+                "realized_horizon_sessions": 1,
+                "prediction_field": "ensemble_voting.equity_bias",
+                "prediction_transform": "identity",
+                "metric_axis": "time_series_rank_correlation",
+                "metric_kind": "correlation",
+                "contract_version": "ic-observation-metadata/v2",
+            },
+        )
+        monitor.record("ensemble_equity", 0.5, 0.02)
+        path = tmp_path / "ic_state.json"
+        monitor.save_state(path)
+
+        restored = ICMonitor(window_size=30)
+        restored.load_state(path)
+
+        metadata = list(restored._observation_metadata["ensemble_equity"])
+        assert metadata[0]["resolved_date"] == "2026-08-07"
+        assert metadata[0]["target_asset"] == "SPY"
+        assert metadata[1] is None
+        saved = json.loads(path.read_text())
+        assert saved["__state_schema_version__"] == "ic-monitor-state/v2"
+        assert saved["__observation_metadata__"]["ensemble_equity"][1] is None
+
 
 class TestICMonitorPersistence:
     """Test save/load state persistence."""
@@ -310,6 +486,42 @@ class TestICMonitorPersistence:
         monitor = ICMonitor()
         monitor.load_state(path=path)
         assert len(monitor._data) == 0
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            [],
+            {"sig": [[0.1, 0.01, "extra"]]},
+            {"sig": "not-a-list"},
+        ],
+    )
+    def test_load_malformed_state_fails_soft(self, tmp_path, payload):
+        path = tmp_path / "malformed.json"
+        path.write_text(json.dumps(payload))
+        monitor = ICMonitor()
+
+        monitor.load_state(path)
+
+        assert len(monitor._data) == 0
+        assert monitor.compute_decay_report() == {}
+
+    def test_mismatched_metadata_length_is_discarded_not_tail_guessed(self, tmp_path):
+        path = tmp_path / "mismatched.json"
+        path.write_text(json.dumps({
+            "ensemble_equity": [[0.1, 0.01], [0.2, 0.02]],
+            "__state_schema_version__": "ic-monitor-state/v2",
+            "__observation_metadata__": {
+                "ensemble_equity": [{
+                    "prediction_date": "2026-08-07",
+                    "contract_version": "ic-observation-metadata/v2",
+                }],
+            },
+        }))
+        monitor = ICMonitor()
+
+        monitor.load_state(path)
+
+        assert list(monitor._observation_metadata["ensemble_equity"]) == [None, None]
 
     def test_save_creates_parent_dirs(self, tmp_path):
         """Save should create parent directories."""
@@ -467,3 +679,23 @@ def test_ic_summary_keeps_staged_and_historical_pending_scopes_distinct() -> Non
     assert summary["historical_unlabeled_dates"] == 2
     assert summary["historical_unlabeled_scope"] == "historical_db_unlabeled_rows"
     assert summary["staged_pending_scope"] != summary["historical_unlabeled_scope"]
+
+
+def test_ic_summary_projects_bounded_signal_evidence() -> None:
+    monitor = ICMonitor(window_size=30, min_obs_for_status=5)
+    for i in range(10):
+        monitor.record("ensemble_gold", float(i), -float(i))
+    raw = {
+        "status": "critical",
+        "signals": monitor.compute_decay_report(),
+    }
+
+    summary = build_ic_decay_summary(raw)
+    row = summary["signal_evidence"]["ensemble_gold"]
+
+    assert row["metric_axis"] == "time_series_rank_correlation"
+    assert row["alignment_status"] == "misaligned"
+    assert row["inference_status"] == "unavailable"
+    assert row["evaluation_contract"]["target_asset"] == "GLD"
+    assert "latest_observation_metadata" not in row
+    assert "prediction_rows" not in json.dumps(summary)
