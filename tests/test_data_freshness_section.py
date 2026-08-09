@@ -8,6 +8,17 @@ from unittest.mock import MagicMock
 
 from src.dashboard.data_freshness_section import build_data_freshness_section
 
+# Fixed reference dates (deterministic on any run day): 2026-08-07 is a
+# Friday, 2026-08-08 a Saturday, 2026-08-09 a Sunday, 2026-08-06 a Thursday.
+FRIDAY = "2026-08-07"
+SATURDAY = "2026-08-08"
+SUNDAY = "2026-08-09"
+THURSDAY = "2026-08-06"
+
+
+def _days_since(value: str) -> int:
+    return (datetime.now() - datetime.strptime(value, "%Y-%m-%d")).days
+
 
 def _make_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
@@ -25,34 +36,32 @@ def test_build_data_freshness_section_empty() -> None:
     out = build_data_freshness_section(conn=conn)
     assert out["data_freshness"] == {}
     assert out["latest_market_date"] is None
+    assert out["latest_crypto_date"] is None
     conn.close()
 
 
 def test_build_data_freshness_section_single_symbol() -> None:
     conn = _make_conn()
-    today = datetime.now().strftime("%Y-%m-%d")
-    _insert(conn, "SPY", today)
+    _insert(conn, "SPY", FRIDAY)
     out = build_data_freshness_section(conn=conn)
-    assert out["latest_market_date"] == today
+    assert out["latest_market_date"] == FRIDAY
     entry = out["data_freshness"]["SPY"]
-    assert entry["last_update"] == today
-    assert entry["days_stale"] == 0
+    assert entry["last_update"] == FRIDAY
+    assert entry["days_stale"] == _days_since(FRIDAY)
     assert entry["market_lag_days"] == 0
     assert entry["status"] == "fresh"
-    assert entry["latest_available_market_date"] == today
+    assert entry["latest_available_market_date"] == FRIDAY
     conn.close()
 
 
 def test_build_data_freshness_section_stale_symbol() -> None:
     conn = _make_conn()
-    today = datetime.now().strftime("%Y-%m-%d")
-    old = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
-    _insert(conn, "SPY", today)
-    _insert(conn, "GLD", old)
+    _insert(conn, "SPY", FRIDAY)
+    _insert(conn, "GLD", "2026-08-02")
     out = build_data_freshness_section(conn=conn)
-    assert out["latest_market_date"] == today
+    assert out["latest_market_date"] == FRIDAY
     gld = out["data_freshness"]["GLD"]
-    assert gld["days_stale"] == 5
+    assert gld["days_stale"] == _days_since("2026-08-02")
     assert gld["market_lag_days"] == 5
     assert gld["status"] == "critical"
     conn.close()
@@ -79,6 +88,7 @@ def test_build_data_freshness_section_db_error_degrades_gracefully() -> None:
     out = build_data_freshness_section(conn=conn)
     assert out["data_freshness"] == {}
     assert out["latest_market_date"] is None
+    assert out["latest_crypto_date"] is None
 
 
 def test_build_data_freshness_section_unparseable_date_skipped() -> None:
@@ -89,4 +99,77 @@ def test_build_data_freshness_section_unparseable_date_skipped() -> None:
     # latest_market_date is set (string compare), but the row's date fails to parse
     assert out["latest_market_date"] == "not-a-date"
     assert "SPY" not in out["data_freshness"]
+    conn.close()
+
+
+def test_sunday_crypto_rows_keep_weekday_symbols_fresh() -> None:
+    """Sunday crypto rows advance only the crypto reference (7-day calendar).
+
+    Regression: the previous single global MAX(date) made 39 weekday assets
+    appear two days stale on weekends (artifact SLO warning).
+    """
+    conn = _make_conn()
+    for sym in ("SPY", "GLD"):
+        _insert(conn, sym, FRIDAY)
+    for sym in ("BTC-USD", "ETH-USD"):
+        _insert(conn, sym, SUNDAY)
+    out = build_data_freshness_section(conn=conn)
+    assert out["latest_market_date"] == FRIDAY
+    assert out["latest_crypto_date"] == SUNDAY
+
+    spy = out["data_freshness"]["SPY"]
+    assert spy["last_update"] == FRIDAY
+    assert spy["market_lag_days"] == 0
+    assert spy["status"] == "fresh"
+    assert spy["latest_available_market_date"] == FRIDAY
+
+    btc = out["data_freshness"]["BTC-USD"]
+    assert btc["last_update"] == SUNDAY
+    assert btc["market_lag_days"] == 0
+    assert btc["status"] == "fresh"
+    assert btc["latest_available_market_date"] == SUNDAY
+    conn.close()
+
+
+def test_no_crypto_rows_crypto_reference_none() -> None:
+    """Without crypto rows the crypto reference is None and all symbols use
+    the trading reference."""
+    conn = _make_conn()
+    _insert(conn, "SPY", FRIDAY)
+    _insert(conn, "GLD", THURSDAY)
+    out = build_data_freshness_section(conn=conn)
+    assert out["latest_market_date"] == FRIDAY
+    assert out["latest_crypto_date"] is None
+    assert out["data_freshness"]["GLD"]["market_lag_days"] == 1
+    assert out["data_freshness"]["GLD"]["status"] == "fresh"
+    conn.close()
+
+
+def test_weekend_row_for_traditional_symbol_does_not_advance_reference() -> None:
+    """A stray weekend row for a traditional symbol must not advance the
+    weekday trading reference."""
+    conn = _make_conn()
+    _insert(conn, "SPY", FRIDAY)
+    _insert(conn, "SPY", SATURDAY)  # stray weekend row
+    _insert(conn, "GLD", THURSDAY)
+    out = build_data_freshness_section(conn=conn)
+    assert out["latest_market_date"] == FRIDAY
+    gld = out["data_freshness"]["GLD"]
+    assert gld["market_lag_days"] == 1
+    assert gld["status"] == "fresh"
+    conn.close()
+
+
+def test_sparse_vix3m_reports_honest_trading_lag() -> None:
+    """Sparse VIX-family rows keep honest lag in this section (advisory
+    semantics live in price_quality.ts, untouched here)."""
+    conn = _make_conn()
+    _insert(conn, "SPY", FRIDAY)
+    _insert(conn, "^VIX3M", "2026-07-17")
+    out = build_data_freshness_section(conn=conn)
+    vix3m = out["data_freshness"]["^VIX3M"]
+    assert vix3m["market_lag_days"] == 21
+    assert vix3m["status"] == "critical"
+    assert vix3m["latest_available_market_date"] == FRIDAY
+    assert out["data_freshness"]["SPY"]["status"] == "fresh"
     conn.close()
