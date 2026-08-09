@@ -227,10 +227,80 @@ def _atomic_write_json_path(path: Path, payload: dict[str, Any]) -> None:
         _atomic_write_text(path, text, mode=0o644)
     except Exception:
         path.write_text(text, encoding="utf-8")
-        try:
-            os.chmod(path, 0o644)
-        except OSError:
-            pass
+
+
+def _new_generation_id() -> str:
+    """One generation/run identity for health-owned outputs (Task 5B)."""
+    import uuid as _uuid
+
+    return (
+        f"gen-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-"
+        f"{_uuid.uuid4().hex[:8]}"
+    )
+
+
+def _atomic_write_json_text(path: Path, payload: Any) -> None:
+    """Atomic JSON write through the canonical signal_authority writer.
+
+    Exposed as a module-level seam so publication-contract tests can inject
+    failures at the exact write boundary.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    from src.dashboard.public_projection import is_public_output_path
+    from src.monitor.signal_authority import _atomic_write_text, serialize_json_payload
+
+    text = serialize_json_payload(
+        payload,
+        output_path=path,
+        public=is_public_output_path(path),
+    )
+    _atomic_write_text(path, text, mode=0o644)
+
+
+def write_health_generation(
+    payload: dict[str, Any],
+    *,
+    path: Path,
+    producer_sha: str | None = None,
+) -> Path:
+    """Write one health-owned output stamped with run/generation identity.
+
+    Task 5B: every health-owned file carries ``producer_run_id`` (tasker run
+    when present) and ``generation_id`` plus the producer source SHA, written
+    atomically so an interrupted run never leaves partial bytes.
+    """
+    stamped = dict(payload)
+    run_id = os.environ.get("TASKER_RUN_ID") or os.environ.get("CRON_RUN_ID")
+    if run_id:
+        stamped.setdefault("producer_run_id", run_id)
+    stamped.setdefault("generation_id", _new_generation_id())
+    if producer_sha is not None:
+        stamped["producer_git_sha"] = producer_sha
+    elif stamped.get("generator_git_sha"):
+        stamped["producer_git_sha"] = stamped["generator_git_sha"]
+    _atomic_write_json_text(path, stamped)
+    return path
+
+
+def commit_public_index(
+    payload: Any,
+    *,
+    index_path: Path,
+    generation_id: str | None = None,
+) -> Path:
+    """Atomically commit the public index LAST (Task 5B).
+
+    Content files are written first by their producers; the index is built
+    from the exact final bytes and replaced atomically only after every
+    intended generation file is in place. On failure the prior committed
+    index remains untouched.
+    """
+    stamped = dict(payload)
+    if generation_id is not None:
+        stamped["generation_id"] = generation_id
+    stamped.setdefault("generated_at", datetime.now(timezone.utc).isoformat())
+    _atomic_write_json_text(index_path, stamped)
+    return index_path
 
 
 def reconcile_monitor_health_with_disk_ssot(
@@ -2805,9 +2875,13 @@ def run_health_check() -> dict:
     else:
         HEALTH_PATH.parent.mkdir(parents=True, exist_ok=True)
         try:
-            with open(HEALTH_PATH, "w") as f:
-                json.dump(report, f, indent=2)
-                f.flush()
+            # Task 5: atomic generation-stamped private write — a critical
+            # observation is still published atomically and never partially.
+            write_health_generation(
+                report,
+                path=HEALTH_PATH,
+                producer_sha=report.get("generator_git_sha"),
+            )
             # Post-write integrity: re-read and confirm kill dimension survived.
             try:
                 on_disk = json.loads(HEALTH_PATH.read_text(encoding="utf-8"))
@@ -2867,17 +2941,43 @@ def run_health_check() -> dict:
     return report
 
 
-def main():
+def main(argv: list[str] | None = None) -> int:
+    """Run the health producer.
+
+    Exit modes (Task 3C — truth separation):
+    - ``publication`` (default): the exit code answers only "did the producer
+      complete compute/write/commit". A critical observation is a SUCCESSFUL
+      run whose artifact stays critical and whose halt stays enabled — it must
+      not be recorded as a scheduler failure (which previously accumulated
+      hundreds of tasker failures merely because the observed portfolio state
+      was unsafe).
+    - ``probe``: legacy Nagios-compatible severity exit codes (0 ok/warning,
+      1 critical) for operator tooling that needs severity from the exit code.
+    """
+    import argparse
+
     from src.utils.log_config import configure_logging
+
+    parser = argparse.ArgumentParser(description="Run the Portfolio Lab health producer.")
+    parser.add_argument(
+        "--exit-mode",
+        choices=("publication", "probe"),
+        default=os.environ.get("PORTFOLIO_LAB_HEALTH_EXIT_MODE", "publication"),
+    )
+    args = parser.parse_args(argv)
     configure_logging()
     report = run_health_check()
     logger.info("Health check: %s", json.dumps(report, indent=2))
-    # warning is a valid ops state (open advisory incidents, etc.). Mapping it
-    # to exit 1 made tasker status=error and sticky failed_cron noise.
-    status = str(report.get("status") or "ok").lower()
-    if status in {"ok", "warning", "healthy"}:
-        return 0
-    return 1
+    if args.exit_mode == "probe":
+        # warning is a valid ops state (open advisory incidents, etc.). Mapping it
+        # to exit 1 made tasker status=error and sticky failed_cron noise.
+        status = str(report.get("status") or "ok").lower()
+        if status in {"ok", "warning", "healthy"}:
+            return 0
+        return 1
+    # Publication mode: producer completion is success; observation severity
+    # lives in the artifact (health.status critical + kill halt preserved).
+    return 0
 
 
 if __name__ == "__main__":

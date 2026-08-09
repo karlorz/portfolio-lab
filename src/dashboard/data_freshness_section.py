@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from src.dashboard.health_report import build_symbol_freshness_entry
+from src.dashboard.health_report import (
+    build_symbol_freshness_entry,
+    compute_session_freshness,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,18 +61,19 @@ def _in_clause(symbols: frozenset[str]) -> tuple[str, tuple[str, ...]]:
 def build_data_freshness_section(
     *,
     conn: sqlite3.Connection,
+    as_of: datetime | None = None,
 ) -> dict[str, Any]:
     """Build per-symbol data_freshness from the prices SQLite table.
 
     Returns {"data_freshness": {symbol: entry}, "latest_market_date": str|None,
     "latest_crypto_date": str|None}.
 
-    The freshness reference is calendar-aware: traditional market symbols are
-    compared against ``latest_market_date`` — the latest weekday bar across
-    non-crypto symbols — while crypto symbols use ``latest_crypto_date``, the
-    latest bar across crypto symbols on their seven-day calendar. Sunday crypto
-    rows therefore never make weekday assets look stale. The reference dates
-    are exposed so callers can cross-reference without re-querying.
+    Freshness is session-aware (Task 4): each symbol's status derives from
+    ``missed_market_sessions`` on its own calendar at an injected UTC as-of
+    time (weekday trading calendar for traditional symbols, seven-day calendar
+    for crypto). The calendar-aware references are retained as disclosure, and
+    calendar age remains disclosure-only. Sunday crypto rows therefore never
+    make weekday assets look stale.
 
     Errors are logged and degrade to an empty freshness map rather than
     failing the whole health.json build.
@@ -79,6 +83,7 @@ def build_data_freshness_section(
     latest_crypto_date: str | None = None
     latest_market_dt: datetime | None = None
     latest_crypto_dt: datetime | None = None
+    observed_at = as_of if as_of is not None else datetime.now(timezone.utc)
 
     try:
         cursor = conn.cursor()
@@ -138,12 +143,29 @@ def build_data_freshness_section(
             market_lag_days = (
                 max((ref_dt - last_dt).days, 0) if ref_dt is not None else days_stale
             )
-            freshness[sym] = build_symbol_freshness_entry(
+            session = compute_session_freshness(
+                last_bar_date=last_date,
+                as_of=observed_at,
+                crypto=sym in CRYPTO_SYMBOLS,
+            )
+            entry = build_symbol_freshness_entry(
                 last_date=last_date,
                 days_stale=days_stale,
                 market_lag_days=market_lag_days,
                 latest_available_market_date=ref_date,
             )
+            entry.update(
+                {
+                    "last_expected_completed_session": session.get(
+                        "last_expected_completed_session"
+                    ),
+                    "last_update_session": session.get("last_update_session"),
+                    "missed_market_sessions": session.get("missed_market_sessions"),
+                    "status": session.get("status") or entry["status"],
+                    "status_basis": session.get("status_basis") or entry["status_basis"],
+                }
+            )
+            freshness[sym] = entry
     except DATA_FRESHNESS_EXCEPTIONS as exc:
         logger.warning("Data freshness section not available: %s", exc)
 

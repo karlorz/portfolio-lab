@@ -365,3 +365,108 @@ def test_prune_runs_never_touches_state_files(tmp_path):
     # no json/jsonl anywhere in logs dir
     assert list((tmp_path / "logs").glob("*.json")) == []
     assert list((tmp_path / "logs").glob("*.jsonl")) == []
+
+
+# ── Task 3A: named termination cause + additive migration ──────────────
+
+def test_store_migrates_additive_termination_cause_column(tmp_path):
+    """A pre-existing old-shape DB gains the termination columns idempotently."""
+    import sqlite3
+
+    db_path = tmp_path / "old_tasker.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE task_state (
+            task_id TEXT PRIMARY KEY, paused INTEGER NOT NULL DEFAULT 0,
+            pause_reason TEXT, failure_count INTEGER NOT NULL DEFAULT 0,
+            consecutive_failures INTEGER NOT NULL DEFAULT 0, last_run_id TEXT,
+            last_status TEXT, last_started_at TEXT, last_finished_at TEXT,
+            last_duration_seconds REAL, last_exit_code INTEGER,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE task_runs (
+            run_id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
+            command_json TEXT NOT NULL, trigger TEXT NOT NULL, retry_of TEXT,
+            status TEXT NOT NULL, pid INTEGER, started_at TEXT, finished_at TEXT,
+            duration_seconds REAL, exit_code INTEGER, error TEXT,
+            log_path TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        """
+    )
+    conn.close()
+
+    store = TaskerStore(
+        db_path=db_path,
+        public_status_path=tmp_path / "public" / "tasker_status.json",
+        cron_status_path=tmp_path / "data" / "cron_status.json",
+        log_dir=tmp_path / "logs",
+    )
+    store.sync_registry(_registry())
+
+    # Constructing twice must be idempotent (no duplicate column error).
+    TaskerStore(
+        db_path=db_path,
+        public_status_path=tmp_path / "public" / "tasker_status.json",
+        cron_status_path=tmp_path / "data" / "cron_status.json",
+        log_dir=tmp_path / "logs",
+    )
+
+    run = store.create_run("portfolio-lab-health", ["make", "health"], trigger="scheduled")
+    assert run["termination_cause"] is None
+    assert run["termination_detail"] is None
+
+
+def test_store_finish_run_persists_termination_cause(tmp_path):
+    store = _store(tmp_path)
+    store.sync_registry(_registry())
+    run = store.create_run("portfolio-lab-health", ["make", "health"], trigger="scheduled")
+    assert (
+        store.finish_run(
+            run["run_id"],
+            status=RUN_ERROR,
+            exit_code=1,
+            duration_seconds=3.0,
+            error="interrupted",
+            termination_cause="service_restart",
+            termination_detail="systemd restart during active run",
+        )
+        is True
+    )
+    completed = store.get_run(run["run_id"])
+    assert completed["status"] == RUN_ERROR
+    assert completed["termination_cause"] == "service_restart"
+    assert completed["termination_detail"] == "systemd restart during active run"
+
+
+def test_planned_termination_cause_does_not_increment_failures(tmp_path):
+    store = _store(tmp_path)
+    store.sync_registry(_registry())
+    run = store.create_run("portfolio-lab-health", ["make", "health"], trigger="scheduled")
+    store.finish_run(
+        run["run_id"],
+        status=RUN_ERROR,
+        exit_code=1,
+        duration_seconds=3.0,
+        error="interrupted",
+        termination_cause="service_restart",
+    )
+    state = store.get_task("portfolio-lab-health", _registry())["state"]
+    assert state["consecutive_failures"] == 0
+    assert state["failure_count"] == 0
+
+
+def test_unplanned_error_still_increments_failure_health(tmp_path):
+    store = _store(tmp_path)
+    store.sync_registry(_registry())
+    run = store.create_run("portfolio-lab-health", ["make", "health"], trigger="scheduled")
+    store.finish_run(
+        run["run_id"],
+        status=RUN_ERROR,
+        exit_code=1,
+        duration_seconds=3.0,
+        error="boom",
+    )
+    state = store.get_task("portfolio-lab-health", _registry())["state"]
+    assert state["consecutive_failures"] == 1
+    assert state["failure_count"] == 1

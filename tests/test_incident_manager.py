@@ -508,3 +508,60 @@ def test_write_summary_dual_writes_public_incidents(tmp_path, monkeypatch):
     pub = json.loads((public / "incidents.json").read_text())
     assert priv["open_count"] == 0
     assert pub["open_count"] == 0
+
+
+# ── Task 2A: manual-review-required incidents are not auto-resolved ────
+
+def test_manual_review_required_incident_survives_pass_alert(tmp_path):
+    """A PASS on a manual-review-required channel must not resolve the incident."""
+    from datetime import datetime, timezone
+
+    from src.monitor.incident_manager import IncidentManager, IncidentState
+    from src.monitor.alerting import AlertChannel, AlertLevel
+
+    def _utc_iso(value: str):
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+    manager = IncidentManager(
+        log_path=tmp_path / "incidents.jsonl",
+        summary_path=tmp_path / "incidents.json",
+        kill_switch_path=tmp_path / "kill_switch.json",
+        escalation_cycles=1,
+    )
+    manager.record_alert(
+        channel=AlertChannel.IC_DECAY,
+        level=AlertLevel.HALT,
+        message="4 signal(s) with CRITICAL IC decay",
+        now=_utc_iso("2026-08-01T00:00:00Z"),
+    )
+    manager.record_alert(
+        channel=AlertChannel.IC_DECAY,
+        level=AlertLevel.HALT,
+        message="4 signal(s) with CRITICAL IC decay",
+        now=_utc_iso("2026-08-02T00:00:00Z"),
+    )
+    manager.record_alert(
+        channel=AlertChannel.IC_DECAY,
+        level=AlertLevel.HALT,
+        message="4 signal(s) with CRITICAL IC decay",
+        now=_utc_iso("2026-08-03T00:00:00Z"),
+    )
+    incidents = manager.open_incidents()
+    assert len(incidents) == 1
+    assert incidents[0].manual_review_required is True
+    assert incidents[0].state == IncidentState.FIRING
+
+    # A PASS (e.g. warm-up or recovered IC) must NOT auto-resolve it.
+    manager.record_alert(
+        channel=AlertChannel.IC_DECAY,
+        level=AlertLevel.PASS,
+        message="IC monitor warming up: 1 signal(s)",
+        now=_utc_iso("2026-08-09T00:00:00Z"),
+    )
+    incidents = manager.open_incidents()
+    assert len(incidents) == 1
+    assert incidents[0].state == IncidentState.FIRING
+    # Kill switch stays armed.
+    kill = json.loads((tmp_path / "kill_switch.json").read_text(encoding="utf-8"))
+    assert kill["enabled"] is True
+    assert kill["level"] == "halt"

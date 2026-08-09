@@ -29,6 +29,21 @@ TERMINAL_RUN_STATUSES = {
 # greenwashed as intentional blocked (Batch CE / c363).
 EXIT_CODE_BLOCKED = 2
 
+# Named terminal causes (Task 3A). Planned interruptions (service restart /
+# operator cancellation) are not ordinary failures: they never increment
+# consecutive_failures. Unplanned orphan/timeout/error rows carry no cause or
+# an explicit unplanned cause and keep counting.
+TERMINATION_CAUSE_SERVICE_RESTART = "service_restart"
+TERMINATION_CAUSE_OPERATOR_CANCELLED = "operator_cancelled"
+TERMINATION_CAUSE_UNPLANNED = "unplanned"
+PLANNED_TERMINATION_CAUSES = frozenset(
+    {
+        TERMINATION_CAUSE_SERVICE_RESTART,
+        TERMINATION_CAUSE_OPERATOR_CANCELLED,
+    }
+)
+
+
 # Tasks whose command legitimately returns EXIT_BLOCKED=2 as control-loop skip.
 # Expand only when a Makefile target documents `exit 2` → STATUS=blocked.
 INTENTIONAL_BLOCK_TASK_IDS = frozenset(

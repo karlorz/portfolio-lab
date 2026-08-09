@@ -18,6 +18,7 @@ from src.paths import (
     sqlite_connect,
 )
 from src.tasker.models import (
+    PLANNED_TERMINATION_CAUSES,
     RUN_BLOCKED,
     RUN_CANCELLED,
     RUN_ERROR,
@@ -161,6 +162,9 @@ class TaskerStore:
         exit_code: int | None,
         duration_seconds: float,
         error: str | None = None,
+        *,
+        termination_cause: str | None = None,
+        termination_detail: str | None = None,
     ) -> bool:
         finished_at = _utc_now()
         with self._connect() as conn:
@@ -172,14 +176,36 @@ class TaskerStore:
             updated = conn.execute(
                 """
                 UPDATE task_runs
-                SET status = ?, exit_code = ?, duration_seconds = ?, error = ?, finished_at = ?, updated_at = ?
+                SET status = ?, exit_code = ?, duration_seconds = ?, error = ?,
+                    finished_at = ?, updated_at = ?,
+                    termination_cause = ?, termination_detail = ?
                 WHERE run_id = ? AND status = ?
                 """,
-                (status, exit_code, duration_seconds, error, finished_at, finished_at, run_id, run["status"]),
+                (
+                    status,
+                    exit_code,
+                    duration_seconds,
+                    error,
+                    finished_at,
+                    finished_at,
+                    termination_cause,
+                    termination_detail,
+                    run_id,
+                    run["status"],
+                ),
             ).rowcount
             if updated != 1:
                 return False
-            self._update_task_health(conn, run["task_id"], run_id, status, exit_code, duration_seconds, finished_at)
+            self._update_task_health(
+                conn,
+                run["task_id"],
+                run_id,
+                status,
+                exit_code,
+                duration_seconds,
+                finished_at,
+                termination_cause=termination_cause,
+            )
         return True
 
     def list_running_runs(self) -> list[dict[str, Any]]:
@@ -446,6 +472,30 @@ class TaskerStore:
                     ON task_runs (task_id, created_at DESC);
                 """
             )
+            self._migrate_schema(conn)
+
+    def _migrate_schema(self, conn: sqlite3.Connection) -> None:
+        """Additive, idempotent tasker schema migrations (Task 3A).
+
+        Existing tasker DBs get the ``termination_cause`` /
+        ``termination_detail`` columns added in place; old rows keep a NULL
+        cause and old code remains tolerant (columns are additive only).
+        """
+        columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(task_runs)").fetchall()
+        }
+        if "termination_cause" not in columns:
+            conn.execute(
+                "ALTER TABLE task_runs ADD COLUMN termination_cause TEXT"
+            )
+        if "termination_detail" not in columns:
+            conn.execute(
+                "ALTER TABLE task_runs ADD COLUMN termination_detail TEXT"
+            )
+        try:
+            conn.execute("PRAGMA user_version = 1")
+        except sqlite3.Error:  # pragma: no cover - version stamp is best effort
+            pass
 
     def _update_task_health(
         self,
@@ -456,11 +506,17 @@ class TaskerStore:
         exit_code: int | None,
         duration_seconds: float,
         finished_at: str,
+        termination_cause: str | None = None,
     ) -> None:
         state = conn.execute("SELECT * FROM task_state WHERE task_id = ?", (task_id,)).fetchone()
         failure_count = int(state["failure_count"]) if state else 0
         consecutive = int(state["consecutive_failures"]) if state else 0
-        if status in {RUN_ERROR, RUN_TIMEOUT}:
+        # Planned interruptions (service restart, operator cancellation) are
+        # not ordinary failures: they never increment consecutive_failures or
+        # failure_count, even when the recorded status is error/timeout.
+        if termination_cause in PLANNED_TERMINATION_CAUSES:
+            pass
+        elif status in {RUN_ERROR, RUN_TIMEOUT}:
             failure_count += 1
             consecutive += 1
         elif status in {RUN_SUCCESS, RUN_BLOCKED}:
@@ -514,6 +570,8 @@ class TaskerStore:
             "duration_seconds": row["duration_seconds"],
             "exit_code": row["exit_code"],
             "error": row["error"],
+            "termination_cause": row["termination_cause"],
+            "termination_detail": row["termination_detail"],
             "log_path": row["log_path"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],

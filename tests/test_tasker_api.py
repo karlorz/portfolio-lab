@@ -124,3 +124,30 @@ def test_api_has_no_arbitrary_command_endpoint(tmp_path):
     client, _, _ = _client(tmp_path)
 
     assert client.post("/api/tasker/command", json={"command": "make health"}, headers={"X-Tasker-Token": "secret"}).status_code == 404
+
+
+# ── Task 3B: API rejects starts while draining ─────────────────────────
+
+def test_api_rejects_mutating_actions_while_draining(tmp_path):
+    import threading
+
+    class _Stub:
+        pass
+
+    registry = _registry()
+    store = _store(tmp_path)
+    store.sync_registry(registry)
+    runner = StubRunner()
+    draining = threading.Event()
+    app = create_app(
+        registry=registry, store=store, runner=runner, admin_token="secret", draining=draining
+    )
+    client = app.test_client()
+    draining.set()
+
+    response = client.post(
+        "/api/tasks/portfolio-lab-health/run",
+        headers={"X-Tasker-Token": "secret"},
+    )
+    assert response.status_code == 503
+    assert "draining" in response.get_json()["error"]

@@ -351,11 +351,14 @@ class TestPredictionLabelLifecycle:
             gen.conn.close()
 
         state = json.loads((tmp_path / "ic_monitor_state.json").read_text())
-        assert state["__staged__"]["date"] == "2026-07-02"
-        equity_meta = state["__staged__"]["prediction_metadata"]["ensemble_equity"]
-        assert equity_meta["prediction_date"] == "2026-07-02"
-        assert equity_meta["prediction_field"] == "ensemble_voting.equity_bias"
-        assert equity_meta["prediction_transform"] == "identity"
+        # Per-signal staged shape (Task 2B): entries keyed by identity carry the
+        # latest market-data prediction date, not the wall-clock run date.
+        staged = state["__staged_v2__"]
+        equity = next(e for e in staged if e["signal"] == "ensemble_equity")
+        assert equity["prediction_date"] == "2026-07-02"
+        assert equity["metadata"]["prediction_date"] == "2026-07-02"
+        assert equity["metadata"]["prediction_field"] == "ensemble_voting.equity_bias"
+        assert equity["metadata"]["prediction_transform"] == "identity"
 
     def test_record_ic_data_preserves_unresolved_staged_predictions_on_same_market_date(
         self, tmp_path, monkeypatch
@@ -379,10 +382,12 @@ class TestPredictionLabelLifecycle:
             gen.conn.close()
 
         state = json.loads(state_path.read_text())
-        assert state["__staged__"] == {
-            "date": "2026-07-02",
-            "predictions": {"old_signal": 0.25},
-        }
+        # Legacy single-slot staging migrates to per-signal identities; the
+        # unresolved old cohort survives alongside the new cohort.
+        staged = {e["signal"]: e for e in state["__staged_v2__"]}
+        assert staged["old_signal"]["prediction"] == 0.25
+        assert staged["old_signal"]["prediction_date"] == "2026-07-02"
+        assert staged["ensemble_equity"]["prediction"] == 0.9
 
     def test_record_ic_data_resolves_staged_predictions_when_later_spy_row_exists(
         self, tmp_path, monkeypatch
@@ -416,7 +421,10 @@ class TestPredictionLabelLifecycle:
         assert resolved_meta["resolved_date"] == "2026-07-03"
         assert resolved_meta["target_asset"] == "SPY"
         assert resolved_meta["realized_horizon_sessions"] == 1
-        assert state["__staged__"]["date"] == "2026-07-03"
+        # New cohort staged at the latest market-data date.
+        staged = {e["signal"]: e for e in state["__staged_v2__"]}
+        assert staged["ensemble_equity"]["prediction_date"] == "2026-07-03"
+        assert staged["ensemble_equity"]["prediction"] == pytest.approx(-0.2)
 
     def test_record_ic_data_counts_realized_market_sessions(self, tmp_path, monkeypatch):
         """A multi-session label records the actual SPY session span."""
@@ -2166,9 +2174,10 @@ class TestHealthJSON:
         gen.conn.close()
 
     def test_provider_latest_date_symbols_are_fresh_even_with_calendar_lag(self, tmp_path):
-        """Freshness status is relative to the provider's latest available date."""
+        """Freshness status is session-relative: a Friday bar on a Sunday as-of
+        is zero missed sessions even though calendar age is two days."""
         db_path = tmp_path / "market.db"
-        provider_latest = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+        provider_latest = "2026-08-07"  # fixed Friday
         conn = sqlite3.connect(str(db_path))
         conn.execute(
             "CREATE TABLE prices (symbol TEXT, date TEXT, close REAL, PRIMARY KEY (symbol, date))"
@@ -2182,29 +2191,42 @@ class TestHealthJSON:
         gen.conn.row_factory = sqlite3.Row
         (tmp_path / "cron_status.json").write_text('{"jobs": []}')
 
+        class _FrozenDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                # Sunday 2026-08-09 16:00 ET: Friday bars are fully fresh.
+                # Mimic real datetime.now(): naive without tz, aware with tz.
+                base = cls(2026, 8, 9, 20, 0)
+                return base.replace(tzinfo=tz) if tz is not None else base
+
         with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
             with patch("src.dashboard.generator.DATA_DIR", tmp_path):
-                path = gen.generate_health_json()
+                with patch(
+                    "src.dashboard.data_freshness_section.datetime", _FrozenDatetime
+                ):
+                    path = gen.generate_health_json()
 
         with open(path) as f:
             data = json.load(f)
         assert {item["status"] for item in data["data_freshness"].values()} == {"fresh"}
-        assert data["data_freshness"]["SPY"]["days_stale"] >= 2
+        assert data["data_freshness"]["SPY"]["days_stale"] == 2
         assert data["data_freshness"]["SPY"]["market_lag_days"] == 0
+        assert data["data_freshness"]["SPY"]["missed_market_sessions"] == 0
         assert data["data_freshness"]["SPY"]["latest_available_market_date"] == provider_latest
         gen.conn.close()
 
     def test_symbol_lagging_provider_latest_date_is_critical(self, tmp_path):
-        """A symbol behind the provider's latest date should still be flagged."""
+        """A symbol genuinely behind the provider's latest completed session
+        is flagged critical in missed-session units."""
         db_path = tmp_path / "market.db"
-        provider_latest = datetime.now() - timedelta(days=2)
-        lagging_date = provider_latest - timedelta(days=5)
+        provider_latest = "2026-08-07"  # fixed Friday
+        lagging_date = "2026-08-02"  # Sunday: bar's update session is Fri 2026-07-31
         conn = sqlite3.connect(str(db_path))
         conn.execute(
             "CREATE TABLE prices (symbol TEXT, date TEXT, close REAL, PRIMARY KEY (symbol, date))"
         )
-        conn.execute("INSERT INTO prices VALUES (?, ?, ?)", ("SPY", provider_latest.strftime("%Y-%m-%d"), 100.0))
-        conn.execute("INSERT INTO prices VALUES (?, ?, ?)", ("GLD", lagging_date.strftime("%Y-%m-%d"), 100.0))
+        conn.execute("INSERT INTO prices VALUES (?, ?, ?)", ("SPY", provider_latest, 100.0))
+        conn.execute("INSERT INTO prices VALUES (?, ?, ?)", ("GLD", lagging_date, 100.0))
         conn.commit()
         conn.close()
         gen = DashboardGenerator.__new__(DashboardGenerator)
@@ -2212,15 +2234,26 @@ class TestHealthJSON:
         gen.conn.row_factory = sqlite3.Row
         (tmp_path / "cron_status.json").write_text('{"jobs": []}')
 
+        class _FrozenDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                # Sunday 2026-08-09 16:00 ET.
+                base = cls(2026, 8, 9, 20, 0)
+                return base.replace(tzinfo=tz) if tz is not None else base
+
         with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
             with patch("src.dashboard.generator.DATA_DIR", tmp_path):
-                path = gen.generate_health_json()
+                with patch(
+                    "src.dashboard.data_freshness_section.datetime", _FrozenDatetime
+                ):
+                    path = gen.generate_health_json()
 
         with open(path) as f:
             data = json.load(f)
         assert data["data_freshness"]["SPY"]["status"] == "fresh"
         assert data["data_freshness"]["GLD"]["status"] == "critical"
         assert data["data_freshness"]["GLD"]["market_lag_days"] == 5
+        assert data["data_freshness"]["GLD"]["missed_market_sessions"] == 5
         gen.conn.close()
 
 

@@ -241,3 +241,89 @@ def test_runner_preserves_a_dead_pid_during_bounded_grace(tmp_path):
 
     assert runner.reconcile_orphaned_runs(grace_seconds=60) == []
     assert store.get_run(run["run_id"])["status"] == "running"
+
+
+# ── Task 3A/3B: drain-aware starts + named termination cause ───────────
+
+def test_runner_refuses_starts_while_draining(tmp_path):
+    import threading
+
+    command = [sys.executable, "-c", "import time; time.sleep(0.2)"]
+    registry = _registry(command)
+    store = _store(tmp_path)
+    store.sync_registry(registry)
+    draining = threading.Event()
+    runner = TaskRunner(
+        registry=registry, store=store, project_root=tmp_path, draining=draining
+    )
+
+    draining.set()
+    with pytest.raises(RuntimeError, match="draining"):
+        runner.start_task("env-task", trigger="manual")
+
+
+def test_cancel_with_termination_cause_persists_cause_and_keeps_failure_health(tmp_path):
+    command = [sys.executable, "-c", "import time; time.sleep(30)"]
+    registry = _registry(command, timeout_seconds=60)
+    store = _store(tmp_path)
+    store.sync_registry(registry)
+    runner = TaskRunner(registry=registry, store=store, project_root=tmp_path)
+
+    run = runner.start_task("env-task", trigger="manual")
+    deadline = time.time() + 5
+    while time.time() < deadline and store.get_run(run["run_id"])["status"] != "running":
+        time.sleep(0.01)
+
+    assert (
+        runner.cancel_run(
+            run["run_id"],
+            grace_seconds=0.1,
+            termination_cause="service_restart",
+            termination_detail="planned service restart",
+        )
+        is True
+    )
+    completed = runner.wait_for_run(run["run_id"], timeout_seconds=5)
+    assert completed["status"] == "cancelled"
+    assert completed["termination_cause"] == "service_restart"
+    state = store.get_task("env-task", registry)["state"]
+    assert state["consecutive_failures"] == 0
+    assert state["failure_count"] == 0
+
+
+def test_restarted_service_with_terminal_planned_run_is_not_busy(tmp_path):
+    """A drain-finalized run must not block the replacement service.
+
+    The replacement runner must accept work immediately: no RUNNING rows
+    survive a planned restart, so no orphan-grace busy window can occur.
+    """
+    command = [sys.executable, "-c", "import time; time.sleep(0.2)"]
+    registry = _registry(command)
+    store = _store(tmp_path)
+    store.sync_registry(registry)
+
+    # Old service: run started, then drain-finalized with a named cause.
+    old_runner = TaskRunner(registry=registry, store=store, project_root=tmp_path)
+    run = old_runner.start_task("env-task", trigger="manual")
+    completed = old_runner.wait_for_run(run["run_id"], timeout_seconds=5)
+    assert completed["status"] == "success"
+    # Simulate the drain path: mark a fake run running, then finalize it.
+    pending = store.create_run("env-task", command, trigger="scheduled")
+    store.mark_run_running(pending["run_id"], pid=99999999)
+    assert (
+        store.finish_run(
+            pending["run_id"],
+            status="cancelled",
+            exit_code=None,
+            duration_seconds=2.0,
+            termination_cause="service_restart",
+        )
+        is True
+    )
+    assert store.list_running_runs() == []
+
+    # Replacement service boots: no running rows → start accepted immediately.
+    replacement = TaskRunner(registry=registry, store=store, project_root=tmp_path)
+    run2 = replacement.start_task("env-task", trigger="manual")
+    completed2 = replacement.wait_for_run(run2["run_id"], timeout_seconds=5)
+    assert completed2["status"] == "success"

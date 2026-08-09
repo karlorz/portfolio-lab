@@ -103,3 +103,73 @@ def test_fresh_status_with_wall_clock_age_disclosed() -> None:
     assert row["calendar_note"] is not None
     assert "calendar_age_days=3" in row["calendar_note"]
     assert "market_lag" in row["calendar_note"]
+
+
+# ── Task 4: session-aware freshness ────────────────────────────────────
+
+def test_compute_session_freshness_friday_bar_on_sunday_zero_missed():
+    """Friday daily bars on Sunday have 0 missed sessions before Monday close."""
+    from datetime import datetime, timezone
+    from src.dashboard.health_report import compute_session_freshness
+
+    result = compute_session_freshness(
+        last_bar_date="2026-08-07",
+        as_of=datetime(2026, 8, 9, 20, 0, tzinfo=timezone.utc),  # Sunday 16:00 ET
+    )
+    assert result["missed_market_sessions"] == 0
+    assert result["last_expected_completed_session"] == "2026-08-07"
+    assert result["last_update_session"] == "2026-08-07"
+    assert result["status"] == "fresh"
+
+
+def test_compute_session_freshness_pre_close_does_not_demand_todays_bar():
+    """A run before today's close must not demand today's daily bar."""
+    from datetime import datetime, timezone
+    from src.dashboard.health_report import compute_session_freshness
+
+    # Friday 14:00 ET: Friday session has not completed yet.
+    result = compute_session_freshness(
+        last_bar_date="2026-08-06",
+        as_of=datetime(2026, 8, 7, 18, 0, tzinfo=timezone.utc),  # Fri 14:00 ET
+    )
+    assert result["last_expected_completed_session"] == "2026-08-06"
+    assert result["missed_market_sessions"] == 0
+    assert result["status"] == "fresh"
+
+
+def test_compute_session_freshness_genuine_lag_escalates():
+    """Genuinely missed completed sessions escalate in session units."""
+    from datetime import datetime, timezone
+    from src.dashboard.health_report import compute_session_freshness
+
+    # Last bar Monday 2026-08-03, as-of Friday 2026-08-07 17:00 ET: Tue/Wed/Thu/Fri
+    # sessions completed → 4 missed sessions → critical.
+    result = compute_session_freshness(
+        last_bar_date="2026-08-03",
+        as_of=datetime(2026, 8, 7, 21, 0, tzinfo=timezone.utc),  # Fri 17:00 ET
+    )
+    assert result["missed_market_sessions"] == 4
+    assert result["status"] == "critical"
+
+    # One missed session is stale (conservative translation), not fresh.
+    result2 = compute_session_freshness(
+        last_bar_date="2026-08-06",
+        as_of=datetime(2026, 8, 7, 21, 0, tzinfo=timezone.utc),  # Fri 17:00 ET, bar Thu
+    )
+    assert result2["missed_market_sessions"] == 1
+    assert result2["status"] == "stale"
+
+
+def test_compute_session_freshness_holiday_uses_official_calendar():
+    """Holiday dates are not expected sessions (July 4th 2026 is a Saturday)."""
+    from datetime import datetime, timezone
+    from src.dashboard.health_report import compute_session_freshness
+
+    # 2026-07-03 (Friday) is the observed July 4th holiday → not a session.
+    result = compute_session_freshness(
+        last_bar_date="2026-07-02",
+        as_of=datetime(2026, 7, 3, 20, 0, tzinfo=timezone.utc),  # Fri 16:00 ET holiday
+    )
+    assert result["last_expected_completed_session"] == "2026-07-02"
+    assert result["missed_market_sessions"] == 0
+    assert result["status"] == "fresh"

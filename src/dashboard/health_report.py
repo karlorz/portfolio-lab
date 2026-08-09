@@ -2,15 +2,168 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Mapping
 
 __all__ = [
     "classify_market_data_freshness",
+    "compute_session_freshness",
     "derive_system_status",
     "signal_health_status_contribution",
     "summarize_stale_symbol_count",
     "build_symbol_freshness_entry",
 ]
+
+# NYSE regular-session close in America/New_York. Early-close days remain a
+# trading session in the repo calendar (the official calendar does not model
+# special hours), so they count as one completed session.
+SESSION_CLOSE_ET = time(16, 0)
+ET_TZ_NAME = "America/New_York"
+
+
+class _YearAwareNYSE:
+    """Thin year-safe wrapper over the repo NYSECalendar.
+
+    NYSECalendar computes holidays for one year; this wrapper resolves the
+    calendar per queried date so windows crossing a year boundary (e.g. late
+    December → early January) stay correct without a second holiday list.
+    """
+
+    def is_trading_day(self, d: date) -> bool:
+        from src.signals.calendar_seasonality import NYSECalendar
+
+        return NYSECalendar(year=d.year).is_trading_day(d)
+
+    def previous_trading_day(self, d: date) -> date:
+        from src.signals.calendar_seasonality import NYSECalendar
+
+        candidate = d - timedelta(days=1)
+        while not NYSECalendar(year=candidate.year).is_trading_day(candidate):
+            candidate -= timedelta(days=1)
+        return candidate
+
+    def trading_days_between(self, start: date, end: date) -> list[date]:
+        from src.signals.calendar_seasonality import NYSECalendar
+
+        days: list[date] = []
+        current = start
+        while current <= end:
+            if NYSECalendar(year=current.year).is_trading_day(current):
+                days.append(current)
+            current += timedelta(days=1)
+        return days
+
+
+class _SevenDayCalendar:
+    """Seven-day calendar policy for crypto: every day is a session."""
+
+    def is_trading_day(self, d: date) -> bool:
+        return True
+
+    def previous_trading_day(self, d: date) -> date:
+        return d - timedelta(days=1)
+
+    def trading_days_between(self, start: date, end: date) -> list[date]:
+        days: list[date] = []
+        current = start
+        while current <= end:
+            days.append(current)
+            current += timedelta(days=1)
+        return days
+
+
+def _as_et(value: datetime) -> datetime:
+    """Normalize an injected as-of time to America/New_York (naive → UTC)."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+
+        return value.astimezone(ZoneInfo(ET_TZ_NAME))
+    except Exception:  # pragma: no cover - zoneinfo unavailable fallback
+        return value.astimezone(timezone.utc)
+
+
+def compute_session_freshness(
+    *,
+    last_bar_date: str | date | None,
+    as_of: datetime,
+    calendar: Any | None = None,
+    crypto: bool = False,
+) -> dict[str, Any]:
+    """Session-aware freshness for one symbol (Task 4).
+
+    ``missed_market_sessions`` counts expected completed sessions on the
+    symbol's calendar that have no bar: 0 on weekends/holidays before the next
+    close, 0 for a pre-close run that must not demand today's daily bar, and
+    ≥1 for genuinely missed completed sessions. Calendar age is disclosure
+    only; the status basis is missed sessions.
+
+    Threshold translation (conservative, documented): the legacy day-lag
+    thresholds (fresh ≤1d, stale ≤3d, critical >3d) map to session units as
+    fresh = 0 missed sessions, stale = 1 missed session, critical = ≥2 missed
+    sessions. This can only flag symbols that genuinely missed a completed
+    session — never calendar age alone.
+    """
+    if last_bar_date is None:
+        return {
+            "last_expected_completed_session": None,
+            "last_update_session": None,
+            "missed_market_sessions": None,
+            "calendar_age_days": None,
+            "status": "unknown",
+            "status_basis": "missed_sessions",
+        }
+    if isinstance(last_bar_date, str):
+        try:
+            last_bar = date.fromisoformat(last_bar_date)
+        except ValueError:
+            return {
+                "last_expected_completed_session": None,
+                "last_update_session": None,
+                "missed_market_sessions": None,
+                "calendar_age_days": None,
+                "status": "unknown",
+                "status_basis": "missed_sessions",
+            }
+    else:
+        last_bar = last_bar_date
+
+    cal = calendar or (_SevenDayCalendar() if crypto else _YearAwareNYSE())
+    as_of_et = _as_et(as_of)
+    as_of_date = as_of_et.date()
+
+    if crypto:
+        # Crypto sessions complete at day end; today's session is not yet done.
+        last_expected_completed = as_of_date - timedelta(days=1)
+    elif cal.is_trading_day(as_of_date) and as_of_et.time() >= SESSION_CLOSE_ET:
+        last_expected_completed = as_of_date
+    else:
+        last_expected_completed = cal.previous_trading_day(as_of_date)
+
+    last_update_session = (
+        last_bar if cal.is_trading_day(last_bar) else cal.previous_trading_day(last_bar)
+    )
+    if last_update_session >= last_expected_completed:
+        missed = 0
+    else:
+        missed = len(
+            cal.trading_days_between(last_update_session + timedelta(days=1), last_expected_completed)
+        )
+    if missed == 0:
+        status = "fresh"
+    elif missed == 1:
+        status = "stale"
+    else:
+        status = "critical"
+    return {
+        "last_expected_completed_session": last_expected_completed.isoformat(),
+        "last_update_session": last_update_session.isoformat(),
+        "missed_market_sessions": missed,
+        "calendar_age_days": max(0, (as_of_date - last_bar).days),
+        "status": status,
+        "status_basis": "missed_sessions",
+    }
 
 
 def classify_market_data_freshness(market_lag_days: int) -> str:

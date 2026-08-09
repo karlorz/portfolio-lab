@@ -357,14 +357,15 @@ class TestICMonitor:
         assert monitor.has_staged_predictions()
         assert monitor.get_staged_date() == "2026-05-26"
 
-    def test_stage_predictions_replaces_previous(self):
-        """Calling stage_predictions twice should replace, not append."""
+    def test_stage_predictions_per_signal_cohorts_coexist(self):
+        """Per-signal staging: same identity restage replaces, new cohorts coexist."""
         monitor = ICMonitor()
         monitor.stage_predictions({"sig_a": 0.5}, "2026-05-26")
-        monitor.stage_predictions({"sig_b": -0.2}, "2026-05-27")
-        assert monitor.get_staged_date() == "2026-05-27"
+        monitor.stage_predictions({"sig_a": 0.55}, "2026-05-26")  # idempotent identity
+        monitor.stage_predictions({"sig_b": -0.2}, "2026-05-27")  # new cohort
+        assert monitor.get_staged_prediction_count() == 2
         n = monitor.resolve_staged(0.02)
-        assert n == 1
+        assert n == 2
 
     def test_resolve_staged_empty(self):
         """resolve_staged with nothing staged should return 0."""
@@ -398,9 +399,9 @@ class TestICMonitor:
         assert "bad_none" not in monitor._data
 
     def test_has_staged_predictions_empty_dict(self):
-        """has_staged_predictions with empty predictions should return False."""
+        """has_staged_predictions with empty staging should return False."""
         monitor = ICMonitor()
-        monitor._staged = {"date": "2026-05-26", "predictions": {}}
+        monitor._staged = {}
         assert not monitor.has_staged_predictions()
 
     def test_staged_survives_save_load_cycle(self, tmp_path):
@@ -699,3 +700,153 @@ def test_ic_summary_projects_bounded_signal_evidence() -> None:
     assert row["evaluation_contract"]["target_asset"] == "GLD"
     assert "latest_observation_metadata" not in row
     assert "prediction_rows" not in json.dumps(summary)
+
+
+# ── Task 2A: control eligibility layer ─────────────────────────────────
+
+def test_decay_report_exposes_control_eligibility_fields():
+    """Every row exposes control_eligible / control_status / reason."""
+    monitor = ICMonitor()
+    monitor.record("ensemble_equity", 0.5, 0.02)
+    monitor.record("ensemble_equity", -0.3, -0.01)
+    for _ in range(25):
+        monitor.record("ensemble_equity", 0.1, 0.005)
+    report = monitor.compute_decay_report()
+    row = report["ensemble_equity"]
+    assert "control_eligible" in row
+    assert "control_status" in row
+    assert "control_ineligibility_reason" in row
+    # Legacy rows without v2 metadata are never silently eligible.
+    assert row["control_eligible"] is False
+    assert row["control_ineligibility_reason"] == "legacy_rows_missing_alignment_metadata"
+
+
+def test_aligned_complete_v2_metadata_becomes_control_eligible():
+    """Provisional signals with complete aligned v2 metadata become eligible."""
+    monitor = ICMonitor()
+    from src.monitor.ic_decay_monitor import (
+        IC_EVALUATION_CONTRACTS,
+        IC_OBSERVATION_METADATA_VERSION,
+    )
+
+    contract = IC_EVALUATION_CONTRACTS["ensemble_equity"]
+    for i in range(25):
+        monitor.record(
+            "ensemble_equity",
+            0.1 + i * 0.001,
+            0.005,
+            observation_metadata={
+                "prediction_date": f"2026-07-{(i % 28) + 1:02d}",
+                "realized_start_date": f"2026-07-{(i % 28) + 2:02d}",
+                "resolved_date": f"2026-07-{(i % 28) + 2:02d}",
+                "target_asset": contract["target_asset"],
+                "intended_horizon_sessions": contract["intended_horizon_sessions"],
+                "realized_horizon_sessions": contract["intended_horizon_sessions"],
+                "prediction_field": contract["prediction_field"],
+                "prediction_transform": contract["prediction_transform"],
+                "metric_axis": contract["intended_metric_axis"],
+                "metric_kind": contract["intended_metric_kind"],
+                "contract_version": IC_OBSERVATION_METADATA_VERSION,
+            },
+        )
+    row = monitor.compute_decay_report()["ensemble_equity"]
+    assert row["alignment_status"] == "aligned"
+    assert row["control_eligible"] is True
+    assert row["control_status"] == "eligible"
+
+
+def test_ic_summary_distinguishes_control_eligible_critical_signals():
+    """Summary lists eligible criticals separately from descriptive ones."""
+    monitor = ICMonitor()
+    # Ineligible critical: legacy rows with poor (anti-correlated) IC.
+    for i in range(25):
+        monitor.record("ensemble_equity", 0.5 if i % 2 else -0.5, -0.02 if i % 2 else 0.02)
+    monitor.record("alternative_data", 0.5, 0.02)
+    for i in range(24):
+        monitor.record("alternative_data", 0.5 if i % 2 else -0.5, -0.02 if i % 2 else 0.02)
+
+    from src.monitor.ic_decay_monitor import build_ic_decay_summary
+
+    summary = build_ic_decay_summary({"signals": monitor.compute_decay_report()})
+    assert set(summary["critical_signals"]) >= {"ensemble_equity", "alternative_data"}
+    assert "control_eligible_critical_signals" in summary
+    assert isinstance(summary["control_eligible_critical_signals"], list)
+
+
+def test_per_signal_staging_coexists_and_resolves_partially():
+    """Different targets/horizons stage together; only matching entries resolve."""
+    monitor = ICMonitor()
+    monitor.stage_predictions(
+        {"ensemble_equity": 0.4, "ensemble_gold": 0.2},
+        "2026-08-07",
+        prediction_metadata={
+            "ensemble_equity": {"target_asset": "SPY", "intended_horizon_sessions": 1},
+            "ensemble_gold": {"target_asset": "GLD", "intended_horizon_sessions": 1},
+        },
+    )
+    assert monitor.get_staged_prediction_count() == 2
+
+    # Resolve SPY-targeted entries only; GLD stays staged.
+    n = monitor.resolve_staged(
+        0.01,
+        target_asset="SPY",
+        resolved_date="2026-08-08",
+        realized_start_date="2026-08-07",
+        realized_horizon_sessions=1,
+    )
+    assert n == 1
+    assert monitor.get_staged_prediction_names() == ["ensemble_gold"]
+
+    # Now resolve the remaining GLD entry against GLD's return.
+    n = monitor.resolve_staged(
+        0.02,
+        target_asset="GLD",
+        resolved_date="2026-08-08",
+        realized_start_date="2026-08-07",
+        realized_horizon_sessions=1,
+    )
+    assert n == 1
+    assert monitor.get_staged_prediction_count() == 0
+    assert len(monitor._data["ensemble_equity"]) == 1
+    assert len(monitor._data["ensemble_gold"]) == 1
+    meta = list(monitor._observation_metadata["ensemble_gold"])[0]
+    assert meta["target_asset"] == "GLD"
+
+
+def test_staging_is_idempotent_by_observation_identity():
+    """Re-staging the same signal+date does not duplicate the cohort."""
+    monitor = ICMonitor()
+    monitor.stage_predictions({"ensemble_equity": 0.4}, "2026-08-07")
+    monitor.stage_predictions({"ensemble_equity": 0.4}, "2026-08-07")
+    assert monitor.get_staged_prediction_count() == 1
+    monitor.stage_predictions({"ensemble_equity": 0.5}, "2026-08-08")
+    assert monitor.get_staged_prediction_count() == 2
+
+
+def test_behavioral_five_session_horizon_waits_for_sessions():
+    """A 5-session staged signal resolves only after 5 realized sessions."""
+    monitor = ICMonitor()
+    monitor.stage_predictions(
+        {"behavioral_sentiment": 0.3},
+        "2026-07-31",
+        prediction_metadata={
+            "behavioral_sentiment": {"target_asset": "SPY", "intended_horizon_sessions": 5}
+        },
+    )
+    n = monitor.resolve_staged(
+        0.01,
+        target_asset="SPY",
+        resolved_date="2026-08-03",
+        realized_start_date="2026-07-31",
+        realized_horizon_sessions=2,
+    )
+    assert n == 0
+    assert monitor.get_staged_prediction_count() == 1
+    n = monitor.resolve_staged(
+        0.01,
+        target_asset="SPY",
+        resolved_date="2026-08-07",
+        realized_start_date="2026-07-31",
+        realized_horizon_sessions=5,
+    )
+    assert n == 1

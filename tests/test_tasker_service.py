@@ -129,3 +129,103 @@ def test_tick_reconciles_orphaned_runs_before_scheduling_and_mirroring():
 
     assert runner.reconciled == [now]
     assert store.wrote_mirrors is True
+
+
+# ── Task 3B: service drain state machine ───────────────────────────────
+
+def test_drain_sets_state_and_scheduler_loop_exits():
+    """Draining stops scheduling and lets the scheduler loop terminate."""
+    from src.tasker.registry import TaskRegistry
+    from src.tasker.runner import TaskRunner
+    from src.tasker.store import TaskerStore
+    from src.tasker.models import TaskDefinition
+
+    class _DrainStore:
+        def __init__(self):
+            self.mirror_writes = 0
+            self.started = []
+
+        def get_task(self, task_id, registry):
+            return {"state": {"paused": False}}
+
+        def write_status_mirrors(self, registry):
+            self.mirror_writes += 1
+
+        def sync_registry(self, registry):
+            pass
+
+        def list_running_runs(self):
+            return []
+
+        def create_run(self, task_id, command, trigger="manual", retry_of=None):
+            raise AssertionError("drain must refuse new starts")
+
+        def get_run(self, run_id):
+            raise KeyError(run_id)
+
+        def finish_run(self, *args, **kwargs):
+            return False
+
+    class _DrainRunner(TaskRunner):
+        def __init__(self):
+            import threading as _threading
+
+            self.started = []
+            self._lock = _threading.Lock()
+            self._processes = {}
+            self._threads = {}
+
+        def start_task(self, task_id, trigger="manual", retry_of=None):
+            self.started.append(task_id)
+            return {"run_id": f"run-{task_id}"}
+
+        def reconcile_orphaned_runs(self, *, now=None):
+            return []
+
+    registry = TaskRegistry(
+        [TaskDefinition(id="portfolio-lab-health", label="Health", command=["make", "health"], schedule="* * * * *", timeout_seconds=60)]
+    )
+    store = _DrainStore()
+    runner = _DrainRunner()
+    svc = service.TaskerService(registry=registry, store=store, runner=runner)
+
+    svc.drain()
+    assert svc.is_draining is True
+    # Scheduler loop must exit promptly once draining is set.
+    svc.run_scheduler_loop()
+    assert svc._stop.is_set()
+    assert runner.started == []
+
+
+def test_tick_skips_firing_while_draining():
+    from src.tasker.models import TaskDefinition
+    from src.tasker.registry import TaskRegistry
+
+    class _Store:
+        def get_task(self, task_id, registry):
+            return {"state": {"paused": False}}
+
+        def write_status_mirrors(self, registry):
+            return None
+
+    class _Runner:
+        def __init__(self):
+            self.started = []
+
+        def start_task(self, task_id, trigger="scheduled"):
+            self.started.append(task_id)
+
+        def reconcile_orphaned_runs(self, *, now=None):
+            return []
+
+    registry = TaskRegistry(
+        [TaskDefinition(id="portfolio-lab-health", label="Health", command=["make", "health"], schedule="* * * * *", timeout_seconds=60)]
+    )
+    store = _Store()
+    runner = _Runner()
+    svc = service.TaskerService(registry=registry, store=store, runner=runner)
+    svc.drain()
+
+    from datetime import datetime, timezone
+    svc.tick(datetime.now(timezone.utc))
+    assert runner.started == []

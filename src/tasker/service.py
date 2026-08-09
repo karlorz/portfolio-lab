@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import signal
 import threading
 import argparse
 from datetime import datetime, timezone
@@ -25,7 +26,12 @@ class TaskerService:
         self.store = store
         self.runner = runner
         self._stop = threading.Event()
+        self._draining = threading.Event()
         self._last_fired: set[tuple[str, str]] = set()
+
+    @property
+    def is_draining(self) -> bool:
+        return self._draining.is_set()
 
     def start_background_scheduler(self) -> threading.Thread:
         thread = threading.Thread(target=self.run_scheduler_loop, name="portfolio-lab-tasker-scheduler", daemon=True)
@@ -35,12 +41,41 @@ class TaskerService:
     def stop(self) -> None:
         self._stop.set()
 
+    def drain(self, termination_cause: str = "service_restart", termination_detail: str | None = None) -> None:
+        """Enter draining: stop scheduling, reject starts, finalize active runs.
+
+        The drain event also makes the API reject mutating actions and the
+        runner refuse new starts. Active children are cancelled with the named
+        cause and bounded to a terminal state before the service exits, so a
+        replacement service never waits through orphan grace for them.
+        """
+        if self._draining.is_set():
+            return
+        self._draining.set()
+        self._stop.set()
+        logger.info("Tasker draining (cause=%s): stopping scheduler", termination_cause)
+        try:
+            active = self.runner.drain_active_runs(
+                termination_cause=termination_cause,
+                termination_detail=termination_detail,
+            )
+            if active:
+                logger.info(
+                    "Tasker drain finalized %d active run(s): %s",
+                    len(active),
+                    ", ".join(active),
+                )
+        except Exception as exc:  # noqa: BLE001 - drain must not wedge shutdown
+            logger.exception("Tasker drain failed while finalizing runs: %s", exc)
+
     def run_scheduler_loop(self) -> None:
-        while not self._stop.is_set():
+        while not self._stop.is_set() and not self._draining.is_set():
             self.tick(datetime.now(timezone.utc))
             self._stop.wait(15)
 
     def tick(self, now: datetime) -> None:
+        if self._draining.is_set():
+            return
         self.reconcile_orphaned_runs(now=now)
         minute_key = now.replace(second=0, microsecond=0).isoformat()
         for task in self.registry.due_tasks(now):
@@ -92,7 +127,7 @@ def build_service() -> tuple[TaskerService, object]:
         store.write_status_mirrors(registry)
     except Exception as exc:  # noqa: BLE001 - startup mirrors are best effort
         logger.exception("Tasker startup status mirror write failed: %s", exc)
-    app = create_app(registry=registry, store=store, runner=runner)
+    app = create_app(registry=registry, store=store, runner=runner, draining=service._draining)
     return service, app
 
 
@@ -116,8 +151,37 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.no_scheduler and os.environ.get("TASKER_DISABLE_SCHEDULER") != "1":
         service.start_background_scheduler()
-    app.run(host=args.host, port=args.port)
-    return 0
+
+    # Bounded graceful drain (Task 3B): SIGTERM/SIGINT enter draining, finalize
+    # active runs with a named cause, then the process exits cleanly inside
+    # systemd's TimeoutStopSec so no control-group kill races the finalization.
+    shutdown = threading.Event()
+
+    def _handle_signal(signum, _frame):
+        logger.info("Tasker received signal %s: entering drain", signum)
+        shutdown.set()
+
+    previous_term = signal.signal(signal.SIGTERM, _handle_signal)
+    previous_int = signal.signal(signal.SIGINT, _handle_signal)
+    try:
+        server_thread = threading.Thread(
+            target=app.run,
+            kwargs={"host": args.host, "port": args.port, "use_reloader": False},
+            name="portfolio-lab-tasker-api",
+            daemon=True,
+        )
+        server_thread.start()
+        shutdown.wait()
+        logger.info("Tasker shutdown requested: draining before exit")
+        service.drain(termination_cause="service_restart", termination_detail="service shutdown signal")
+        try:
+            service.store.write_status_mirrors(service.registry)
+        except Exception as exc:  # noqa: BLE001 - final mirrors are best effort
+            logger.exception("Tasker final status mirror write failed: %s", exc)
+        return 0
+    finally:
+        signal.signal(signal.SIGTERM, previous_term)
+        signal.signal(signal.SIGINT, previous_int)
 
 
 if __name__ == "__main__":

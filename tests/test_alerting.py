@@ -516,7 +516,7 @@ class TestCheckIcDecayAndAlert:
     @patch("src.monitor.alerting.send_alert")
     def test_warning_signal_sends_warn(self, mock_send):
         ic_decay = {
-            "alternative_data": {"status": "warning", "ic_rolling": 0.07, "ic_trend": "decaying"},
+            "alternative_data": {"status": "warning", "ic_rolling": 0.07, "ic_trend": "decaying", "control_eligible": True},
             "cross_asset_rv": {"status": "healthy", "ic_rolling": 0.12, "ic_trend": "stable"},
         }
         check_ic_decay_and_alert(ic_decay)
@@ -528,7 +528,7 @@ class TestCheckIcDecayAndAlert:
     @patch("src.monitor.alerting.send_alert")
     def test_critical_signal_sends_halt(self, mock_send):
         ic_decay = {
-            "alternative_data": {"status": "critical", "ic_rolling": 0.02, "ic_trend": "decaying"},
+            "alternative_data": {"status": "critical", "ic_rolling": 0.02, "ic_trend": "decaying", "control_eligible": True},
             "cross_asset_rv": {"status": "warning", "ic_rolling": 0.07, "ic_trend": "decaying"},
         }
         check_ic_decay_and_alert(ic_decay)
@@ -571,7 +571,7 @@ class TestCheckIcDecayAndAlert:
     def test_mixed_warning_and_critical_sends_halt(self, mock_send):
         """When both warning and critical signals exist, alert is HALT."""
         ic_decay = {
-            "multi_speed_mom": {"status": "critical", "ic_rolling": 0.01, "ic_trend": "decaying"},
+            "multi_speed_mom": {"status": "critical", "ic_rolling": 0.01, "ic_trend": "decaying", "control_eligible": True},
             "alternative_data": {"status": "warning", "ic_rolling": 0.08, "ic_trend": "decaying"},
             "cross_asset_rv": {"status": "healthy", "ic_rolling": 0.15, "ic_trend": "stable"},
         }
@@ -581,3 +581,60 @@ class TestCheckIcDecayAndAlert:
         # Details should include both critical and warning signals
         details = mock_send.call_args[1].get("details") or mock_send.call_args[0][3] if len(mock_send.call_args[0]) > 3 else None
         # The function passes details as keyword arg
+
+
+# ── Task 2A: alerting consumes only control-eligible severity ──────────
+
+def test_ineligible_critical_signal_does_not_send_halt(monkeypatch):
+    """Misaligned/legacy critical rows cannot generate a halt-authoritative alert."""
+    from src.monitor.alerting import check_ic_decay_and_alert, AlertChannel, AlertLevel
+
+    sent = {}
+
+    def fake_send_alert(channel, level, message, details=None, **kwargs):
+        sent["channel"] = channel
+        sent["level"] = level
+        sent["message"] = message
+        sent["details"] = details or {}
+
+    monkeypatch.setattr("src.monitor.alerting.send_alert", fake_send_alert)
+
+    check_ic_decay_and_alert(
+        {
+            "ensemble_equity": {
+                "status": "critical",
+                "control_eligible": False,
+                "control_ineligibility_reason": "legacy_rows_missing_alignment_metadata",
+            }
+        }
+    )
+    assert sent.get("level") != AlertLevel.HALT
+    assert sent.get("level") == AlertLevel.PASS
+    assert sent["details"].get("policy") == "control_ineligible_no_escalation"
+    assert sent["details"].get("ineligible_critical_signals") == ["ensemble_equity"]
+
+
+def test_eligible_critical_signal_sends_halt(monkeypatch):
+    from src.monitor.alerting import check_ic_decay_and_alert, AlertChannel, AlertLevel
+
+    sent = {}
+
+    def fake_send_alert(channel, level, message, details=None, **kwargs):
+        sent["channel"] = channel
+        sent["level"] = level
+        sent["message"] = message
+        sent["details"] = details or {}
+
+    monkeypatch.setattr("src.monitor.alerting.send_alert", fake_send_alert)
+
+    check_ic_decay_and_alert(
+        {
+            "ensemble_equity": {
+                "status": "critical",
+                "control_eligible": True,
+                "control_status": "eligible",
+            }
+        }
+    )
+    assert sent.get("level") == AlertLevel.HALT
+    assert sent["details"]["critical_signals"] == ["ensemble_equity"]

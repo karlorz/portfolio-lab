@@ -139,6 +139,21 @@ curl -fsS https://lab.karldigi.dev/data/signals.json | head
 static bytes match the manifest, but it is not a third-party cryptographic
 attestation.
 
+## Tasker drain contract (2026-08-09, Session B)
+
+The service installs SIGTERM/SIGINT handlers and drains on shutdown: it stops
+scheduling, rejects new starts (API returns 503 `tasker is draining`), cancels
+any active child with a bounded SIGTERM→SIGKILL escalation inside
+`TimeoutStopSec=30`, and persists `termination_cause=service_restart` on the
+terminal run. Planned restarts never increment `consecutive_failures`, and a
+replacement service never waits through orphan grace for a drain-finalized run.
+`KillMode` stays the systemd default `control-group` — never `process`/`none`.
+During a deploy, expect the old service to enter drain, all active runs to
+reach terminal state, then the new service to become ready with no busy window.
+Health runs publish in `publication` exit mode: a critical observation records
+tasker `success` while `health.json` stays `critical` and the halt stays
+enabled (probe mode `--exit-mode probe` preserves severity exit codes).
+
 ## Rollback
 
 Rollback restores the prior verified static release directory to the web root
