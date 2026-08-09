@@ -177,6 +177,11 @@ class SignalWalkForwardValidator:
             oos_ic = _spearman_rank_correlation(
                 test_preds.tolist(), test_actuals.tolist()
             )
+            # Undefined rank correlation (constant/too-thin usable inputs) is
+            # missing evidence, not an observed zero.  Skip the window and let
+            # the existing no-valid-windows branch fail closed.
+            if is_ic is None or oos_ic is None:
+                continue
 
             windows.append(SignalWFEWindow(
                 window=i + 1,

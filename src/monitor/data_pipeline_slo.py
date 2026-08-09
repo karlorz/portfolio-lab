@@ -167,6 +167,22 @@ def _is_intentional_lab_provider_gap_row(row: Mapping[str, Any]) -> bool:
     return reason in {"missing_api_key", "missing_fred_api_key"}
 
 
+def _is_healthy_provider_row(row: Mapping[str, Any]) -> bool:
+    """Return whether provider provenance represents a successful usable source.
+
+    The FRED producer uses ``cached`` + ``success`` only for data within its
+    cache TTL. Preserve that provenance while rejecting stale/fallback modes and
+    contradictory rows that carry a provider failure reason.
+    """
+    if str(row.get("status") or "") != "success":
+        return False
+    if str(row.get("source_mode") or "") not in {"live", "cached"}:
+        return False
+    return row.get("failure_reason") in (None, "", "null") and row.get(
+        "fallback_reason"
+    ) in (None, "", "null")
+
+
 def _provider_dimension(source_manifest: Mapping[str, Any] | None) -> dict[str, Any]:
     artifacts = source_manifest.get("artifacts") if isinstance(source_manifest, Mapping) else None
     rows = [row for row in artifacts if isinstance(row, Mapping)] if isinstance(artifacts, list) else []
@@ -184,7 +200,7 @@ def _provider_dimension(source_manifest: Mapping[str, Any] | None) -> dict[str, 
     degraded_rows = [
         row
         for row in rows
-        if (row.get("status") != "success" or row.get("source_mode") != "live")
+        if not _is_healthy_provider_row(row)
         and not _is_intentional_lab_provider_gap_row(row)
     ]
     quality_warn_only = [
@@ -224,7 +240,7 @@ def _provider_dimension(source_manifest: Mapping[str, Any] | None) -> dict[str, 
             else
             f"provider degraded for {', '.join(degraded)} ({'; '.join(reason_parts)})"
             if degraded
-            else "providers live"
+            else "providers healthy"
         ),
     }
     if quality_warn_only:

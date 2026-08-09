@@ -652,11 +652,82 @@ export const MarlStatusSchema = z.object({
 // ---------------------------------------------------------------------------
 // IcDecaySchema — IC decay monitoring for signal quality tracking
 // ---------------------------------------------------------------------------
-const IcDecaySignalEntrySchema = z.object({
+const IcMetricAxisSchema = z.enum([
+  'time_series_rank_correlation',
+  'cross_sectional_ic',
+  'calibration_proper_score',
+]);
+
+const IcMetricKindSchema = z.enum(['correlation', 'calibration_proper_score']);
+const IcAlignmentStatusSchema = z.enum([
+  'aligned',
+  'provisional',
+  'misaligned',
+  'ambiguous',
+  'metric_mismatch',
+  'undeclared',
+]);
+const IcInferenceReasonSchema = z.enum([
+  'legacy_rows_missing_alignment_metadata',
+  'observation_metadata_incomplete',
+  'label_alignment_mismatch',
+  'metric_contract_mismatch',
+  'evaluation_contract_missing',
+  'dependence_not_characterized',
+]);
+
+const IcEvaluationContractSchema = z.object({
+  contract_version: z.literal('ic-evaluation-contract/v2'),
+  intended_metric_axis: IcMetricAxisSchema,
+  intended_metric_kind: IcMetricKindSchema,
+  target_asset: z.nullable(z.string()),
+  target_basket: z.nullable(z.string()),
+  intended_horizon_sessions: z.nullable(z.number().int().nonnegative()),
+  prediction_field: z.nullable(z.string()),
+  prediction_transform: z.nullable(z.string()),
+});
+
+const IcObservationMetadataSchema = z.object({
+  prediction_date: z.optional(z.string()),
+  realized_start_date: z.optional(z.string()),
+  resolved_date: z.optional(z.string()),
+  target_asset: z.optional(z.string()),
+  intended_horizon_sessions: z.optional(z.number().int().nonnegative()),
+  realized_horizon_sessions: z.optional(z.number().int().nonnegative()),
+  prediction_field: z.optional(z.string()),
+  prediction_transform: z.optional(z.string()),
+  metric_axis: z.optional(IcMetricAxisSchema),
+  metric_kind: z.optional(IcMetricKindSchema),
+  contract_version: z.optional(z.literal('ic-observation-metadata/v2')),
+});
+
+const IcDecayEvidenceFieldsSchema = z.object({
+  metric_axis: z.optional(IcMetricAxisSchema),
+  metric_kind: z.optional(IcMetricKindSchema),
+  estimate_kind: z.optional(z.literal('descriptive')),
+  alignment_status: z.optional(IcAlignmentStatusSchema),
+  alignment_reason: z.optional(z.string()),
+  inference_status: z.optional(z.literal('unavailable')),
+  inference_reason: z.optional(IcInferenceReasonSchema),
+  observation_count: z.optional(z.number().int().nonnegative()),
+  observation_unit: z.optional(z.enum(['pairs', 'dates', 'cross_sectional_periods'])),
+  contract_version: z.optional(z.literal('ic-evaluation-contract/v2')),
+  evaluation_contract: z.optional(IcEvaluationContractSchema),
+  latest_observation_metadata: z.optional(IcObservationMetadataSchema),
+});
+
+const IcDecaySignalEntrySchema = IcDecayEvidenceFieldsSchema.extend({
   ic_rolling: z.nullable(z.number()),
   ic_trend: z.enum(['stable', 'decaying', 'improving', 'unknown']),
   observations: z.number(),
   status: z.enum(['healthy', 'warning', 'critical', 'insufficient_data']),
+  min_obs_for_status: z.optional(z.number().int().nonnegative()),
+});
+
+const IcDecayEvidenceEntrySchema = IcDecayEvidenceFieldsSchema.extend({
+  ic_rolling: z.optional(z.nullable(z.number())),
+  observations: z.optional(z.number()),
+  status: z.optional(z.enum(['healthy', 'warning', 'critical', 'insufficient_data'])),
 });
 
 export const IcDecaySchema = z.object({
@@ -707,6 +778,7 @@ export const IcDecaySummarySchema = z.object({
   routing_control: z.string(),
   control_effect: z.string(),
   kill_switch_level: z.optional(z.nullable(z.string())),
+  signal_evidence: z.optional(z.record(z.string(), IcDecayEvidenceEntrySchema)),
 }).passthrough();
 
 // ---------------------------------------------------------------------------

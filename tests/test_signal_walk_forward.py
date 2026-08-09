@@ -108,6 +108,21 @@ class TestSignalWalkForwardValidator:
             assert w.train_days > 0
             assert w.test_days > 0
 
+    def test_constant_windows_are_missing_evidence_not_zero_ic(self):
+        validator = SignalWalkForwardValidator(
+            n_splits=3, test_size=30, gap=5, min_ic=0.01,
+        )
+        predictions = [1.0] * 300
+        actual_returns = np.linspace(-0.1, 0.1, 300).tolist()
+
+        result = validator.validate_signal(
+            "constant_signal", predictions, actual_returns
+        )
+
+        assert result.status == "insufficient_data"
+        assert result.n_windows == 0
+        assert result.windows == []
+
 
 class TestValidateFromICMonitor:
     """Test batch validation from ICMonitor data."""

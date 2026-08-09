@@ -1,8 +1,8 @@
 """
-Information Coefficient (IC) decay monitor for signal quality tracking.
+Rank-correlation decay monitor for signal quality tracking.
 
-Tracks per-signal IC (rank correlation between signal predictions and
-actual forward returns) over rolling windows. Detects when a signal's
+Tracks per-signal time-series Spearman rank correlation between signal
+predictions and actual forward returns over rolling windows. Detects when a signal's
 predictive power is degrading, which is a leading indicator of alpha
 decay that SPC monitoring alone cannot catch.
 
@@ -52,6 +52,9 @@ __all__ = [
     "ic_control_projection",
     "advisory_factor_half_life_table",
     "ADVISORY_FACTOR_HALF_LIFE_DAYS",
+    "IC_EVALUATION_CONTRACTS",
+    "IC_EVALUATION_CONTRACT_VERSION",
+    "IC_OBSERVATION_METADATA_VERSION",
 ]
 
 # Configurable via environment variables
@@ -62,6 +65,200 @@ IC_TREND_WINDOW = int(os.environ.get("IC_TREND_WINDOW", "20"))
 # Spearman IC with n≈5–10 is extremely noisy; do not escalate kill on thin history.
 IC_MIN_OBS_FOR_STATUS = int(os.environ.get("IC_MIN_OBS_FOR_STATUS", "20"))
 IC_STATE_PATH = DATA_DIR / "ic_monitor_state.json"
+
+IC_EVALUATION_CONTRACT_VERSION = "ic-evaluation-contract/v2"
+IC_OBSERVATION_METADATA_VERSION = "ic-observation-metadata/v2"
+IC_STATE_SCHEMA_VERSION = "ic-monitor-state/v2"
+IC_ACTUAL_METRIC_AXIS = "time_series_rank_correlation"
+IC_ACTUAL_METRIC_KIND = "correlation"
+IC_METRIC_AXES = {
+    "time_series_rank_correlation",
+    "cross_sectional_ic",
+    "calibration_proper_score",
+}
+IC_METRIC_KINDS = {"correlation", "calibration_proper_score"}
+
+# These contracts describe the intended evaluation, while the current resolver
+# truthfully records that it uses one shared SPY forward return.  Keeping the
+# two concepts separate prevents a mechanically computed coefficient from being
+# mistaken for aligned cross-sectional IC or calibrated significance.
+IC_EVALUATION_CONTRACTS: Dict[str, Dict[str, Any]] = {
+    "ensemble_equity": {
+        "contract_version": IC_EVALUATION_CONTRACT_VERSION,
+        "intended_metric_axis": IC_ACTUAL_METRIC_AXIS,
+        "intended_metric_kind": IC_ACTUAL_METRIC_KIND,
+        "target_asset": "SPY",
+        "target_basket": None,
+        "intended_horizon_sessions": 1,
+        "prediction_field": "ensemble_voting.equity_bias",
+        "prediction_transform": "identity",
+        "observed_prediction_field": "ensemble_voting.equity_bias",
+        "observed_prediction_transform": "identity",
+        "declared_alignment_status": "provisional",
+        "alignment_reason": "legacy_rows_missing_alignment_metadata",
+    },
+    "ensemble_gold": {
+        "contract_version": IC_EVALUATION_CONTRACT_VERSION,
+        "intended_metric_axis": IC_ACTUAL_METRIC_AXIS,
+        "intended_metric_kind": IC_ACTUAL_METRIC_KIND,
+        "target_asset": "GLD",
+        "target_basket": None,
+        "intended_horizon_sessions": 1,
+        "prediction_field": "ensemble_voting.gold_bias",
+        "prediction_transform": "identity",
+        "observed_prediction_field": "ensemble_voting.gold_bias",
+        "observed_prediction_transform": "identity",
+        "declared_alignment_status": "misaligned",
+        "alignment_reason": "actual_target_spy_expected_gld",
+    },
+    "ensemble_duration": {
+        "contract_version": IC_EVALUATION_CONTRACT_VERSION,
+        "intended_metric_axis": IC_ACTUAL_METRIC_AXIS,
+        "intended_metric_kind": IC_ACTUAL_METRIC_KIND,
+        "target_asset": "TLT",
+        "target_basket": None,
+        "intended_horizon_sessions": 1,
+        "prediction_field": "ensemble_voting.duration_bias",
+        "prediction_transform": "identity",
+        "observed_prediction_field": "ensemble_voting.duration_bias",
+        "observed_prediction_transform": "identity",
+        "declared_alignment_status": "misaligned",
+        "alignment_reason": "actual_target_spy_expected_tlt",
+    },
+    "ensemble_consensus": {
+        "contract_version": IC_EVALUATION_CONTRACT_VERSION,
+        "intended_metric_axis": "cross_sectional_ic",
+        "intended_metric_kind": "correlation",
+        "target_asset": None,
+        "target_basket": "SPY/GLD/TLT",
+        "intended_horizon_sessions": 1,
+        "prediction_field": "ensemble_voting.per_sleeve_bias_vector",
+        "prediction_transform": "identity",
+        "observed_prediction_field": "ensemble_voting.weighted_consensus",
+        "observed_prediction_transform": "identity",
+        "declared_alignment_status": "ambiguous",
+        "alignment_reason": "mixed_asset_consensus_resolved_against_single_spy_return",
+    },
+    "alternative_data": {
+        "contract_version": IC_EVALUATION_CONTRACT_VERSION,
+        "intended_metric_axis": IC_ACTUAL_METRIC_AXIS,
+        "intended_metric_kind": IC_ACTUAL_METRIC_KIND,
+        "target_asset": "SPY",
+        "target_basket": None,
+        "intended_horizon_sessions": 1,
+        "prediction_field": "alternative_data.spy_value",
+        "prediction_transform": "canonical_spy_polarity",
+        "observed_prediction_field": "alternative_data.composite_score",
+        "observed_prediction_transform": "identity",
+        "declared_alignment_status": "misaligned",
+        "alignment_reason": "prediction_field_and_polarity_mismatch",
+    },
+    "behavioral_sentiment": {
+        "contract_version": IC_EVALUATION_CONTRACT_VERSION,
+        "intended_metric_axis": IC_ACTUAL_METRIC_AXIS,
+        "intended_metric_kind": IC_ACTUAL_METRIC_KIND,
+        "target_asset": "SPY",
+        "target_basket": None,
+        "intended_horizon_sessions": 5,
+        "prediction_field": "behavioral_sentiment.spy_value",
+        "prediction_transform": "canonical_spy_projection",
+        "observed_prediction_field": "behavioral_sentiment.composite_score",
+        "observed_prediction_transform": "identity",
+        "declared_alignment_status": "misaligned",
+        "alignment_reason": "prediction_field_and_horizon_mismatch",
+    },
+    "factor_rotation": {
+        "contract_version": IC_EVALUATION_CONTRACT_VERSION,
+        "intended_metric_axis": IC_ACTUAL_METRIC_AXIS,
+        "intended_metric_kind": IC_ACTUAL_METRIC_KIND,
+        "target_asset": None,
+        "target_basket": "selected_factor_etfs",
+        "intended_horizon_sessions": None,
+        "prediction_field": "factor_rotation.signal_strength",
+        "prediction_transform": "identity",
+        "observed_prediction_field": "factor_rotation.signal_strength",
+        "observed_prediction_transform": "identity",
+        "declared_alignment_status": "ambiguous",
+        "alignment_reason": "selected_factor_return_target_and_horizon_undeclared",
+    },
+    "fred_macro": {
+        "contract_version": IC_EVALUATION_CONTRACT_VERSION,
+        "intended_metric_axis": "calibration_proper_score",
+        "intended_metric_kind": "calibration_proper_score",
+        "target_asset": None,
+        "target_basket": "macro_regime_outcomes",
+        "intended_horizon_sessions": None,
+        "prediction_field": "fred_macro.confidence",
+        "prediction_transform": "probability_confidence",
+        "observed_prediction_field": "fred_macro.confidence",
+        "observed_prediction_transform": "identity",
+        "declared_alignment_status": "metric_mismatch",
+        "alignment_reason": "unsigned_confidence_requires_calibration_not_signed_return_correlation",
+    },
+}
+
+_OBSERVATION_METADATA_FIELDS = {
+    "prediction_date",
+    "realized_start_date",
+    "resolved_date",
+    "target_asset",
+    "intended_horizon_sessions",
+    "realized_horizon_sessions",
+    "prediction_field",
+    "prediction_transform",
+    "metric_axis",
+    "metric_kind",
+    "contract_version",
+}
+
+_OBSERVATION_CONTRACT_DEFAULTS = {
+    "metric_axis": IC_ACTUAL_METRIC_AXIS,
+    "metric_kind": IC_ACTUAL_METRIC_KIND,
+    "contract_version": IC_OBSERVATION_METADATA_VERSION,
+}
+
+
+def _normalize_observation_metadata(
+    metadata: Optional[Mapping[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Return a JSON-safe, bounded observation-metadata record."""
+    if not isinstance(metadata, Mapping):
+        return None
+    normalized: Dict[str, Any] = {}
+    for key in _OBSERVATION_METADATA_FIELDS:
+        value = metadata.get(key)
+        if value is None:
+            continue
+        if key in {"intended_horizon_sessions", "realized_horizon_sessions"}:
+            try:
+                value = max(0, int(value))
+            except (TypeError, ValueError):
+                continue
+        elif key in {
+            "prediction_date",
+            "realized_start_date",
+            "resolved_date",
+            "target_asset",
+            "prediction_field",
+            "prediction_transform",
+            "metric_axis",
+            "metric_kind",
+            "contract_version",
+        }:
+            value = str(value).strip()
+            if not value:
+                continue
+            if key == "metric_axis" and value not in IC_METRIC_AXES:
+                continue
+            if key == "metric_kind" and value not in IC_METRIC_KINDS:
+                continue
+            if (
+                key == "contract_version"
+                and value != IC_OBSERVATION_METADATA_VERSION
+            ):
+                continue
+        normalized[key] = value
+    return normalized or None
 
 # Advisory factor / sleeve half-lives (trading days) from multi-market IC decay
 # literature (Flint/Vermaak-style summaries via Alpha Architect / Quantpedia).
@@ -117,13 +314,30 @@ def advisory_factor_half_life_table() -> Dict[str, Any]:
 
 
 
-def _spearman_rank_correlation(x: List[float], y: List[float]) -> float:
+def _average_midranks(values: np.ndarray) -> np.ndarray:
+    """Return deterministic zero-based average ranks, including ties."""
+    order = np.argsort(values, kind="mergesort")
+    sorted_values = values[order]
+    ranks = np.empty(len(values), dtype=float)
+    start = 0
+    while start < len(values):
+        end = start + 1
+        while end < len(values) and sorted_values[end] == sorted_values[start]:
+            end += 1
+        ranks[order[start:end]] = (start + end - 1) / 2.0
+        start = end
+    return ranks
+
+
+def _spearman_rank_correlation(
+    x: List[float], y: List[float]
+) -> Optional[float]:
     """Compute Spearman rank correlation between two arrays.
 
-    Returns 0.0 if either array has zero variance or insufficient data.
+    Returns ``None`` if either array has zero variance or insufficient data.
     """
     if len(x) < 5 or len(y) < 5:
-        return 0.0
+        return None
 
     x_arr = np.array(x, dtype=float)
     y_arr = np.array(y, dtype=float)
@@ -134,16 +348,17 @@ def _spearman_rank_correlation(x: List[float], y: List[float]) -> float:
     y_arr = y_arr[mask]
 
     if len(x_arr) < 5:
-        return 0.0
+        return None
 
     # Zero-variance check on original values — argsort assigns unique ranks
     # to identical values, masking the lack of real variation
     if np.ptp(x_arr) < 1e-10 or np.ptp(y_arr) < 1e-10:
-        return 0.0
+        return None
 
-    # Rank the values
-    x_rank = np.argsort(np.argsort(x_arr)).astype(float)
-    y_rank = np.argsort(np.argsort(y_arr)).astype(float)
+    # Project policy: ties receive average midranks.  Nested argsort would give
+    # identical values arbitrary distinct ranks based on their input order.
+    x_rank = _average_midranks(x_arr)
+    y_rank = _average_midranks(y_arr)
 
     # Pearson correlation of ranks
     n = len(x_rank)
@@ -157,7 +372,7 @@ def _spearman_rank_correlation(x: List[float], y: List[float]) -> float:
     den = np.sqrt((x_dev ** 2).sum() * (y_dev ** 2).sum())
 
     if den < 1e-10:
-        return 0.0
+        return None
 
     return float(num / den)
 
@@ -191,11 +406,20 @@ class ICMonitor:
 
         # Per-signal data: deque of (prediction, actual_return)
         self._data: Dict[str, deque] = {}
+        # Optional v2 metadata aligned one-for-one with _data rows.  Legacy
+        # state loads as explicit None entries; missing facts are never guessed.
+        self._observation_metadata: Dict[str, deque] = {}
         # Staged predictions waiting for forward-return resolution
         # Format: {"date": "2026-05-26", "predictions": {"signal_name": value, ...}}
         self._staged: Optional[Dict] = None
 
-    def record(self, signal_name: str, prediction: float, actual_return: float) -> None:
+    def record(
+        self,
+        signal_name: str,
+        prediction: float,
+        actual_return: float,
+        observation_metadata: Optional[Mapping[str, Any]] = None,
+    ) -> None:
         """Record a signal prediction and the corresponding actual return.
 
         Args:
@@ -205,9 +429,22 @@ class ICMonitor:
         """
         if signal_name not in self._data:
             self._data[signal_name] = deque(maxlen=self.window_size)
+        if signal_name not in self._observation_metadata:
+            self._observation_metadata[signal_name] = deque(
+                [None] * len(self._data[signal_name]),
+                maxlen=self.window_size,
+            )
         self._data[signal_name].append((prediction, actual_return))
+        self._observation_metadata[signal_name].append(
+            _normalize_observation_metadata(observation_metadata)
+        )
 
-    def stage_predictions(self, predictions: Dict[str, float], date_str: str) -> None:
+    def stage_predictions(
+        self,
+        predictions: Dict[str, float],
+        date_str: str,
+        prediction_metadata: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    ) -> None:
         """Stage predictions for resolution on the next cron run.
 
         Predictions are stored with a date. On the next run, resolve_staged()
@@ -218,9 +455,41 @@ class ICMonitor:
             predictions: Dict mapping signal_name → prediction value.
             date_str: ISO date string when predictions were made.
         """
+        metadata_by_signal: Dict[str, Dict[str, Any]] = {}
+        for signal_name in predictions:
+            supplied = (
+                prediction_metadata.get(signal_name)
+                if isinstance(prediction_metadata, Mapping)
+                else None
+            )
+            contract = IC_EVALUATION_CONTRACTS.get(signal_name, {})
+            derived: Dict[str, Any] = {
+                **_OBSERVATION_CONTRACT_DEFAULTS,
+                "prediction_date": date_str,
+                "prediction_field": contract.get("observed_prediction_field"),
+                "prediction_transform": contract.get("observed_prediction_transform"),
+                "intended_horizon_sessions": contract.get(
+                    "intended_horizon_sessions"
+                ),
+            }
+            if isinstance(supplied, Mapping):
+                derived.update(supplied)
+            normalized = _normalize_observation_metadata(derived)
+            if normalized:
+                metadata_by_signal[signal_name] = normalized
         self._staged = {"date": date_str, "predictions": dict(predictions)}
+        if metadata_by_signal:
+            self._staged["prediction_metadata"] = metadata_by_signal
 
-    def resolve_staged(self, forward_return: float) -> int:
+    def resolve_staged(
+        self,
+        forward_return: float,
+        *,
+        resolved_date: Optional[str] = None,
+        realized_start_date: Optional[str] = None,
+        target_asset: Optional[str] = None,
+        realized_horizon_sessions: Optional[int] = None,
+    ) -> int:
         """Resolve previously staged predictions with the actual forward return.
 
         Pairs each staged prediction with the given forward return and records
@@ -236,10 +505,32 @@ class ICMonitor:
         if not self._staged:
             return 0
         predictions = self._staged["predictions"]
+        staged_metadata = self._staged.get("prediction_metadata", {})
         count = 0
         for signal_name, prediction in predictions.items():
             if prediction is not None and np.isfinite(prediction):
-                self.record(signal_name, float(prediction), forward_return)
+                metadata = {}
+                if isinstance(staged_metadata, Mapping):
+                    raw_metadata = staged_metadata.get(signal_name)
+                    if isinstance(raw_metadata, Mapping):
+                        metadata.update(raw_metadata)
+                metadata.setdefault("prediction_date", self._staged.get("date"))
+                resolved_metadata = dict(_OBSERVATION_CONTRACT_DEFAULTS)
+                for key, value in {
+                    "resolved_date": resolved_date,
+                    "realized_start_date": realized_start_date,
+                    "target_asset": target_asset,
+                    "realized_horizon_sessions": realized_horizon_sessions,
+                }.items():
+                    if value is not None:
+                        resolved_metadata[key] = value
+                metadata.update(resolved_metadata)
+                self.record(
+                    signal_name,
+                    float(prediction),
+                    forward_return,
+                    observation_metadata=metadata,
+                )
                 count += 1
         self._staged = None
         return count
@@ -309,6 +600,9 @@ class ICMonitor:
         ic_recent = _spearman_rank_correlation(predictions_recent, actuals_recent)
         ic_earlier = _spearman_rank_correlation(predictions_earlier, actuals_earlier)
 
+        if ic_recent is None or ic_earlier is None:
+            return "unknown"
+
         diff = ic_recent - ic_earlier
 
         if ic_recent < self.decay_threshold:
@@ -347,13 +641,118 @@ class ICMonitor:
             else:
                 status = "healthy"
 
-            report[signal_name] = {
+            contract = dict(IC_EVALUATION_CONTRACTS.get(signal_name, {
+                "contract_version": IC_EVALUATION_CONTRACT_VERSION,
+                "intended_metric_axis": "time_series_rank_correlation",
+                "intended_metric_kind": "correlation",
+                "target_asset": None,
+                "target_basket": None,
+                "intended_horizon_sessions": None,
+                "prediction_field": None,
+                "prediction_transform": None,
+                "declared_alignment_status": "undeclared",
+                "alignment_reason": "evaluation_contract_missing",
+            }))
+            declared_alignment = str(
+                contract.get("declared_alignment_status") or "undeclared"
+            )
+            metadata_rows = list(self._observation_metadata.get(signal_name, ()))
+            metadata_complete = (
+                len(metadata_rows) == n_obs
+                and bool(metadata_rows)
+                and all(
+                    isinstance(metadata_row, Mapping)
+                    and _OBSERVATION_METADATA_FIELDS.issubset(metadata_row)
+                    for metadata_row in metadata_rows
+                )
+            )
+            if declared_alignment == "provisional" and metadata_rows:
+                aligned = metadata_complete and all(
+                    row.get("target_asset") == contract.get("target_asset")
+                    and row.get("realized_horizon_sessions")
+                    == contract.get("intended_horizon_sessions")
+                    and row.get("prediction_field")
+                    == contract.get("prediction_field")
+                    and row.get("prediction_transform")
+                    == contract.get("prediction_transform")
+                    and row.get("metric_axis")
+                    == contract.get("intended_metric_axis")
+                    and row.get("metric_kind")
+                    == contract.get("intended_metric_kind")
+                    and row.get("contract_version")
+                    == IC_OBSERVATION_METADATA_VERSION
+                    for row in metadata_rows
+                    if isinstance(row, Mapping)
+                )
+                if aligned:
+                    declared_alignment = "aligned"
+                    alignment_reason = "metadata_complete_and_contract_aligned"
+                elif metadata_complete:
+                    declared_alignment = "misaligned"
+                    alignment_reason = "observation_metadata_conflicts_with_contract"
+                else:
+                    alignment_reason = (
+                        "observation_metadata_incomplete"
+                        if any(isinstance(row, Mapping) for row in metadata_rows)
+                        else "legacy_rows_missing_alignment_metadata"
+                    )
+            else:
+                alignment_reason = str(
+                    contract.get("alignment_reason") or "evaluation_contract_missing"
+                )
+
+            if declared_alignment in {"misaligned", "ambiguous"}:
+                inference_reason = "label_alignment_mismatch"
+            elif declared_alignment == "metric_mismatch":
+                inference_reason = "metric_contract_mismatch"
+            elif declared_alignment == "undeclared":
+                inference_reason = "evaluation_contract_missing"
+            elif not metadata_rows or any(row is None for row in metadata_rows):
+                inference_reason = "legacy_rows_missing_alignment_metadata"
+            elif not metadata_complete:
+                inference_reason = "observation_metadata_incomplete"
+            else:
+                inference_reason = "dependence_not_characterized"
+
+            public_contract = {
+                key: value
+                for key, value in contract.items()
+                if key not in {
+                    "observed_prediction_field",
+                    "observed_prediction_transform",
+                    "declared_alignment_status",
+                    "alignment_reason",
+                }
+            }
+            row: Dict[str, Any] = {
                 "ic_rolling": round(ic, 4) if ic is not None else None,
                 "ic_trend": trend,
                 "observations": n_obs,
                 "status": status,
                 "min_obs_for_status": self.min_obs_for_status,
+                "metric_axis": IC_ACTUAL_METRIC_AXIS,
+                "metric_kind": IC_ACTUAL_METRIC_KIND,
+                "estimate_kind": "descriptive",
+                "alignment_status": declared_alignment,
+                "alignment_reason": alignment_reason,
+                "inference_status": "unavailable",
+                "inference_reason": inference_reason,
+                "observation_count": n_obs,
+                "observation_unit": "pairs",
+                "contract_version": IC_EVALUATION_CONTRACT_VERSION,
+                "evaluation_contract": public_contract,
             }
+            latest_metadata = next(
+                (
+                    dict(item)
+                    for item in reversed(metadata_rows)
+                    if isinstance(item, Mapping)
+                ),
+                None,
+            )
+            if latest_metadata:
+                row["latest_observation_metadata"] = latest_metadata
+            report[signal_name] = row
 
         return report
 
@@ -374,6 +773,12 @@ class ICMonitor:
             state[signal_name] = list(data)
         if self._staged:
             state["__staged__"] = self._staged
+        if self._observation_metadata:
+            state["__state_schema_version__"] = IC_STATE_SCHEMA_VERSION
+            state["__observation_metadata__"] = {
+                signal_name: list(rows)
+                for signal_name, rows in self._observation_metadata.items()
+            }
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
             json.dump(state, f)
@@ -389,15 +794,64 @@ class ICMonitor:
         try:
             with open(path) as f:
                 state = json.load(f)
+            if not isinstance(state, Mapping):
+                raise TypeError("IC monitor state must be a JSON object")
+            metadata_state = state.get("__observation_metadata__", {})
+            loaded_data: Dict[str, deque] = {}
+            loaded_metadata: Dict[str, deque] = {}
+            loaded_staged: Optional[Dict[str, Any]] = None
             for key, observations in state.items():
                 if key == "__staged__":
-                    self._staged = observations
+                    if observations is not None and not isinstance(observations, Mapping):
+                        raise TypeError("staged IC state must be a JSON object")
+                    loaded_staged = dict(observations) if observations else None
+                elif key in {"__state_schema_version__", "__observation_metadata__"}:
+                    continue
                 else:
-                    self._data[key] = deque(maxlen=self.window_size)
-                    for pred, actual in observations:
-                        self._data[key].append((pred, actual))
+                    if not isinstance(observations, list):
+                        raise TypeError(f"IC observations for {key} must be a list")
+                    observation_rows = list(observations)
+                    loaded_data[key] = deque(maxlen=self.window_size)
+                    for observation in observation_rows:
+                        if not isinstance(observation, (list, tuple)) or len(observation) != 2:
+                            raise ValueError(
+                                f"IC observation for {key} must be a prediction/return pair"
+                            )
+                        pred, actual = observation
+                        loaded_data[key].append((pred, actual))
+                    raw_metadata = (
+                        metadata_state.get(key, [])
+                        if isinstance(metadata_state, Mapping)
+                        else []
+                    )
+                    metadata_is_aligned = (
+                        isinstance(raw_metadata, list)
+                        and len(raw_metadata) == len(observation_rows)
+                    )
+                    normalized_metadata = (
+                        [
+                            _normalize_observation_metadata(item)
+                            for item in raw_metadata
+                        ]
+                        if metadata_is_aligned
+                        else []
+                    )
+                    data_len = len(loaded_data[key])
+                    normalized_metadata = normalized_metadata[-data_len:]
+                    if len(normalized_metadata) < data_len:
+                        normalized_metadata = (
+                            [None] * (data_len - len(normalized_metadata))
+                            + normalized_metadata
+                        )
+                    loaded_metadata[key] = deque(
+                        normalized_metadata,
+                        maxlen=self.window_size,
+                    )
+            self._data = loaded_data
+            self._observation_metadata = loaded_metadata
+            self._staged = loaded_staged
             logger.info("IC monitor state loaded: %d signals", len(self._data))
-        except (json.JSONDecodeError, OSError, TypeError) as e:
+        except (json.JSONDecodeError, OSError, TypeError, ValueError) as e:
             logger.warning("Failed to load IC monitor state: %s", e)
 
 
@@ -563,6 +1017,7 @@ def build_ic_decay_summary(
     insufficient: list[str] = []
     qualified_count = 0
     minimums: list[int] = []
+    signal_evidence: Dict[str, Any] = {}
     for raw_name, raw_row in signals.items():
         if not isinstance(raw_row, Mapping):
             continue
@@ -584,6 +1039,30 @@ def build_ic_decay_summary(
             minimums.append(int(raw_row.get("min_obs_for_status")))
         except (TypeError, ValueError):
             pass
+        evidence_fields = {
+            "ic_rolling",
+            "observations",
+            "status",
+            "metric_axis",
+            "metric_kind",
+            "estimate_kind",
+            "alignment_status",
+            "alignment_reason",
+            "inference_status",
+            "inference_reason",
+            "observation_count",
+            "observation_unit",
+            "contract_version",
+            "evaluation_contract",
+            "latest_observation_metadata",
+        }
+        evidence = {
+            key: raw_row.get(key)
+            for key in evidence_fields
+            if key in raw_row
+        }
+        if evidence:
+            signal_evidence[name] = evidence
 
     def _bounded_int(key: str, default: int = 0) -> int:
         try:
@@ -624,6 +1103,7 @@ def build_ic_decay_summary(
         "routing_authority": routing_authority,
         "routing_control": routing_control,
         "control_effect": control_effect,
+        "signal_evidence": signal_evidence,
     }
     if kill_switch_level is not None:
         summary["kill_switch_level"] = str(kill_switch_level)
