@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from typing import Any
 
 from flask import Flask, abort, jsonify, request
@@ -18,12 +19,14 @@ def create_app(
     store: TaskerStore | None = None,
     runner: Any | None = None,
     admin_token: str | None = None,
+    draining: threading.Event | None = None,
 ) -> Flask:
     registry = registry or load_task_registry()
     store = store or TaskerStore()
     store.sync_registry(registry)
     runner = runner or TaskRunner(registry=registry, store=store)
     admin_token = admin_token if admin_token is not None else os.environ.get("TASKER_ADMIN_TOKEN")
+    draining = draining if draining is not None else threading.Event()
 
     app = Flask(__name__)
 
@@ -38,6 +41,13 @@ def create_app(
             token = auth.removeprefix("Bearer ").strip()
         if not admin_token or token != admin_token:
             abort(403)
+
+    def require_not_draining() -> None:
+        """Reject mutating actions once the service entered drain (Task 3B)."""
+        if draining.is_set():
+            response = jsonify({"error": "tasker is draining; start/retry refused"})
+            response.status_code = 503
+            abort(response)
 
     @app.get("/api/tasker/status")
     def tasker_status():
@@ -69,12 +79,14 @@ def create_app(
     @app.post("/api/tasks/<task_id>/run")
     def run_task(task_id: str):
         require_admin()
+        require_not_draining()
         run = runner.start_task(task_id, trigger="manual")
         return public_json(run), 202
 
     @app.post("/api/tasks/<task_id>/pause")
     def pause_task(task_id: str):
         require_admin()
+        require_not_draining()
         payload = request.get_json(silent=True) or {}
         store.set_task_paused(task_id, paused=True, reason=payload.get("reason"))
         store.write_status_mirrors(registry)
@@ -83,6 +95,7 @@ def create_app(
     @app.post("/api/tasks/<task_id>/resume")
     def resume_task(task_id: str):
         require_admin()
+        require_not_draining()
         store.set_task_paused(task_id, paused=False)
         store.write_status_mirrors(registry)
         return public_json(store.get_task(task_id, registry))
@@ -90,12 +103,14 @@ def create_app(
     @app.post("/api/runs/<run_id>/cancel")
     def cancel_run(run_id: str):
         require_admin()
+        require_not_draining()
         runner.cancel_run(run_id)
         return public_json({"run_id": run_id, "cancel_requested": True}), 202
 
     @app.post("/api/runs/<run_id>/retry")
     def retry_run(run_id: str):
         require_admin()
+        require_not_draining()
         existing = store.get_run(run_id)
         run = runner.start_task(existing["task_id"], trigger="retry", retry_of=run_id)
         return public_json(run), 202

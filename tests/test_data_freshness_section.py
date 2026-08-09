@@ -133,30 +133,45 @@ def test_sunday_crypto_rows_keep_weekday_symbols_fresh() -> None:
 
 def test_no_crypto_rows_crypto_reference_none() -> None:
     """Without crypto rows the crypto reference is None and all symbols use
-    the trading reference."""
+    the trading reference; a Thursday bar on a Sunday as-of has missed Friday's
+    completed session (1 missed → stale under session semantics)."""
+    from datetime import datetime, timezone
+
     conn = _make_conn()
     _insert(conn, "SPY", FRIDAY)
     _insert(conn, "GLD", THURSDAY)
-    out = build_data_freshness_section(conn=conn)
+    out = build_data_freshness_section(
+        conn=conn,
+        as_of=datetime(2026, 8, 9, 20, 0, tzinfo=timezone.utc),  # Sunday 16:00 ET
+    )
     assert out["latest_market_date"] == FRIDAY
     assert out["latest_crypto_date"] is None
     assert out["data_freshness"]["GLD"]["market_lag_days"] == 1
-    assert out["data_freshness"]["GLD"]["status"] == "fresh"
+    assert out["data_freshness"]["GLD"]["missed_market_sessions"] == 1
+    assert out["data_freshness"]["GLD"]["status"] == "stale"
+    assert out["data_freshness"]["SPY"]["status"] == "fresh"
     conn.close()
 
 
 def test_weekend_row_for_traditional_symbol_does_not_advance_reference() -> None:
     """A stray weekend row for a traditional symbol must not advance the
-    weekday trading reference."""
+    weekday trading reference; status still reflects missed sessions."""
+    from datetime import datetime, timezone
+
     conn = _make_conn()
     _insert(conn, "SPY", FRIDAY)
     _insert(conn, "SPY", SATURDAY)  # stray weekend row
     _insert(conn, "GLD", THURSDAY)
-    out = build_data_freshness_section(conn=conn)
+    out = build_data_freshness_section(
+        conn=conn,
+        as_of=datetime(2026, 8, 9, 20, 0, tzinfo=timezone.utc),  # Sunday 16:00 ET
+    )
     assert out["latest_market_date"] == FRIDAY
     gld = out["data_freshness"]["GLD"]
     assert gld["market_lag_days"] == 1
-    assert gld["status"] == "fresh"
+    assert gld["missed_market_sessions"] == 1
+    assert gld["status"] == "stale"
+    assert out["data_freshness"]["SPY"]["status"] == "fresh"
     conn.close()
 
 
@@ -172,4 +187,44 @@ def test_sparse_vix3m_reports_honest_trading_lag() -> None:
     assert vix3m["status"] == "critical"
     assert vix3m["latest_available_market_date"] == FRIDAY
     assert out["data_freshness"]["SPY"]["status"] == "fresh"
+    conn.close()
+
+
+# ── Task 4: session-aware fields with injected as-of ───────────────────
+
+def test_session_fields_present_with_injected_as_of() -> None:
+    """Entries expose session fields; Sunday as-of keeps Friday bars fresh."""
+    from datetime import datetime, timezone
+
+    conn = _make_conn()
+    for sym in ("SPY", "GLD", "TLT"):
+        _insert(conn, sym, FRIDAY)
+    _insert(conn, "BTC-USD", SUNDAY)
+    out = build_data_freshness_section(
+        conn=conn,
+        as_of=datetime(2026, 8, 9, 20, 0, tzinfo=timezone.utc),  # Sunday 16:00 ET
+    )
+    spy = out["data_freshness"]["SPY"]
+    assert spy["missed_market_sessions"] == 0
+    assert spy["last_expected_completed_session"] == FRIDAY
+    assert spy["status"] == "fresh"
+    assert spy["status_basis"] == "missed_sessions"
+    assert spy["calendar_age_days"] == spy["days_stale"]
+    conn.close()
+
+
+def test_genuine_missed_sessions_escalate_with_as_of() -> None:
+    from datetime import datetime, timezone
+
+    conn = _make_conn()
+    _insert(conn, "SPY", "2026-08-03")  # Monday; as-of Friday 17:00 ET
+    _insert(conn, "GLD", FRIDAY)
+    out = build_data_freshness_section(
+        conn=conn,
+        as_of=datetime(2026, 8, 7, 21, 0, tzinfo=timezone.utc),  # Fri 17:00 ET
+    )
+    assert out["data_freshness"]["SPY"]["missed_market_sessions"] == 4
+    assert out["data_freshness"]["SPY"]["status"] == "critical"
+    assert out["data_freshness"]["GLD"]["missed_market_sessions"] == 0
+    assert out["data_freshness"]["GLD"]["status"] == "fresh"
     conn.close()

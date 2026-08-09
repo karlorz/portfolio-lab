@@ -103,6 +103,10 @@ export interface IcDecayEvidence {
   contract_version?: 'ic-evaluation-contract/v2';
   evaluation_contract?: IcEvaluationContract;
   latest_observation_metadata?: IcObservationMetadata;
+  // Task 2A: control eligibility derived from complete contract alignment.
+  control_eligible?: boolean;
+  control_status?: 'eligible' | 'ineligible';
+  control_ineligibility_reason?: string | null;
 }
 
 export interface RegimeAuthority {
@@ -563,6 +567,9 @@ export interface IcDecaySummary {
   routing_authority: string;
   routing_control: string;
   control_effect: string;
+  // Task 2A: control-eligible subsets of the descriptive signal lists.
+  control_eligible_critical_signals?: string[];
+  control_eligible_warning_signals?: string[];
   kill_switch_level?: string | null;
   signal_evidence?: Record<string, IcDecayEvidence>;
 }

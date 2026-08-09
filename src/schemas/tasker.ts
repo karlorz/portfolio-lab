@@ -22,6 +22,10 @@ export const TaskerRunSchema = z.object({
   duration_seconds: z.nullable(z.number()),
   exit_code: z.nullable(z.number()),
   error: z.nullable(z.string()),
+  // Task 3A: named terminal cause (service_restart / operator_cancelled /
+  // unplanned); additive, null for legacy rows.
+  termination_cause: z.nullable(z.string()).optional(),
+  termination_detail: z.nullable(z.string()).optional(),
   log_path: z.string(),
   created_at: z.string(),
   updated_at: z.string(),

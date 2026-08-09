@@ -619,6 +619,9 @@ def check_ic_decay_and_alert(ic_decay_data: Dict) -> None:
 
     warning_signals = []
     critical_signals = []
+    eligible_critical = []
+    eligible_warning = []
+    ineligible_critical = []
     healthy_count = 0
     insufficient_count = 0
 
@@ -626,10 +629,19 @@ def check_ic_decay_and_alert(ic_decay_data: Dict) -> None:
         if not isinstance(data, dict):
             continue
         status = data.get("status", "unknown")
+        # Task 2A: only contract-aligned rows may drive halt-authoritative IC
+        # control alerts; descriptive status is preserved for operators.
+        control_eligible = bool(data.get("control_eligible"))
         if status == "critical":
             critical_signals.append(signal_name)
+            if control_eligible:
+                eligible_critical.append(signal_name)
+            else:
+                ineligible_critical.append(signal_name)
         elif status == "warning":
             warning_signals.append(signal_name)
+            if control_eligible:
+                eligible_warning.append(signal_name)
         elif status == "healthy":
             healthy_count += 1
         elif status == "insufficient_data":
@@ -639,7 +651,50 @@ def check_ic_decay_and_alert(ic_decay_data: Dict) -> None:
     if total == 0:
         return
 
-    if not warning_signals and not critical_signals:
+    if eligible_critical:
+        send_alert(
+            AlertChannel.IC_DECAY,
+            AlertLevel.HALT,
+            f"{len(eligible_critical)} signal(s) with CRITICAL IC decay: {', '.join(eligible_critical)}",
+            details={
+                "critical_signals": critical_signals,
+                "control_eligible_critical_signals": eligible_critical,
+                "warning_signals": warning_signals,
+                "healthy_count": healthy_count,
+            },
+        )
+    elif eligible_warning:
+        send_alert(
+            AlertChannel.IC_DECAY,
+            AlertLevel.WARN,
+            f"{len(eligible_warning)} signal(s) with IC decay warning: {', '.join(eligible_warning)}",
+            details={
+                "warning_signals": warning_signals,
+                "control_eligible_warning_signals": eligible_warning,
+                "healthy_count": healthy_count,
+            },
+        )
+    elif critical_signals or warning_signals:
+        # Descriptive-only critical/warning rows (misaligned/legacy/ambiguous)
+        # are disclosed but cannot escalate. PASS here is safe for incidents:
+        # ic_decay incidents are manual-review-required and never auto-resolve.
+        send_alert(
+            AlertChannel.IC_DECAY,
+            AlertLevel.PASS,
+            (
+                f"IC control evidence ineligible: {len(ineligible_critical)} "
+                f"critical, {len(warning_signals) - len(eligible_warning)} warning "
+                "signal(s) lack complete contract alignment"
+            ),
+            details={
+                "ineligible_critical_signals": ineligible_critical,
+                "ineligible_warning_signals": [
+                    s for s in warning_signals if s not in eligible_warning
+                ],
+                "policy": "control_ineligible_no_escalation",
+            },
+        )
+    else:
         # PASS clears prior false HALT from thin-history critical misclassification.
         # Warm-up (all insufficient_data) is not an operational failure.
         if healthy_count == 0 and insufficient_count > 0:
@@ -664,24 +719,3 @@ def check_ic_decay_and_alert(ic_decay_data: Dict) -> None:
             )
         else:
             return
-    elif critical_signals:
-        send_alert(
-            AlertChannel.IC_DECAY,
-            AlertLevel.HALT,
-            f"{len(critical_signals)} signal(s) with CRITICAL IC decay: {', '.join(critical_signals)}",
-            details={
-                "critical_signals": critical_signals,
-                "warning_signals": warning_signals,
-                "healthy_count": healthy_count,
-            },
-        )
-    elif warning_signals:
-        send_alert(
-            AlertChannel.IC_DECAY,
-            AlertLevel.WARN,
-            f"{len(warning_signals)} signal(s) with IC decay warning: {', '.join(warning_signals)}",
-            details={
-                "warning_signals": warning_signals,
-                "healthy_count": healthy_count,
-            },
-        )

@@ -24,6 +24,14 @@ Every script sources `cron_guard.sh` which provides 4-layer defense:
 | Script | Makefile Target | Guard Timeout | Duration | Schedule |
 |--------|----------------|---------------|----------|----------|
 | `portfolio-lab-health-monitor.sh` | `make health` | 120s | 120s | `0,30 * * * *` |
+
+> **Health exit semantics (2026-08-09, Session B):** `src.monitor.health_check`
+> runs in `publication` exit mode by default (`PORTFOLIO_LAB_HEALTH_EXIT_MODE`),
+> so a complete critical observation is a SUCCESSFUL producer run (exit 0) —
+> tasker records `success` while the artifact stays `critical` and the halt
+> stays enabled. Operator tooling that needs severity from the exit code must
+> call `python -m src.monitor.health_check --exit-mode probe` (0 = ok/warning,
+> 1 = critical).
 | `portfolio-lab-data-pipeline.sh` | `make data` | 300s | 5 min | `5 * * * *` |
 | `portfolio-lab-dashboard.sh` | `make dashboard` | 180s | 3 min | `15 * * * *` |
 | `portfolio-lab-strategy-eval.sh` | `make eval` | 600s | 10 min | `20 */2 * * *` |

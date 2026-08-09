@@ -28,6 +28,8 @@ import {
   RebalanceHealthSchema,
   GraduationDataSchema,
   validateFetchData,
+  IcDecaySignalEntrySchema,
+  IcDecaySummarySchema,
 } from '../../src/schemas/signals';
 import { z } from 'zod';
 
@@ -1693,5 +1695,100 @@ describe('validateFetchData', () => {
   it('returns null for DashboardDataSchema with completely wrong type', () => {
     const result = validateFetchData('totally wrong', DashboardDataSchema, 'dashboard');
     expect(result).toBeNull();
+  });
+});
+
+// ── Task 2C: additive IC control-eligibility schema ───────────────────
+
+describe('IcDecayControlEligibilitySchema', () => {
+  it('accepts descriptive entries with additive control fields', () => {
+    const row = {
+      ic_rolling: -0.02,
+      ic_trend: 'decaying',
+      observations: 25,
+      status: 'critical',
+      min_obs_for_status: 20,
+      metric_axis: 'time_series_rank_correlation',
+      metric_kind: 'correlation',
+      estimate_kind: 'descriptive',
+      alignment_status: 'misaligned',
+      alignment_reason: 'actual_target_spy_expected_gld',
+      inference_status: 'unavailable',
+      inference_reason: 'label_alignment_mismatch',
+      observation_count: 25,
+      observation_unit: 'pairs',
+      contract_version: 'ic-evaluation-contract/v2',
+      evaluation_contract: {
+        contract_version: 'ic-evaluation-contract/v2',
+        intended_metric_axis: 'time_series_rank_correlation',
+        intended_metric_kind: 'correlation',
+        target_asset: 'GLD',
+        target_basket: null,
+        intended_horizon_sessions: 1,
+        prediction_field: 'ensemble_voting.gold_bias',
+        prediction_transform: 'identity',
+      },
+      control_eligible: false,
+      control_status: 'ineligible',
+      control_ineligibility_reason: 'label_alignment_mismatch',
+    };
+    const result = IcDecaySignalEntrySchema.safeParse(row);
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects invalid control_status enum values', () => {
+    const row = {
+      ic_rolling: null,
+      ic_trend: 'unknown',
+      observations: 5,
+      status: 'insufficient_data',
+      min_obs_for_status: 20,
+      metric_axis: 'time_series_rank_correlation',
+      metric_kind: 'correlation',
+      estimate_kind: 'descriptive',
+      alignment_status: 'undeclared',
+      alignment_reason: 'evaluation_contract_missing',
+      inference_status: 'unavailable',
+      inference_reason: 'evaluation_contract_missing',
+      observation_count: 5,
+      observation_unit: 'pairs',
+      contract_version: 'ic-evaluation-contract/v2',
+      evaluation_contract: {},
+      control_eligible: true,
+      control_status: 'bogus',
+    };
+    const result = IcDecaySignalEntrySchema.safeParse(row);
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('IcDecaySummarySchema control fields', () => {
+  it('accepts control_eligible_critical_signals', () => {
+    const summary = {
+      status: 'critical',
+      critical_signals: ['ensemble_equity'],
+      warning_signals: [],
+      insufficient_data_signals: [],
+      resolved_signal_count: 1,
+      min_observations: 20,
+      staged_pending_predictions: 0,
+      staged_pending_signal_names: [],
+      staged_pending_scope: 'ic_staged_date_window',
+      staged_date: null,
+      historical_unlabeled_rows: 0,
+      historical_unlabeled_dates: 0,
+      historical_unlabeled_oldest_date: null,
+      historical_unlabeled_scope: 'historical_db_unlabeled_rows',
+      evidence_generated_at: '2026-08-09T00:00:00Z',
+      evidence_freshness: 'fresh',
+      routing_authority: 'advisory_only',
+      routing_control: 'routing_blocked',
+      control_effect: 'routing_blocked',
+      signal_evidence: {},
+      control_eligible_critical_signals: ['ensemble_equity'],
+      control_eligible_warning_signals: [],
+    };
+    const result = IcDecaySummarySchema.safeParse(summary);
+    expect(result.success).toBe(true);
   });
 });

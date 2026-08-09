@@ -125,6 +125,10 @@ class Incident:
     mttr_seconds: float | None = None
     alert_count: int = 1
     kill_switch_level: str | None = None
+    # Task 2A: incidents on evidence-correction channels (ic_decay) require
+    # explicit operator review; PASS alerts never auto-resolve them.
+    manual_review_required: bool = False
+    manual_review_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -437,7 +441,14 @@ class IncidentManager:
 
         body = json.dumps(summary, indent=2)
         self.summary_path.parent.mkdir(parents=True, exist_ok=True)
-        self.summary_path.write_text(body, encoding="utf-8")
+        # Task 5A: private incidents SSOT uses the canonical atomic writer so
+        # an interrupted write can never leave a partial incidents.json.
+        try:
+            from src.monitor.signal_authority import _atomic_write_text
+
+            _atomic_write_text(self.summary_path, body, mode=0o644)
+        except Exception:  # noqa: BLE001 - fall back to plain write only on tooling failure
+            self.summary_path.write_text(body, encoding="utf-8")
         # Atomic dual-write: public is a byte-copy of private SSOT (not a second
         # open-set derivation). Prevents secondary writers with a partial
         # process view from inventing a divergent public open set.
@@ -553,6 +564,13 @@ class IncidentManager:
                 created_at=timestamp,
                 updated_at=timestamp,
             )
+            # Task 2A: evidence-correction channels require explicit operator
+            # review; a green producer run must never close them.
+            # (Channel value mirrors AlertChannel.IC_DECAY = "ic_decay";
+            # imported as a literal to avoid a module cycle with alerting.py.)
+            if channel == "ic_decay":
+                incident.manual_review_required = True
+                incident.manual_review_reason = "ic_evidence_correction"
             incident.kill_switch_level = self._kill_switch_level_for_count(
                 incident.alert_count, severity=severity
             )
@@ -569,16 +587,55 @@ class IncidentManager:
             created_at=existing.created_at,
             updated_at=timestamp,
             alert_count=existing.alert_count + 1,
+            manual_review_required=existing.manual_review_required,
+            manual_review_reason=existing.manual_review_reason,
         )
         incident.kill_switch_level = self._kill_switch_level_for_count(
             incident.alert_count, severity=severity
         )
+        # Task 2A: evidence-correction channels require explicit operator
+        # review; a green producer run must never close them. Applied on both
+        # open and update so pre-existing ic_decay incidents (e.g. live
+        # incident 8115a9c1) become manual-review-required on their next
+        # update without rewriting their history.
+        # (Channel value mirrors AlertChannel.IC_DECAY = "ic_decay";
+        # imported as a literal to avoid a module cycle with alerting.py.)
+        if channel == "ic_decay":
+            incident.manual_review_required = True
+            incident.manual_review_reason = "ic_evidence_correction"
         self._append_event("updated", incident)
         return incident
 
     def _resolve(self, channel: str, message: str, now: datetime) -> Incident | None:
         existing = self._find_open_by_channel(channel)
         if existing is None:
+            return None
+
+        if existing.manual_review_required:
+            # Task 2A: hold the incident for explicit operator review. Record
+            # the PASS attempt without fabricating a healthy resolution event.
+            logger.warning(
+                "Incident %s is manual-review-required (%s); PASS held, not resolved",
+                existing.incident_id,
+                existing.manual_review_reason,
+            )
+            self._append_event(
+                "pass_held_for_manual_review",
+                Incident(
+                    incident_id=existing.incident_id,
+                    channel=existing.channel,
+                    severity=existing.severity,
+                    state=existing.state,
+                    message=message,
+                    details=existing.details,
+                    created_at=existing.created_at,
+                    updated_at=_iso(now),
+                    alert_count=existing.alert_count,
+                    kill_switch_level=existing.kill_switch_level,
+                    manual_review_required=True,
+                    manual_review_reason=existing.manual_review_reason,
+                ),
+            )
             return None
 
         resolved_at = _iso(now)

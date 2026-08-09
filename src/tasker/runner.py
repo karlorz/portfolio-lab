@@ -45,17 +45,30 @@ class TaskRunner:
         store: TaskerStore,
         project_root: str | Path = PROJECT_ROOT,
         base_env: dict[str, str] | None = None,
+        draining: threading.Event | None = None,
     ):
         self.registry = registry
         self.store = store
         self.project_root = Path(project_root)
         self.base_env = dict(base_env or {})
+        # Shared drain signal: when set, the runner refuses new starts so a
+        # service drain can stop scheduling without racing an in-flight run.
+        self._draining = draining if draining is not None else threading.Event()
         self._lock = threading.Lock()
         self._threads: dict[str, threading.Thread] = {}
         self._processes: dict[str, subprocess.Popen[Any]] = {}
         self._cancelled: set[str] = set()
+        # Per-run named termination cause recorded during drain/cancel so the
+        # finishing thread persists it with the terminal transition.
+        self._termination_causes: dict[str, tuple[str | None, str | None]] = {}
+
+    @property
+    def draining(self) -> threading.Event:
+        return self._draining
 
     def start_task(self, task_id: str, trigger: str = "manual", retry_of: str | None = None) -> dict[str, Any]:
+        if self._draining.is_set():
+            raise RuntimeError(f"tasker is draining: {task_id} not started")
         task = self.registry.get(task_id)
         if trigger == "scheduled" and (not task.enabled or task.manual_only):
             raise RuntimeError(f"Task is not scheduled: {task_id}")
@@ -213,9 +226,17 @@ class TaskRunner:
         marker = f"TASKER_RUN_ID={run_id}".encode()
         return marker in environ
 
-    def cancel_run(self, run_id: str, grace_seconds: float = 5.0) -> bool:
+    def cancel_run(
+        self,
+        run_id: str,
+        grace_seconds: float = 5.0,
+        termination_cause: str | None = None,
+        termination_detail: str | None = None,
+    ) -> bool:
         process = self._processes.get(run_id)
         self._cancelled.add(run_id)
+        if termination_cause is not None:
+            self._termination_causes[run_id] = (termination_cause, termination_detail)
         if process is None:
             return False
         try:
@@ -230,6 +251,41 @@ class TaskRunner:
             except ProcessLookupError:
                 pass
         return True
+
+    def drain_active_runs(
+        self,
+        *,
+        termination_cause: str = "service_restart",
+        termination_detail: str | None = None,
+        grace_seconds: float = 10.0,
+    ) -> list[str]:
+        """Cancel all locally active runs with a named planned cause (Task 3B).
+
+        Called during service drain. Every active child receives SIGTERM (with
+        a bounded SIGKILL escalation), and the finishing thread persists the
+        named cause so the terminal transition never looks like an unplanned
+        failure. Returns the run IDs that were active.
+        """
+        with self._lock:
+            run_ids = list(self._processes.keys())
+        drained: list[str] = []
+        for run_id in run_ids:
+            try:
+                if self.cancel_run(
+                    run_id,
+                    grace_seconds=grace_seconds,
+                    termination_cause=termination_cause,
+                    termination_detail=termination_detail,
+                ):
+                    drained.append(run_id)
+            except Exception as exc:  # noqa: BLE001 - drain must not wedge
+                logger.exception("Tasker drain failed to cancel run %s: %s", run_id, exc)
+        for run_id in drained:
+            try:
+                self.wait_for_run(run_id, timeout_seconds=max(grace_seconds, 10.0))
+            except TimeoutError:
+                logger.warning("Tasker drain: run %s did not finalize in time", run_id)
+        return drained
 
     def wait_for_run(self, run_id: str, timeout_seconds: float = 60.0) -> dict[str, Any]:
         thread = self._threads.get(run_id)
@@ -285,6 +341,7 @@ class TaskRunner:
 
             duration = time.monotonic() - started
             error_msg: str | None = None
+            cause, detail = self._termination_causes.pop(run_id, (None, None))
             if run_id in self._cancelled:
                 status = RUN_CANCELLED
             elif process.returncode == 0:
@@ -314,6 +371,8 @@ class TaskRunner:
                 exit_code=process.returncode,
                 duration_seconds=duration,
                 error=error_msg,
+                termination_cause=cause,
+                termination_detail=detail,
             )
         except Exception as exc:  # pragma: no cover - defensive runtime path
             duration = time.monotonic() - started

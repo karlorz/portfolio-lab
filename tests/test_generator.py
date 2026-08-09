@@ -351,11 +351,14 @@ class TestPredictionLabelLifecycle:
             gen.conn.close()
 
         state = json.loads((tmp_path / "ic_monitor_state.json").read_text())
-        assert state["__staged__"]["date"] == "2026-07-02"
-        equity_meta = state["__staged__"]["prediction_metadata"]["ensemble_equity"]
-        assert equity_meta["prediction_date"] == "2026-07-02"
-        assert equity_meta["prediction_field"] == "ensemble_voting.equity_bias"
-        assert equity_meta["prediction_transform"] == "identity"
+        # Per-signal staged shape (Task 2B): entries keyed by identity carry the
+        # latest market-data prediction date, not the wall-clock run date.
+        staged = state["__staged_v2__"]
+        equity = next(e for e in staged if e["signal"] == "ensemble_equity")
+        assert equity["prediction_date"] == "2026-07-02"
+        assert equity["metadata"]["prediction_date"] == "2026-07-02"
+        assert equity["metadata"]["prediction_field"] == "ensemble_voting.equity_bias"
+        assert equity["metadata"]["prediction_transform"] == "identity"
 
     def test_record_ic_data_preserves_unresolved_staged_predictions_on_same_market_date(
         self, tmp_path, monkeypatch
@@ -379,10 +382,12 @@ class TestPredictionLabelLifecycle:
             gen.conn.close()
 
         state = json.loads(state_path.read_text())
-        assert state["__staged__"] == {
-            "date": "2026-07-02",
-            "predictions": {"old_signal": 0.25},
-        }
+        # Legacy single-slot staging migrates to per-signal identities; the
+        # unresolved old cohort survives alongside the new cohort.
+        staged = {e["signal"]: e for e in state["__staged_v2__"]}
+        assert staged["old_signal"]["prediction"] == 0.25
+        assert staged["old_signal"]["prediction_date"] == "2026-07-02"
+        assert staged["ensemble_equity"]["prediction"] == 0.9
 
     def test_record_ic_data_resolves_staged_predictions_when_later_spy_row_exists(
         self, tmp_path, monkeypatch
@@ -416,7 +421,10 @@ class TestPredictionLabelLifecycle:
         assert resolved_meta["resolved_date"] == "2026-07-03"
         assert resolved_meta["target_asset"] == "SPY"
         assert resolved_meta["realized_horizon_sessions"] == 1
-        assert state["__staged__"]["date"] == "2026-07-03"
+        # New cohort staged at the latest market-data date.
+        staged = {e["signal"]: e for e in state["__staged_v2__"]}
+        assert staged["ensemble_equity"]["prediction_date"] == "2026-07-03"
+        assert staged["ensemble_equity"]["prediction"] == pytest.approx(-0.2)
 
     def test_record_ic_data_counts_realized_market_sessions(self, tmp_path, monkeypatch):
         """A multi-session label records the actual SPY session span."""

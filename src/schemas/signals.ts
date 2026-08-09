@@ -716,12 +716,17 @@ const IcDecayEvidenceFieldsSchema = z.object({
   latest_observation_metadata: z.optional(IcObservationMetadataSchema),
 });
 
-const IcDecaySignalEntrySchema = IcDecayEvidenceFieldsSchema.extend({
+export const IcDecaySignalEntrySchema = IcDecayEvidenceFieldsSchema.extend({
   ic_rolling: z.nullable(z.number()),
   ic_trend: z.enum(['stable', 'decaying', 'improving', 'unknown']),
   observations: z.number(),
   status: z.enum(['healthy', 'warning', 'critical', 'insufficient_data']),
   min_obs_for_status: z.optional(z.number().int().nonnegative()),
+  // Task 2A: control eligibility derived from complete contract alignment —
+  // never from coefficient magnitude. Additive; descriptive fields preserved.
+  control_eligible: z.optional(z.boolean()),
+  control_status: z.optional(z.enum(['eligible', 'ineligible'])),
+  control_ineligibility_reason: z.optional(z.nullable(z.string())),
 });
 
 const IcDecayEvidenceEntrySchema = IcDecayEvidenceFieldsSchema.extend({
@@ -777,6 +782,9 @@ export const IcDecaySummarySchema = z.object({
   routing_authority: z.string(),
   routing_control: z.string(),
   control_effect: z.string(),
+  // Task 2A: control-eligible subsets of the descriptive signal lists.
+  control_eligible_critical_signals: z.optional(z.array(z.string())),
+  control_eligible_warning_signals: z.optional(z.array(z.string())),
   kill_switch_level: z.optional(z.nullable(z.string())),
   signal_evidence: z.optional(z.record(z.string(), IcDecayEvidenceEntrySchema)),
 }).passthrough();

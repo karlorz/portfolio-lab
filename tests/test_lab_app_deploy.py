@@ -230,3 +230,65 @@ def test_makefile_exposes_offline_data_quality_target():
     assert ".PHONY: data-quality" in makefile
     assert "scripts/check_public_data_quality.py" in makefile
     assert "$(PYTHON_RUNTIME) scripts/check_public_data_quality.py --app-dir $(PROJECT_DIR)" in makefile
+
+
+# ── Task 1B/3B: deploy unit semantics — safe systemd kill/timeout + drain ─
+
+def test_tasker_unit_keeps_safe_kill_semantics():
+    """The deployed systemd unit keeps control-group containment and bounded
+    shutdown: never KillMode=process/none, SIGTERM first, TimeoutStopSec bounded."""
+    source = _read("scripts/deploy-lab-app.sh")
+    unit_block = source.split("cat > /etc/systemd/system/", 1)[1].split("EOF", 1)[0] if "cat > /etc/systemd/system/" in source else source
+
+    assert "KillMode=process" not in source
+    assert "KillMode=none" not in source
+    assert "Type=simple" in unit_block
+    assert "KillSignal=SIGTERM" in unit_block
+    assert "TimeoutStopSec=30" in unit_block
+    assert "Restart=always" in unit_block
+    # The service must be restarted by deploy (never --skip-service for this
+    # release: the drain + truth semantics are part of the deployed unit).
+    assert "--skip-service" in source  # flag exists for operator escape hatch
+    assert "systemctl restart" in source
+
+
+def test_service_main_installs_signal_handlers_and_drains():
+    """Service main installs SIGTERM/SIGINT and drains before exit."""
+    source = _read("src/tasker/service.py")
+
+    assert "signal.signal(signal.SIGTERM" in source
+    assert "signal.signal(signal.SIGINT" in source
+    assert "service.drain(" in source
+    assert "termination_cause=\"service_restart\"" in source
+    assert "write_status_mirrors" in source
+
+
+def test_runner_and_store_expose_named_termination_cause():
+    """Planned causes are persisted and never counted as failures."""
+    store_source = _read("src/tasker/store.py")
+    runner_source = _read("src/tasker/runner.py")
+
+    assert "termination_cause" in store_source
+    assert "PLANNED_TERMINATION_CAUSES" in store_source
+    assert "drain_active_runs" in runner_source
+    assert "termination_cause=\"service_restart\"" in runner_source or "termination_cause=termination_cause" in runner_source
+
+
+def test_health_check_exposes_publication_and_probe_exit_modes():
+    """Health producer default exit reflects completion; probe keeps severity."""
+    source = _read("src/monitor/health_check.py")
+
+    assert "--exit-mode" in source
+    assert '"publication"' in source
+    assert '"probe"' in source
+    assert "PORTFOLIO_LAB_HEALTH_EXIT_MODE" in source
+
+
+def test_generation_publication_helpers_exist():
+    """Committed mutable-data generation seams are present."""
+    source = _read("src/monitor/health_check.py")
+
+    assert "write_health_generation" in source
+    assert "commit_public_index" in source
+    assert "generation_id" in source
+    assert "producer_run_id" in source

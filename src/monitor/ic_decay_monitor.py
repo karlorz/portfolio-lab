@@ -409,9 +409,12 @@ class ICMonitor:
         # Optional v2 metadata aligned one-for-one with _data rows.  Legacy
         # state loads as explicit None entries; missing facts are never guessed.
         self._observation_metadata: Dict[str, deque] = {}
-        # Staged predictions waiting for forward-return resolution
-        # Format: {"date": "2026-05-26", "predictions": {"signal_name": value, ...}}
-        self._staged: Optional[Dict] = None
+        # Staged predictions waiting for forward-return resolution (Task 2B).
+        # Per-signal lifecycle: keyed by stable observation identity so each
+        # signal keeps its own prediction date / target / horizon and resolves
+        # independently and idempotently.
+        # entry = {signal, prediction_date, prediction, metadata, identity}
+        self._staged: Dict[str, Dict[str, Any]] = {}
 
     def record(
         self,
@@ -447,16 +450,12 @@ class ICMonitor:
     ) -> None:
         """Stage predictions for resolution on the next cron run.
 
-        Predictions are stored with a date. On the next run, resolve_staged()
-        pairs each prediction with the forward return that materialized between
-        the staged date and the current date.
-
-        Args:
-            predictions: Dict mapping signal_name → prediction value.
-            date_str: ISO date string when predictions were made.
+        Per-signal lifecycle (Task 2B): each signal is stored under a stable
+        observation identity (signal + prediction date + contract version), so
+        re-staging the same cohort is idempotent, different cohorts coexist,
+        and each signal resolves independently at its own horizon.
         """
-        metadata_by_signal: Dict[str, Dict[str, Any]] = {}
-        for signal_name in predictions:
+        for signal_name, prediction in predictions.items():
             supplied = (
                 prediction_metadata.get(signal_name)
                 if isinstance(prediction_metadata, Mapping)
@@ -471,15 +470,26 @@ class ICMonitor:
                 "intended_horizon_sessions": contract.get(
                     "intended_horizon_sessions"
                 ),
+                "target_asset": contract.get("target_asset"),
+                "contract_version": contract.get(
+                    "contract_version", IC_OBSERVATION_METADATA_VERSION
+                ),
             }
             if isinstance(supplied, Mapping):
                 derived.update(supplied)
             normalized = _normalize_observation_metadata(derived)
-            if normalized:
-                metadata_by_signal[signal_name] = normalized
-        self._staged = {"date": date_str, "predictions": dict(predictions)}
-        if metadata_by_signal:
-            self._staged["prediction_metadata"] = metadata_by_signal
+            metadata = normalized if normalized else dict(derived)
+            contract_version = str(
+                metadata.get("contract_version") or IC_OBSERVATION_METADATA_VERSION
+            )
+            identity = f"{signal_name}|{date_str}|{contract_version}"
+            self._staged[identity] = {
+                "signal": signal_name,
+                "prediction_date": date_str,
+                "prediction": prediction,
+                "metadata": metadata,
+                "identity": identity,
+            }
 
     def resolve_staged(
         self,
@@ -492,74 +502,89 @@ class ICMonitor:
     ) -> int:
         """Resolve previously staged predictions with the actual forward return.
 
-        Pairs each staged prediction with the given forward return and records
-        them via record(), then clears the staged predictions.
-
-        Args:
-            forward_return: The actual return that materialized (e.g., SPY
-                            return between staged date and now).
-
-        Returns:
-            Number of predictions resolved (0 if nothing was staged).
+        Per-signal lifecycle (Task 2B): only entries whose declared target
+        asset matches ``target_asset`` (or that declare no target) and whose
+        intended horizon has elapsed (``realized_horizon_sessions >=
+        intended_horizon_sessions``) are resolved; everything else stays
+        staged for a later run. Resolution is idempotent per identity.
         """
         if not self._staged:
             return 0
-        predictions = self._staged["predictions"]
-        staged_metadata = self._staged.get("prediction_metadata", {})
         count = 0
-        for signal_name, prediction in predictions.items():
-            if prediction is not None and np.isfinite(prediction):
-                metadata = {}
-                if isinstance(staged_metadata, Mapping):
-                    raw_metadata = staged_metadata.get(signal_name)
-                    if isinstance(raw_metadata, Mapping):
-                        metadata.update(raw_metadata)
-                metadata.setdefault("prediction_date", self._staged.get("date"))
-                resolved_metadata = dict(_OBSERVATION_CONTRACT_DEFAULTS)
-                for key, value in {
-                    "resolved_date": resolved_date,
-                    "realized_start_date": realized_start_date,
-                    "target_asset": target_asset,
-                    "realized_horizon_sessions": realized_horizon_sessions,
-                }.items():
-                    if value is not None:
-                        resolved_metadata[key] = value
-                metadata.update(resolved_metadata)
-                self.record(
-                    signal_name,
-                    float(prediction),
-                    forward_return,
-                    observation_metadata=metadata,
+        for identity, entry in list(self._staged.items()):
+            prediction = entry.get("prediction")
+            if prediction is None or not np.isfinite(prediction):
+                # Non-finite predictions never resolve; drop them rather than
+                # letting a poisoned cohort block the identity forever.
+                del self._staged[identity]
+                continue
+            metadata = dict(entry.get("metadata") or {})
+            entry_target = metadata.get("target_asset")
+            if entry_target is not None and entry_target != target_asset:
+                continue  # different sleeve; leave staged for its own return
+            try:
+                intended_horizon = (
+                    int(metadata.get("intended_horizon_sessions"))
+                    if metadata.get("intended_horizon_sessions") is not None
+                    else None
                 )
-                count += 1
-        self._staged = None
+            except (TypeError, ValueError):
+                intended_horizon = None
+            if (
+                intended_horizon is not None
+                and realized_horizon_sessions is not None
+                and realized_horizon_sessions < intended_horizon
+            ):
+                continue  # not enough sessions elapsed yet; stay staged
+
+            resolved_metadata = dict(_OBSERVATION_CONTRACT_DEFAULTS)
+            for key, value in {
+                "resolved_date": resolved_date,
+                "realized_start_date": realized_start_date,
+                "target_asset": target_asset,
+                "realized_horizon_sessions": realized_horizon_sessions,
+            }.items():
+                if value is not None:
+                    resolved_metadata[key] = value
+            metadata.update(resolved_metadata)
+            self.record(
+                entry.get("signal"),
+                float(prediction),
+                forward_return,
+                observation_metadata=metadata,
+            )
+            del self._staged[identity]
+            count += 1
         return count
 
     def has_staged_predictions(self) -> bool:
         """Check if there are unresolved staged predictions."""
-        return self._staged is not None and len(self._staged.get("predictions", {})) > 0
+        return len(self._staged) > 0
 
     def get_staged_date(self) -> Optional[str]:
-        """Return the date of staged predictions, if any."""
-        if self._staged:
-            return self._staged.get("date")
-        return None
+        """Return the earliest staged prediction date, if any."""
+        if not self._staged:
+            return None
+        dates = [
+            str(entry.get("prediction_date"))
+            for entry in self._staged.values()
+            if entry.get("prediction_date")
+        ]
+        return min(dates) if dates else None
 
     def get_staged_prediction_count(self) -> int:
         """Return the number of currently unresolved staged predictions."""
-        if not self._staged:
-            return 0
-        predictions = self._staged.get("predictions", {})
-        return len(predictions) if isinstance(predictions, dict) else 0
+        return len(self._staged)
 
     def get_staged_prediction_names(self) -> List[str]:
         """Return bounded names for the currently staged IC predictions."""
-        if not self._staged:
-            return []
-        predictions = self._staged.get("predictions", {})
-        if not isinstance(predictions, dict):
-            return []
-        return sorted(str(name) for name in predictions if str(name).strip())
+        return sorted(
+            {
+                str(entry.get("signal"))
+                for entry in self._staged.values()
+                if str(entry.get("signal") or "").strip()
+            }
+        )
 
     def compute_ic(self, signal_name: str) -> Optional[float]:
         """Compute rolling IC for a specific signal.
@@ -701,6 +726,15 @@ class ICMonitor:
                     contract.get("alignment_reason") or "evaluation_contract_missing"
                 )
 
+            # Control eligibility (Task 2A): only fully contract-aligned rows
+            # with complete v2 metadata may drive halt-authoritative IC control
+            # decisions. Descriptive status is preserved for operators.
+            control_eligible = bool(
+                metadata_complete
+                and metadata_rows
+                and declared_alignment == "aligned"
+            )
+
             if declared_alignment in {"misaligned", "ambiguous"}:
                 inference_reason = "label_alignment_mismatch"
             elif declared_alignment == "metric_mismatch":
@@ -741,6 +775,16 @@ class ICMonitor:
                 "observation_unit": "pairs",
                 "contract_version": IC_EVALUATION_CONTRACT_VERSION,
                 "evaluation_contract": public_contract,
+                # Control eligibility (Task 2A): derived strictly from complete
+                # contract alignment — never from coefficient magnitude. A row
+                # keeps its descriptive status but cannot drive halt-authoritative
+                # IC control alerts unless every observation matches the declared
+                # v2 contract (axis/kind, target/basket, horizon, field/transform).
+                "control_eligible": control_eligible,
+                "control_status": "eligible" if control_eligible else "ineligible",
+                "control_ineligibility_reason": (
+                    None if control_eligible else inference_reason
+                ),
             }
             latest_metadata = next(
                 (
@@ -772,7 +816,7 @@ class ICMonitor:
         for signal_name, data in self._data.items():
             state[signal_name] = list(data)
         if self._staged:
-            state["__staged__"] = self._staged
+            state["__staged_v2__"] = list(self._staged.values())
         if self._observation_metadata:
             state["__state_schema_version__"] = IC_STATE_SCHEMA_VERSION
             state["__observation_metadata__"] = {
@@ -799,12 +843,85 @@ class ICMonitor:
             metadata_state = state.get("__observation_metadata__", {})
             loaded_data: Dict[str, deque] = {}
             loaded_metadata: Dict[str, deque] = {}
-            loaded_staged: Optional[Dict[str, Any]] = None
+            loaded_staged: Dict[str, Dict[str, Any]] = {}
             for key, observations in state.items():
-                if key == "__staged__":
-                    if observations is not None and not isinstance(observations, Mapping):
+                if key == "__staged_v2__":
+                    if observations is not None and not isinstance(observations, (list, Mapping)):
                         raise TypeError("staged IC state must be a JSON object")
-                    loaded_staged = dict(observations) if observations else None
+                    raw_entries = (
+                        list(observations)
+                        if isinstance(observations, list)
+                        else list(observations.values())
+                        if observations
+                        else []
+                    )
+                    for entry in raw_entries:
+                        if not isinstance(entry, Mapping):
+                            continue
+                        signal = str(entry.get("signal") or "").strip()
+                        if not signal:
+                            continue
+                        identity = str(
+                            entry.get("identity")
+                            or f"{signal}|{entry.get('prediction_date')}"
+                        )
+                        loaded_staged[identity] = {
+                            "signal": signal,
+                            "prediction_date": entry.get("prediction_date"),
+                            "prediction": entry.get("prediction"),
+                            "metadata": dict(entry.get("metadata") or {}),
+                            "identity": identity,
+                        }
+                elif key == "__staged__":
+                    # Legacy single-slot staging: migrate to per-signal entries
+                    # without rewriting historical paired rows.
+                    if observations is not None and isinstance(observations, Mapping):
+                        legacy_predictions = observations.get("predictions")
+                        legacy_metadata = observations.get("prediction_metadata")
+                        legacy_date = observations.get("date")
+                        if isinstance(legacy_predictions, Mapping):
+                            for signal, value in legacy_predictions.items():
+                                signal = str(signal).strip()
+                                if not signal:
+                                    continue
+                                contract = IC_EVALUATION_CONTRACTS.get(signal, {})
+                                derived = dict(_OBSERVATION_CONTRACT_DEFAULTS)
+                                if isinstance(legacy_metadata, Mapping) and isinstance(
+                                    legacy_metadata.get(signal), Mapping
+                                ):
+                                    derived.update(legacy_metadata[signal])
+                                derived.setdefault("prediction_date", legacy_date)
+                                derived.setdefault(
+                                    "prediction_field",
+                                    contract.get("observed_prediction_field"),
+                                )
+                                derived.setdefault(
+                                    "prediction_transform",
+                                    contract.get("observed_prediction_transform"),
+                                )
+                                derived.setdefault(
+                                    "intended_horizon_sessions",
+                                    contract.get("intended_horizon_sessions"),
+                                )
+                                derived.setdefault(
+                                    "target_asset", contract.get("target_asset")
+                                )
+                                normalized = _normalize_observation_metadata(derived)
+                                metadata = normalized if normalized else derived
+                                contract_version = str(
+                                    metadata.get("contract_version")
+                                    or IC_OBSERVATION_METADATA_VERSION
+                                )
+                                identity = (
+                                    f"{signal}|{legacy_date}|{contract_version}"
+                                )
+                                loaded_staged[identity] = {
+                                    "signal": signal,
+                                    "prediction_date": legacy_date,
+                                    "prediction": value,
+                                    "metadata": metadata,
+                                    "identity": identity,
+                                }
                 elif key in {"__state_schema_version__", "__observation_metadata__"}:
                     continue
                 else:
@@ -1015,6 +1132,8 @@ def build_ic_decay_summary(
     critical: list[str] = []
     warning: list[str] = []
     insufficient: list[str] = []
+    control_eligible_critical: list[str] = []
+    control_eligible_warning: list[str] = []
     qualified_count = 0
     minimums: list[int] = []
     signal_evidence: Dict[str, Any] = {}
@@ -1025,12 +1144,17 @@ def build_ic_decay_summary(
         if not name:
             continue
         status = str(raw_row.get("status") or "").lower()
+        control_eligible = bool(raw_row.get("control_eligible"))
         if status == "critical":
             critical.append(name)
             qualified_count += 1
+            if control_eligible:
+                control_eligible_critical.append(name)
         elif status == "warning":
             warning.append(name)
             qualified_count += 1
+            if control_eligible:
+                control_eligible_warning.append(name)
         elif status == "healthy":
             qualified_count += 1
         elif status == "insufficient_data":
@@ -1083,6 +1207,10 @@ def build_ic_decay_summary(
         "critical_signals": sorted(set(critical)),
         "warning_signals": sorted(set(warning)),
         "insufficient_data_signals": sorted(set(insufficient)),
+        # Control-eligible subsets: only these may drive halt-authoritative IC
+        # control alerts. Descriptive critical/warning lists stay complete.
+        "control_eligible_critical_signals": sorted(set(control_eligible_critical)),
+        "control_eligible_warning_signals": sorted(set(control_eligible_warning)),
         "resolved_signal_count": qualified_count,
         "min_observations": min(minimums) if minimums else IC_MIN_OBS_FOR_STATUS,
         "staged_pending_predictions": _bounded_int("pending_predictions"),

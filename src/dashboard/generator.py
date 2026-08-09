@@ -105,6 +105,14 @@ def project_alternative_data_signal(alt_data_raw: Dict[str, Any]) -> Dict[str, A
             }
 
     alt_regime = alt_data_raw.get("regime")
+    # Task 2B: canonical SPY-facing value at the projection boundary — never
+    # recompute a hidden second policy in the IC monitor. The composite score
+    # is the producer's SPY-facing score; bound it to [-1, 1] for staging.
+    raw_composite = raw.get("composite_score")
+    try:
+        spy_value = max(-1.0, min(1.0, float(raw_composite))) if raw_composite is not None else None
+    except (TypeError, ValueError):
+        spy_value = None
     return {
         # Keep ``regime`` for backward compat but mark as advisory shadow so it
         # cannot be read as peer-level live regime_authority (VIX classify).
@@ -117,7 +125,8 @@ def project_alternative_data_signal(alt_data_raw: Dict[str, Any]) -> Dict[str, A
         "confidence": alt_data_raw.get("confidence"),
         "timestamp": alt_data_raw.get("timestamp"),
         "components": components,
-        "composite_score": raw.get("composite_score"),
+        "composite_score": raw_composite,
+        "spy_value": spy_value,
         "z_score": raw.get("z_score"),
         "sources_count": raw.get("sources_count"),
         "data_freshness_hours": raw.get("data_freshness_hours"),
@@ -1848,14 +1857,17 @@ class DashboardGenerator:
     def _record_ic_data(self, output: Dict) -> None:
         """Record signal predictions for IC decay monitoring.
 
-        Two-phase lifecycle:
-        1. Resolve: pair previously staged predictions with the forward
-           return that materialized since they were staged.
-        2. Stage: store current predictions for resolution next run.
+        Two-phase lifecycle (Task 2B — per-signal):
+        1. Resolve: each staged prediction is paired with the forward return of
+           its own declared target asset (SPY/GLD/TLT) once its intended
+           horizon has elapsed; other entries stay staged.
+        2. Stage: store canonical current predictions (equity/gold/duration
+           biases, alternative-data SPY-facing value, behavioral normalized
+           equity shift) for resolution next runs.
 
-        The legacy resolver uses one SPY return for all signals.  The monitor
-        now records that fact as observation metadata instead of implying the
-        label is aligned with every signal's intended target and horizon.
+        Consensus, factor rotation, and FRED are NOT staged into correlation
+        control history until their basket/outcome/metric contracts are
+        implemented; their exclusion is disclosed in the IC summary.
         Saves monitor state to disk so IC data survives across cron runs.
         """
         try:
@@ -1864,59 +1876,78 @@ class DashboardGenerator:
             monitor = ICMonitor()
             monitor.load_state()
             cursor = self.conn.cursor()
-            cursor.execute(
-                "SELECT date, close FROM prices WHERE symbol = 'SPY' "
-                "ORDER BY date DESC LIMIT 1",
-            )
-            latest_spy_row = cursor.fetchone()
-            latest_spy_date = latest_spy_row[0] if latest_spy_row else None
 
-            # Phase 1: Resolve previously staged predictions
-            if monitor.has_staged_predictions():
-                staged_date = monitor.get_staged_date()
-                if staged_date:
-                    # Compute SPY forward return from staged date to latest
+            def _latest_bar(symbol: str):
+                cursor.execute(
+                    "SELECT date, close FROM prices WHERE symbol = ? "
+                    "ORDER BY date DESC LIMIT 1",
+                    (symbol,),
+                )
+                return cursor.fetchone()
+
+            latest_spy_row = _latest_bar("SPY")
+
+            # Phase 1: Resolve previously staged predictions per target asset.
+            staged_entries = getattr(monitor, "_staged", None) or {}
+            for target_asset in ("SPY", "GLD", "TLT"):
+                latest = _latest_bar(target_asset)
+                if not latest:
+                    continue
+                latest_date, latest_close = latest
+                staged_dates = sorted(
+                    {
+                        entry.get("prediction_date")
+                        for entry in staged_entries.values()
+                        if entry.get("metadata", {}).get("target_asset")
+                        in (None, target_asset)
+                        and entry.get("prediction_date")
+                    }
+                )
+                if not staged_dates:
+                    continue
+                for staged_date in staged_dates:
                     cursor.execute(
-                        "SELECT date, close FROM prices WHERE symbol = 'SPY' "
+                        "SELECT date, close FROM prices WHERE symbol = ? "
                         "AND date >= ? ORDER BY date ASC LIMIT 1",
-                        (staged_date,),
+                        (target_asset, staged_date),
                     )
                     start_row = cursor.fetchone()
-                    end_row = latest_spy_row
-                    if start_row and end_row and start_row[0] != end_row[0]:
-                        start_price = float(start_row[1])
-                        end_price = float(end_row[1])
-                        if start_price > 0:
-                            forward_return = (end_price / start_price) - 1.0
-                            cursor.execute(
-                                "SELECT MIN(date), COUNT(*) FROM prices WHERE symbol = 'SPY' "
-                                "AND date > ? AND date <= ?",
-                                (start_row[0], end_row[0]),
-                            )
-                            realized_range_row = cursor.fetchone()
-                            realized_start_date = (
-                                str(realized_range_row[0])
-                                if realized_range_row and realized_range_row[0]
-                                else None
-                            )
-                            realized_horizon_sessions = int(
-                                realized_range_row[1] or 0
-                            )
-                            n_resolved = monitor.resolve_staged(
-                                forward_return,
-                                resolved_date=str(end_row[0]),
-                                realized_start_date=realized_start_date,
-                                target_asset="SPY",
-                                realized_horizon_sessions=realized_horizon_sessions,
-                            )
-                            logger.info(
-                                "IC decay: resolved %d staged predictions "
-                                "(%s → %s, forward return=%.4f%%)",
-                                n_resolved, staged_date, end_row[0],
-                                forward_return * 100,
-                            )
+                    if (
+                        not start_row
+                        or start_row[0] == latest_date
+                        or float(start_row[1]) <= 0
+                    ):
+                        continue
+                    start_price = float(start_row[1])
+                    forward_return = (float(latest_close) / start_price) - 1.0
+                    cursor.execute(
+                        "SELECT MIN(date), COUNT(*) FROM prices WHERE symbol = ? "
+                        "AND date > ? AND date <= ?",
+                        (target_asset, start_row[0], latest_date),
+                    )
+                    realized_range_row = cursor.fetchone()
+                    realized_start_date = (
+                        str(realized_range_row[0])
+                        if realized_range_row and realized_range_row[0]
+                        else None
+                    )
+                    realized_horizon_sessions = int(realized_range_row[1] or 0)
+                    n_resolved = monitor.resolve_staged(
+                        forward_return,
+                        resolved_date=str(latest_date),
+                        realized_start_date=realized_start_date,
+                        target_asset=target_asset,
+                        realized_horizon_sessions=realized_horizon_sessions,
+                    )
+                    if n_resolved:
+                        logger.info(
+                            "IC decay: resolved %d staged predictions "
+                            "(%s → %s %s, forward return=%.4f%%)",
+                            n_resolved, staged_date, latest_date, target_asset,
+                            forward_return * 100,
+                        )
 
-            # Phase 2: Stage current predictions for next run
+            # Phase 2: Stage canonical current predictions (per-signal upsert).
             predictions: Dict[str, float] = {}
 
             # Ensemble voter biases
@@ -1928,33 +1959,26 @@ class DashboardGenerator:
                     predictions["ensemble_gold"] = float(ensemble["gold_bias"])
                 if "duration_bias" in ensemble and ensemble["duration_bias"] is not None:
                     predictions["ensemble_duration"] = float(ensemble["duration_bias"])
-                if "weighted_consensus" in ensemble and ensemble["weighted_consensus"] is not None:
-                    predictions["ensemble_consensus"] = float(ensemble["weighted_consensus"])
 
-            # Alternative data composite score
+            # Alternative data: canonical SPY-facing value (projection boundary).
             alt = output.get("alternative_data")
-            if isinstance(alt, dict) and alt.get("composite_score") is not None:
-                predictions["alternative_data"] = float(alt["composite_score"])
+            if isinstance(alt, dict) and alt.get("spy_value") is not None:
+                predictions["alternative_data"] = float(alt["spy_value"])
 
-            # Behavioral sentiment composite
+            # Behavioral sentiment: normalized equity shift (capped ±5% → [-1, 1]).
             beh = output.get("behavioral_sentiment")
-            if isinstance(beh, dict) and beh.get("composite_score") is not None:
-                predictions["behavioral_sentiment"] = float(beh["composite_score"])
+            if isinstance(beh, dict) and beh.get("equity_shift_pct") is not None:
+                try:
+                    predictions["behavioral_sentiment"] = max(
+                        -1.0, min(1.0, float(beh["equity_shift_pct"]) / 5.0)
+                    )
+                except (TypeError, ValueError):
+                    pass
 
-            # Factor rotation signal strength
-            fr = output.get("factor_rotation")
-            if isinstance(fr, dict) and fr.get("signal_strength") is not None:
-                predictions["factor_rotation"] = float(fr["signal_strength"])
-
-            # FRED-MD macro confidence
-            fred = output.get("fred_macro")
-            if _is_predictive_fred_macro(fred):
-                predictions["fred_macro"] = float(fred["confidence"])
-
-            if predictions and latest_spy_date and not monitor.has_staged_predictions():
+            if predictions:
                 monitor.stage_predictions(
                     predictions,
-                    str(latest_spy_date),
+                    str(latest_spy_row[0]) if latest_spy_row else datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 )
 
             monitor.save_state()
@@ -6957,14 +6981,32 @@ class DashboardGenerator:
                     logger.info("Generated: %s", p)
 
             # Create a versioned public-data manifest while keeping files[] for
-            # existing dashboard consumers.
+            # existing dashboard consumers. Task 5B: content files are already
+            # in place; commit the index LAST, atomically, with generation
+            # identity so an interrupted generation never advances it.
             index = build_public_data_index(paths, public_dir=PUBLIC_DIR)
-            save_results_json(index, output_path=str(PUBLIC_DIR / "index.json"))
+            from src.monitor.health_check import commit_public_index
+
+            commit_public_index(
+                index,
+                index_path=PUBLIC_DIR / "index.json",
+                generation_id=_new_generation_id(),
+            )
             _mirror_public_data_contract_files_to_dist(PUBLIC_DIR)
         finally:
             self.close()
 
         logger.info("Dashboard generation complete")
+
+def _new_generation_id() -> str:
+    """One generation identity for the committed public-data manifest."""
+    import uuid as _uuid
+
+    return (
+        f"gen-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-"
+        f"{_uuid.uuid4().hex[:8]}"
+    )
+
 
 def refresh_graduation_dual_surfaces(
     *,
