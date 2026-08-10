@@ -381,6 +381,17 @@ def estimate_schedule_period_seconds(schedule: Any) -> Optional[float]:
     # Weekly: day-of-week constrained (e.g. ``20 4 * * 0``)
     if not _star(dow) and _star(dom):
         return float(7 * 86400)
+    # Step-hour (P3): ``*/N`` in the hour field → every N hours. Must precede
+    # the daily branch or ``0 */3 * * *`` is misread as a daily schedule.
+    if hour.startswith("*/") and hour[2:].isdigit():
+        return float(int(hour[2:]) * 3600)
+    # Fixed-hour list: ``0 0,6,12,18 * * *`` → minimum hour gap.
+    if "," in hour:
+        hours = sorted(int(x) for x in hour.split(",") if x.isdigit())
+        if len(hours) >= 2:
+            gaps = [hours[i + 1] - hours[i] for i in range(len(hours) - 1)]
+            gaps.append(24 - hours[-1] + hours[0])
+            return float(min(g for g in gaps if g > 0) * 3600)
     # Daily: specific hour(s), any day-of-month/week
     if not _star(hour) and _star(dom) and _star(dow):
         return float(86400)
