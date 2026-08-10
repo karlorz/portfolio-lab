@@ -318,7 +318,12 @@ def normalize_cron_status(value: Any) -> str:
     if status in {"disabled", "paused"}:
         return "disabled"
     # Never-run / not-yet-fired scheduled work (tasker seeds status=pending).
-    if status in {"pending", "queued", "waiting", "never_run", "not_run"}:
+    # ``blocked`` = intentional no-op under kill authority (tasker
+    # RUN_BLOCKED, src/tasker/models.py:16; INTENTIONAL_BLOCK_TASK_IDS) — a
+    # legitimate terminal state, not missing evidence. Normalized to pending
+    # so it never degrades unknown_active; heartbeat still goes overdue if a
+    # blocked job stops running entirely (real failure stays visible).
+    if status in {"pending", "queued", "waiting", "never_run", "not_run", "blocked"}:
         return "pending"
     return "unknown"
 

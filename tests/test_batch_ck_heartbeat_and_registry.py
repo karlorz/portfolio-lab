@@ -124,6 +124,40 @@ def test_summarize_backend_pending_never_run_still_ok_with_heartbeat(
     assert summary.get("heartbeat_overdue_jobs") is None
 
 
+def test_blocked_job_with_recent_run_heartbeat_ok():
+    """Eval blocked under kill halt: recent run → heartbeat ok, not unknown."""
+    now = datetime(2026, 8, 10, 6, 26, tzinfo=timezone.utc).timestamp()
+    job = {
+        "name": "portfolio-lab-eval",
+        "schedule": "20 */2 * * *",
+        "status": "blocked",
+        "enabled": True,
+        "manual_only": False,
+        "state": "scheduled",
+        "last_run": "2026-08-10T06:20:10+00:00",
+    }
+    hb = schedule_aware_last_success_heartbeat(job, now=now)
+    assert hb["heartbeat_state"] == "ok"
+    assert hb["overdue"] is False
+
+
+def test_blocked_job_stale_still_overdue():
+    """Guard: a blocked job that stops running entirely still goes overdue."""
+    now = datetime(2026, 8, 10, 6, 26, tzinfo=timezone.utc).timestamp()
+    job = {
+        "name": "portfolio-lab-eval",
+        "schedule": "20 */2 * * *",
+        "status": "blocked",
+        "enabled": True,
+        "manual_only": False,
+        "state": "scheduled",
+        "last_run": "2026-08-08T20:20:10+00:00",  # ~34h ago, beyond period+grace
+    }
+    hb = schedule_aware_last_success_heartbeat(job, now=now)
+    assert hb["heartbeat_state"] == "overdue"
+    assert hb["overdue"] is True
+
+
 def test_publish_decision_registry_dual_writes_private(tmp_path, monkeypatch):
     from src.monitor import decision_registry as dr
 

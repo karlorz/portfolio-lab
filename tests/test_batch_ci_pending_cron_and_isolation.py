@@ -13,6 +13,7 @@ def test_normalize_cron_status_preserves_pending():
     assert normalize_cron_status("queued") == "pending"
     assert normalize_cron_status("waiting") == "pending"
     assert normalize_cron_status("never_run") == "pending"
+    assert normalize_cron_status("blocked") == "pending"
     assert normalize_cron_status("success") == "ok"
     assert normalize_cron_status("mystery") == "unknown"
 
@@ -64,6 +65,56 @@ def test_summarize_backend_true_unknown_still_degrades():
     )
     assert summary["status"] == "degraded"
     assert summary.get("unknown_active_jobs") == 1
+
+
+def test_summarize_backend_blocked_job_does_not_degrade_but_unknown_still_does(
+    tmp_path, monkeypatch
+):
+    """Tasker 'blocked' (eval under kill halt) is intentional, not unknown.
+
+    Guard against over-broad fix: a genuinely unknown job in the same backend
+    must still degrade with only the real unknown counted.
+    """
+    from datetime import datetime, timezone
+
+    import src.monitor.hermes_cron as hc
+
+    monkeypatch.setattr(hc, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(hc, "PUBLIC_DATA_DIR", tmp_path)
+    now = datetime(2026, 8, 10, 6, 26, tzinfo=timezone.utc).timestamp()
+    jobs = [
+        hc.normalize_cron_job(
+            {
+                "name": "portfolio-lab-eval",
+                "schedule": "20 */2 * * *",
+                "status": "blocked",
+                "enabled": True,
+                "manual_only": False,
+                "state": "scheduled",
+                "last_run": "2026-08-10T06:20:10+00:00",
+            },
+            backend="tasker",
+            source="x",
+            now=now,
+        ),
+        hc.normalize_cron_job(
+            {
+                "name": "mystery-job",
+                "status": "mystery",
+                "enabled": True,
+                "manual_only": False,
+                "state": "scheduled",
+                "last_run": None,
+            },
+            backend="tasker",
+            source="x",
+            now=now,
+        ),
+    ]
+    summary = summarize_backend(backend="tasker", source="x", jobs=jobs)
+    assert summary["status"] == "degraded"
+    assert summary.get("unknown_active_jobs") == 1
+    assert summary.get("pending_never_run_jobs") is None
 
 
 def test_incident_write_summary_skips_pytest_public_when_private_live(
