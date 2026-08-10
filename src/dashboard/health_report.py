@@ -14,11 +14,41 @@ __all__ = [
     "build_symbol_freshness_entry",
 ]
 
-# NYSE regular-session close in America/New_York. Early-close days remain a
-# trading session in the repo calendar (the official calendar does not model
-# special hours), so they count as one completed session.
+# NYSE regular-session close in America/New_York. Early-close days (day after
+# Thanksgiving, Christmas Eve, New Year's Eve, July 3rd) close at 13:00 ET and
+# still count as one completed trading session — see is_early_close_date /
+# session_close_et (F4b).
 SESSION_CLOSE_ET = time(16, 0)
+EARLY_CLOSE_ET = time(13, 0)
 ET_TZ_NAME = "America/New_York"
+
+
+def is_early_close_date(d: date) -> bool:
+    """NYSE early-close rule model: dates that close at 13:00 ET.
+
+    Recurring rulebook early closes (applied only on trading days — callers
+    guard with the trading calendar): the day after Thanksgiving, December 24,
+    December 31, and July 3. Weekends never match. This is a model, not the
+    official announced calendar: ad-hoc early closes are not enumerated.
+    """
+    if d.weekday() >= 5:
+        return False
+    if d.month == 11:
+        # Day after Thanksgiving: the Friday after the 4th Thursday of November.
+        first = date(d.year, 11, 1)
+        fourth_thursday = first + timedelta(days=((3 - first.weekday()) % 7) + 21)
+        if d == fourth_thursday + timedelta(days=1):
+            return True
+    if d.month == 12 and d.day in (24, 31):
+        return True
+    if d.month == 7 and d.day == 3:
+        return True
+    return False
+
+
+def session_close_et(d: date) -> time:
+    """Session close time for a date: 13:00 ET on early-close days, else 16:00."""
+    return EARLY_CLOSE_ET if is_early_close_date(d) else SESSION_CLOSE_ET
 
 
 class _YearAwareNYSE:
@@ -136,7 +166,7 @@ def compute_session_freshness(
     if crypto:
         # Crypto sessions complete at day end; today's session is not yet done.
         last_expected_completed = as_of_date - timedelta(days=1)
-    elif cal.is_trading_day(as_of_date) and as_of_et.time() >= SESSION_CLOSE_ET:
+    elif cal.is_trading_day(as_of_date) and as_of_et.time() >= session_close_et(as_of_date):
         last_expected_completed = as_of_date
     else:
         last_expected_completed = cal.previous_trading_day(as_of_date)

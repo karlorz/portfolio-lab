@@ -717,6 +717,16 @@ def test_public_index_represents_missing_optional_labs_files(tmp_path: Path) -> 
     assert labs_registry["size_bytes"] is None
     assert labs_registry["sha256"] is None
     assert "labs_registry.json" not in index["files"]
+    # F4c: labs_replays.json must be disclosed (not silently absent) the same
+    # way when no replay report was published.
+    labs_replays = entries["labs_replays.json"]
+    assert labs_replays["category"] == "labs"
+    assert labs_replays["schema_version"] == "labs-replay/v1"
+    assert labs_replays["status"] == "missing"
+    assert labs_replays["validation_status"] == "missing"
+    assert labs_replays["size_bytes"] is None
+    assert labs_replays["sha256"] is None
+    assert "labs_replays.json" not in index["files"]
 
 
 def test_public_index_records_incident_lifecycle_contract_when_missing(tmp_path: Path) -> None:

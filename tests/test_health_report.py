@@ -173,3 +173,56 @@ def test_compute_session_freshness_holiday_uses_official_calendar():
     assert result["last_expected_completed_session"] == "2026-07-02"
     assert result["missed_market_sessions"] == 0
     assert result["status"] == "fresh"
+
+
+# ── F4b: NYSE early-close sessions (13:00 ET close) ──────────────────────
+
+def test_compute_session_freshness_early_close_day_completes_at_13h():
+    """On an early-close day the session is complete after 13:00 ET.
+
+    2026-12-24 (Thu) is a trading day with a 13:00 ET close; a run at
+    14:30 ET with the previous day's bar must count Dec 24 as a completed,
+    missed session (stale), not pretend the session is still open.
+    """
+    from datetime import datetime, timezone
+    from src.dashboard.health_report import compute_session_freshness
+
+    result = compute_session_freshness(
+        last_bar_date="2026-12-23",
+        as_of=datetime(2026, 12, 24, 19, 30, tzinfo=timezone.utc),  # 14:30 ET
+    )
+    assert result["last_expected_completed_session"] == "2026-12-24"
+    assert result["missed_market_sessions"] == 1
+    assert result["status"] == "stale"
+
+
+def test_compute_session_freshness_early_close_before_13h_not_due():
+    """Before the 13:00 ET early close, today's session is not yet complete."""
+    from datetime import datetime, timezone
+    from src.dashboard.health_report import compute_session_freshness
+
+    result = compute_session_freshness(
+        last_bar_date="2026-12-23",
+        as_of=datetime(2026, 12, 24, 16, 0, tzinfo=timezone.utc),  # 11:00 ET
+    )
+    assert result["last_expected_completed_session"] == "2026-12-23"
+    assert result["missed_market_sessions"] == 0
+    assert result["status"] == "fresh"
+
+
+def test_early_close_date_rules_and_session_close():
+    """F4b rule model: recurring NYSE early-close dates close at 13:00 ET."""
+    from datetime import date, time
+    from src.dashboard.health_report import (
+        is_early_close_date,
+        session_close_et,
+    )
+
+    assert is_early_close_date(date(2026, 11, 27)) is True  # day after Thanksgiving
+    assert is_early_close_date(date(2026, 12, 24)) is True  # Christmas Eve
+    assert is_early_close_date(date(2026, 12, 31)) is True  # New Year's Eve
+    assert is_early_close_date(date(2025, 7, 3)) is True    # July 3 (trading day)
+    assert is_early_close_date(date(2026, 8, 10)) is False  # regular Monday
+    assert is_early_close_date(date(2026, 11, 26)) is False  # Thanksgiving (holiday)
+    assert session_close_et(date(2026, 12, 24)) == time(13, 0)
+    assert session_close_et(date(2026, 8, 10)) == time(16, 0)
