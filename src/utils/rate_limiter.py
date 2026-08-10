@@ -63,7 +63,7 @@ def retry_on_api_error(
 
         @retry_on_api_error()
         def fetch_data(symbol):
-            return yf.Ticker(symbol).history(period="1d")
+            return yf.Ticker(symbol).history(period="1d", timeout=10)
     """
     return retry(
         retry=retry_if_exception_type(retryable_exceptions),
@@ -118,7 +118,7 @@ def rate_limited(api: str = "yahoo"):
 
         @rate_limited("yahoo")
         def fetch_yahoo(symbol):
-            return yf.Ticker(symbol).history()
+            return yf.Ticker(symbol).history(timeout=10)
     """
     limiter_map = {
         "yahoo": _yahoo_limiter,

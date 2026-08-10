@@ -46,6 +46,11 @@ CACHE_TTL_HOURS = 4
 CBOE_SKEW_URL = "https://www.cboe.com/us/indices/dashboard/skew/"
 CBOE_VIX_URL = "https://www.cboe.com/tradable_products/vix/"
 
+# Explicit network bound for every yfinance history() call (G6): a stalled
+# provider must surface TimeoutError (→ documented fallback) instead of
+# hanging the scheduled job past its deadline.
+YF_FETCH_TIMEOUT_SECONDS = 10
+
 # Sentiment thresholds
 EXTREME_FEAR_THRESHOLD = -2.0
 EXTREME_GREED_THRESHOLD = 2.0
@@ -240,7 +245,7 @@ class BehavioralSentimentFetcher:
                 return value
 
         try:
-            hist = yf.Ticker(ticker).history(period=period)
+            hist = yf.Ticker(ticker).history(period=period, timeout=YF_FETCH_TIMEOUT_SECONDS)
             if not hist.empty and "Close" in hist.columns:
                 closes = hist["Close"].dropna()
                 if not closes.empty:
@@ -280,7 +285,7 @@ class BehavioralSentimentFetcher:
                 return value
 
         try:
-            hist = yf.Ticker("^CPCE").history(period="5d")
+            hist = yf.Ticker("^CPCE").history(period="5d", timeout=YF_FETCH_TIMEOUT_SECONDS)
             if not hist.empty and "Close" in hist.columns:
                 closes = hist["Close"].dropna().tolist()
                 if closes:
