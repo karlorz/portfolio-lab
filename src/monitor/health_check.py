@@ -1432,8 +1432,11 @@ def publish_health_alerts_json(report: dict[str, Any] | None = None) -> Path | N
         "health_generated_at": health_payload.get("generated_at")
         or health_payload.get("timestamp"),
     }
+    # F3: the health job fully rebuilds the alerts surface from disk SSOT each
+    # run (not a patch over a stale artifact), so the provenance stamp is a
+    # full_generate with the HEAD-derived sha — operators can attribute it.
     try:
-        output = _stamp_generator_git_sha(output, status="partial_patch")
+        output = _stamp_generator_git_sha(output, status="full_generate")
     except Exception:  # noqa: BLE001
         pass
     try:

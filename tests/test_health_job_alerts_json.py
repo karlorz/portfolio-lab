@@ -83,3 +83,42 @@ def test_publish_health_alerts_json_reuses_canonical_kill_alert(
     ]
     assert kill_alerts == [build_kill_switch_alert(kill_payload)]
     assert json.loads((data / "alerts.json").read_text(encoding="utf-8")) == payload
+
+
+def test_publish_health_alerts_json_stamps_full_generate_provenance(
+    tmp_path, monkeypatch
+):
+    """F3: a fresh health-job alerts.json carries a real generator_git_sha.
+
+    The health job fully rebuilds the alerts surface from SSOT each run, so
+    the stamp must be ``full_generate`` (not ``partial_patch``) with a non-null
+    HEAD-derived SHA — otherwise operators cannot attribute the artifact.
+    """
+    from src.monitor.health_check import publish_health_alerts_json
+
+    public = tmp_path / "public"
+    data = tmp_path / "data"
+    public.mkdir()
+    data.mkdir()
+    report = {
+        "status": "ok",
+        "generated_at": "2026-07-22T12:00:00+00:00",
+        "timestamp": "2026-07-22T12:00:00+00:00",
+        "checks": {},
+    }
+    monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", public)
+    monkeypatch.setattr("src.monitor.health_check.DATA_DIR", data)
+    monkeypatch.setattr(
+        "src.monitor.health_check.HEALTH_PATH", data / "health.json"
+    )
+
+    out = publish_health_alerts_json(report)
+
+    assert out is not None
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    sha = payload.get("generator_git_sha")
+    assert sha, "generator_git_sha must be non-null on a fresh health-job write"
+    assert payload.get("generator_git_sha_status") == "full_generate"
+    assert payload.get("last_full_generator_git_sha") == sha
+    assert len(sha) == 12
+    assert json.loads((data / "alerts.json").read_text(encoding="utf-8"))["generator_git_sha"] == sha
