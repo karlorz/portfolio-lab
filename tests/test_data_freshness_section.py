@@ -40,6 +40,40 @@ def test_build_data_freshness_section_empty() -> None:
     conn.close()
 
 
+def test_crypto_symbols_match_ts_universe() -> None:
+    """F4a: Python CRYPTO_SYMBOLS mirrors the canonical TS universe.
+
+    src/data/symbol_universe.ts is the canonical source; the Python freshness
+    mirror (data_freshness_section.CRYPTO_SYMBOLS) must not drift. Drives the
+    real shipped extraction script (scripts/ts_crypto_symbols.ts) via bun.
+    """
+    import json
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    import pytest
+
+    from src.dashboard.data_freshness_section import CRYPTO_SYMBOLS
+
+    bun = shutil.which("bun")
+    if bun is None:
+        pytest.skip("bun not available for TS universe extraction")
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [bun, "run", "scripts/ts_crypto_symbols.ts"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    ts_symbols = set(json.loads(result.stdout.strip().splitlines()[-1]))
+    assert ts_symbols == set(CRYPTO_SYMBOLS), (
+        f"drift: Python mirror {sorted(CRYPTO_SYMBOLS)} != TS canonical {sorted(ts_symbols)}"
+    )
+
+
 def test_build_data_freshness_section_single_symbol() -> None:
     conn = _make_conn()
     _insert(conn, "SPY", FRIDAY)
