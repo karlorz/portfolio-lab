@@ -41,8 +41,8 @@
 # App build — DISABLED: no web server consumers found (2026-05-17 audit)
 # 31 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab build >> /root/projects/portfolio-lab/data/build.log 2>&1
 
-# Position sync — hourly at :41 (DISABLED: owned by tasker portfolio-lab-position-sync)
-# 41 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab sync >> /root/projects/portfolio-lab/data/position_sync.log 2>&1
+# Position sync — every 2h at :55 (DISABLED: owned by tasker portfolio-lab-position-sync, schedule "55 */2 * * *")
+# 55 */2 * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab sync >> /root/projects/portfolio-lab/data/position_sync.log 2>&1
 
 # Overlay signals — every 20 minutes (DISABLED: owned by tasker portfolio-lab-overlay-signals)
 # 3,23,43 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab overlay-signals >> /root/projects/portfolio-lab/data/overlay_signals.log 2>&1

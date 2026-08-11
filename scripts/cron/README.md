@@ -38,7 +38,7 @@ Every script sources `cron_guard.sh` which provides 4-layer defense:
 | `portfolio-lab-research-agent.sh` | `make research` | 300s | 5 min | `25 */2 * * *` |
 | `portfolio-lab-wiki-sync.sh` | `make wiki-sync` | 120s | 2 min | `35 */2 * * *` |
 | `portfolio-lab-autonomous-agent.sh` | *(Hermes no-agent)* | 300s | 60s¹ | `40 */2 * * *` |
-| `portfolio-lab-position-sync.sh` | `make sync` | 60s | 60s² | `55 */2 * * *` |
+| *(tasker-owned — script removed 2026-08-11)* `portfolio-lab-position-sync` | `make sync` | 60s | ~1s² | `55 */2 * * *` |
 | `portfolio-lab-app-build.sh` | `make build` | 600s | — | **PAUSED**³ |
 
 ¹ Pre-flight checks only. LLM dispatch removed post-incident; the configurator enforces no-agent mode.
