@@ -118,6 +118,7 @@ from src.dashboard.sections_alerts import _AlertsSectionsMixin
 from src.dashboard.sections_overlay import _OverlaySectionsMixin
 from src.dashboard.sections_stacking import _StackingSectionsMixin
 from src.dashboard.sections_graduation import _GraduationExplainabilitySectionsMixin
+from src.dashboard.sections_regime_gate import _RegimeGateStateMixin
 
 # Legacy flat keys (pre seven-component producer) → panel component names
 
@@ -266,7 +267,7 @@ def _resolve_hermes_cron_jobs_path() -> Optional[Path]:
     )
 
 
-class DashboardGenerator(_EnsembleSectionsMixin, _HedgeSectionsMixin, _RegimeAuthorityMixin, _AlertsSectionsMixin, _OverlaySectionsMixin, _StackingSectionsMixin, _GraduationExplainabilitySectionsMixin):
+class DashboardGenerator(_EnsembleSectionsMixin, _HedgeSectionsMixin, _RegimeAuthorityMixin, _AlertsSectionsMixin, _OverlaySectionsMixin, _StackingSectionsMixin, _GraduationExplainabilitySectionsMixin, _RegimeGateStateMixin):
     # SPC monitor instance (class-level to persist across runs)
     _spc_monitor = None
 
@@ -1825,180 +1826,8 @@ class DashboardGenerator(_EnsembleSectionsMixin, _HedgeSectionsMixin, _RegimeAut
             _log_signal_error("turnover_validator", e)
             return None
 
-    @staticmethod
-    def _normalize_gate_regime_name(regime: str | None) -> str:
-        """Map live lowercase regimes to RegimeGate uppercase labels."""
-        if not regime:
-            return "NORMAL"
-        name = str(regime).strip()
-        if not name:
-            return "NORMAL"
-        # Gate rules use NORMAL/HIGH_VOL/…; live classify uses normal/vol_spike/…
-        upper = name.upper()
-        aliases = {
-            "VOL_SPIKE": "HIGH_VOL",
-            "VOLSPIKE": "HIGH_VOL",
-            "HIGHVOL": "HIGH_VOL",
-            "LOWVOL": "LOW_VOL",
-            "LOW_VOL": "LOW_VOL",
-            "HIGH_VOL": "HIGH_VOL",
-            "CRISIS": "CRISIS",
-            "RECOVERY": "RECOVERY",
-            "NORMAL": "NORMAL",
-        }
-        return aliases.get(upper.replace("-", "_"), upper.replace("-", "_"))
 
-    def _resolve_current_regime_for_gate(self) -> tuple[str, float, str]:
-        """Resolve current regime + confidence for gate SSOT (not live order authority).
 
-        Preference order:
-        1. Live VIX/trend classifier via open DB connection (same as signals path)
-        2. ensemble_voting on public/data signals.json
-        3. regime_classifier_state.json (adaptive path; may be stale)
-        4. Explicit default with disclosed source
-        """
-        # 1) Live VIX path when generator has a DB connection
-        conn = getattr(self, "conn", None)
-        if conn is not None:
-            try:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT close FROM prices WHERE symbol = '^VIX' ORDER BY date DESC LIMIT 1"
-                )
-                vix_row = cursor.fetchone()
-                vix_level = float(vix_row[0]) if vix_row and vix_row[0] is not None else None
-                cursor.execute(
-                    "SELECT regime FROM regime_log ORDER BY detected_at DESC LIMIT 1"
-                )
-                trend_row = cursor.fetchone()
-                trend_regime = trend_row[0] if trend_row else "normal"
-                live = classify_vix_regime(vix_level, trend_regime)
-                conf = 0.7 if vix_level is not None else 0.55
-                return self._normalize_gate_regime_name(live), conf, "classify_vix_regime"
-            except Exception as exc:  # noqa: BLE001 — fall through to file SSOT
-                logger.debug("regime_state: VIX path failed: %s", exc)
-
-        # 2) Ensemble voting block on published signals
-        for signals_path in (PUBLIC_DIR / "signals.json", DATA_DIR / "signals.json"):
-            try:
-                if not signals_path.exists():
-                    continue
-                with open(signals_path) as f:
-                    signals = json.load(f)
-                ensemble = signals.get("ensemble_voting") or {}
-                if ensemble.get("regime") is not None:
-                    conf_raw = ensemble.get("regime_confidence", 0.5)
-                    try:
-                        conf = float(conf_raw)
-                    except (TypeError, ValueError):
-                        conf = 0.5
-                    return (
-                        self._normalize_gate_regime_name(str(ensemble.get("regime"))),
-                        conf,
-                        "ensemble_voting",
-                    )
-                regime_block = signals.get("regime") or {}
-                if isinstance(regime_block, dict) and regime_block.get("regime"):
-                    return (
-                        self._normalize_gate_regime_name(str(regime_block.get("regime"))),
-                        0.6,
-                        "signals.regime",
-                    )
-            except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
-                logger.debug("regime_state: signals read failed (%s): %s", signals_path, exc)
-
-        # 3) Adaptive classifier state (legacy parallel file)
-        clf_path = DATA_DIR / "regime_classifier_state.json"
-        try:
-            if clf_path.exists():
-                with open(clf_path) as f:
-                    clf = json.load(f)
-                regime = clf.get("current_regime") or clf.get("regime")
-                if regime:
-                    conf_raw = clf.get("confidence", 0.5)
-                    if isinstance(clf.get("history"), list) and clf["history"]:
-                        last = clf["history"][-1]
-                        if isinstance(last, dict) and last.get("confidence") is not None:
-                            conf_raw = last.get("confidence")
-                    try:
-                        conf = float(conf_raw)
-                    except (TypeError, ValueError):
-                        conf = 0.5
-                    return (
-                        self._normalize_gate_regime_name(str(regime)),
-                        conf,
-                        "regime_classifier_state",
-                    )
-        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
-            logger.debug("regime_state: classifier read failed: %s", exc)
-
-        return "NORMAL", 0.5, "default_missing_state"
-
-    def _persist_regime_state(
-        self,
-        regime_name: str,
-        confidence: float,
-        source: str,
-    ) -> Path:
-        """Write DATA_DIR/regime_state.json SSOT for gate + graduation consumers."""
-        regime_file = DATA_DIR / "regime_state.json"
-        history: list = []
-        previous = None
-        if regime_file.exists():
-            try:
-                with open(regime_file) as f:
-                    prior = json.load(f)
-                previous = prior.get("regime")
-                hist = prior.get("history")
-                if isinstance(hist, list):
-                    history = hist[-49:]  # keep last 50 after append
-            except (OSError, json.JSONDecodeError, TypeError, ValueError):
-                history = []
-
-        now_iso = datetime.now().isoformat()
-        history.append(
-            {
-                "timestamp": now_iso,
-                "regime": regime_name,
-                "confidence": confidence,
-                "source": source,
-            }
-        )
-        payload = {
-            "regime": regime_name,
-            "confidence": confidence,
-            "source": source,
-            "previous_regime": previous,
-            "updated_at": now_iso,
-            "schema_version": "regime-state/v1",
-            "note": (
-                "SSOT for dashboard regime_gate + graduation regime_coverage; "
-                "not live order-routing authority (see regime_authority / target_allocations)."
-            ),
-            "history": history,
-        }
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        save_results_json(payload, output_path=str(regime_file))
-
-        # Append one regime_log line so graduation coverage can accumulate over cycles
-        try:
-            log_path = DATA_DIR / "regime_log.json"
-            with open(log_path, "a", encoding="utf-8") as logf:
-                logf.write(
-                    json.dumps(
-                        {
-                            "regime": regime_name,
-                            "confidence": confidence,
-                            "source": source,
-                            "detected_at": now_iso,
-                        }
-                    )
-                    + "\n"
-                )
-        except OSError as exc:
-            logger.debug("regime_state: regime_log append failed: %s", exc)
-
-        return regime_file
 
     def generate_regime_gate_json(self) -> Optional[Path]:
         """Generate regime gate status data for dashboard."""

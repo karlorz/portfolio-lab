@@ -63,7 +63,7 @@ def test_a2_paper_trading_summary_history_path():
             ],
         }
     }
-    with patch("src.dashboard.sections_graduation.DATA_DIR", __import__("pathlib").Path("/nonexistent")):
+    with patch("src.dashboard.generator.DATA_DIR", __import__("pathlib").Path("/nonexistent")):
         result = _GraduationExplainabilitySectionsMixin._paper_trading_summary_for_dashboard(
             state, days_elapsed=30, days_required=60
         )
@@ -87,7 +87,7 @@ def test_a2_paper_trading_summary_perf_file_override(tmp_path):
         json.dumps(perf)
     )
     state = {"portfolio": {"cash": 0.0, "positions": {}, "history": []}}
-    with patch("src.dashboard.sections_graduation.DATA_DIR", tmp_path):
+    with patch("src.dashboard.generator.DATA_DIR", tmp_path):
         result = _GraduationExplainabilitySectionsMixin._paper_trading_summary_for_dashboard(
             state, days_elapsed=None, days_required="60"
         )
@@ -114,7 +114,7 @@ def test_a2_paper_trading_summary_deferred_today_fallback():
 
     with patch("src.dashboard.generator.datetime", FakeDateTime):
         with patch(
-            "src.dashboard.sections_graduation.DATA_DIR",
+            "src.dashboard.generator.DATA_DIR",
             __import__("pathlib").Path("/nonexistent"),
         ):
             result = _GraduationExplainabilitySectionsMixin._paper_trading_summary_for_dashboard(
@@ -181,7 +181,7 @@ def test_a2_load_risk_decomposition_live_path_fallback(tmp_path):
             return cls._value.astimezone(tz)
 
     with patch("src.dashboard.generator.datetime", FakeDateTime):
-        with patch("src.dashboard.sections_graduation.PUBLIC_DIR", tmp_path):
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
             # decompose_portfolio is lazily imported inside the method; force
             # the fallback by making the import fail.
             import builtins

@@ -20,9 +20,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from src.paths import BASE_ALLOCATION, DATA_DIR, PUBLIC_DATA_DIR
-
-PUBLIC_DIR = PUBLIC_DATA_DIR  # same alias as generator.py (src.paths has no PUBLIC_DIR)
+from src.paths import BASE_ALLOCATION
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +87,7 @@ class _GraduationExplainabilitySectionsMixin:
                 current_value = float(end_val)
 
         # Prefer authoritative paper-trading-performance metrics when present.
+        from src.dashboard.generator import DATA_DIR  # lazy (patch seams)
         start_value_files = sorted(DATA_DIR.glob("paper-trading-performance-*.json"))
         if start_value_files:
             try:
@@ -196,6 +195,7 @@ class _GraduationExplainabilitySectionsMixin:
         the section is not left missing (None → optional unavailable forever).
         """
         from src.dashboard import generator as _generator  # lazy (patch seams)
+        from src.dashboard.generator import PUBLIC_DIR  # lazy (patch seams)
         now_ts = _generator.datetime.now(_generator.timezone.utc).isoformat()
 
         def _stamp(payload: Dict[str, Any]) -> Dict[str, Any]:

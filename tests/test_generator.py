@@ -3673,22 +3673,24 @@ class TestHealthJSONEdgeCases:
         assert data["system_status"] == "degraded"
         gen.conn.close()
 
-    def test_stale_data_warning_threshold(self, tmp_path):
-        """stale_count > 5 with market_lag in the stale band (2–3d) → warning.
+    def test_stale_data_warning_threshold(self, tmp_path, monkeypatch):
+        """stale_count > 5 with market_lag in the stale band (1d) → warning.
 
         Symbols must not be ``critical`` freshness (market_lag > 3): any
         critical data_freshness child rolls the artifact SLO to critical and
-        elevates system_status. Use lag=3 relative to the freshest row so
-        status is ``stale`` only.
+        elevates system_status. Lag 1 calendar day behind the freshest row
+        and pin the freshness clock to 22:00Z on the freshest date so the
+        session-aware classifier deterministically reports exactly 1 missed
+        session (stale, not critical) at any wall-clock time (GAP-1).
         """
         gen, db_path = _make_generator(tmp_path)
         # _make_generator seeds SPY/GLD/TLT/QQQ through today; lag stale rows
-        # 3 calendar days behind that cross-section (stale, not critical).
+        # 1 calendar day behind that cross-section (stale, not critical).
         conn = sqlite3.connect(str(db_path))
         cursor = conn.execute("SELECT MAX(date) FROM prices")
         latest = cursor.fetchone()[0]
         latest_dt = datetime.strptime(latest, "%Y-%m-%d")
-        stale_date = (latest_dt - timedelta(days=3)).strftime("%Y-%m-%d")
+        stale_date = (latest_dt - timedelta(days=1)).strftime("%Y-%m-%d")
         for i in range(6):
             conn.execute(
                 "INSERT INTO prices VALUES (?, ?, ?)",
@@ -3696,6 +3698,28 @@ class TestHealthJSONEdgeCases:
             )
         conn.commit()
         conn.close()
+
+        class FakeFreshnessClock(datetime):
+            """Pin freshness evaluation to 22:00Z on the freshest bar's date."""
+
+            _value = datetime(
+                latest_dt.year,
+                latest_dt.month,
+                latest_dt.day,
+                22,
+                0,
+                tzinfo=timezone.utc,
+            )
+
+            @classmethod
+            def now(cls, tz=None):
+                if tz is None:
+                    return cls._value.replace(tzinfo=None)
+                return cls._value.astimezone(tz)
+
+        monkeypatch.setattr(
+            "src.dashboard.data_freshness_section.datetime", FakeFreshnessClock
+        )
         with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
             with patch("src.dashboard.generator.DATA_DIR", tmp_path):
                 path = gen.generate_health_json()
