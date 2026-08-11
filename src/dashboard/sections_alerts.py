@@ -10,6 +10,8 @@ call-time lazy import (circular-import safe).
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.utils import safe_get
+
 
 class _AlertsSectionsMixin:
     @staticmethod
