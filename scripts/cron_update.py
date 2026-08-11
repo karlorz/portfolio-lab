@@ -4,7 +4,7 @@ import json
 import os
 import sys
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Use cron_compat for backend discovery
@@ -18,6 +18,18 @@ except ImportError:
     _default_backend = os.environ.get("CRON_BACKEND", "manual")
 
 _METADATA_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# Makefile STATUS vocabulary → tasker vocabulary (G9, 2026-08-11): the make
+# chain stamps ok/oom/timeout/error into cron_status.json; the tasker mirror
+# writes tasker vocabulary (success/blocked). Map at this write boundary only
+# — do NOT change Makefile STATUS strings (make exit-code semantics depend on
+# them). Unknown values pass through unchanged.
+_STATUS_VOCAB_MAP = {
+    "ok": "success",
+    "oom": "error",
+    "timeout": "timeout",
+    "error": "error",
+}
 
 
 def _parse_metadata(args):
@@ -37,7 +49,7 @@ def main():
         sys.exit(1)
 
     job_name = sys.argv[1]
-    status = sys.argv[2]
+    status = _STATUS_VOCAB_MAP.get(sys.argv[2], sys.argv[2])
     duration = float(sys.argv[3])
     backend = sys.argv[4] if len(sys.argv) > 4 else _default_backend
     metadata = _parse_metadata(sys.argv[5:])
@@ -63,7 +75,7 @@ def main():
     if not backend_explicit and file_backend in {"tasker", "crontab", "hermes"}:
         backend = file_backend
 
-    now = datetime.now().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     found = False
     for job in data["jobs"]:
         if job["name"] == job_name:
