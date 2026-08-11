@@ -14,6 +14,7 @@ Authority: never touches target_allocations / order_router.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -195,3 +196,70 @@ def test_restamp_signals_json_nested_health_lag(tmp_path) -> None:
     # Restamp must not re-darken Caddy (0600); atomic write leaves 0o644
     mode = signals_path.stat().st_mode & 0o777
     assert mode == 0o644 or (mode & 0o004), oct(mode)
+
+
+def test_restamp_monitor_health_advances_embedded_timestamp(tmp_path) -> None:
+    """NG4 (2026-08-11 session B): mirror-lag restamp rewrites of the
+    monitor-schema report must advance the embedded timestamp.
+
+    Live artifact between :00/:30 health runs: the soft-mirror restamp
+    rewrote data/health.json (fresh mtime + ssot_reconciled_at) while the
+    embedded timestamp stayed at report generation time — mtime-based
+    freshness overstated content by up to 30 min. Any SSOT re-projection
+    write must advance timestamp; the fix lives at the shared patch seam
+    (_patch_monitor_report_kill_open).
+    """
+    from src.monitor.repo_public_mirror_lag import restamp_mirror_lag_on_health_documents
+
+    health_path = tmp_path / "health.json"
+    old_ts = "2026-08-11T07:00:05+00:00"
+    health_path.write_text(
+        json.dumps(
+            {
+                "status": "critical",
+                "timestamp": old_ts,
+                # SLI keys present as in production monitor health.json
+                # (stamped by earlier mirror-lag restamps).
+                "repo_public_mirror_lagging_count": 0,
+                "repo_public_mirror_total": 33,
+                "repo_public_mirror_lag_status": "ok",
+                "checks": {
+                    "kill_switch": {
+                        "status": "critical",
+                        "enabled": True,
+                        "level": "halt",
+                        "reason": "unresolved_incident:ic_decay",
+                    },
+                    "open_incidents": {
+                        "status": "critical",
+                        "open_count": 1,
+                        "incident_id": "8115a9c1-0000-0000-0000-000000000000",
+                    },
+                    "data_freshness": {"signals": {"status": "fresh"}},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    live = {
+        "lagging_count": 0,
+        "total": 33,
+        "lagging_paths": [],
+        "source": "/var/www/x",
+        "dest": str(tmp_path),
+        "ok": True,
+    }
+    result = restamp_mirror_lag_on_health_documents(
+        paths=[health_path],
+        lag_summary=live,
+    )
+    assert any("health" in r for r in result["restamped"])
+    out = json.loads(health_path.read_text(encoding="utf-8"))
+    new_ts = out.get("timestamp")
+    assert new_ts and new_ts != old_ts
+    new_dt = datetime.fromisoformat(new_ts)
+    assert abs((datetime.now(timezone.utc) - new_dt).total_seconds()) < 300
+    # Kill/open projection + SSOT disclosure stamps still present.
+    assert out["checks"]["kill_switch"]["enabled"] is True
+    assert out.get("ssot_reconciled_at")

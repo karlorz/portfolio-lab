@@ -207,6 +207,17 @@ def _patch_monitor_report_kill_open(
     payload["status"] = _compute_system_status(rollup_checks, circuit)
     payload["ssot_reconciled_at"] = datetime.now(timezone.utc).isoformat()
     payload["ssot_reconcile_source"] = "disk_incidents_kill"
+    # NG4 (2026-08-11 session B): any SSOT re-projection rewrites the file, so
+    # the embedded timestamp must advance with it. Observed: the mirror-lag
+    # restamp (repo_public_mirror_lag.restamp_mirror_lag_on_health_documents)
+    # force-patches kill/open on data/health.json between :00/:30 health runs
+    # and rewrote the file with a fresh mtime + ssot_reconciled_at while the
+    # embedded timestamp stayed at report generation time — content looked
+    # fresh by mtime while being up to 30 min old. Restamp here, at the shared
+    # patch seam (reconcile + fan-out + mirror-lag restamp), so every
+    # re-projection write advances timestamp. Reconcile re-stamps right after;
+    # harmless (same value, microseconds apart).
+    payload["timestamp"] = datetime.now(timezone.utc).isoformat()
     return True
 
 
@@ -337,13 +348,14 @@ def reconcile_monitor_health_with_disk_ssot(
     if not _patch_monitor_report_kill_open(payload, disk_kill, disk_open):
         return False
 
-    # NG2 (2026-08-11): this rewrite refreshes the file mtime, so the embedded
-    # timestamp must advance with it. Observed failure: dashboard regen
-    # reconciled data/health.json at 01:17Z but left the embedded timestamp at
-    # 00:00:14Z — content looked fresh by mtime while being ~77min old. The
-    # status and kill/open projection ARE recomputed here, so restamping is
-    # honest; ssot_reconciled_at/source already disclose the partial rebuild.
-    payload["timestamp"] = datetime.now(timezone.utc).isoformat()
+    # NG2/NG4 (2026-08-11): this rewrite refreshes the file mtime, so the
+    # embedded timestamp must advance with it — restamped inside
+    # _patch_monitor_report_kill_open (shared seam also used by the
+    # mirror-lag restamp). Observed failure: dashboard regen reconciled
+    # data/health.json at 01:17Z but left the embedded timestamp at 00:00:14Z
+    # — content looked fresh by mtime while being ~77min old. The status and
+    # kill/open projection ARE recomputed here, so restamping is honest;
+    # ssot_reconciled_at/source already disclose the partial rebuild.
 
     try:
         _atomic_write_json_path(path, payload)
