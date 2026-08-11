@@ -398,6 +398,7 @@ pick_pm() {
       return
     fi
     if command -v npm >/dev/null 2>&1; then
+      # bun canonical (CLAUDE.md/CI) — package-lock.json intentionally absent; npm install would regenerate
       echo "npm"
       return
     fi
