@@ -29,6 +29,7 @@ from collections import defaultdict
 logger = logging.getLogger(__name__)
 
 from .base_agent import BaseAgent, AgentType, AgentObservation, AgentAction, AgentMessage, MessageType
+from src.paths import BASE_ALLOCATION
 
 # FPILOT inference-time planning (numpy-only, no ML deps)
 _INFERENCE_TIME_PLANNING = os.environ.get("INFERENCE_TIME_PLANNING", "0") == "1"
@@ -212,8 +213,10 @@ class ControllerAgent(BaseAgent):
     PRICE_HISTORY_LEN = 20
     N_ASSETS = 4  # SPY, GLD, TLT, Cash
     
-    # Default allocation (46/38/16/0 baseline)
-    DEFAULT_ALLOCATION = np.array([0.46, 0.38, 0.16, 0.0])
+    # Default allocation (46/38/16/0 baseline) — derived from src.paths.BASE_ALLOCATION (single SoT)
+    DEFAULT_ALLOCATION = np.array(
+        [BASE_ALLOCATION["SPY"], BASE_ALLOCATION["GLD"], BASE_ALLOCATION["TLT"], 0.0]
+    )
     
     def __init__(
         self,
