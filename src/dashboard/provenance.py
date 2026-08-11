@@ -12,7 +12,6 @@ import json
 import re
 import shutil
 import hashlib
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -152,7 +151,11 @@ _BUG_EXCEPTIONS = (ValueError, TypeError)
 
 def _attach_signal_metadata(output: Dict, *, generated_at: str | None = None) -> Dict:
     """Attach dashboard-level generation timestamps to a signals payload."""
-    timestamp = generated_at or datetime.now(timezone.utc).isoformat()
+    # Resolve datetime via the generator module: tests freeze time by patching
+    # ``src.dashboard.generator.datetime`` (FakeDateTime pattern).
+    from src.dashboard import generator as _generator
+
+    timestamp = generated_at or _generator.datetime.now(_generator.timezone.utc).isoformat()
     enriched = dict(output)
     enriched["generated_at"] = timestamp
     enriched.setdefault("timestamp", timestamp)
@@ -412,7 +415,10 @@ def finalize_dual_write_provenance_after_sync(
 
 def _finalize_signal_metadata(output: Dict, *, finalized_at: str | None = None) -> Dict:
     """Stamp final artifact metadata after all signal sections are assembled."""
-    timestamp = finalized_at or datetime.now(timezone.utc).isoformat()
+    # Resolve datetime via the generator module (FakeDateTime patch pattern).
+    from src.dashboard import generator as _generator
+
+    timestamp = finalized_at or _generator.datetime.now(_generator.timezone.utc).isoformat()
     finalized = dict(output)
     finalized["generated_at"] = timestamp
     finalized["timestamp"] = timestamp
