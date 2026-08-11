@@ -365,9 +365,9 @@ class ControllerAgent(BaseAgent):
 
             # Get current weights from observation
             current_weights = np.array([
-                obs.current_weights.get('SPY', 0.46),
-                obs.current_weights.get('GLD', 0.38),
-                obs.current_weights.get('TLT', 0.16),
+                obs.current_weights.get('SPY', BASE_ALLOCATION["SPY"]),
+                obs.current_weights.get('GLD', BASE_ALLOCATION["GLD"]),
+                obs.current_weights.get('TLT', BASE_ALLOCATION["TLT"]),
                 obs.current_weights.get('CASH', 0.0),
             ])
 
@@ -500,9 +500,9 @@ class ControllerAgent(BaseAgent):
         # Portfolio state
         # Current weights
         current_weights = np.array([
-            obs.current_weights.get('SPY', 0.46),
-            obs.current_weights.get('GLD', 0.38),
-            obs.current_weights.get('TLT', 0.16),
+            obs.current_weights.get('SPY', BASE_ALLOCATION["SPY"]),
+            obs.current_weights.get('GLD', BASE_ALLOCATION["GLD"]),
+            obs.current_weights.get('TLT', BASE_ALLOCATION["TLT"]),
             obs.current_weights.get('CASH', 0.0)
         ])
         features.extend(current_weights)

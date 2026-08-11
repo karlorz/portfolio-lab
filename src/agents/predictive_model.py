@@ -20,6 +20,8 @@ import numpy as np
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 
+from src.paths import BASE_ALLOCATION
+
 RandomStateInput = Optional[int | np.random.Generator]
 
 
@@ -353,8 +355,10 @@ class TrajectoryOptimizer:
         self.n_iterations = n_iterations
         self._rng = _resolve_rng(random_state)
 
-        # Default allocation weights
-        self.default_weights = np.array([0.46, 0.38, 0.16, 0.0])
+        # Default allocation weights (champion 46/38/16 from src.paths BASE_ALLOCATION)
+        self.default_weights = np.array(
+            [BASE_ALLOCATION["SPY"], BASE_ALLOCATION["GLD"], BASE_ALLOCATION["TLT"], 0.0]
+        )
         if n_assets != 4:
             self.default_weights = np.array([1.0 / n_assets] * n_assets)
 
