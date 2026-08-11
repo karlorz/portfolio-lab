@@ -28,9 +28,12 @@ OUTPUT_PATH = DATA_DIR / "rebalance_health.json"
 # rewrites of the same fill events (wiki-sync rewrites the orders tail daily
 # with file date = write day). They accumulated unboundedly (~1/day; live
 # 79 files, 73 flagged snapshot rewrites) and inflated the raw forensic
-# history (raw=116 vs 5 canonical execution days). Retention cap: prune
-# daily snapshots older than this window on generate(); canonical execution
-# days live in historical_orders/* + the dedupe, never in these snapshots.
+# history (raw=116 vs 5 canonical execution days). Retention: prune daily
+# snapshots past this window on generate(), canonical-preserving — a file is
+# pruned only when its execution date is still covered by remaining entries
+# (historical_orders/* or retained daily snapshots); for an uncovered date
+# the NEWEST carrier is kept (2026-06-11 existed only in a snapshot).
+# Never touches historical_orders/.
 DAILY_SNAPSHOT_RETENTION_DAYS = 14
 
 
