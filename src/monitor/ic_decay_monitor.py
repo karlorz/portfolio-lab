@@ -34,6 +34,7 @@ IC_TREND_WINDOW : int
 import json
 import os
 from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
@@ -586,6 +587,77 @@ class ICMonitor:
             }
         )
 
+    def staged_observation_counts(self) -> Dict[str, int]:
+        """Per-signal count of currently staged v2 observations."""
+        counts: Dict[str, int] = {}
+        for entry in self._staged.values():
+            signal = str(entry.get("signal") or "").strip()
+            if signal:
+                counts[signal] = counts.get(signal, 0) + 1
+        return counts
+
+    def rebaseline_trigger_state(self) -> Dict[str, Any]:
+        """Re-review trigger for incident 8115a9c1 (operator-approved 2026-08-11).
+
+        Due when any signal accumulates ``min_obs_for_status`` staged v2
+        observations — the point at which a re-baseline (or a resolution
+        decision) can be evidence-based rather than noise-driven. Purely
+        informational: never raises alerts or touches the kill switch.
+        """
+        counts = self.staged_observation_counts()
+        max_staged = max(counts.values(), default=0)
+        return {
+            "due": max_staged >= self.min_obs_for_status,
+            "threshold": self.min_obs_for_status,
+            "max_staged_observations": max_staged,
+            "staged_observations_per_signal": dict(sorted(counts.items())),
+            "criterion": "max_staged_observations >= min_obs_for_status",
+        }
+
+    def rebaseline(self, archive_path: Optional[Path] = None) -> Path:
+        """Archive the current staging epoch and start a fresh accumulation epoch.
+
+        Operator-approved 2026-08-11 (incident 8115a9c1, Option B): re-anchors
+        IC measurement at the current v2-contract point so the next report
+        measures only observations accumulated from here. The prior epoch —
+        staged rows, resolved pairs, and observation metadata — is snapshotted
+        to a dated archive file before the monitor state is cleared; nothing is
+        lost. This method only re-arms measurement; it does not touch the kill
+        switch, thresholds, or the incident (all operator-gated).
+        """
+        if archive_path is None:
+            archive_dir = DATA_DIR / "ic_rebaseline_archives"
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            archive_path = archive_dir / (
+                "ic_epoch_archive_"
+                + datetime.now(timezone.utc)
+                .isoformat(timespec="seconds")
+                .replace(":", "-")
+                + ".json"
+            )
+        archive_path = Path(archive_path)
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+        snapshot = {
+            "schema": "ic-rebaseline-archive/v1",
+            "archived_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "incident_id": "8115a9c1-a167-4da7-9832-673617dc7de3",
+            "staged": list(self._staged.values()),
+            "observations": {
+                signal: list(rows) for signal, rows in self._data.items()
+            },
+            "observation_metadata": {
+                signal: list(rows)
+                for signal, rows in self._observation_metadata.items()
+            },
+        }
+        with open(archive_path, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f, indent=2)
+        self._staged.clear()
+        self._data.clear()
+        self._observation_metadata.clear()
+        logger.info("IC monitor re-baselined: epoch archived to %s", archive_path)
+        return archive_path
+
     def compute_ic(self, signal_name: str) -> Optional[float]:
         """Compute rolling IC for a specific signal.
 
@@ -1069,6 +1141,19 @@ def compute_ic_decay_report() -> Dict[str, Any]:
     pending = monitor.get_staged_prediction_count()
     get_staged_names = getattr(monitor, "get_staged_prediction_names", None)
     staged_prediction_names = get_staged_names() if callable(get_staged_names) else []
+    # Operator-approved re-baseline trigger (incident 8115a9c1, 2026-08-11):
+    # informational re-review signal, never an alert. getattr fallback keeps
+    # lightweight fakes compatible.
+    get_trigger = getattr(monitor, "rebaseline_trigger_state", None)
+    if callable(get_trigger):
+        trigger = get_trigger()
+    else:
+        trigger = {
+            "due": False,
+            "threshold": IC_MIN_OBS_FOR_STATUS,
+            "max_staged_observations": 0,
+            "staged_observations_per_signal": {},
+        }
     if signals:
         statuses = [row.get("status") for row in signals.values()]
         if any(status == "critical" for status in statuses):
@@ -1105,6 +1190,12 @@ def compute_ic_decay_report() -> Dict[str, Any]:
         "staged_date": monitor.get_staged_date(),
         "label_horizon": "SPY close-to-close forward return from staged market-data date to latest available SPY row",
         "advisory_factor_half_life": advisory_factor_half_life_table(),
+        "staged_observations_per_signal": trigger[
+            "staged_observations_per_signal"
+        ],
+        "rebaseline_due": trigger["due"],
+        "rebaseline_threshold": trigger["threshold"],
+        "max_staged_observations": trigger["max_staged_observations"],
     }
 
 
@@ -1202,6 +1293,16 @@ def build_ic_decay_summary(
     else:
         staged_signal_names = []
 
+    staged_counts = source.get("staged_observations_per_signal")
+    if isinstance(staged_counts, Mapping):
+        bounded_staged_counts = {
+            str(name).strip(): max(0, int(count))
+            for name, count in staged_counts.items()
+            if str(name).strip()
+        }
+    else:
+        bounded_staged_counts = {}
+
     summary: Dict[str, Any] = {
         "status": str(source.get("status") or "unknown"),
         "critical_signals": sorted(set(critical)),
@@ -1219,6 +1320,14 @@ def build_ic_decay_summary(
         "staged_pending_scope": str(
             source.get("pending_scope") or "ic_staged_date_window"
         ),
+        # Re-baseline trigger (operator-approved 2026-08-11): bounded per-signal
+        # staged counts + due flag; informational, never an alert.
+        "staged_observations_per_signal": bounded_staged_counts,
+        "rebaseline_due": bool(source.get("rebaseline_due")),
+        "rebaseline_threshold": (
+            _bounded_int("rebaseline_threshold") or IC_MIN_OBS_FOR_STATUS
+        ),
+        "max_staged_observations": _bounded_int("max_staged_observations"),
         "historical_unlabeled_rows": _bounded_int("pending_rows"),
         "historical_unlabeled_dates": _bounded_int("pending_dates"),
         "historical_unlabeled_oldest_date": source.get("oldest_unresolved_date"),

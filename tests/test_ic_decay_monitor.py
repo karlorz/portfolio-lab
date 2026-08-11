@@ -850,3 +850,139 @@ def test_behavioral_five_session_horizon_waits_for_sessions():
         realized_horizon_sessions=5,
     )
     assert n == 1
+
+
+class TestRebaselineAndTrigger:
+    """Operator-approved re-baseline machinery (incident 8115a9c1, 2026-08-11).
+
+    Option A (hold) was approved; Option B (re-baseline) is implemented and
+    armed: ``rebaseline()`` archives the current staging epoch and starts a
+    fresh accumulation epoch; ``rebaseline_trigger_state()`` reports when any
+    signal has accumulated ``min_obs_for_status`` staged v2 observations —
+    the evidence-based re-review point. The halt itself is untouched by these
+    methods.
+    """
+
+    def test_rebaseline_archives_full_epoch_and_starts_fresh(self, tmp_path):
+        monitor = ICMonitor()
+        monitor.stage_predictions(
+            {"ensemble_equity": 0.3, "ensemble_gold": -0.1}, "2026-08-10"
+        )
+        monitor.record("ensemble_equity", 0.3, 0.01)
+        monitor.record("ensemble_gold", -0.1, -0.005)
+        assert monitor.get_staged_prediction_count() == 2
+
+        archive_path = monitor.rebaseline(archive_path=tmp_path / "epoch.json")
+
+        # Archive snapshot preserves the prior epoch losslessly.
+        snapshot = json.loads(archive_path.read_text(encoding="utf-8"))
+        assert snapshot["schema"] == "ic-rebaseline-archive/v1"
+        staged_identities = {
+            entry["identity"] for entry in snapshot["staged"]
+        }
+        assert staged_identities == {
+            "ensemble_equity|2026-08-10|ic-observation-metadata/v2",
+            "ensemble_gold|2026-08-10|ic-observation-metadata/v2",
+        }
+        assert snapshot["observations"]["ensemble_equity"] == [[0.3, 0.01]]
+        assert snapshot["observations"]["ensemble_gold"] == [[-0.1, -0.005]]
+        assert "ensemble_equity" in snapshot["observation_metadata"]
+
+        # Measurement restarts from a fresh epoch.
+        assert monitor.get_staged_prediction_count() == 0
+        assert monitor.staged_observation_counts() == {}
+        assert monitor.compute_decay_report() == {}
+
+    def test_rebaseline_epoch_persists_across_save_and_load(self, tmp_path):
+        monitor = ICMonitor()
+        monitor.stage_predictions({"ensemble_equity": 0.3}, "2026-08-10")
+        monitor.rebaseline(archive_path=tmp_path / "epoch.json")
+        state_path = tmp_path / "state.json"
+        monitor.save_state(state_path)
+
+        reloaded = ICMonitor()
+        reloaded.load_state(state_path)
+        assert reloaded.get_staged_prediction_count() == 0
+        assert reloaded.staged_observation_counts() == {}
+        assert reloaded.compute_decay_report() == {}
+
+    def test_rebaseline_default_archive_path_is_dated(self, tmp_path, monkeypatch):
+        from src.monitor import ic_decay_monitor as icm
+
+        monkeypatch.setattr(icm, "DATA_DIR", tmp_path)
+        monitor = ICMonitor()
+        monitor.stage_predictions({"ensemble_equity": 0.3}, "2026-08-10")
+        archive_path = monitor.rebaseline()
+        assert archive_path.exists()
+        assert archive_path.parent == tmp_path / "ic_rebaseline_archives"
+        snapshot = json.loads(archive_path.read_text(encoding="utf-8"))
+        assert len(snapshot["staged"]) == 1
+
+    def test_rebaseline_trigger_state_below_threshold(self):
+        monitor = ICMonitor()
+        monitor.stage_predictions({"ensemble_equity": 0.3}, "2026-08-10")
+        state = monitor.rebaseline_trigger_state()
+        assert state["due"] is False
+        assert state["threshold"] == 20
+        assert state["max_staged_observations"] == 1
+        assert state["staged_observations_per_signal"] == {"ensemble_equity": 1}
+
+    def test_rebaseline_trigger_due_at_threshold(self):
+        monitor = ICMonitor()
+        for i in range(20):
+            monitor.stage_predictions(
+                {"ensemble_equity": 0.1 * i}, f"2026-07-{i + 1:02d}"
+            )
+        state = monitor.rebaseline_trigger_state()
+        assert state["due"] is True
+        assert state["max_staged_observations"] == 20
+        assert state["staged_observations_per_signal"] == {"ensemble_equity": 20}
+
+    def test_compute_ic_decay_report_exposes_rebaseline_trigger(self, tmp_path, monkeypatch):
+        from src.monitor import ic_decay_monitor as icm
+
+        monkeypatch.setattr(
+            icm, "_signal_prediction_backlog",
+            lambda db_path=None: {
+                "pending_rows": 0,
+                "pending_dates": 0,
+                "oldest_unresolved_date": None,
+                "total_predictions": 0,
+                "resolved_predictions": 0,
+                "pending_semantics": "test",
+            },
+        )
+        state_path = tmp_path / "ic_state.json"
+        monkeypatch.setattr(icm, "IC_STATE_PATH", state_path)
+        monitor = icm.ICMonitor()
+        monitor.stage_predictions({"ensemble_equity": 0.3}, "2026-08-10")
+        monitor.save_state(state_path)
+
+        report = icm.compute_ic_decay_report()
+        assert report["rebaseline_due"] is False
+        assert report["rebaseline_threshold"] == 20
+        assert report["max_staged_observations"] == 1
+        assert report["staged_observations_per_signal"] == {"ensemble_equity": 1}
+
+    def test_ic_summary_projects_rebaseline_trigger_fields(self):
+        report = {
+            "status": "no_data",
+            "signals": {},
+            "pending_predictions": 21,
+            "pending_scope": "ic_staged_date_window",
+            "staged_prediction_names": ["ensemble_equity"],
+            "staged_observations_per_signal": {"ensemble_equity": 21},
+            "rebaseline_due": True,
+            "rebaseline_threshold": 20,
+            "max_staged_observations": 21,
+            "pending_rows": 0,
+            "pending_rows_scope": "historical_db_unlabeled_rows",
+            "pending_dates": 0,
+            "oldest_unresolved_date": None,
+            "staged_date": "2026-08-01",
+        }
+        summary = build_ic_decay_summary(report)
+        assert summary["rebaseline_due"] is True
+        assert summary["rebaseline_threshold"] == 20
+        assert summary["max_staged_observations"] == 21
+        assert summary["staged_observations_per_signal"] == {"ensemble_equity": 21}
