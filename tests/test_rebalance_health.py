@@ -1067,3 +1067,42 @@ class TestBatchDRRecentOrdersDailySummary:
         assert entry["summary_file_date"] == "2026-07-20"
         assert entry.get("snapshot_rewrite") is True
         assert entry.get("snapshot_rewrite_lag_days") == 9
+
+class TestPruneDailySnapshots:
+    """G6 (2026-08-11 session B): daily snapshot retention cap."""
+
+    def test_prunes_only_old_daily_snapshots(self, tmp_path: Path) -> None:
+        from src.monitor.rebalance_health import _prune_daily_snapshot_files
+
+        (tmp_path / "order-history-2026-05-25.json").write_text("{}")
+        (tmp_path / "order-history-2026-07-01.json").write_text("{}")
+        (tmp_path / "order-history-2026-08-10.json").write_text("{}")
+        (tmp_path / "order-history-2026-08-11.json").write_text("{}")
+        (tmp_path / "notes.json").write_text("{}")
+        legacy = tmp_path / "historical_orders"
+        legacy.mkdir()
+        (legacy / "order_history_20260511_143008_x.json").write_text("{}")
+
+        pruned = _prune_daily_snapshot_files(
+            tmp_path,
+            now=datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc),
+        )
+
+        assert pruned == 2  # 05-25 and 07-01 older than 14 days
+        assert (tmp_path / "order-history-2026-08-10.json").exists()
+        assert (tmp_path / "order-history-2026-08-11.json").exists()
+        assert (tmp_path / "notes.json").exists()
+        assert (legacy / "order_history_20260511_143008_x.json").exists()
+
+    def test_never_touches_malformed_or_missing_dir(self, tmp_path: Path) -> None:
+        from src.monitor.rebalance_health import _prune_daily_snapshot_files
+
+        (tmp_path / "order-history-not-a-date.json").write_text("{}")
+        pruned = _prune_daily_snapshot_files(
+            tmp_path,
+            now=datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc),
+        )
+        assert pruned == 0
+        assert (tmp_path / "order-history-not-a-date.json").exists()
+        # Missing directory is a no-op, never raises.
+        assert _prune_daily_snapshot_files(tmp_path / "nope") == 0

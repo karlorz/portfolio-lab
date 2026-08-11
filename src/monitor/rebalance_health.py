@@ -8,6 +8,7 @@ Reads order history files and SmartRebalanceData to produce execution timeline.
 
 import json
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,48 @@ logger = logging.getLogger(__name__)
 
 ORDERS_DIR = DATA_DIR / "historical_orders"
 OUTPUT_PATH = DATA_DIR / "rebalance_health.json"
+
+# G6 (2026-08-11 session B): daily order-history-*.json files are snapshot
+# rewrites of the same fill events (wiki-sync rewrites the orders tail daily
+# with file date = write day). They accumulated unboundedly (~1/day; live
+# 79 files, 73 flagged snapshot rewrites) and inflated the raw forensic
+# history (raw=116 vs 5 canonical execution days). Retention cap: prune
+# daily snapshots older than this window on generate(); canonical execution
+# days live in historical_orders/* + the dedupe, never in these snapshots.
+DAILY_SNAPSHOT_RETENTION_DAYS = 14
+
+
+def _prune_daily_snapshot_files(
+    daily_dir: Path, *, now: datetime | None = None
+) -> int:
+    """Prune order-history-YYYY-MM-DD.json snapshots older than retention.
+
+    Best-effort: only files matching the daily snapshot pattern are ever
+    touched (never historical_orders/ or other payloads). Returns the number
+    of files pruned. ``now`` is injectable for deterministic tests.
+    """
+    if daily_dir is None or not daily_dir.is_dir():
+        return 0
+    ref = now if now is not None else datetime.now(timezone.utc)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=timezone.utc)
+    pruned = 0
+    for path in sorted(daily_dir.glob("order-history-*.json")):
+        stem = path.stem  # order-history-YYYY-MM-DD
+        try:
+            day = datetime.strptime(stem[len("order-history-"):], "%Y-%m-%d")
+        except (ValueError, IndexError):
+            continue  # pattern-matched but malformed — never touch
+        day = day.replace(tzinfo=timezone.utc)
+        if (ref - day).days > DAILY_SNAPSHOT_RETENTION_DAYS:
+            try:
+                path.unlink()
+                pruned += 1
+            except OSError as exc:
+                logger.warning("daily snapshot prune failed for %s: %s", path, exc)
+    if pruned:
+        logger.info("rebalance daily snapshot prune removed %d file(s)", pruned)
+    return pruned
 
 
 def _parse_order_file(path: Path) -> dict[str, Any] | None:
@@ -238,6 +281,15 @@ def generate() -> dict[str, Any]:
             if entry:
                 history.append(entry)
 
+    # G6: retention cap on daily snapshot rewrites (unbounded ~1/day growth
+    # inflated raw_history_entries vs canonical days). Never mutate fixture
+    # trees under pytest; prune failures never block generation.
+    try:
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            _prune_daily_snapshot_files(daily_dir)
+    except Exception as exc:  # noqa: BLE001 — retention is best-effort
+        logger.warning("rebalance daily snapshot prune skipped: %s", exc)
+
     # Sort by timestamp
     history.sort(key=lambda e: e["timestamp"])
     canonical_history = _dedupe_canonical_history(history)
@@ -364,10 +416,13 @@ def generate() -> dict[str, Any]:
         "canonical_order_history_source": _canonical_source_label(history),
         "snapshot_rewrite_files": snapshot_rewrites,
         "snapshot_rewrite_policy": (
-            "schedule_uses_order_event_timestamp; file date is write day only"
+            "schedule_uses_order_event_timestamp; file date is write day only; "
+            f"daily snapshot retention {DAILY_SNAPSHOT_RETENTION_DAYS} days "
+            "(older order-history-*.json pruned on generate)"
         ),
         "execution_timeline_policy": (
-            "canonical_event_day; raw rewrites forensic only"
+            "canonical_event_day; raw rewrites forensic only; "
+            f"daily snapshot retention {DAILY_SNAPSHOT_RETENTION_DAYS} days"
         ),
         "market_data_consistency": _generate_market_data_consistency(),
         "alpaca_feed_entitlement": _generate_alpaca_feed_entitlement(),

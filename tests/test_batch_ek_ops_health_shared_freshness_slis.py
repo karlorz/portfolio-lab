@@ -101,3 +101,61 @@ def test_ops_report_timeline_unknown_without_panel(tmp_path, monkeypatch) -> Non
     assert report["repo_public_mirror_lag_status"] == "ok"
     assert report["rebalance_execution_timeline_status"] == "unknown"
     assert report["rebalance_execution_timeline"]["source"] == "missing"
+
+
+def test_ops_report_timeline_ok_when_rewrites_within_retention(
+    tmp_path, monkeypatch
+) -> None:
+    """G6 re-policy: bounded forensic retention must not flag rewrite_inflated.
+
+    Live pre-fix state: raw=116 rewrites=73 vs 5 canonical days flagged the
+    intended daily-snapshot retention forever. With the producer cap (14
+    days) the SLI flags only when rewrite files exceed 2× the window.
+    """
+    data = tmp_path / "data"
+    public = tmp_path / "public"
+    data.mkdir()
+    public.mkdir()
+
+    (data / "rebalance_health.json").write_text(
+        json.dumps(
+            {
+                "canonical_execution_days": 5,
+                "total_executions": 5,
+                "raw_history_entries": 51,
+                "snapshot_rewrite_files": 12,
+                "execution_timeline_policy": (
+                    "canonical_event_day; raw rewrites forensic only; "
+                    "daily snapshot retention 14 days"
+                ),
+                "generated": "2026-08-11T10:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "src.monitor.health_check.DATA_DIR", data, raising=False
+    )
+    monkeypatch.setattr(
+        "src.monitor.health_check.PUBLIC_DATA_DIR", public, raising=False
+    )
+    monkeypatch.setattr(
+        "src.monitor.repo_public_mirror_lag.summarize_repo_public_mirror_lag",
+        lambda **kwargs: {
+            "lagging_count": 0,
+            "total": 33,
+            "lagging_paths": [],
+            "ok": True,
+        },
+    )
+
+    report = attach_shared_freshness_slis_to_ops_report(
+        {"status": "ok", "service": "portfolio-lab"},
+        data_dir=data,
+    )
+
+    assert report["rebalance_execution_timeline_status"] == "ok"
+    assert report["rebalance_snapshot_rewrite_files"] == 12
+    assert report["rebalance_raw_history_entries"] == 51
+    assert "unique=5" in (report.get("rebalance_execution_timeline_badge") or "")

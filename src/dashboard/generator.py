@@ -1026,17 +1026,15 @@ def project_execution_timeline_onto_health(
     ) or rebalance_health.get("snapshot_rewrite_policy")
 
     inflated = False
-    if (
-        unique_days is not None
-        and raw_entries is not None
-        and unique_days > 0
-        and raw_entries >= int(rewrite_inflate_min_raw)
-        and raw_entries >= unique_days * float(rewrite_inflate_ratio)
-    ):
-        inflated = True
-    elif rewrite_files >= int(rewrite_inflate_min_raw) and (
-        unique_days is not None and rewrite_files > unique_days
-    ):
+    # G6 (2026-08-11 session B): re-policy — raw snapshot rewrites are
+    # forensic-only and bounded by the producer retention cap (14 days of
+    # daily order-history-*.json; see rebalance_health.py). The old ratio
+    # test (raw >= unique × 2 / rewrites > unique) flagged the intended
+    # retention forever (live: raw=116 rewrites=73 vs 5 canonical days).
+    # Flag only when rewrite files exceed twice the retention window — i.e.
+    # the prune failed and raw history is growing unboundedly again.
+    REWRITE_RETENTION_MAX = 2 * 14  # 2 × rebalance_health.DAILY_SNAPSHOT_RETENTION_DAYS
+    if rewrite_files > REWRITE_RETENTION_MAX:
         inflated = True
 
     if inflated:
