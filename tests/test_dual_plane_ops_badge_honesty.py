@@ -99,6 +99,105 @@ def test_quality_only_all_unhealthy_never_creates_ops_critical_status(
     assert alerts[0]["zero_healthy_sources"] is True
 
 
+# --- G7 (2026-08-11 session B): worst-wins system_status rollup assertion ---
+
+
+def test_enforce_worst_wins_kill_halt_never_masked_by_healthy_system_status() -> None:
+    """Public system_status must equal worst(ops, kill_switch, open_incidents).
+
+    Regression for 09:05:41Z: public payload served system_status=healthy
+    while kill halt + open incident were critical.
+    """
+    from src.monitor import health_check as hc
+
+    payload = {
+        "system_status": "healthy",
+        "ops_health_status": "ok",
+        "kill_switch": {"enabled": True, "level": "halt", "status": "critical"},
+        "open_incidents": {"open_count": 1, "status": "critical"},
+    }
+    result = hc.enforce_worst_wins_system_status(payload)
+    assert result == "critical"
+    assert payload["system_status"] == "critical"
+    assert "worst_wins" in payload.get("system_status_rollup", "")
+
+
+def test_enforce_worst_wins_ops_critical_with_clear_disk_ssot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ops critical must surface even when disk kill SSOT is clear.
+
+    Prior behavior: with ssot_clear the elevation branch was skipped, so a
+    critical monitor report left public system_status=healthy — the G7
+    split-brain. The worst-wins assertion is the final word after every
+    demotion/elevation branch in the ops merge.
+    """
+    from src.monitor import health_check as hc
+
+    data = tmp_path / "data"
+    public = tmp_path / "public"
+    data.mkdir()
+    public.mkdir()
+    _write_clear_kill_ssot(data)
+    monkeypatch.setattr(hc, "DATA_DIR", data)
+    monkeypatch.setattr(
+        hc,
+        "_project_mirror_lag_onto_dashboard_health",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(hc, "load_graduation_cb_ssot", lambda *args, **kwargs: None)
+
+    health = _green_ops_health(_thin_signal_health(tmp_path))
+    report = {
+        "status": "critical",
+        "timestamp": "2026-07-25T07:16:41+00:00",
+        "checks": {
+            "kill_switch": {"enabled": False, "status": "ok"},
+            "open_incidents": {"open_count": 0, "status": "ok"},
+        },
+        "scope": "operational_readiness",
+    }
+
+    result = hc.apply_ops_monitor_to_dashboard_health(
+        health, report, data_dir=data, public_dir=public
+    )
+
+    assert result["ops_health_status"] == "critical"
+    assert result["system_status"] == "critical", (
+        "worst-wins assertion must elevate system_status for critical ops "
+        "even when disk kill SSOT is clear"
+    )
+
+
+def test_enforce_worst_wins_warning_kill_elevates_to_warning() -> None:
+    """A non-halt (restrict/warning) kill elevates system_status to warning."""
+    from src.monitor import health_check as hc
+
+    payload = {
+        "system_status": "healthy",
+        "ops_health_status": "ok",
+        "kill_switch": {"enabled": True, "level": "restrict", "status": "warning"},
+        "open_incidents": {"open_count": 0, "status": "ok"},
+    }
+    assert hc.enforce_worst_wins_system_status(payload) == "warning"
+    assert payload["system_status"] == "warning"
+
+
+def test_enforce_worst_wins_never_demotes() -> None:
+    """The assertion elevates only; a critical badge stays critical on heal."""
+    from src.monitor import health_check as hc
+
+    payload = {
+        "system_status": "critical",
+        "ops_health_status": "ok",
+        "kill_switch": {"enabled": False, "status": "ok"},
+        "open_incidents": {"open_count": 0, "status": "ok"},
+    }
+    assert hc.enforce_worst_wins_system_status(payload) == "critical"
+    assert "system_status_rollup" not in payload
+
+
+
 def _write_clear_kill_ssot(data_dir: Path) -> None:
     """Seed disk kill_switch.json + incidents.json in clear (off / 0) state."""
     (data_dir / "kill_switch.json").write_text(

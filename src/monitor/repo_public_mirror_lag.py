@@ -600,6 +600,25 @@ def restamp_mirror_lag_on_health_documents(
             ):
                 updated["status"] = status_before_kill_patch
 
+        # G7 (2026-08-11 session B): worst-wins rollup assertion. The kill/open
+        # force-patch above re-projects disk authority onto dashboard-schema
+        # docs, so system_status must be re-elevated to match — otherwise a
+        # restamp can leave the public payload serving system_status=healthy
+        # while kill halt / open incident are critical (observed 09:05:41Z).
+        if "system_status" in updated:
+            try:
+                from src.monitor.health_check import (
+                    enforce_worst_wins_system_status,
+                )
+
+                enforce_worst_wins_system_status(updated)
+            except Exception as exc:  # noqa: BLE001 — never block lag restamp
+                logger.warning(
+                    "restamp worst-wins system_status assertion skipped for %s: %s",
+                    path,
+                    exc,
+                )
+
         try:
             _atomic_write_json_doc(path, updated)
             result["restamped"].append(str(path.name))

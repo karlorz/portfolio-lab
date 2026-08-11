@@ -111,6 +111,47 @@ def _elevate_public_system_status(current: Any, ops_status: str) -> str:
     return cur if cur else "healthy"
 
 
+def enforce_worst_wins_system_status(payload: dict[str, Any]) -> str:
+    """G7 (2026-08-11 session B): one rollup assertion for dashboard system_status.
+
+    Public ``system_status`` must equal ``worst(ops_health_status,
+    kill_switch, open_incidents)`` on every write. Elevates only (never
+    demotes — the worst dimension must surface even when a writer set a
+    milder value), then stamps provenance so operators can see the seam
+    applied. Mirrors ``elevate_system_status_for_kill`` semantics so a halt
+    can never be masked by a milder rollup (observed 09:05:41Z: public
+    payload served system_status=healthy while kill halt + open incident
+    critical).
+    """
+    if not isinstance(payload, dict):
+        return "healthy"
+    current = str(payload.get("system_status") or "healthy")
+    ops_status = str(payload.get("ops_health_status") or "ok")
+    elevated = _elevate_public_system_status(current, ops_status)
+    kill = (
+        payload.get("kill_switch")
+        if isinstance(payload.get("kill_switch"), dict)
+        else {}
+    )
+    open_inc = (
+        payload.get("open_incidents")
+        if isinstance(payload.get("open_incidents"), dict)
+        else {}
+    )
+    try:
+        from src.dashboard.kill_authority import elevate_system_status_for_kill
+
+        elevated = elevate_system_status_for_kill(elevated, kill, open_inc)
+    except ImportError:
+        pass
+    if elevated != current:
+        payload["system_status"] = elevated
+        payload["system_status_rollup"] = (
+            "worst_wins:ops_health_status,kill_switch,open_incidents"
+        )
+    return elevated
+
+
 def _is_monitor_health_report(payload: dict[str, Any]) -> bool:
     """True for monitor schema (status + checks), not dashboard system_status JSON."""
     if not isinstance(payload.get("checks"), dict):
@@ -631,6 +672,9 @@ def apply_ops_monitor_to_dashboard_health(
         data_dir=data_dir, public_dir=public_dir
     )
     if not report:
+        # G7: even without a monitor report, never serve a payload whose
+        # system_status understates its own kill/open fields.
+        enforce_worst_wins_system_status(health_data)
         return health_data
 
     projected = _project_public_kill_fields(report)
@@ -766,6 +810,12 @@ def apply_ops_monitor_to_dashboard_health(
         project_graduation_cb_onto_report(health_data, data_dir=root, ssot=ssot)
     except Exception as exc:  # noqa: BLE001 — never block ops merge on CB SLI
         logger.warning("dashboard graduation CB projection failed: %s", exc)
+
+    # G7 (2026-08-11 session B): worst-wins rollup assertion — the final word
+    # on system_status after every demotion/elevation branch above, so the
+    # public badge can never understate ops / kill / open-incident severity
+    # (observed: 09:05:41Z public system_status=healthy while halt active).
+    enforce_worst_wins_system_status(health_data)
 
     return health_data
 
