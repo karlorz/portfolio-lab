@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 from src.dashboard.data_freshness_section import build_data_freshness_section
@@ -77,7 +77,12 @@ def test_crypto_symbols_match_ts_universe() -> None:
 def test_build_data_freshness_section_single_symbol() -> None:
     conn = _make_conn()
     _insert(conn, "SPY", FRIDAY)
-    out = build_data_freshness_section(conn=conn)
+    # Fixed as-of: Friday 2026-08-07 16:00 ET — Friday is the latest
+    # completed session, so Friday's bar is fresh on any run day (the
+    # default as_of=now would make this test date-flaky).
+    out = build_data_freshness_section(
+        conn=conn, as_of=datetime(2026, 8, 7, 20, 0, tzinfo=timezone.utc)
+    )
     assert out["latest_market_date"] == FRIDAY
     entry = out["data_freshness"]["SPY"]
     assert entry["last_update"] == FRIDAY
@@ -147,7 +152,12 @@ def test_sunday_crypto_rows_keep_weekday_symbols_fresh() -> None:
         _insert(conn, sym, FRIDAY)
     for sym in ("BTC-USD", "ETH-USD"):
         _insert(conn, sym, SUNDAY)
-    out = build_data_freshness_section(conn=conn)
+    # Fixed as-of: Sunday 2026-08-09 16:00 ET — Sunday is the latest
+    # completed session on the crypto calendar and Friday on the weekday
+    # calendar, so both stay fresh on any run day.
+    out = build_data_freshness_section(
+        conn=conn, as_of=datetime(2026, 8, 9, 20, 0, tzinfo=timezone.utc)
+    )
     assert out["latest_market_date"] == FRIDAY
     assert out["latest_crypto_date"] == SUNDAY
 
@@ -215,7 +225,9 @@ def test_sparse_vix3m_reports_honest_trading_lag() -> None:
     conn = _make_conn()
     _insert(conn, "SPY", FRIDAY)
     _insert(conn, "^VIX3M", "2026-07-17")
-    out = build_data_freshness_section(conn=conn)
+    out = build_data_freshness_section(
+        conn=conn, as_of=datetime(2026, 8, 7, 20, 0, tzinfo=timezone.utc)
+    )
     vix3m = out["data_freshness"]["^VIX3M"]
     assert vix3m["market_lag_days"] == 21
     assert vix3m["status"] == "critical"
