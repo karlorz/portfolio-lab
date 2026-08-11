@@ -678,15 +678,25 @@ def check_ic_decay_and_alert(ic_decay_data: Dict) -> None:
         # Descriptive-only critical/warning rows (misaligned/legacy/ambiguous)
         # are disclosed but cannot escalate. PASS here is safe for incidents:
         # ic_decay incidents are manual-review-required and never auto-resolve.
+        # G3 (2026-08-11): message counts derive from the same descriptive
+        # lists that populate `details` so operators can reconcile the message
+        # with details.critical_signals / warning_signals (observed mismatch:
+        # message "5 critical, 0 warning" vs details lists 4+1). In this branch
+        # every critical/warning row is ineligible (eligible branches above),
+        # so totals equal the ineligible subsets — the message wording is
+        # unchanged, only the count source is unified with `details`.
         send_alert(
             AlertChannel.IC_DECAY,
             AlertLevel.PASS,
             (
-                f"IC control evidence ineligible: {len(ineligible_critical)} "
-                f"critical, {len(warning_signals) - len(eligible_warning)} warning "
+                f"IC control evidence ineligible: {len(critical_signals)} "
+                f"critical, {len(warning_signals)} warning "
                 "signal(s) lack complete contract alignment"
             ),
             details={
+                "critical_signals": critical_signals,
+                "warning_signals": warning_signals,
+                "healthy_count": healthy_count,
                 "ineligible_critical_signals": ineligible_critical,
                 "ineligible_warning_signals": [
                     s for s in warning_signals if s not in eligible_warning

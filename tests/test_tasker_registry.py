@@ -147,3 +147,31 @@ def test_registry_reports_due_tasks_without_manual_disabled_entries():
     assert "portfolio-lab-health" in due_ids
     assert "portfolio-lab-build" not in due_ids
     assert "portfolio-lab-autonomous-agent" not in due_ids
+
+
+def test_data_and_dashboard_timeout_windows_cover_observed_runs():
+    """G2 (2026-08-11 session B): per-job timeout windows must cover the
+    longest observed data/dashboard runs.
+
+    Session A evidence: `portfolio-lab-data` was killed at the 300s cap on
+    2026-08-11 00:05-00:10Z (log truncated mid-flight) and
+    `portfolio-lab-dashboard` hit its 180s cap at 23:18Z/00:18Z under
+    deploy-window load, while both now complete in ~110-145s at steady
+    state. Windows below these caps produce recurring `timeout` false
+    positives in data/cron_status.json. Caps stay well under the hourly
+    schedule gap (3600s) so a genuinely stuck run is still bounded.
+    """
+    registry = load_task_registry()
+    data = registry.get("portfolio-lab-data")
+    dashboard = registry.get("portfolio-lab-dashboard")
+
+    # Headroom over the observed kill points (300s / 180s) without
+    # exceeding the 60-minute schedule gap.
+    assert data.timeout_seconds >= 480
+    assert data.timeout_seconds <= 3000
+    assert dashboard.timeout_seconds >= 360
+    assert dashboard.timeout_seconds <= 3000
+
+    # Definition flow-through: the same window must surface in the store
+    # payload so data/cron_status.json can report it.
+    assert data.to_dict()["timeout_seconds"] == data.timeout_seconds

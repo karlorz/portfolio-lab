@@ -638,3 +638,66 @@ def test_eligible_critical_signal_sends_halt(monkeypatch):
     )
     assert sent.get("level") == AlertLevel.HALT
     assert sent["details"]["critical_signals"] == ["ensemble_equity"]
+
+
+# ── G3 (2026-08-11 session B): ineligible message counts match details ──
+
+def test_ineligible_message_counts_match_details_lists(monkeypatch):
+    """The 'IC control evidence ineligible' message counts must equal the
+    descriptive details lists.
+
+    Session A observed the message claim '5 critical, 0 warning' while
+    details.critical_signals listed 4 and warning_signals listed 1 — an
+    operator-facing contradiction. The message must derive from the same
+    sets that populate ``details`` (counts locked by regression test).
+    """
+    from src.monitor.alerting import AlertLevel, check_ic_decay_and_alert
+
+    sent = {}
+
+    def fake_send_alert(channel, level, message, details=None, **kwargs):
+        sent["channel"] = channel
+        sent["level"] = level
+        sent["message"] = message
+        sent["details"] = details or {}
+
+    monkeypatch.setattr("src.monitor.alerting.send_alert", fake_send_alert)
+
+    check_ic_decay_and_alert(
+        {
+            "ensemble_equity": {
+                "status": "critical",
+                "ic_rolling": 0.01,
+                "ic_trend": "decaying",
+                "control_eligible": False,
+            },
+            "ensemble_gold": {
+                "status": "critical",
+                "ic_rolling": 0.02,
+                "ic_trend": "decaying",
+                "control_eligible": False,
+            },
+            "factor_rotation": {
+                "status": "warning",
+                "ic_rolling": 0.05,
+                "ic_trend": "decaying",
+                "control_eligible": False,
+            },
+            "ensemble_duration": {"status": "healthy", "ic_rolling": 0.15},
+        }
+    )
+    assert sent.get("level") == AlertLevel.PASS
+    assert sent["details"].get("policy") == "control_ineligible_no_escalation"
+
+    import re
+
+    match = re.search(r"ineligible: (\d+) critical, (\d+) warning", sent["message"])
+    assert match is not None, f"message format changed: {sent['message']!r}"
+    msg_critical, msg_warning = int(match.group(1)), int(match.group(2))
+
+    assert msg_critical == len(sent["details"]["critical_signals"])
+    assert msg_warning == len(sent["details"]["warning_signals"])
+    assert sent["details"]["critical_signals"] == ["ensemble_equity", "ensemble_gold"]
+    assert sent["details"]["warning_signals"] == ["factor_rotation"]
+    # All four rows are ineligible here, so totals equal the ineligible sets.
+    assert len(sent["details"].get("ineligible_critical_signals", [])) == msg_critical

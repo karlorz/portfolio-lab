@@ -31,6 +31,13 @@ from src.tasker.registry import TaskRegistry
 
 logger = logging.getLogger(__name__)
 
+# NG1 (2026-08-11): bounded SQLite lock-wait for store connections. WAL
+# allows exactly one writer; under single-worker saturation the status-mirror
+# write previously failed instantly with "database is locked" (00:39Z
+# 2026-08-11). 10s exceeds the sqlite3 default 5s wait so short writer
+# contention is absorbed instead of failing a run.
+SQLITE_BUSY_TIMEOUT_MS = 10_000
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -428,6 +435,7 @@ class TaskerStore:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite_connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
         return conn
 
     def _init_db(self) -> None:

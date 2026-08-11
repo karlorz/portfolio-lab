@@ -20,15 +20,8 @@ from pathlib import Path
 import pytest
 
 
-def test_reconcile_arms_kill_when_disk_enabled_after_clear_stamp(
-    tmp_path, monkeypatch
-) -> None:
-    """DE4: sticky clear monitor health must pick up mid-cycle kill arm."""
-    from src.monitor import health_check as hc
-
-    data = tmp_path / "data"
-    data.mkdir()
-    # Disk SSOT: kill just armed after last health stamp
+def _write_disk_kill_open_ssot(data: Path, incident_id: str, ts: str) -> None:
+    """Write the armed kill_switch.json + incidents.json disk SSOT fixture."""
     (data / "kill_switch.json").write_text(
         json.dumps(
             {
@@ -37,8 +30,8 @@ def test_reconcile_arms_kill_when_disk_enabled_after_clear_stamp(
                 "reason": "unresolved_incident:signal_staleness",
                 "source": "incident_lifecycle",
                 "message": "stale alternative_data",
-                "timestamp": "2026-07-23T12:42:00+00:00",
-                "incident_id": "inc-de4",
+                "timestamp": ts,
+                "incident_id": incident_id,
                 "mode": "paper",
             }
         ),
@@ -50,7 +43,7 @@ def test_reconcile_arms_kill_when_disk_enabled_after_clear_stamp(
                 "open_count": 1,
                 "incidents": [
                     {
-                        "incident_id": "inc-de4",
+                        "incident_id": incident_id,
                         "channel": "signal_staleness",
                         "severity": "p2",
                         "state": "firing",
@@ -62,6 +55,18 @@ def test_reconcile_arms_kill_when_disk_enabled_after_clear_stamp(
         ),
         encoding="utf-8",
     )
+
+
+def test_reconcile_arms_kill_when_disk_enabled_after_clear_stamp(
+    tmp_path, monkeypatch
+) -> None:
+    """DE4: sticky clear monitor health must pick up mid-cycle kill arm."""
+    from src.monitor import health_check as hc
+
+    data = tmp_path / "data"
+    data.mkdir()
+    # Disk SSOT: kill just armed after last health stamp
+    _write_disk_kill_open_ssot(data, "inc-de4", "2026-07-23T12:42:00+00:00")
     # Sticky clear stamp from prior health cycle
     (data / "health.json").write_text(
         json.dumps(
@@ -299,3 +304,52 @@ def test_alt_data_freshness_from_prices_mtime(tmp_path, monkeypatch) -> None:
     hours = gen._input_data_freshness_hours()
     assert 2.5 <= hours <= 3.5
     assert hours != 12.0
+
+
+def test_reconcile_rewrite_restamps_embedded_timestamp(tmp_path) -> None:
+    """NG2 (2026-08-11 session B): reconcile writes must restamp the embedded
+    timestamp so content never masquerades as fresher than it is.
+
+    Session A observed data/health.json with a fresh mtime (01:17Z) but an
+    embedded timestamp of 00:00:14Z — the dashboard regeneration reconciled
+    the file (rewrote it) without advancing the embedded timestamp, so an
+    mtime-based observer saw 'fresh' while the content was ~77 minutes old.
+    Whenever reconcile rewrites the monitor report (kill/open projection
+    changed), the embedded timestamp must advance to the write time.
+    """
+    from src.monitor import health_check as hc
+
+    data = tmp_path / "data"
+    data.mkdir()
+    # Monitor-schema report stamped an hour ago with a clear kill switch.
+    old_ts = "2026-08-11T00:00:14+00:00"
+    (data / "health.json").write_text(
+        json.dumps(
+            {
+                "status": "ok",
+                "timestamp": old_ts,
+                "checks": {
+                    "kill_switch": {
+                        "status": "ok",
+                        "enabled": False,
+                        "level": None,
+                    },
+                    "open_incidents": {"status": "ok", "open_count": 0},
+                    "data_freshness": {"signals": {"status": "fresh"}},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    # Disk SSOT: kill armed after the last stamp → reconcile must write.
+    _write_disk_kill_open_ssot(data, "inc-ng2", "2026-08-11T01:00:00+00:00")
+
+    assert hc.reconcile_monitor_health_with_disk_ssot(data_dir=data) is True
+
+    rewritten = json.loads((data / "health.json").read_text(encoding="utf-8"))
+    new_ts = rewritten.get("timestamp")
+    assert new_ts and new_ts != old_ts
+    new_dt = datetime.fromisoformat(new_ts)
+    assert abs((datetime.now(timezone.utc) - new_dt).total_seconds()) < 300
+    assert rewritten["checks"]["kill_switch"]["enabled"] is True
+    assert rewritten.get("ssot_reconciled_at")

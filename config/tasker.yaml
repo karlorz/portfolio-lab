@@ -10,13 +10,19 @@ tasks:
     label: Data
     command: make data
     schedule: "5 * * * *"
-    timeout_seconds: 300
+    # G2 (2026-08-11): 300s cap was hit mid-flight under deploy-window load
+    # (killed 00:10Z with log truncated at 00:08:17Z). Steady state ~145s;
+    # 600s = 10min hard cap, well under the 60min schedule gap.
+    timeout_seconds: 600
 
   - id: portfolio-lab-dashboard
     label: Dashboard
     command: make dashboard
     schedule: "15 * * * *"
-    timeout_seconds: 180
+    # G2 (2026-08-11): 180s cap produced recurring timeout false positives
+    # (23:18Z/00:18Z; post-reboot completion ~125s, steady ~109s).
+    # 420s = 7min hard cap, well under the 60min schedule gap.
+    timeout_seconds: 420
 
   - id: portfolio-lab-eval
     label: Evaluator

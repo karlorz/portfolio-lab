@@ -470,3 +470,23 @@ def test_unplanned_error_still_increments_failure_health(tmp_path):
     state = store.get_task("portfolio-lab-health", _registry())["state"]
     assert state["consecutive_failures"] == 1
     assert state["failure_count"] == 1
+
+
+def test_store_connection_sets_busy_timeout(tmp_path):
+    """NG1 (2026-08-11 session B): store connections must set an explicit
+    SQLite busy timeout.
+
+    Session A evidence: on 2026-08-11 00:39Z the tasker's own SQLite store
+    returned 'database is locked' under single-worker saturation (status
+    mirror write failed). WAL allows one writer at a time; the Python
+    sqlite3 default wait is only 5s. The store connection must declare a
+    bounded busy_timeout so a concurrent writer waits out a short lock
+    instead of failing the run.
+    """
+    from src.tasker.store import SQLITE_BUSY_TIMEOUT_MS
+
+    store = _store(tmp_path)
+    with store._connect() as conn:
+        busy = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+    # 10_000ms explicitly exceeds the sqlite3 default 5s wait (see constant).
+    assert busy == SQLITE_BUSY_TIMEOUT_MS

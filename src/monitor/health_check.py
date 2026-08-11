@@ -337,6 +337,14 @@ def reconcile_monitor_health_with_disk_ssot(
     if not _patch_monitor_report_kill_open(payload, disk_kill, disk_open):
         return False
 
+    # NG2 (2026-08-11): this rewrite refreshes the file mtime, so the embedded
+    # timestamp must advance with it. Observed failure: dashboard regen
+    # reconciled data/health.json at 01:17Z but left the embedded timestamp at
+    # 00:00:14Z — content looked fresh by mtime while being ~77min old. The
+    # status and kill/open projection ARE recomputed here, so restamping is
+    # honest; ssot_reconciled_at/source already disclose the partial rebuild.
+    payload["timestamp"] = datetime.now(timezone.utc).isoformat()
+
     try:
         _atomic_write_json_path(path, payload)
     except OSError as exc:
