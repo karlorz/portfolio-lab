@@ -101,3 +101,41 @@ def test_fetch_put_call_ratio_stall_degrades_to_065(fetcher):
 
     assert f._fetch_put_call_ratio() == 0.65
     assert f._yf_cache["^CPCE"][0] == 0.65
+
+
+def test_fetch_yf_timeout_is_not_retried(fetcher, monkeypatch):
+    """A stalled endpoint must not be retried: one attempt, fallback value.
+
+    G6 follow-up (2026-08-11): 13 consecutive hourly data-job timeouts traced
+    to yfinance stalls. Each stalled history() burns its 10s timeout; retrying
+    a stalling endpoint just burns the budget again (2 attempts + backoff ×
+    4 tickers ≈ 84-120s of the 300s job budget). Timeouts therefore fail fast
+    to the documented fallback; only fast transient errors retry.
+    """
+    monkeypatch.setattr("tenacity.nap.sleep", lambda _seconds: None)
+    fake = FakeTicker(fail=TimeoutError("stalled"))
+    f = fetcher(fake)
+
+    value = f._fetch_yf("^VIX", default=16.0)
+
+    assert value == 16.0
+    assert len(fake.calls) == 1, "timeout must not trigger a retry (budget burn)"
+
+
+def test_fetch_yf_transient_error_degrades_single_attempt(fetcher, monkeypatch):
+    """Fast connection errors degrade to the fallback in one attempt.
+
+    The former ``retry_on_api_error`` decorator could never fire here: every
+    exception it would retry (OSError family) is caught inside ``_fetch_yf``,
+    which degrades to the documented default. The dead decorator was removed;
+    this test locks the real shipped behavior — bounded single attempt, no
+    hidden retry multiplication in the hourly job budget.
+    """
+    monkeypatch.setattr("tenacity.nap.sleep", lambda _seconds: None)
+    fake = FakeTicker(fail=ConnectionError("connection refused"))
+    f = fetcher(fake)
+
+    value = f._fetch_yf("^VIX", default=16.0)
+
+    assert value == 16.0
+    assert len(fake.calls) == 1, "single bounded attempt, fallback on failure"

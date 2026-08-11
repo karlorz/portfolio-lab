@@ -59,15 +59,26 @@ class SignalAggregator:
     ) -> Dict[SignalSource, Any]:
         active_sources = self.active_sources_for(regime)
         readings: Dict[SignalSource, Any] = {}
-        self._collect_msm_signal(readings, active_sources, regime, date)
-        self._collect_cross_asset_rv_signal(readings, active_sources, regime)
-        self._collect_intl_momentum_signal(readings, active_sources, regime)
-        self._collect_alt_data_signal(readings, active_sources, regime)
-        self._collect_regime_arb_signal(readings, active_sources, regime)
-        self._collect_unified_overlay_signal(readings, active_sources, regime)
-        self._collect_mtf_signal(readings, active_sources, regime, date)
-        self._collect_google_trends(readings, active_sources, regime)
-        self._collect_vix_term_structure_signal(readings, active_sources, regime)
+        # Phase-boundary watchdog (G6 follow-up, 2026-08-11): log per-collector
+        # elapsed time so a stalled run localizes to the second instead of
+        # ending at the job timeout with no evidence.
+        def _run(tag: str, fn: Callable[[], None]) -> None:
+            started = datetime.now()
+            fn()
+            elapsed = (datetime.now() - started).total_seconds()
+            if elapsed >= 2.0:
+                logger.warning(
+                    "aggregator collect %s took %.1fs", tag, elapsed
+                )
+        _run("multi_speed_momentum", lambda: self._collect_msm_signal(readings, active_sources, regime, date))
+        _run("cross_asset_rv", lambda: self._collect_cross_asset_rv_signal(readings, active_sources, regime))
+        _run("intl_momentum", lambda: self._collect_intl_momentum_signal(readings, active_sources, regime))
+        _run("alternative_data", lambda: self._collect_alt_data_signal(readings, active_sources, regime))
+        _run("regime_arb", lambda: self._collect_regime_arb_signal(readings, active_sources, regime))
+        _run("unified_overlay", lambda: self._collect_unified_overlay_signal(readings, active_sources, regime))
+        _run("multi_timeframe_fusion", lambda: self._collect_mtf_signal(readings, active_sources, regime, date))
+        _run("google_trends", lambda: self._collect_google_trends(readings, active_sources, regime))
+        _run("vix_term_structure", lambda: self._collect_vix_term_structure_signal(readings, active_sources, regime))
         return readings
 
     @staticmethod

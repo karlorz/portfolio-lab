@@ -432,6 +432,7 @@ class SignalSectionBuilder:
 
         # Behavioral sentiment data (v2.70)
         behavioral_sentiment_data = None
+        _bs_started = datetime.now()
         try:
             from src.signals.behavioral_sentiment import BehavioralSentimentSignal
             from src.data.behavioral_sentiment_fetcher import BehavioralSentimentFetcher
@@ -490,6 +491,11 @@ class SignalSectionBuilder:
             }
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("behavioral_sentiment", e)
+        _bs_elapsed = (datetime.now() - _bs_started).total_seconds()
+        if _bs_elapsed >= 2.0:
+            logger.warning(
+                "behavioral_sentiment section took %.1fs (stall watchdog)", _bs_elapsed
+            )
 
         # Stacking ensemble dashboard data (v3.10)
         stacking_ensemble_dashboard = None

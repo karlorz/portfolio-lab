@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 import math
 
 import yfinance as yf
-from src.utils.rate_limiter import rate_limited, retry_on_api_error
+from src.utils.rate_limiter import rate_limited
 from dataclasses import dataclass, asdict
 from typing import Dict, Optional, List, Tuple
 from pathlib import Path
@@ -220,7 +220,6 @@ class BehavioralSentimentFetcher:
             data_fresh=data['data_fresh']
         )
     
-    @retry_on_api_error(max_retries=2)
     @rate_limited("yahoo")
     def _fetch_yf(self, ticker: str, period: str = "1d", default: float = 0.0,
                   ttl: float = 60.0) -> float:

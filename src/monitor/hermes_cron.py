@@ -292,7 +292,16 @@ def rollup_failed_cron_jobs(
     for job in jobs:
         if not isinstance(job, dict):
             continue
-        if job.get("status") != "error":
+        raw_status = job.get("status")
+        if raw_status not in {"error", "timeout"}:
+            continue
+        # A timed-out (killed) run is a hard failure event: producer artifacts
+        # may be half-written (e.g. prices fresh, signals stale), so the
+        # sticky-recovery exception must not mask it. Only ``error`` rows may
+        # be recovered by fresher artifacts; the next successful run clears
+        # the timeout row naturally.
+        if raw_status == "timeout":
+            failed.append(job)
             continue
         if is_health_self_job(job):
             continue
