@@ -9,7 +9,6 @@
     "preview": "vite preview",
     "test:dashboard-browser": "playwright test --config playwright.config.ts",
     "fetch-data": "bun run scripts/fetch-data.ts",
-    "backtest": "python3 -m src.backtest.engine",
     "agent-train": "python3 -m src.agents.marl_trainer",
     "agent-infer": "python3 -m src.agents.ai_controller"
   },
