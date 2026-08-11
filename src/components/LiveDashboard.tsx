@@ -53,6 +53,8 @@ import {
   GraduationDataSchema,
   AdaptiveSizingSchema,
   BlackLittermanSchema,
+  RegimeGateSchema,
+  TSMOMSchema,
 } from '../schemas/signals';
 import { z } from 'zod';
 
@@ -453,14 +455,14 @@ export function LiveDashboard({
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (regimeGateRaw) {
           const raw = regimeGateRaw;
-          const validated = validateFetchData(raw, PassthroughSchema, 'regime_gate');
+          const validated = validateFetchData(raw, RegimeGateSchema, 'regime_gate');
           if (validated) setRegimeGateData(validated as unknown as RegimeGateData);
         }
         const tsmomRaw = await safeParseJson(tsmomRes);
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (tsmomRaw) {
           const raw = tsmomRaw;
-          const validated = validateFetchData(raw, PassthroughSchema, 'tsmom');
+          const validated = validateFetchData(raw, TSMOMSchema, 'tsmom');
           if (validated) setTsmomData(validated as unknown as TSMOMData);
         }
         const crossAssetRVRaw = await safeParseJson(rvRes);

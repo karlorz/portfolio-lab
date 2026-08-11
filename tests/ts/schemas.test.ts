@@ -30,6 +30,8 @@ import {
   validateFetchData,
   IcDecaySignalEntrySchema,
   IcDecaySummarySchema,
+  RegimeGateSchema,
+  TSMOMSchema,
 } from '../../src/schemas/signals';
 import { z } from 'zod';
 
@@ -1790,5 +1792,95 @@ describe('IcDecaySummarySchema control fields', () => {
     };
     const result = IcDecaySummarySchema.safeParse(summary);
     expect(result.success).toBe(true);
+  });
+});
+
+// ===========================================================================
+// RegimeGateSchema — /data/regime_gate.json (A11 pilot)
+// ===========================================================================
+function fallbackRegimeGate() {
+  return {
+    current_regime: 'NORMAL',
+    regime_confidence: 0.62,
+    confidence_source: 'regime_surface',
+    gate_rules: [
+      { signal_name: 'multi_speed_momentum', off_regimes: ['CRISIS', 'HIGH_VOL'], is_active: true },
+    ],
+    active_signals: ['multi_speed_momentum'],
+    inactive_signals: [],
+    min_dwell_days: 5,
+    generated_at: '2026-08-11T00:00:00Z',
+  };
+}
+
+describe('RegimeGateSchema', () => {
+  const generatedRG = () => readJsonOrFallback('public/data/regime_gate.json', fallbackRegimeGate());
+
+  it('accepts a valid regime gate payload', () => {
+    const result = RegimeGateSchema.safeParse(fallbackRegimeGate());
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts the generated regime_gate artifact (live producer contract)', () => {
+    const result = RegimeGateSchema.safeParse(generatedRG());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.current_regime).toBeTruthy();
+    expect(Array.isArray(result.data.gate_rules)).toBe(true);
+    expect(result.data.gate_rules[0].signal_name).toBeTruthy();
+  });
+
+  it('rejects a payload missing required fields', () => {
+    const bad = { ...fallbackRegimeGate() } as Record<string, unknown>;
+    delete bad.current_regime;
+    expect(RegimeGateSchema.safeParse(bad).success).toBe(false);
+  });
+});
+
+// ===========================================================================
+// TSMOMSchema — /data/tsmom.json (A11 pilot #2)
+// ===========================================================================
+function fallbackTsmom() {
+  return {
+    composite_signal: 1.0,
+    speed_breakdown: [
+      {
+        label: 'SPY TSMOM',
+        weight: 0.46,
+        signal: 1,
+        asset_signals: { SPY: 0.1 },
+        realized_vol: 0.14,
+        adjustment: 0.1,
+      },
+    ],
+    position_recommendation: 'long',
+    confidence: 1.0,
+    standalone_sharpe: 0.96,
+    overlay_sharpe: 0.93,
+    health_score: 0.55,
+    is_gated_off: false,
+    generated_at: '2026-08-11T00:00:00Z',
+  };
+}
+
+describe('TSMOMSchema', () => {
+  const generatedTsmom = () => readJsonOrFallback('public/data/tsmom.json', fallbackTsmom());
+
+  it('accepts a valid tsmom payload', () => {
+    const result = TSMOMSchema.safeParse(fallbackTsmom());
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts the generated tsmom artifact (live producer contract)', () => {
+    const result = TSMOMSchema.safeParse(generatedTsmom());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(['long', 'short', 'neutral']).toContain(result.data.position_recommendation);
+    expect(Array.isArray(result.data.speed_breakdown)).toBe(true);
+  });
+
+  it('rejects an unknown position_recommendation value', () => {
+    const bad = { ...fallbackTsmom(), position_recommendation: 'sideways' };
+    expect(TSMOMSchema.safeParse(bad).success).toBe(false);
   });
 });

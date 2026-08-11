@@ -1929,6 +1929,48 @@ export const GraduationDataSchema = z.object({
 }).passthrough();
 
 // ---------------------------------------------------------------------------
+// RegimeGateSchema — /data/regime_gate.json (A11 pilot; live producer
+// generator.py generate_regime_gate_json, extras passthrough-covered:
+// confidence_source, generator_git_sha*, artifact_id, plane, runtime_provenance)
+// ---------------------------------------------------------------------------
+export const RegimeGateSchema = z.object({
+  current_regime: z.string(),
+  regime_confidence: z.number(),
+  gate_rules: z.array(z.object({
+    signal_name: z.string(),
+    off_regimes: z.array(z.string()),
+    is_active: z.boolean(),
+  })),
+  active_signals: z.array(z.string()),
+  inactive_signals: z.array(z.string()),
+  min_dwell_days: z.number(),
+  generated_at: z.string(),
+}).passthrough();
+
+// ---------------------------------------------------------------------------
+// TSMOMSchema — /data/tsmom.json (A11 pilot #2; speed items carry extras
+// realized_vol/adjustment not in the panel interface — passthrough required)
+// ---------------------------------------------------------------------------
+export const TSMOMSpeedItemSchema = z.object({
+  label: z.string(),
+  weight: z.number(),
+  signal: z.number(),
+  asset_signals: z.record(z.string(), z.number()),
+}).passthrough();
+
+export const TSMOMSchema = z.object({
+  composite_signal: z.number(),
+  speed_breakdown: z.array(TSMOMSpeedItemSchema),
+  position_recommendation: z.enum(['long', 'short', 'neutral']),
+  confidence: z.number(),
+  standalone_sharpe: z.number(),
+  overlay_sharpe: z.number(),
+  health_score: z.number(),
+  is_gated_off: z.boolean(),
+  generated_at: z.string(),
+}).passthrough();
+
+// ---------------------------------------------------------------------------
 // Generic validation helper with graceful degradation
 // ---------------------------------------------------------------------------
 export function validateFetchData<T>(
