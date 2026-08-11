@@ -182,6 +182,33 @@ def build_health_slo_alerts(health: Mapping[str, Any] | None) -> list[dict[str, 
         alert_type = HEALTH_SLO_ALERT_TYPE
 
     if is_critical:
+        # N1 (2026-08-11 session B): dedupe G1-derived criticals. When the
+        # kill-switch halt / open-incident complex is the ONLY critical driver
+        # (SLO ok, scheduler ok) and the dedicated kill_switch critical alert
+        # (incident_id + halt level) already pages it, do not emit a second
+        # requires_action health_slo alert — the by-design halt pages once,
+        # not twice. Observed: recurring critical_health_slo error every
+        # :00/:30 since 09:15:13Z duplicating kill_switch for incident
+        # 8115a9c1 (halt by design, operator decision pending).
+        kill = health.get("kill_switch")
+        kill_on = isinstance(kill, Mapping) and bool(kill.get("enabled"))
+        kill_level = (
+            str(kill.get("level") or "").lower()
+            if isinstance(kill, Mapping)
+            else ""
+        )
+        # Suppress only for the by-design HALT complex (kill_switch alert
+        # covers it). Restrict/warning kills and open-incident-only criticals
+        # keep their health_slo page — no dedicated alert exists for them.
+        g1_only_critical = (
+            kill_on
+            and kill_level == "halt"
+            and slo_status not in {"critical", "error"}
+            and scheduler_label in {None, "", "ok", "healthy", "success"}
+        )
+        if g1_only_critical:
+            return []
+
         reason = (
             dim_payload.get("reason")
             or top_cause.get("reason")

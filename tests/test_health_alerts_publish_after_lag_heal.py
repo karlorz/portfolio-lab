@@ -38,6 +38,112 @@ def _sh_one_of_nine() -> dict:
     }
 
 
+# --- N1 (2026-08-11 session B): dedupe G1-derived critical health_slo alerts ---
+
+
+def _g1_halt_health() -> dict:
+    """Live-shaped payload: system_status critical solely from the G1 halt."""
+    return {
+        "system_status": "critical",
+        "generated_at": "2026-08-11T10:00:17+00:00",
+        "ops_health_status": "critical",
+        "scheduler_status": {"status": "ok"},
+        "data_pipeline_slo": {"status": "ok"},
+        "kill_switch": {
+            "enabled": True,
+            "status": "critical",
+            "level": "halt",
+            "reason": "unresolved_incident:ic_decay",
+            "incident_id": "8115a9c1-a167-4da7-9832-673617dc7de3",
+        },
+        "open_incidents": {"open_count": 1, "status": "critical"},
+    }
+
+
+def test_g1_halt_critical_suppresses_duplicate_health_slo_error() -> None:
+    """Kill-switch halt alone must not emit a second requires_action alert.
+
+    Regression: recurring critical_health_slo error every :00/:30 since
+    09:15:13Z duplicating the dedicated kill_switch critical alert for
+    incident 8115a9c1 (halt by design, operator decision pending).
+    """
+    from src.dashboard.health_slo_alerts import build_health_slo_alerts
+
+    alerts = build_health_slo_alerts(_g1_halt_health())
+    assert alerts == [], (
+        "kill_switch halt with SLO+scheduler ok must not page a duplicate "
+        "health_slo critical"
+    )
+
+
+def test_g1_halt_dedupe_keeps_real_slo_critical() -> None:
+    """A genuinely critical data_pipeline_slo still alerts despite the halt."""
+    from src.dashboard.health_slo_alerts import build_health_slo_alerts
+
+    health = _g1_halt_health()
+    health["data_pipeline_slo"] = {"status": "critical", "top_dimension": "prices"}
+    alerts = build_health_slo_alerts(health)
+    assert len(alerts) == 1
+    assert alerts[0]["level"] == "error"
+    assert alerts[0]["type"] == "health_slo"
+
+
+def test_g1_halt_dedupe_keeps_scheduler_critical() -> None:
+    """A degraded scheduler still alerts despite the halt."""
+    from src.dashboard.health_slo_alerts import build_health_slo_alerts
+
+    health = _g1_halt_health()
+    health["scheduler_status"] = {"status": "error", "backends": {"tasker": "error"}}
+    alerts = build_health_slo_alerts(health)
+    assert len(alerts) == 1
+    assert alerts[0]["level"] == "error"
+    assert alerts[0]["type"] == "health_slo"
+
+
+def test_slo_critical_without_halt_still_alerts() -> None:
+    """Dedupe only applies to the halt complex — not bare SLO criticals."""
+    from src.dashboard.health_slo_alerts import build_health_slo_alerts
+
+    health = _g1_halt_health()
+    health["kill_switch"] = {"enabled": False, "status": "ok"}
+    health["open_incidents"] = {"open_count": 0, "status": "ok"}
+    health["data_pipeline_slo"] = {"status": "critical", "top_dimension": "prices"}
+    alerts = build_health_slo_alerts(health)
+    assert len(alerts) == 1
+    assert alerts[0]["level"] == "error"
+    assert alerts[0]["type"] == "health_slo"
+
+
+def test_open_incident_without_kill_still_alerts() -> None:
+    """Open-incident-only criticals keep their page (no kill alert exists)."""
+    from src.dashboard.health_slo_alerts import build_health_slo_alerts
+
+    health = _g1_halt_health()
+    health["kill_switch"] = {"enabled": False, "status": "ok"}
+    alerts = build_health_slo_alerts(health)
+    assert len(alerts) == 1
+    assert alerts[0]["level"] == "error"
+    assert alerts[0]["type"] == "health_slo"
+
+
+def test_restrict_kill_does_not_suppress_critical_health_slo() -> None:
+    """Non-halt kills must not mask a critical health/SLO page."""
+    from src.dashboard.health_slo_alerts import build_health_slo_alerts
+
+    health = _g1_halt_health()
+    health["kill_switch"] = {
+        "enabled": True,
+        "status": "warning",
+        "level": "restrict",
+    }
+    health["ops_health_status"] = "warning"
+    health["data_pipeline_slo"] = {"status": "ok"}
+    alerts = build_health_slo_alerts(health)
+    assert len(alerts) == 1
+    assert alerts[0]["level"] == "error"
+    assert alerts[0]["type"] == "health_slo"
+
+
 def test_publish_heals_sticky_lag_stamp_when_live_lag_zero(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
