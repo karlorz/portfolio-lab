@@ -34,29 +34,69 @@ OUTPUT_PATH = DATA_DIR / "rebalance_health.json"
 DAILY_SNAPSHOT_RETENTION_DAYS = 14
 
 
-def _prune_daily_snapshot_files(
-    daily_dir: Path, *, now: datetime | None = None
-) -> int:
-    """Prune order-history-YYYY-MM-DD.json snapshots older than retention.
+def _daily_snapshot_is_old(path: Path, ref: datetime) -> bool:
+    """True when an order-history-YYYY-MM-DD.json write day is past retention."""
+    stem = path.stem  # order-history-YYYY-MM-DD
+    try:
+        day = datetime.strptime(stem[len("order-history-"):], "%Y-%m-%d")
+    except (ValueError, IndexError):
+        return False  # pattern-matched but malformed — never touch
+    day = day.replace(tzinfo=timezone.utc)
+    return (ref - day).days > DAILY_SNAPSHOT_RETENTION_DAYS
 
-    Best-effort: only files matching the daily snapshot pattern are ever
-    touched (never historical_orders/ or other payloads). Returns the number
-    of files pruned. ``now`` is injectable for deterministic tests.
+
+def _prune_daily_snapshot_files(
+    daily_dir: Path,
+    daily_entries: dict[Path, dict[str, Any]] | None = None,
+    all_entries: list[dict[str, Any]] | None = None,
+    *,
+    now: datetime | None = None,
+) -> int:
+    """Prune order-history-YYYY-MM-DD.json snapshots past the retention window.
+
+    Canonical-preserving (G6 2026-08-11 follow-up): the first prune run
+    deleted order-history-2026-06-11.json — the only record of the 2026-06-11
+    execution — dropping canonical days 5 → 4. A candidate file is pruned
+    only when its execution date is still covered by entries that remain
+    (legacy historical_orders or retained daily snapshots); for a date with
+    no remaining coverage the NEWEST carrier is kept and older duplicates
+    pruned. Never touches historical_orders/ or non-matching files.
     """
     if daily_dir is None or not daily_dir.is_dir():
         return 0
     ref = now if now is not None else datetime.now(timezone.utc)
     if ref.tzinfo is None:
         ref = ref.replace(tzinfo=timezone.utc)
+
+    daily_entries = daily_entries or {}
+    all_entries = all_entries or []
+
+    legacy_dates = {
+        e.get("date")
+        for e in all_entries
+        if e.get("source") != "daily_order_summary"
+    }
+    retained_daily_dates = {
+        e.get("date")
+        for path, e in daily_entries.items()
+        if not _daily_snapshot_is_old(path, ref)
+    }
+    covered = legacy_dates | retained_daily_dates
+
+    old_by_date: dict[str, list[tuple[Path, dict[str, Any]]]] = {}
+    for path, entry in daily_entries.items():
+        if _daily_snapshot_is_old(path, ref):
+            old_by_date.setdefault(entry.get("date"), []).append((path, entry))
+
     pruned = 0
-    for path in sorted(daily_dir.glob("order-history-*.json")):
-        stem = path.stem  # order-history-YYYY-MM-DD
-        try:
-            day = datetime.strptime(stem[len("order-history-"):], "%Y-%m-%d")
-        except (ValueError, IndexError):
-            continue  # pattern-matched but malformed — never touch
-        day = day.replace(tzinfo=timezone.utc)
-        if (ref - day).days > DAILY_SNAPSHOT_RETENTION_DAYS:
+    for date, files in old_by_date.items():
+        if date in covered:
+            victims = files  # date still covered by remaining entries
+        else:
+            # Last carrier of a canonical execution date: keep the newest.
+            files.sort(key=lambda pe: pe[0].name)
+            victims = files[:-1]
+        for path, _entry in victims:
             try:
                 path.unlink()
                 pruned += 1
@@ -275,18 +315,23 @@ def generate() -> dict[str, Any]:
             if entry:
                 history.append(entry)
     daily_dir = _daily_order_summary_dir()
+    daily_entries: dict[Path, dict[str, Any]] = {}
     if daily_dir.exists():
         for f in sorted(daily_dir.glob("order-history-*.json")):
             entry = _parse_daily_order_summary(f)
             if entry:
+                daily_entries[f] = entry
                 history.append(entry)
 
     # G6: retention cap on daily snapshot rewrites (unbounded ~1/day growth
-    # inflated raw_history_entries vs canonical days). Never mutate fixture
-    # trees under pytest; prune failures never block generation.
+    # inflated raw_history_entries vs canonical days). Canonical-preserving:
+    # the last carrier of an execution date is never pruned. Never mutate
+    # fixture trees under pytest; prune failures never block generation.
     try:
         if not os.environ.get("PYTEST_CURRENT_TEST"):
-            _prune_daily_snapshot_files(daily_dir)
+            _prune_daily_snapshot_files(
+                daily_dir, daily_entries, history
+            )
     except Exception as exc:  # noqa: BLE001 — retention is best-effort
         logger.warning("rebalance daily snapshot prune skipped: %s", exc)
 

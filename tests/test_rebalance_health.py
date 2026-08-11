@@ -1071,28 +1071,82 @@ class TestBatchDRRecentOrdersDailySummary:
 class TestPruneDailySnapshots:
     """G6 (2026-08-11 session B): daily snapshot retention cap."""
 
-    def test_prunes_only_old_daily_snapshots(self, tmp_path: Path) -> None:
+    def test_prunes_old_snapshots_covered_by_remaining_entries(
+        self, tmp_path: Path
+    ) -> None:
         from src.monitor.rebalance_health import _prune_daily_snapshot_files
 
-        (tmp_path / "order-history-2026-05-25.json").write_text("{}")
-        (tmp_path / "order-history-2026-07-01.json").write_text("{}")
-        (tmp_path / "order-history-2026-08-10.json").write_text("{}")
-        (tmp_path / "order-history-2026-08-11.json").write_text("{}")
+        now = datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc)
+        # Old snapshot whose execution date (05-11) is covered by legacy
+        # historical_orders entries → pruned.
+        old_covered = tmp_path / "order-history-2026-05-25.json"
+        old_covered.write_text("{}")
+        # Old snapshot whose execution date (07-11) is covered by retained
+        # daily snapshots → pruned.
+        old_covered2 = tmp_path / "order-history-2026-07-01.json"
+        old_covered2.write_text("{}")
+        # Old snapshot whose execution date (06-11) has NO remaining carrier
+        # → the last carrier must be kept (2026-06-11 regression).
+        last_carrier = tmp_path / "order-history-2026-06-11.json"
+        last_carrier.write_text("{}")
+        # Recent snapshots within retention → kept.
+        recent1 = tmp_path / "order-history-2026-08-10.json"
+        recent1.write_text("{}")
+        recent2 = tmp_path / "order-history-2026-08-11.json"
+        recent2.write_text("{}")
         (tmp_path / "notes.json").write_text("{}")
         legacy = tmp_path / "historical_orders"
         legacy.mkdir()
         (legacy / "order_history_20260511_143008_x.json").write_text("{}")
 
+        daily_entries = {
+            old_covered: {"date": "2026-05-11", "source": "daily_order_summary"},
+            old_covered2: {"date": "2026-07-11", "source": "daily_order_summary"},
+            last_carrier: {"date": "2026-06-11", "source": "daily_order_summary"},
+            # Retained snapshots carry the July fills (entry day 07-11).
+            recent1: {"date": "2026-07-11", "source": "daily_order_summary"},
+            recent2: {"date": "2026-08-11", "source": "daily_order_summary"},
+        }
+        all_entries = [
+            *daily_entries.values(),
+            {"date": "2026-05-11", "source": "historical_order_file"},
+            {"date": "2026-05-12", "source": "historical_order_file"},
+        ]
+
         pruned = _prune_daily_snapshot_files(
-            tmp_path,
-            now=datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc),
+            tmp_path, daily_entries, all_entries, now=now
         )
 
-        assert pruned == 2  # 05-25 and 07-01 older than 14 days
-        assert (tmp_path / "order-history-2026-08-10.json").exists()
-        assert (tmp_path / "order-history-2026-08-11.json").exists()
+        assert pruned == 2  # covered old snapshots only
+        assert last_carrier.exists(), (
+            "last carrier of canonical date 2026-06-11 must never be pruned"
+        )
+        assert recent1.exists()
+        assert recent2.exists()
         assert (tmp_path / "notes.json").exists()
         assert (legacy / "order_history_20260511_143008_x.json").exists()
+
+    def test_keeps_newest_carrier_when_date_uncovered(self, tmp_path: Path) -> None:
+        """Multiple old carriers of an uncovered date: newest survives."""
+        from src.monitor.rebalance_health import _prune_daily_snapshot_files
+
+        now = datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc)
+        older = tmp_path / "order-history-2026-06-20.json"
+        older.write_text("{}")
+        newer = tmp_path / "order-history-2026-07-27.json"
+        newer.write_text("{}")
+        daily_entries = {
+            older: {"date": "2026-06-11", "source": "daily_order_summary"},
+            newer: {"date": "2026-06-11", "source": "daily_order_summary"},
+        }
+
+        pruned = _prune_daily_snapshot_files(
+            tmp_path, daily_entries, [], now=now
+        )
+
+        assert pruned == 1
+        assert newer.exists()
+        assert not older.exists()
 
     def test_never_touches_malformed_or_missing_dir(self, tmp_path: Path) -> None:
         from src.monitor.rebalance_health import _prune_daily_snapshot_files
@@ -1100,6 +1154,8 @@ class TestPruneDailySnapshots:
         (tmp_path / "order-history-not-a-date.json").write_text("{}")
         pruned = _prune_daily_snapshot_files(
             tmp_path,
+            {},
+            [],
             now=datetime(2026, 8, 11, 12, 0, tzinfo=timezone.utc),
         )
         assert pruned == 0
