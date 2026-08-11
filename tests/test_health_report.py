@@ -226,3 +226,47 @@ def test_early_close_date_rules_and_session_close():
     assert is_early_close_date(date(2026, 11, 26)) is False  # Thanksgiving (holiday)
     assert session_close_et(date(2026, 12, 24)) == time(13, 0)
     assert session_close_et(date(2026, 8, 10)) == time(16, 0)
+
+
+def test_early_close_rule_model_full_year_2026_2027():
+    """Full-year enumeration lock: exactly the rule-model early-close days
+    close at 13:00 ET, every other trading day closes at 16:00 ET, for all
+    of 2026 and 2027 against the repo NYSECalendar.
+
+    Expected early-close trading days: 2026-11-27 (Fri), 2026-12-24 (Thu),
+    2026-12-31 (Thu), 2027-11-26 (Fri), 2027-12-31 (Fri). Non-issues the
+    guard handles: 2026-07-03 (Fri) is the observed July 4 holiday (not a
+    trading day); 2027-07-03 is a Saturday (weekend guard); 2027-12-24
+    (Fri) is the observed Christmas holiday (Dec 25 2027 is a Saturday),
+    so there is no session to early-close. Ad-hoc announced closes are
+    still not enumerated (documented model limitation).
+    """
+    from datetime import date, timedelta, time
+
+    from src.dashboard.health_report import is_early_close_date, session_close_et
+    from src.signals.calendar_seasonality import NYSECalendar
+
+    expected_early = {
+        date(2026, 11, 27),
+        date(2026, 12, 24),
+        date(2026, 12, 31),
+        date(2027, 11, 26),
+        date(2027, 12, 31),
+    }
+    observed_early: set[date] = set()
+    for year in (2026, 2027):
+        cal = NYSECalendar(year=year)
+        d = date(year, 1, 1)
+        while d.year == year:
+            if cal.is_trading_day(d):
+                close = session_close_et(d)
+                assert close in (time(13, 0), time(16, 0)), f"{d}: bad close {close}"
+                if close == time(13, 0):
+                    observed_early.add(d)
+                assert (close == time(13, 0)) == is_early_close_date(d), (
+                    f"{d}: session_close_et and is_early_close_date disagree"
+                )
+            d += timedelta(days=1)
+    assert observed_early == expected_early, (
+        f"early-close set drifted: {sorted(observed_early)} vs {sorted(expected_early)}"
+    )

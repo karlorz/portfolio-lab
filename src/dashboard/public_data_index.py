@@ -960,6 +960,21 @@ def build_public_data_index(
         index = _stamp_generator_git_sha(index)
     except Exception:  # noqa: BLE001 — index still usable without git
         pass
+    # Option C (operator-approved 2026-08-11): disclose the current immutable
+    # generation when one exists (rollback target / integrity anchor).
+    try:
+        from src.dashboard.generation_store import GenerationStore
+
+        current = GenerationStore(public_dir=public_dir).current()
+        if current is not None:
+            index["generation"] = {
+                "run_id": current.run_id,
+                "generated_at": current.generated_at,
+                "file_count": current.file_count,
+                "git_sha": current.git_sha,
+            }
+    except Exception:  # noqa: BLE001 — index remains usable without the store
+        pass
     return index
 
 

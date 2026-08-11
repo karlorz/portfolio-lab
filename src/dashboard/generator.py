@@ -6998,6 +6998,16 @@ class DashboardGenerator:
 
         logger.info("Dashboard generation complete")
 
+        # Option C (operator-approved 2026-08-11): record the public artifact
+        # surface as an immutable generation + atomically flip the current
+        # pointer. Guarded: a store failure must never fail the job.
+        try:
+            from src.dashboard.generation_store import GenerationStore
+
+            GenerationStore(public_dir=PUBLIC_DIR).record(run_id=_new_generation_id())
+        except Exception as e:  # noqa: BLE001 — observability must not fail the run
+            logger.warning("generation record skipped (non-blocking): %s", e)
+
 def _new_generation_id() -> str:
     """One generation identity for the committed public-data manifest."""
     import uuid as _uuid
