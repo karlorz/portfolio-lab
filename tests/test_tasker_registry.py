@@ -89,15 +89,36 @@ def test_make_daily_brief_target_reports_cron_status():
     assert "STATUS" in recipe
 
 
-def test_daily_brief_tasker_entry_uses_hourly_25_schedule():
-    """tasker SoT schedule for daily-brief: :25 hourly (after dashboard :15)."""
+def test_daily_brief_tasker_entry_uses_hourly_26_schedule():
+    """tasker SoT schedule for daily-brief: :26 hourly (after dashboard :15).
+
+    G8 (2026-08-11): was :25, colliding with research (:25 even hours) on the
+    single worker -> recurring busy-skip WARNINGs; shifted to :26 (free slot).
+    """
     registry = load_task_registry()
     task = registry.get("portfolio-lab-daily-brief")
 
     assert task.enabled is True
     assert task.manual_only is False
-    assert task.schedule == "25 * * * *"
+    assert task.schedule == "26 * * * *"
     assert task.command == ["make", "daily-brief"]
+    assert task.timeout_seconds > 0
+
+
+def test_daily_pnl_tasker_entry_uses_10_41_schedule():
+    """tasker SoT schedule for daily-pnl: :10 and :41 hourly.
+
+    G8 (2026-08-11): was :40, colliding with overlay-signals (:40 hourly) on
+    the single worker -> recurring busy-skip WARNINGs; shifted to :41 (free
+    slot; overlay-dashboard :45 / attribution :47 / position-sync :55).
+    """
+    registry = load_task_registry()
+    task = registry.get("portfolio-lab-daily-pnl")
+
+    assert task.enabled is True
+    assert task.manual_only is False
+    assert task.schedule == "10,41 * * * *"
+    assert task.command == ["make", "daily-pnl"]
     assert task.timeout_seconds > 0
 
 
