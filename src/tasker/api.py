@@ -115,4 +115,22 @@ def create_app(
         run = runner.start_task(existing["task_id"], trigger="retry", retry_of=run_id)
         return public_json(run), 202
 
+    @app.post("/api/portfolio-query")
+    def portfolio_query():
+        """Answer a natural-language portfolio question (ChatPanel backend).
+
+        Wires the shipped ChatPanel feature (c4bbc5d) to
+        src.chat.portfolio_query.answer_query; production runs the
+        deterministic offline fallback (no ANTHROPIC_API_KEY on host).
+        Lazy import keeps startup light; first call generates the unified
+        dashboard context (heavy) — acceptable for a chat endpoint.
+        """
+        payload = request.get_json(silent=True) or {}
+        question = (payload.get("question") or "").strip()
+        if not question:
+            return jsonify({"error": "missing question"}), 400
+        from src.chat.portfolio_query import answer_query as _answer_query
+
+        return jsonify({"answer": _answer_query(question)})
+
     return app

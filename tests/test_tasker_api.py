@@ -151,3 +151,50 @@ def test_api_rejects_mutating_actions_while_draining(tmp_path):
     )
     assert response.status_code == 503
     assert "draining" in response.get_json()["error"]
+
+
+def test_portfolio_query_route_returns_answer(tmp_path, monkeypatch):
+    """POST /api/portfolio-query → 200 with non-empty answer (wired route)."""
+    monkeypatch.setattr(
+        "src.chat.portfolio_query.answer_query",
+        lambda question, dashboard=None: f"Current allocation:\nSPY: 46.0%",
+    )
+    client, _, _ = _client(tmp_path)
+
+    resp = client.post(
+        "/api/portfolio-query",
+        json={"question": "What is my current allocation?"},
+    )
+
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert isinstance(body.get("answer"), str)
+    assert len(body["answer"]) > 0
+
+
+def test_portfolio_query_route_runs_fallback_answer(tmp_path, monkeypatch):
+    """Real fallback_answer path through the route (no heavy dashboard gen)."""
+    monkeypatch.setattr(
+        "src.monitor.unified_dashboard.generate_unified_dashboard",
+        lambda: {"portfolio": {"positions": [{"symbol": "SPY", "weight": 46.0, "value": 45000}]}},
+    )
+    client, _, _ = _client(tmp_path)
+
+    resp = client.post(
+        "/api/portfolio-query",
+        json={"question": "What is my current allocation?"},
+    )
+
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert "SPY" in body.get("answer", "")
+
+
+def test_portfolio_query_route_rejects_missing_question(tmp_path):
+    """Malformed body (missing/blank question) → graceful 400."""
+    client, _, _ = _client(tmp_path)
+
+    for payload in ({}, {"question": ""}, {"question": "   "}):
+        resp = client.post("/api/portfolio-query", json=payload)
+        assert resp.status_code == 400
+        assert "error" in resp.get_json()
