@@ -3,15 +3,12 @@
 Tests for strategy/factor_rotation.py — FactorScore, FactorMomentumEngine,
 FactorRotationBacktest.
 """
-import json
 import sqlite3
 import numpy as np
 import pandas as pd
 
 import pytest
 from datetime import datetime
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 from src.strategy.factor_rotation import (
     FactorScore,

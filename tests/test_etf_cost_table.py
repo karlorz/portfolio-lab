@@ -3,7 +3,6 @@
 Tests for src/costs/etf_cost_table.py — centralized ETF transaction cost data.
 """
 
-import pytest
 
 from src.costs.etf_cost_table import (
     ETF_COST_BPS,

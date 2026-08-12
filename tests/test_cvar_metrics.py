@@ -3,13 +3,11 @@
 Tests for cvar_metrics.py — CVaRMetrics dataclass, VaR/CVaR calculation,
 tail severity classification, volatility, and metric computation.
 """
-import sys
 import json
 import logging
 import numpy as np
 
 import pytest
-from pathlib import Path
 from datetime import datetime
 from unittest.mock import patch, MagicMock
 

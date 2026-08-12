@@ -3,10 +3,8 @@ Tests for Crypto Fear & Greed Index Fetcher.
 """
 import json
 import pytest
-import time
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from src.data.crypto_fg import CryptoFgFetcher, CryptoFgData, get_crypto_fg
 

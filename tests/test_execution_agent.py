@@ -20,7 +20,7 @@ from datetime import datetime
 from unittest.mock import patch, MagicMock
 import dataclasses
 
-import pytest; pytestmark = pytest.mark.heavy
+pytestmark = pytest.mark.heavy
 
 # torch is guarded at module level — importing it during test collection
 # (even for skipped heavy tests) loads 63MB+ and can exhaust CPU on low-resource
@@ -1136,7 +1136,6 @@ class TestExportCompleteness:
             ExecutionStyle,
             ExecutionNetwork,
             ExecutionAgent,
-            SCHEDULER_AVAILABLE,
         )
         assert ExecutionStyle is not None
         assert ExecutionNetwork is not None

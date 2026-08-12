@@ -9,7 +9,6 @@ import numpy as np
 
 import pytest
 from pathlib import Path
-from datetime import datetime
 from unittest.mock import patch, MagicMock
 
 from src.strategy.evaluator import (
@@ -2336,8 +2335,7 @@ class TestIncidentKillBlocksPaperControlLoop:
 
 
 def test_garch_health_report_separates_policy_and_measured_dd(tmp_path, monkeypatch):
-    from src.strategy.evaluator import Portfolio, PAPER_CONFIG, DATA_DIR
-    from types import SimpleNamespace
+    from src.strategy.evaluator import Portfolio
     from dataclasses import dataclass
     import src.strategy.evaluator as ev
 

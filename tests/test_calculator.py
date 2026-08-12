@@ -5,7 +5,6 @@ drawdown series, rolling metrics, benchmark comparison, analytics report
 generation, main() CLI handler, and __all__ exports.
 """
 import json
-import io
 import logging
 import sys
 
@@ -13,7 +12,7 @@ import pytest
 import numpy as np
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import patch, mock_open
 
 from src.analytics.calculator import (
     DrawdownPoint, RollingMetrics, BenchmarkSeries, CrisisPeriod,

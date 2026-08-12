@@ -16,7 +16,7 @@ import os
 import sqlite3
 import sys
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest

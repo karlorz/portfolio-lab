@@ -3,7 +3,7 @@ Tests for Calendar Seasonality Signal Generator (v3.50)
 """
 
 import pytest
-from datetime import datetime, date, timedelta
+from datetime import date, timedelta
 
 from src.signals.calendar_seasonality import (
     NYSECalendar,

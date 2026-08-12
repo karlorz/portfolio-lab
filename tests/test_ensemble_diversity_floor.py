@@ -6,12 +6,10 @@ signal to prevent weight concentration and improve N_eff.
 import os
 import pytest
 import numpy as np
-from unittest.mock import patch, MagicMock
-from dataclasses import fields
+from unittest.mock import patch
 
 from src.strategy.ensemble_voter import (
     EnsembleVoter,
-    EnsembleVote,
     Regime,
     SignalReading,
     DEFAULT_DIVERSITY_FLOOR,
@@ -179,5 +177,4 @@ class TestDiversityFloorConstants:
 
     def test_default_floor_value(self):
         """Default diversity floor should be reasonable (2-8%)."""
-        from src.strategy.ensemble_voter import DEFAULT_DIVERSITY_FLOOR
         assert 0.02 <= DEFAULT_DIVERSITY_FLOOR <= 0.08

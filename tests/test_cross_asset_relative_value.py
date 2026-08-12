@@ -7,8 +7,7 @@ import json
 import logging
 import numpy as np
 from datetime import datetime, timedelta
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 import pytest
@@ -626,7 +625,6 @@ class TestSignalGenerationExtended:
 
     def test_get_signal_snapshot_active_field(self, scanner):
         """SignalSnapshot is_active should reflect signal_value."""
-        from src.signals.signal_snapshot import SignalSnapshot
         scanner._load_price_data()
         snapshot = scanner.get_signal_snapshot()
         # is_active should be True if signal_value != 0, False otherwise
@@ -1567,7 +1565,6 @@ class TestSignalSnapshotEdgeCases:
 
     def test_snapshot_regime_fit_default(self, scanner):
         """Snapshot should always have regime_fit='all'."""
-        from src.signals.signal_snapshot import SignalSnapshot
         signal = CrossAssetRVSignal(
             timestamp="2026-05-24", pairs={},
             avg_z_score=1.5, max_divergence=2.0, num_diverged=1, total_pairs=5,
@@ -1579,7 +1576,6 @@ class TestSignalSnapshotEdgeCases:
 
     def test_snapshot_explanation_format(self, scanner):
         """Snapshot explanation should contain z-score and diverged count format."""
-        from src.signals.signal_snapshot import SignalSnapshot
         # Use a signal with actual pairs data so z-score and diverged count are computed
         pair = PairReading(
             pair_name="SPY/GLD", symbol_a="SPY", symbol_b="GLD",

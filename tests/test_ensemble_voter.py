@@ -12,7 +12,6 @@ import pandas as pd
 import pytest
 from dataclasses import fields
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from src.strategy.ensemble_voter import (
@@ -3763,7 +3762,6 @@ class TestEnumCompleteness:
 
     def test_signal_source_count_matches_active_set(self):
         """All SignalSource values should match between enum and __all__."""
-        from src.strategy.ensemble_voter import __all__ as all_names
         assert len(list(SignalSource)) >= 7  # 6 original + MULTI_TIMEFRAME_FUSION
 
     def test_regime_has_low_vol(self):

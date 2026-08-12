@@ -379,7 +379,7 @@ class TestGenerateSignalExtended:
 
     def test_generate_signal_exit_when_position_active(self):
         """When exit is triggered and we have a position, should go flat."""
-        from src.strategy.convexity_harvest import ConvexityHarvestStrategy, ConvexityPosition
+        from src.strategy.convexity_harvest import ConvexityHarvestStrategy
         mock_mgr = MagicMock()
         mock_mgr.get_contango_signal.return_value = {
             "vix_level": 40.0,
@@ -1253,7 +1253,7 @@ class TestCLIMain:
 
 def test_get_current_signal_uses_utc_calendar_date(monkeypatch):
     """Host-local midnight must not advance date ahead of UTC SSOT."""
-    from datetime import datetime, timezone
+    from datetime import timezone
     from src.strategy.convexity_harvest import ConvexityHarvestStrategy
 
     # Freeze "now" to 2026-07-20 01:00+08 (still 2026-07-19 UTC)

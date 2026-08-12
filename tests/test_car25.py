@@ -7,11 +7,9 @@ after position-sizing via safe-f (max drawdown-constrained).
 import logging
 import pytest
 import numpy as np
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import patch, mock_open
 from dataclasses import fields
 import json
-import io
-import sys
 
 from src.backtest.car25 import (
     block_bootstrap_returns,
@@ -1592,7 +1590,7 @@ class TestAllExports:
     def test___all___no_duplicates(self):
         """__all__ should not contain duplicate entries."""
         from src.backtest.car25 import __all__ as all_exports
-        assert len(all_exports) == len(set(all_exports)), f"Duplicates found in __all__"
+        assert len(all_exports) == len(set(all_exports)), "Duplicates found in __all__"
 
     def test___all___all_strings(self):
         """All __all__ entries should be strings."""

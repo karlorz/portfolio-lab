@@ -12,7 +12,6 @@ import pytest
 import numpy as np
 from dataclasses import asdict
 from datetime import date
-from pathlib import Path
 
 from src.backtest.combined_overlay_backtest import (
     CombinedOverlayBacktest,

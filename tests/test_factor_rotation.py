@@ -10,8 +10,6 @@ import dataclasses
 import logging
 import numpy as np
 import pytest
-from datetime import datetime
-from unittest.mock import patch, MagicMock
 from pathlib import Path
 
 from src.strategy.factor_rotation import (
@@ -2513,7 +2511,6 @@ class TestMainGuard:
         #     main()
         # Verify the module has this guard by checking it runs
         # We can test this by importing and checking the last lines
-        import ast
         import inspect
         from src.strategy import factor_rotation
         source = inspect.getsource(factor_rotation)

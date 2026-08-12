@@ -1,8 +1,6 @@
 """Tests for TTL-cached computation utilities."""
 
-import os
 import time
-from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -313,7 +311,6 @@ class TestEnvVarTTL:
 class TestThreadSafety:
     def test_concurrent_access_does_not_crash(self, price_series, multi_asset_df):
         """Multiple threads accessing different caches simultaneously should not crash."""
-        import threading
         from concurrent.futures import ThreadPoolExecutor
 
         def worker_vol():

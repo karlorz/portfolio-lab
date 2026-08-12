@@ -1,9 +1,6 @@
 """Tests for freeze manifest module — config drift detection."""
 
-import json
-from pathlib import Path
 
-import pytest
 
 from src.monitor.freeze_manifest import (
     create_manifest,

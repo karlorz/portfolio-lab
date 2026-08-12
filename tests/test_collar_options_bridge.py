@@ -6,7 +6,7 @@ import json
 import pytest
 from datetime import datetime, date
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
+from unittest.mock import MagicMock, AsyncMock
 
 from src.broker.collar_options_bridge import (
     CollarOptionsBridge,
@@ -701,7 +701,6 @@ class TestBridgeInitialization:
     def test_ensure_dirs_creates_dirs(self, bridge):
         """_ensure_dirs should create DATA_DIR and signals subdir."""
         import tempfile
-        from pathlib import Path
         data_dir = Path(tempfile.mkdtemp())
         signals_dir = data_dir / "signals"
         assert not signals_dir.exists()

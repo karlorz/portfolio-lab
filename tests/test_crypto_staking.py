@@ -5,7 +5,6 @@ Tests the ETH staking yield model, allocation influence, and crypto carry comput
 No ML dependencies — safe to run anytime.
 """
 
-import json
 import tempfile
 from datetime import datetime
 from pathlib import Path

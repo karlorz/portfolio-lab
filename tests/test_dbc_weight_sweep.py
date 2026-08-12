@@ -2,11 +2,9 @@
 Tests for DBC Commodity Weight Sweep (v4.90)
 """
 
-import json
 import math
 import pytest
 import numpy as np
-from pathlib import Path
 
 from src.backtest.dbc_weight_sweep import (
     DBCWeightSweep,

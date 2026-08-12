@@ -9,7 +9,6 @@ import sqlite3
 import numpy as np
 
 import pytest
-from pathlib import Path
 from unittest.mock import patch, MagicMock, call
 
 from src.backtest.metrics import BacktestResult, compute_metrics_from_returns

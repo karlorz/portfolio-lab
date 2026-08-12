@@ -12,7 +12,6 @@ import os
 os.environ["PORTFOLIO_LAB_ENABLE_ML"] = "0"
 
 import pytest
-from datetime import datetime
 from unittest.mock import patch, MagicMock
 
 from src.strategy.ensemble_voter import (

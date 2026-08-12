@@ -11,9 +11,8 @@ from dataclasses import asdict
 import pytest
 import pandas as pd
 import numpy as np
-from pathlib import Path
 from datetime import datetime
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from src.backtest.duration_yield_backtest import (
     STATIC_ALLOCATION,

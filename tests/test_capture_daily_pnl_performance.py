@@ -1,8 +1,6 @@
 """capture_daily_pnl appends deduped performance.jsonl rows."""
 import json
-from pathlib import Path
 
-import pytest
 
 
 def test_append_performance_jsonl_writes_row(tmp_path, monkeypatch):

@@ -5,13 +5,11 @@ pybreaker is mocked so the tests are fully hermetic and do not require the
 real library to be installed.
 """
 import logging
-import time
-from unittest.mock import MagicMock, patch, ANY
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from src.broker.circuit_breaker import (
-    PYBREAKER_AVAILABLE,
     BrokerCircuitBreaker,
     BrokerError,
     CircuitBreakerError,

@@ -5,14 +5,12 @@ Tests for Cashless Collar Signal Generator (v4.60)
 import json
 import sqlite3
 import pytest
-from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 
 from src.signals.collar_signal import (
     CollarSignalGenerator,
     CollarSignal,
-    CollarStrikes,
     CollarRegime,
     CollarState,
     BlackScholesPricer,

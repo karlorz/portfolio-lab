@@ -12,10 +12,8 @@ Test coverage:
 """
 
 import os
-import sys
 import pytest
 import numpy as np
-from datetime import datetime
 
 # Ensure INFERENCE_TIME_PLANNING flag is on for controller agent tests
 os.environ.setdefault("INFERENCE_TIME_PLANNING", "1")

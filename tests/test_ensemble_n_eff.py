@@ -93,7 +93,6 @@ class TestNEffComputation:
     def test_ensemble_vote_has_n_eff(self):
         """EnsembleVote dataclass should have n_eff and weight_entropy fields."""
         from src.strategy.ensemble_voter import EnsembleVote
-        import inspect
         fields = [f.name for f in EnsembleVote.__dataclass_fields__.values()]
         assert "n_eff" in fields
         assert "weight_entropy" in fields

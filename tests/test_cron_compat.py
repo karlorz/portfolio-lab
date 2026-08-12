@@ -2,10 +2,7 @@
 Tests for src/cron_compat.py — dual-mode cron backend compatibility.
 No ML dependencies, no network calls.
 """
-import pytest
 import os
-import sys
-from pathlib import Path
 from unittest.mock import patch
 
 
@@ -137,7 +134,7 @@ class TestModuleIntegrity:
         assert isinstance(IS_MANUAL, bool)
 
     def test_bools_are_mutually_exclusive_except_manual(self):
-        from src.cron_compat import IS_HERMES, IS_CRONTAB, IS_MANUAL
+        from src.cron_compat import IS_HERMES, IS_CRONTAB
         # hermes and crontab should not both be true
         assert not (IS_HERMES and IS_CRONTAB)
 

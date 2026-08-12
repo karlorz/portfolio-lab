@@ -13,8 +13,7 @@ import json
 import pytest
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock
 
 import pandas as pd
 

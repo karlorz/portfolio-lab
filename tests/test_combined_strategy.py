@@ -1876,7 +1876,6 @@ class TestRunBaselineAdvanced:
         # range(start_idx + 1, end_idx + 1) = range(253, 253) is empty
         # This causes years = 0 and ZeroDivisionError in CAGR computation.
         # This test documents that this edge case is not handled in the source.
-        import math
         with pytest.raises(ZeroDivisionError):
             bt._run_baseline(252, 252, 100000.0)
 

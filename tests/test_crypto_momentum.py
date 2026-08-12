@@ -4,7 +4,6 @@ Tests for Crypto Momentum Signal Generator (v4.70)
 
 import pytest
 import numpy as np
-from datetime import datetime, date
 
 from src.signals.crypto_momentum import (
     CryptoMomentumCalculator,

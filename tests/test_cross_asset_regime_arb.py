@@ -11,7 +11,7 @@ import os
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -1360,9 +1360,7 @@ class TestOutputFunctions:
     def test_cli_signal_returns_json(self, capsys):
         """CLI signal command outputs JSON."""
         import sys
-        import json
         with patch.object(sys, "argv", ["cross_asset_regime_arb.py", "signal"]):
-            from src.signals.cross_asset_regime_arb import main as signal_main
             with patch.object(CrossAssetRegimeArbDetector, "_load_prices", return_value=True):
                 detector = CrossAssetRegimeArbDetector()
                 detector.prices = {
