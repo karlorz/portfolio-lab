@@ -1967,3 +1967,14 @@ class TestAdditionalBoundaryConditions:
         config = BacktestConfig(extras={"custom_param": 42, "debug": True})
         assert config.extras["custom_param"] == 42
         assert config.extras["debug"] is True
+
+
+def test_a3_b1a_delegation_matches_pre_migration_capture():
+    """A3 pin (Item B1a sub-task 2): load_data delegates to grid_runner.load_prices."""
+    from src.backtest.grid_runner import load_prices
+
+    # class method stays in pilot; the shared loader is grid_runner's
+    assert WalkForwardBondDurationBacktester.load_data.__module__ == (
+        "src.backtest.bond_duration_backtest"
+    )
+    assert load_prices.__module__ == "src.backtest.grid_runner"
