@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.dashboard.generator import DashboardGenerator, PUBLIC_DIR
+from src.dashboard.generator import DashboardGenerator
 from tests.helpers import _make_generator
 
 

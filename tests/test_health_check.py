@@ -2,7 +2,6 @@
 
 import json
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -16,7 +15,6 @@ from src.monitor.health_check import (
     _check_circuit_breaker,
     _check_fred_md_cache,
     _compute_system_status,
-    HEALTH_PATH,
 )
 from src.monitor.alerting import AlertChannel, AlertLevel
 from src.monitor.fred_readiness import assess_fred_readiness, resolve_fred_operating_mode

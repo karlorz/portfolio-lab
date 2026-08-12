@@ -8,11 +8,7 @@ Signal construction: Z-score of 7-day rolling search volume relative to 90-day m
 """
 
 import json
-import os
-import pytest
 from datetime import datetime, timedelta
-from pathlib import Path
-from unittest.mock import patch
 
 from src.signals.google_trends_signal import (
     GoogleTrendsSignal,

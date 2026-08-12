@@ -514,7 +514,7 @@ def test_write_summary_dual_writes_public_incidents(tmp_path, monkeypatch):
 
 def test_manual_review_required_incident_survives_pass_alert(tmp_path):
     """A PASS on a manual-review-required channel must not resolve the incident."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from src.monitor.incident_manager import IncidentManager, IncidentState
     from src.monitor.alerting import AlertChannel, AlertLevel

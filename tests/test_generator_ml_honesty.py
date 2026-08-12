@@ -809,7 +809,6 @@ class TestZeroDTEClosingAuctionHonesty:
 
                 return S()
 
-        import sys
         import types
 
         monkeypatch.setitem(
@@ -871,7 +870,6 @@ class TestZeroDTEClosingAuctionHonesty:
 
                 return S()
 
-        import sys
         import types
 
         monkeypatch.setitem(
@@ -896,7 +894,6 @@ class TestTwoStageRegimeUnavailableHonesty:
 
     def test_two_stage_none_publishes_unavailable_section(self, tmp_path, monkeypatch):
         from datetime import datetime, timezone
-        import types
         from src.dashboard import generator as generator_module
 
         gen, _ = _make_generator(tmp_path)

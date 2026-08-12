@@ -1254,20 +1254,17 @@ class TestInternationalMomentumSignalNaNInf(unittest.TestCase):
 
     def test_is_active_nan_confidence(self):
         """NaN confidence should make is_active() return False."""
-        import math
         signal = self._make_signal(confidence=float('nan'))
         # NaN >= 0.5 evaluates to False in Python
         self.assertFalse(signal.is_active())
 
     def test_is_active_inf_confidence(self):
         """Positive infinite confidence should make is_active() return True."""
-        import math
         signal = self._make_signal(confidence=float('inf'))
         self.assertTrue(signal.is_active())
 
     def test_signal_nan_momentum_values(self):
         """NaN momentum values should be stored without error."""
-        import math
         signal = self._make_signal(
             efa_momentum_6m=float('nan'),
             eem_momentum_6m=float('nan'),
@@ -1352,7 +1349,6 @@ class TestInternationalMomentumCli(unittest.TestCase):
 
     def test_cli_help_output(self):
         """--help should print usage and exit with code 0."""
-        import sys
         test_args = ['prog', '--help']
         with patch('sys.argv', test_args):
             with self.assertRaises(SystemExit) as ctx:
@@ -1363,7 +1359,6 @@ class TestInternationalMomentumCli(unittest.TestCase):
     def test_cli_no_args(self):
         """No arguments should print help without exiting."""
         import io
-        import sys
         test_args = ['prog']
         with patch('sys.argv', test_args):
             with patch('sys.stdout', new_callable=io.StringIO) as mock_stdout:
@@ -1374,7 +1369,6 @@ class TestInternationalMomentumCli(unittest.TestCase):
 
     def test_cli_current_empty(self):
         """--current with no signal should exit with code 1 and print error to stderr."""
-        import sys
         mock_gen = MagicMock(spec=InternationalMomentumGenerator)
         mock_gen.get_current_signal.return_value = None
         test_args = ['prog', '--current']
@@ -1391,8 +1385,6 @@ class TestInternationalMomentumCli(unittest.TestCase):
 
     def test_cli_current_with_signal(self):
         """--current with a stored signal should print JSON to stdout."""
-        import io
-        import sys
         signal = InternationalMomentumSignal(
             timestamp='2026-05-14T10:00:00', signal_type='efa_lead',
             confidence=0.65, confidence_level='medium',
@@ -1418,7 +1410,6 @@ class TestInternationalMomentumCli(unittest.TestCase):
 
     def test_cli_stats(self):
         """--stats should print JSON statistics to stdout."""
-        import sys
         stats = {'total_signals': 3, 'activation_rate': 0.67}
         mock_gen = MagicMock(spec=InternationalMomentumGenerator)
         mock_gen.get_signal_statistics.return_value = stats
@@ -1435,7 +1426,6 @@ class TestInternationalMomentumCli(unittest.TestCase):
 
     def test_cli_generate_no_file(self):
         """--generate with non-existent file should exit with code 1."""
-        import sys
         mock_gen = MagicMock(spec=InternationalMomentumGenerator)
         test_args = ['prog', '--generate', '--data-file', '/nonexistent/path/data.json']
         with patch('sys.argv', test_args):

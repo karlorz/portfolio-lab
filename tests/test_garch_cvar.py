@@ -11,7 +11,6 @@ Validates:
 - GARCH parameter validation
 """
 import numpy as np
-import warnings
 
 
 import pytest
@@ -26,7 +25,6 @@ from src.monitor.garch_cvar import (
     compare_cvar_methods,
     ARCH_AVAILABLE,
 )
-from src.monitor.cvar_metrics import calculate_var, calculate_cvar
 
 
 # -----------------------------------------------------------------------------

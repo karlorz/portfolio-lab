@@ -3,19 +3,10 @@
 Tests for dashboard generator — VIX regime detection, data freshness,
 health status, alerts, broker data, and stats calculation.
 """
-import json
-import inspect
-import sqlite3
-import sys
-import types
-import numpy as np
 
 import pytest
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from datetime import datetime, timezone
 
-from src.dashboard.generator import DashboardGenerator, DATA_DIR, PUBLIC_DIR, DB_PATH
 
 
 # ---------------------------------------------------------------------------
@@ -23,12 +14,6 @@ from src.dashboard.generator import DashboardGenerator, DATA_DIR, PUBLIC_DIR, DB
 # the autouse _isolate_live_ensemble_and_ic_health fixture stays HERE and is
 # duplicated verbatim into each split file (never conftest.py).
 # ---------------------------------------------------------------------------
-from tests.helpers import (  # noqa: E402
-    _create_market_db,
-    _make_generator,
-    _write_data_quality_report,
-    _write_ok_source_manifest,
-)
 
 
 @pytest.fixture(autouse=True)

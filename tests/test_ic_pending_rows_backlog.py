@@ -1,9 +1,7 @@
 """IC decay report discloses row-level prediction backlog vs staged pending."""
 import sqlite3
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 
 def test_compute_ic_decay_report_includes_pending_rows(tmp_path, monkeypatch):

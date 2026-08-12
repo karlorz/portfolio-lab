@@ -5,7 +5,6 @@ analyze_correlation_regimes with synthetic data (no disk/network).
 """
 
 import json
-from dataclasses import asdict
 from unittest.mock import patch
 
 import numpy as np

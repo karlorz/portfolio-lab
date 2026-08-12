@@ -4,11 +4,8 @@ from __future__ import annotations
 
 import json
 import shutil
-from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 
 from src.dashboard.generator import DashboardGenerator, _compact_health_summary
 from src.dashboard.kill_authority import (
@@ -278,7 +275,6 @@ def test_generate_health_json_cleared_kill_not_reintroduced_by_stale_ops_monitor
     from src.dashboard import generator as gen_mod
     from src.monitor.health_check import apply_ops_monitor_to_dashboard_health
     from src.dashboard.kill_authority import (
-        load_kill_switch_payload,
         load_open_incidents_summary,
         project_kill_switch_fields,
     )

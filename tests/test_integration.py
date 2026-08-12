@@ -13,7 +13,7 @@ cost budget limits, and all boundary/edge conditions.
 import json
 import pytest
 from datetime import datetime
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock
 
 from src.rebalancing.integration import (
     SmartRebalanceGate,
@@ -22,11 +22,7 @@ from src.rebalancing.integration import (
     __all__ as integration_all,
 )
 from src.rebalancing.smart_rebalancer import (
-    RebalanceDecision,
-    UrgencyLevel,
     SmartRebalancingController,
-    PortfolioSnapshot,
-    MarketConditions,
 )
 
 
@@ -167,7 +163,7 @@ class TestRebalanceGateResult:
         assert isinstance(r.metadata, dict)
 
     def test_is_dataclass(self):
-        from dataclasses import dataclass, is_dataclass
+        from dataclasses import is_dataclass
         assert is_dataclass(RebalanceGateResult)
 
     def test_dataclass_order(self):

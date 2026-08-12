@@ -1,9 +1,6 @@
 """Health check exit codes and public generated_at on ops merge."""
 import json
-from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 
 
 def test_main_warning_exits_zero(monkeypatch):

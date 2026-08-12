@@ -2464,7 +2464,6 @@ class TestDataclassFieldValidation:
 
     def test_signal_prediction_fields(self):
         import dataclasses
-        from typing import Dict, Any
         fields = {f.name: f for f in dataclasses.fields(SignalPrediction)}
         assert set(fields.keys()) == {
             'timestamp', 'source', 'signal_value', 'confidence',
@@ -2521,12 +2520,10 @@ class TestModuleConstants:
 
     def test_db_path_exists(self):
         from src.signals.health_tracker import DB_PATH
-        from pathlib import Path
         assert isinstance(DB_PATH, Path)
 
     def test_state_path_exists(self):
         from src.signals.health_tracker import STATE_PATH
-        from pathlib import Path
         assert isinstance(STATE_PATH, Path)
         assert ".signal_health_state" in str(STATE_PATH)
 
@@ -2561,10 +2558,7 @@ class TestCLIEntryPoint:
 
     def test_backfill_flag_shows_message(self, capsys):
         """--backfill should print backfill count message."""
-        from unittest.mock import patch
-        import sys
         import argparse
-        from io import StringIO
 
         # Test the CLI logic directly by simulating argparse
         parser = argparse.ArgumentParser()
@@ -2591,7 +2585,6 @@ class TestCLIEntryPoint:
 
     def test_calculate_with_source_prints_scores(self, tmp_path, capsys):
         """--calculate --source should print the health score dict."""
-        from unittest.mock import patch
         db = tmp_path / "health.db"
         tracker = SignalHealthTracker(db_path=db)
         today = datetime.now()
@@ -2607,7 +2600,6 @@ class TestCLIEntryPoint:
 
     def test_alerts_flag_no_alerts(self, tmp_path, capsys):
         """--alerts should print 'no decay alerts' when none exist."""
-        from unittest.mock import patch
         db = tmp_path / "health.db"
         tracker = SignalHealthTracker(db_path=db)
         alerts = tracker.detect_decay_alerts()
@@ -2819,7 +2811,7 @@ class TestLogPredictionSimpleNaNInf:
 
     def test_nan_signal_value(self, tmp_path):
         """NaN signal_value should be stored (SQLite stores as NULL)."""
-        import math, sqlite3
+        import sqlite3
         db = tmp_path / "health.db"
         tracker = SignalHealthTracker(db_path=db)
         tracker.log_prediction_simple(source="nan_test", signal_value=float('nan'), confidence=0.8)
@@ -2832,7 +2824,7 @@ class TestLogPredictionSimpleNaNInf:
 
     def test_inf_signal_value(self, tmp_path):
         """Inf signal_value -> predicted_direction = 1 (since inf > 0.2)."""
-        import math, sqlite3
+        import sqlite3
         db = tmp_path / "health.db"
         tracker = SignalHealthTracker(db_path=db)
         tracker.log_prediction_simple(source="inf_test", signal_value=float('inf'), confidence=0.8)
@@ -2846,7 +2838,7 @@ class TestLogPredictionSimpleNaNInf:
 
     def test_neg_inf_signal_value(self, tmp_path):
         """-Inf signal_value -> predicted_direction = -1."""
-        import math, sqlite3
+        import sqlite3
         db = tmp_path / "health.db"
         tracker = SignalHealthTracker(db_path=db)
         tracker.log_prediction_simple(source="neg_inf", signal_value=float('-inf'), confidence=0.8)
@@ -2858,7 +2850,7 @@ class TestLogPredictionSimpleNaNInf:
 
     def test_nan_confidence(self, tmp_path):
         """NaN confidence should be stored (SQLite stores as NULL)."""
-        import math, sqlite3
+        import sqlite3
         db = tmp_path / "health.db"
         tracker = SignalHealthTracker(db_path=db)
         tracker.log_prediction_simple(source="nan_conf", signal_value=0.5, confidence=float('nan'))

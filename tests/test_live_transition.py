@@ -1,9 +1,6 @@
 """Tests for LiveTransitionManager — paper→live ramp protocol."""
 
-import json
-import logging
 from contextlib import ExitStack, contextmanager
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -12,8 +9,6 @@ from src.broker.alpaca import (
     LiveTransitionManager,
     RampPhase,
     RAMP_ALLOCATION_PCT,
-    RAMP_MIN_DAYS,
-    RAMP_MAX_DRAWDOWN,
     check_alpaca_status,
 )
 from src.strategy.graduation_checklist import CheckResult

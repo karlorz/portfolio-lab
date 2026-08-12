@@ -4,7 +4,6 @@ Tests for Kurtosis Regime Detector (v4.91)
 
 import pytest
 import numpy as np
-from datetime import datetime
 
 from src.regime.kurtosis_regime import (
     KurtosisRegimeDetector,
@@ -446,10 +445,9 @@ class TestSignalGenerationExtended:
 
 
 import dataclasses
-import json
 import math
 import sys
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import patch
 
 
 class TestKurtosisRegimeSignalDataclass:

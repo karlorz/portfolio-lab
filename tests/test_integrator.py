@@ -12,7 +12,7 @@ import sqlite3
 import pytest
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock
 from src.signals.integrator import (
     SignalSourceResult, CompositeSignal, AllocationDelta,
     PortfolioRecommendation, SignalSource, SignalIntegrator,

@@ -3,7 +3,6 @@
 import json
 import tempfile
 from pathlib import Path
-import pytest
 from src.config.goals import (
     load_goals,
     validate_goals,

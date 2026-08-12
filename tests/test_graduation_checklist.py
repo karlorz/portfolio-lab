@@ -8,7 +8,7 @@ import json
 import logging
 from pathlib import Path
 from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import numpy as np
 import pytest

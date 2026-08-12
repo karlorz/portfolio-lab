@@ -849,7 +849,6 @@ class TestConstantsExtended:
 
     def test_regime_overrides_keys_match(self):
         """Regime override keys correspond to valid regimes."""
-        from src.dashboard.generator import DashboardGenerator
         gen = DashboardGenerator.__new__(DashboardGenerator)
         # Extract the regime_overrides from generate_signals_json logic
         expected_regimes = {"crisis", "vol_spike", "low_vol"}
@@ -885,7 +884,6 @@ class TestConstantsExtended:
         """PUBLIC_DIR is a Path pointing to an existing or creatable directory."""
         from src.dashboard.generator import PUBLIC_DIR
         # This test just validates the constant, directory creation is tested in init
-        import os
         parent = PUBLIC_DIR.parent
         assert parent.exists(), f"Parent dir {parent} should exist"
 

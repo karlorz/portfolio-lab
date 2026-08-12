@@ -2,8 +2,6 @@
 """Tests for src/backtest/gold_allocation_sweep.py."""
 
 import numpy as np
-import pytest
-from dataclasses import asdict
 
 
 class TestGoldSweepRow:
