@@ -9,21 +9,15 @@ module (they stay there); datetime.now deferred through the generator module
 (FakeDateTime patch seam).
 """
 
-import json
 import os
-import re
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 import numpy as np
 
-from src.paths import DATA_DIR
-from src.monitor.signal_ownership import optional_advisory_signals
 from src.dashboard.alternative_data import (
     _ENSEMBLE_STALENESS_MAP,
-    load_alternative_data_producer_timestamp,
 )
 
 logger = logging.getLogger(__name__)

@@ -7,7 +7,6 @@ methods referencing ``DashboardGenerator.X`` use a call-time lazy import
 """
 
 import json
-import re
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional

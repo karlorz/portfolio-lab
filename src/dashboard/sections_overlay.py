@@ -106,7 +106,7 @@ class _OverlaySectionsMixin:
         format expected by LiveDashboard.tsx panels.
         """
         from src.dashboard import generator as _generator  # lazy (patch seams)
-        from src.dashboard.generator import SIGNAL_EXCEPTIONS, MONITOR_EXCEPTIONS, _log_signal_error  # lazy (stay in generator)
+        from src.dashboard.generator import SIGNAL_EXCEPTIONS, _log_signal_error  # lazy (stay in generator)
         result: Dict = {}
 
         # Primary overlay data
@@ -171,7 +171,7 @@ class _OverlaySectionsMixin:
         Saves monitor state to disk so IC data survives across cron runs.
         """
         from src.dashboard import generator as _generator  # lazy (patch seams)
-        from src.dashboard.generator import SIGNAL_EXCEPTIONS, MONITOR_EXCEPTIONS, _log_signal_error  # lazy (stay in generator)
+        from src.dashboard.generator import MONITOR_EXCEPTIONS, _log_signal_error  # lazy (stay in generator)
         try:
             from src.monitor.ic_decay_monitor import ICMonitor
 
