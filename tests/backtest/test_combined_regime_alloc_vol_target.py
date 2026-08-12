@@ -7,9 +7,7 @@ vol targeting overlay on top.
 """
 
 import pytest
-import json
 import numpy as np
-from unittest.mock import patch
 from dataclasses import asdict
 
 from src.strategy.regime_allocation import REGIME_ALLOCATIONS, DEFAULT_ALLOCATION

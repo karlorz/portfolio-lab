@@ -7,13 +7,10 @@ constants, function boundary conditions, CLI guard, and export completeness.
 """
 import pytest
 import json
-import os
 import logging
 import math
-from datetime import datetime, timedelta
 from dataclasses import fields
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from src.data.vix_futures import (
     VIXTermStructure,
@@ -87,7 +84,7 @@ class TestVIXTermStructureFieldValidation:
         flds = fields(VIXTermStructure)
         has_default = [f for f in flds if f.default is not None or f.default_factory is not None]
         # Actually, dataclasses.MISSING means no default.  Check via dataclasses internal.
-        from dataclasses import MISSING, _FIELD
+        from dataclasses import MISSING
 
         for f in flds:
             assert f.default is MISSING, f"{f.name} has default={f.default!r}"
@@ -1045,7 +1042,6 @@ class TestMainGuard:
         with patch("src.data.vix_futures.VIXDataManager", return_value=mgr):
             with patch.object(mgr, "generate_historical_proxy", return_value=[]) as mock_gen:
                 # Directly simulate the __main__ block logic
-                import src.data.vix_futures as vf
                 # The __main__ code: if not manager.data: generate_historical_proxy
                 if not mgr.data:
                     mgr.generate_historical_proxy("2020-01-01", "2024-12-31")

@@ -22,12 +22,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, List, Optional, Sequence
+from typing import Any, Optional, Sequence
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:

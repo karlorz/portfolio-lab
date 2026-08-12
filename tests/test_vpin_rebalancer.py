@@ -3,17 +3,16 @@
 Tests for VPIN microstructure signal and smart rebalancer integration.
 """
 
-import pytest
-from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
+from datetime import datetime
+from unittest.mock import patch
 
 from src.signals.vpin_bvc import (
     BVCCalculator, VPINEngine, VPINSignal, BVCBar,
-    load_historical_bars, backtest_vpin,
+    load_historical_bars,
 )
 from src.rebalancing.smart_rebalancer import (
     SmartRebalancingController, PortfolioSnapshot, MarketConditions,
-    RebalanceDecision, UrgencyLevel,
+    RebalanceDecision,
 )
 from src.rebalancing.integration import SmartRebalanceGate
 

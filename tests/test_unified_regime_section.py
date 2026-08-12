@@ -1,8 +1,6 @@
 """Unified dashboard regime section must read regime_state.json SSOT."""
 import json
-from pathlib import Path
 
-import pytest
 
 
 def test_get_regime_section_available_from_regime_state(tmp_path, monkeypatch):

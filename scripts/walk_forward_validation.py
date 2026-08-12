@@ -24,7 +24,6 @@ import sys
 import argparse
 import logging
 from pathlib import Path
-from datetime import datetime
 
 # Ensure project root is on sys.path for src.* imports
 _project_root = str(Path(__file__).resolve().parent.parent)
@@ -37,7 +36,7 @@ from sklearn.model_selection import TimeSeriesSplit
 
 from src.paths import PRICES_JSON, DATA_DIR
 from src.backtest.metrics import (
-    BacktestMetrics, compute_metrics, compute_crisis_returns,
+    compute_metrics, compute_crisis_returns,
     compute_deflated_sharpe_ratio, DEFAULT_CRISIS_YEARS, save_results_json,
 )
 
@@ -376,17 +375,17 @@ def print_report(result: dict):
     print(f"Windows: {result['n_windows']}")
     print(f"Grid configs per window: {result['n_configs']}")
 
-    print(f"\n--- In-Sample Performance ---")
+    print("\n--- In-Sample Performance ---")
     is_s = result["is_sharpe"]
     print(f"  Sharpe: mean={is_s['mean']:.4f}, std={is_s['std']:.4f}, "
           f"range=[{is_s['min']:.4f}, {is_s['max']:.4f}]")
 
-    print(f"\n--- Out-of-Sample Performance ---")
+    print("\n--- Out-of-Sample Performance ---")
     oos = result["oos_sharpe"]
     print(f"  Sharpe: mean={oos['mean']:.4f}, std={oos['std']:.4f}, "
           f"range=[{oos['min']:.4f}, {oos['max']:.4f}]")
 
-    print(f"\n--- Walk-Forward Efficiency ---")
+    print("\n--- Walk-Forward Efficiency ---")
     wfe = result["walk_forward_efficiency"]
     print(f"  WFE: {wfe:.4f}", end="")
     if wfe > 0.60:
@@ -396,17 +395,17 @@ def print_report(result: dict):
     else:
         print(" (POOR — likely overfit)")
 
-    print(f"\n--- Deflated Sharpe Ratio ---")
+    print("\n--- Deflated Sharpe Ratio ---")
     print(f"  DSR (champion OOS): {result['dsr_champion_oos']:.4f}")
     print(f"  DSR (average OOS):  {result['dsr_average_oos']:.4f}")
 
     if result.get("crisis_summary"):
-        print(f"\n--- Crisis Period Returns ---")
+        print("\n--- Crisis Period Returns ---")
         for year, stats in sorted(result["crisis_summary"].items()):
             print(f"  {year}: mean={stats['mean']:.2f}%, "
                   f"worst={stats['worst']:.2f}% ({stats['count']} windows)")
 
-    print(f"\n--- Champion Weight Consistency ---")
+    print("\n--- Champion Weight Consistency ---")
     for sym, stats in result.get("champion_weight_consistency", {}).items():
         print(f"  {sym}: mean={stats['mean']:.2%}, std={stats['std']:.2%}, "
               f"range=[{stats['min']:.2%}, {stats['max']:.2%}]")

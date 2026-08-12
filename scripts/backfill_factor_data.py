@@ -62,9 +62,9 @@ def backfill_factor_data():
             # Calculate and store returns
             stored = manager.store_returns(symbol)
             if stored:
-                print(f"  ✓ Calculated performance metrics")
+                print("  ✓ Calculated performance metrics")
         else:
-            print(f"  ✗ No data available")
+            print("  ✗ No data available")
     
     # Print summary
     print("\n" + "=" * 50)

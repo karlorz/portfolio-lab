@@ -712,8 +712,6 @@ class TestRegimeBacktestEmptyAndSingleDay:
 
     def test_single_day_prices(self, monkeypatch):
         """Single-day price data should produce a valid result (no crash)."""
-        import json
-        from unittest.mock import patch
         from src.backtest.vol_targeting_backtest import (
             compute_regime_conditional_vol_target_backtest,
         )

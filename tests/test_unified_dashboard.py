@@ -11,9 +11,7 @@ Covers:
 import json
 import logging
 import sys
-import tempfile
-from pathlib import Path
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import patch
 
 import pytest
 

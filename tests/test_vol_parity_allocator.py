@@ -12,8 +12,7 @@ Tests for vol_parity_allocator.py — comprehensive coverage for:
 import sys
 
 import pytest
-from unittest.mock import patch, MagicMock, PropertyMock
-from datetime import datetime
+from unittest.mock import patch, MagicMock
 
 # Mock external dependencies before importing — with cleanup
 _ORIG_MODULES = {}

@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 SRC_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SRC_DIR))
 
-from src.backtest.metrics import compute_metrics
 
 
 class Regime(str, Enum):
@@ -445,11 +444,11 @@ def main():
         overall = sig_results.get("overall", {}).get("sharpe", 0)
         logger.info(f"\n  {sig_name} (overall Sharpe: {overall:.3f}):")
         if gates:
-            logger.info(f"    ⚠  Recommend gating OFF in:")
+            logger.info("    ⚠  Recommend gating OFF in:")
             for regime, sharpe, n_days in gates:
                 logger.info(f"       - {regime:<12} (Sharpe {sharpe:.3f}, {n_days} days obs)")
         else:
-            logger.info(f"    ✅ No gate rules needed — positive or neutral in all regimes")
+            logger.info("    ✅ No gate rules needed — positive or neutral in all regimes")
 
     # Check special case: RECOVERY regime performance for all signals
     logger.info("\n  RECOVERY regime check for all signals:")

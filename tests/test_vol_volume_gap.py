@@ -6,7 +6,6 @@ Tests feature computation, classification logic, and execution signal mapping.
 import json
 import logging
 import os
-import sys
 from io import StringIO
 from pathlib import Path
 import numpy as np
@@ -25,7 +24,6 @@ from src.regime.vol_volume_gap import (
     load_state,
     _build_state,
     main_cli,
-    STATE_FILE,
 )
 
 
@@ -1199,7 +1197,6 @@ class TestSaveLoadErrorPaths:
 
     def test_save_state_oserror(self, monkeypatch):
         """OSError during save is caught and logged, but save_state returns None."""
-        from io import StringIO
         log_capture = StringIO()
         handler = logging.StreamHandler(log_capture)
         logger = logging.getLogger("src.regime.vol_volume_gap")
@@ -1250,7 +1247,6 @@ class TestGetSameDaySignalAdditional:
         if result["status"] == "error":
             pytest.skip("No real data available")
         # Verify UNKNOWN is in the adjustment map correctly
-        from src.regime.vol_volume_gap import DayRegime
         signal = get_same_day_signal("SPY")
         if signal["status"] == "ok":
             assert "execution_adjustment" in signal

@@ -123,7 +123,7 @@ def main():
     )
     pbo_noise, logits_noise = cscv_pbo(M_noise, S=8)
     print(f"  PBO = {pbo_noise:.2%}")
-    print(f"  Expected: around 50-55% across repeated noise draws")
+    print("  Expected: around 50-55% across repeated noise draws")
     print(f"  Combos tested: {len(logits_noise)}")
     print()
 
@@ -134,7 +134,7 @@ def main():
     )
     pbo_signal, logits_signal = cscv_pbo(M_signal, S=8)
     print(f"  PBO = {pbo_signal:.2%}")
-    print(f"  Expected: <10% (persistent signal → IS-best likely to outperform OOS)")
+    print("  Expected: <10% (persistent signal → IS-best likely to outperform OOS)")
     print(f"  Combos tested: {len(logits_signal)}")
     print()
 
@@ -145,7 +145,7 @@ def main():
     )
     pbo_strong, logits_strong = cscv_pbo(M_strong, S=8)
     print(f"  PBO = {pbo_strong:.2%}")
-    print(f"  Expected: <10% (strong signal → high confidence)")
+    print("  Expected: <10% (strong signal → high confidence)")
     print()
 
     # --- Test 4: More blocks (S=16 → 12,870 combos) ---

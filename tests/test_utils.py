@@ -2,7 +2,6 @@
 
 import time
 
-import pytest
 
 from src.utils import classify_vix_regime, signal_timeout
 

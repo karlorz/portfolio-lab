@@ -14,9 +14,6 @@ Covers:
 
 import pytest
 import json
-import tempfile
-from pathlib import Path
-from datetime import datetime
 
 from dataclasses import asdict
 from src.backtest.unified_overlay_backtest import (

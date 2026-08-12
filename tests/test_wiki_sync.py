@@ -9,11 +9,10 @@ _graduation_status, and run().
 
 import json
 import logging
-import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch
 
 import pytest
 
@@ -820,7 +819,6 @@ class TestSaveRawSourceEdgeCases:
 
     def test_with_nan_value(self, wiki_sync):
         """NaN float value does not crash (serializes via default=str)."""
-        import math
         data = {"value": float("nan")}
         path = wiki_sync.save_raw_source(data, "nan_test")
         assert path.exists()
@@ -830,7 +828,6 @@ class TestSaveRawSourceEdgeCases:
 
     def test_with_inf_value(self, wiki_sync):
         """Infinity float value does not crash."""
-        import math
         data = {"value": float("inf")}
         path = wiki_sync.save_raw_source(data, "inf_test")
         assert path.exists()

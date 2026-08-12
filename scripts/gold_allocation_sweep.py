@@ -18,8 +18,6 @@ import json
 import logging
 import sys
 import time
-from collections import OrderedDict
-from dataclasses import asdict
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -36,7 +34,7 @@ from src.backtest.metrics import (
     compute_metrics,
     save_results_json,
 )
-from src.paths import DATA_DIR, PRICES_JSON, RISK_FREE_RATE
+from src.paths import DATA_DIR, PRICES_JSON
 from src.backtest.metrics import TRADING_DAYS_PER_YEAR
 from src.utils.log_config import configure_logging
 

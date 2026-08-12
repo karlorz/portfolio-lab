@@ -1,7 +1,6 @@
 """VIX overlay allocation is percent points, not fraction*100."""
 import json
 
-import pytest
 
 
 def test_vix_alloc_3_percent_points_not_300(tmp_path, monkeypatch):

@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict
 
 
 PROJECT_ROOT = Path(

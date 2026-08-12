@@ -11,7 +11,7 @@ import math
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 

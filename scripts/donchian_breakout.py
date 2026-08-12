@@ -125,7 +125,7 @@ def main():
     print("DONCHIAN CHANNEL BREAKOUT ENSEMBLE — PROOF OF CONCEPT")
     print("=" * 70)
     print(f"Data: {spy.index[0].date()} to {spy.index[-1].date()}")
-    print(f"Ticker: SPY")
+    print("Ticker: SPY")
     print(f"Channel periods: {CHANNEL_PERIODS}")
     print(f"SMA filter: {SMA_FILTER} days")
     print()
@@ -166,7 +166,7 @@ def main():
         years = len(r) / 252
         return total ** (1 / years) - 1 if years > 0 else 0.0
 
-    print(f"--- BUY-AND-HOLD SPY ---")
+    print("--- BUY-AND-HOLD SPY ---")
     print(f"  CAGR: {cagr(returns):+.2%}, Sharpe: {sharpe(returns):.2f}, MaxDD: {max_dd(returns):.2%}")
     print()
 

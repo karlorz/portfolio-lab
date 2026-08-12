@@ -12,7 +12,6 @@ two-stage k-means regime classifier across multiple dimensions:
 """
 
 import sys
-import os
 import logging
 import numpy as np
 import pandas as pd

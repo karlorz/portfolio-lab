@@ -6,12 +6,9 @@ VIX_REGIME_VOL_BIAS constants (5), VIX-enhanced regime classification (6).
 """
 
 import json
-import tempfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-import numpy as np
-import pytest
 
 
 class TestVIXDataLoading:

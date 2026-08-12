@@ -1,8 +1,6 @@
 """Unified risk section prefers fresher GARCH .health_report over stale risk_metrics."""
 import json
-from datetime import datetime
 
-import pytest
 
 
 def test_prefers_fresher_health_report(tmp_path, monkeypatch):

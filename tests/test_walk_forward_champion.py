@@ -643,9 +643,8 @@ class TestWalkForwardComparisonEdgeCases:
     def test_zero_valid_windows(self):
         """Tiny dataset produces zero walk-forward windows."""
         from src.backtest.walk_forward_champion import (
-            run_walk_forward_comparison, _compute_allocation_result,
+            run_walk_forward_comparison,
         )
-        import json as _json
 
         # 1500 days: is_end_idx=1260, while guard 1260+252=1512 < 1500 is false → 0 windows
         prices = _make_synthetic_prices(n_days=1500)
@@ -671,7 +670,7 @@ class TestWalkForwardComparisonEdgeCases:
     def test_identical_wfe_yields_tie(self):
         """When champion and challenger produce identical WFEs, result is 'tie'."""
         from src.backtest.walk_forward_champion import (
-            run_walk_forward_comparison, WalkForwardResult, WalkForwardWindow,
+            run_walk_forward_comparison, WalkForwardResult,
         )
         import src.backtest.walk_forward_champion as mod
 

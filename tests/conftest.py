@@ -578,7 +578,7 @@ def _guard_live_public_ssot_pollution():
         if size_changes:
             pytest.fail(
                 "Live PUBLIC watchlist size changed during pytest "
-                f"(PORTFOLIO_LAB_STRICT_LIVE_PUBLIC_GUARD=1):\n  - "
+                "(PORTFOLIO_LAB_STRICT_LIVE_PUBLIC_GUARD=1):\n  - "
                 + "\n  - ".join(size_changes)
                 + f"\nLive root: {live}"
             )

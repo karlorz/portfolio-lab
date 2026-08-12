@@ -2,10 +2,8 @@
 Tests for v7.04 Dynamic VIXY Hedge Sizing.
 """
 
-import json
 import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 import numpy as np
 import pytest

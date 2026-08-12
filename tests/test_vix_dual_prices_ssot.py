@@ -1,5 +1,4 @@
 """VIX dual-threshold default prices path is public SSOT."""
-import os
 from pathlib import Path
 
 

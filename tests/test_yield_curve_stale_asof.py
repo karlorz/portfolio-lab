@@ -1,10 +1,7 @@
 """Yield curve signal publishes asof and marks stale when lag is high."""
 import json
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 
 
 def test_yield_curve_includes_asof_and_ok_when_fresh(tmp_path, monkeypatch):

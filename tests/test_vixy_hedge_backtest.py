@@ -11,7 +11,6 @@ import logging
 import tempfile
 from pathlib import Path
 
-import numpy as np
 import pytest
 
 from src.backtest.vixy_hedge_backtest import (

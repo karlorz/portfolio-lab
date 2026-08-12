@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import numpy as np
@@ -34,10 +34,8 @@ from walk_forward_validation import (
     run_single_window,
     run_walk_forward,
     print_report,
-    main,
     GRID_CONFIGS,
 )
-from src.backtest.metrics import BacktestMetrics
 
 
 # ══════════════════════════════════════════════════════════════════════════════

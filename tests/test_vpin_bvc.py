@@ -1019,7 +1019,6 @@ class TestVPINConstants:
 
     def test_regime_boundary_values(self):
         """Regime classification boundaries at 0.25, 0.50, 0.75."""
-        from src.signals.vpin_bvc import VPINEngine
 
         # VPINEngine.get_signal defines regimes based on percentile
         # percentile < 0.25 => low
@@ -1251,7 +1250,6 @@ class TestVpinSignalBoundaryConditions:
         assert current_vpin is not None
 
         # History with wide spread => std > 0
-        import numpy as np
         engine.vpin_history["SPY"] = (
             [0.001] * 50 + [0.999] * 50
         )
@@ -1785,7 +1783,6 @@ class TestBVCCalculatorNaNInf:
     def test_classify_bar_inf_high_low_equal(self):
         """Both high and low being Inf triggers the equal branch (50/50)."""
         from src.signals.vpin_bvc import BVCCalculator
-        import math
         calc = BVCCalculator()
         bar = calc.classify_bar(
             timestamp=datetime(2026, 5, 14, 10, 0),
@@ -2454,7 +2451,6 @@ class TestCliMain:
         # We can't directly inspect the default, but we can check the argparse works
         from src.signals.vpin_bvc import cli
         import sys
-        import argparse
         from unittest.mock import patch
         with patch.object(sys, 'argv', ['vpin_bvc.py', '--backtest']):
             with caplog.at_level(logging.INFO, logger="src.signals.vpin_bvc"):

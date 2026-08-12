@@ -9,7 +9,6 @@ Usage: uv run python scripts/faber_sma_gate.py
 """
 
 import json
-import sys
 from pathlib import Path
 
 import numpy as np

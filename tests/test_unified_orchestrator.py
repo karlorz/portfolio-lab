@@ -5,7 +5,6 @@ Tests for Unified Overlay Orchestrator (v4.90)
 import json
 import unittest
 import pytest
-from datetime import datetime
 from pathlib import Path
 
 from src.strategy.unified_orchestrator import (
@@ -947,7 +946,6 @@ class TestRecommendationEdgeCases:
     def test_is_actionable_no_conflicts(self, orch):
         """Recommendation with zero conflicts should be actionable."""
         # Mock collect_overlay_contributions to return single non-conflicting overlay
-        import src.strategy.unified_orchestrator as uo_mod
         single = [
             OverlayContribution("calendar", "v3.50", "active", 0.10,
                                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
