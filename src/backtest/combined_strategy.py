@@ -37,6 +37,7 @@ import argparse
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
+from src.backtest.grid_runner import load_prices
 from src.backtest.metrics import (
     BacktestResult,
     compute_metrics,
@@ -134,8 +135,7 @@ class CombinedStrategyBacktester:
             return False
 
         try:
-            with open(PRICES_PATH) as f:
-                data = json.load(f)
+            data = load_prices(prices_path=PRICES_PATH)
 
             all_prices = {}
             for ticker in self.tickers:

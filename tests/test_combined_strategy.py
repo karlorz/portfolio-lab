@@ -2511,3 +2511,14 @@ class TestExportsCompleteness:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+def test_a3_b1a_delegation_matches_pre_migration_capture():
+    """A3 pin (Item B1a sub-task 11): load_prices delegates to grid_runner.load_prices."""
+    from src.backtest.grid_runner import load_prices as gr_load_prices
+
+    # class method stays in pilot; the shared loader is grid_runner's
+    assert CombinedStrategyBacktester.load_prices.__module__ == (
+        "src.backtest.combined_strategy"
+    )
+    assert gr_load_prices.__module__ == "src.backtest.grid_runner"
