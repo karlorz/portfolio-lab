@@ -1033,7 +1033,7 @@ def print_summary(dashboard: Dict[str, Any]) -> None:
         sc = tca.get("scorecard", {})
         fb = tca.get("feedback", {})
         if sc:
-            logger.info(f"  📊 TCA SCORECARD")
+            logger.info("  📊 TCA SCORECARD")
             logger.info(f"     Orders: {sc.get('total_orders')}, Notional: ${_fmt(sc.get('total_notional'))}")
             logger.info(f"     Avg Slippage: {_fmt(sc.get('avg_slippage_bps'))} bps")
             logger.info(f"     Avg Quality: {_fmt(sc.get('avg_quality_score'))}/100")
@@ -1069,13 +1069,13 @@ def print_summary(dashboard: Dict[str, Any]) -> None:
     # ── Adaptive Weights ──
     aw = dashboard.get("adaptive_weights", {})
     if aw.get("available"):
-        logger.info(f"  🔄 ADAPTIVE ENSEMBLE WEIGHTS (v6.09)")
+        logger.info("  🔄 ADAPTIVE ENSEMBLE WEIGHTS (v6.09)")
         logger.info(f"     Regime: {aw.get('regime', '?')} | Sources: {aw.get('num_sources')} | History: {aw.get('history_count')} adj")
         for c in aw.get("top_changes", [])[:5]:
             arrow = "⬆" if c["change"] > 0 else "⬇"
             logger.info(f"       {arrow} {c['source']:<25} {c['base_weight']:.4f} → {c['adjusted_weight']:.4f} (×{c['multiplier']})")
     else:
-        logger.info(f"  🔄 ADAPTIVE WEIGHTS: not available (run attribution first)")
+        logger.info("  🔄 ADAPTIVE WEIGHTS: not available (run attribution first)")
 
     logger.info("")
 

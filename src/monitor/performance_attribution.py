@@ -944,7 +944,7 @@ def print_report(report: AttributionReport):
     logger.info("")
 
     if report.degradation_signals:
-        logger.info(f"  ⚠ DEGRADATION SIGNALS (negative/weak contribution):")
+        logger.info("  ⚠ DEGRADATION SIGNALS (negative/weak contribution):")
         for sig in report.degradation_signals:
             src = report.sources.get(sig)
             if src:
@@ -952,7 +952,7 @@ def print_report(report: AttributionReport):
         logger.info("")
 
     if report.top_performers:
-        logger.info(f"  ★ TOP PERFORMERS:")
+        logger.info("  ★ TOP PERFORMERS:")
         for sig in report.top_performers:
             src = report.sources.get(sig)
             if src:

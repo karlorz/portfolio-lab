@@ -557,7 +557,7 @@ def main():
             regime_label=args.regime,
         )
         
-        print(f"\n=== Hedge Selection ===")
+        print("\n=== Hedge Selection ===")
         print(f"  Regime:            {rec.regime} (conf={rec.regime_confidence:.2f})")
         print(f"  Primary hedge:     {rec.primary_hedge} ({rec.primary_size_pct:.1f}%)")
         if rec.secondary_hedge:

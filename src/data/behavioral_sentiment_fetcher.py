@@ -535,7 +535,7 @@ class BehavioralSentimentFetcher:
             recommendation['recommended_action'] = 'moderate_buy'
             recommendation['equity_shift_pct'] = 3.0
             recommendation['rationale'] = (
-                f"Elevated fear detected. Moderate contrarian positioning."
+                "Elevated fear detected. Moderate contrarian positioning."
             )
         elif snapshot.signal_type == 'extreme_greed' and snapshot.confidence > 0.5:
             recommendation['recommended_action'] = 'contrarian_sell'
@@ -548,11 +548,11 @@ class BehavioralSentimentFetcher:
             recommendation['recommended_action'] = 'moderate_sell'
             recommendation['equity_shift_pct'] = -3.0
             recommendation['rationale'] = (
-                f"Elevated greed detected. Moderate defensive positioning."
+                "Elevated greed detected. Moderate defensive positioning."
             )
         else:
             recommendation['rationale'] = (
-                f"Neutral sentiment regime. No behavioral overlay recommended."
+                "Neutral sentiment regime. No behavioral overlay recommended."
             )
         
         return recommendation

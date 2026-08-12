@@ -185,7 +185,7 @@ class SignalWalkForwardValidator:
 
             windows.append(SignalWFEWindow(
                 window=i + 1,
-                train_start=f"obs_0",
+                train_start="obs_0",
                 train_end=f"obs_{train_end}",
                 test_start=f"obs_{test_start}",
                 test_end=f"obs_{test_end}",
