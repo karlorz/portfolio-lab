@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from src.paths import DATA_DIR, PUBLIC_DATA_DIR
-from src.monitor.alerting import AlertChannel, AlertLevel, send_alert
+from src.monitor.alerting import AlertChannel, AlertLevel, send_alert, webhook_config_state
 from src.monitor.hermes_cron import (
     HEALTH_SELF_JOB_NAME,
     combine_scheduler_backends,
@@ -1494,6 +1494,7 @@ def publish_health_alerts_json(report: dict[str, Any] | None = None) -> Path | N
     except Exception:  # noqa: BLE001 — kill surface optional
         pass
 
+    webhook_configured, webhook_source = webhook_config_state()
     output: dict[str, Any] = {
         "alerts": alerts,
         "count": len(alerts),
@@ -1501,6 +1502,10 @@ def publish_health_alerts_json(report: dict[str, Any] | None = None) -> Path | N
         "source": "health_check_job",
         "health_generated_at": health_payload.get("generated_at")
         or health_payload.get("timestamp"),
+        "alerting": {
+            "webhook_configured": webhook_configured,
+            "webhook_source": webhook_source,
+        },
     }
     # F3: the health job fully rebuilds the alerts surface from disk SSOT each
     # run (not a patch over a stale artifact), so the provenance stamp is a

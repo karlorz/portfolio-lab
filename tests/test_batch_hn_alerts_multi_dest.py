@@ -125,3 +125,8 @@ def test_publish_health_alerts_json_three_dest_equal(tmp_path, monkeypatch):
     assert payload.get("source") == "health_check_job"
     assert payload.get("generated_at") == "2026-07-23T12:00:00+00:00"
     assert "alerts" in payload
+    # Item 35: webhook disclosure present in BOTH writers' artifact
+    assert payload.get("alerting") == {
+        "webhook_configured": False,
+        "webhook_source": "none",
+    }
