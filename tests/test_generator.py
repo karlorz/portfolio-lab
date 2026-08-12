@@ -113,73 +113,6 @@ def _isolate_live_ensemble_and_ic_health(request, monkeypatch):
 
 
 
-class TestVIXRegimeDetection:
-    """Test VIX-based regime classification logic."""
-
-    def _classify_vix(self, vix_level):
-        """Extract VIX regime classification logic."""
-        if vix_level > 25:
-            return "crisis"
-        elif vix_level > 20:
-            return "vol_spike"
-        elif vix_level < 15:
-            return "low_vol"
-        else:
-            return "normal"
-
-    def test_crisis_regime(self):
-        assert self._classify_vix(30) == "crisis"
-        assert self._classify_vix(26) == "crisis"
-
-    def test_vol_spike_regime(self):
-        assert self._classify_vix(22) == "vol_spike"
-        assert self._classify_vix(21) == "vol_spike"
-
-    def test_low_vol_regime(self):
-        assert self._classify_vix(12) == "low_vol"
-        assert self._classify_vix(14) == "low_vol"
-
-    def test_normal_regime(self):
-        assert self._classify_vix(18) == "normal"
-        assert self._classify_vix(15) == "normal"
-        assert self._classify_vix(20) == "normal"
-
-    def test_composite_regime_vix_overrides(self):
-        """VIX crisis/vol_spike overrides trend regime."""
-        # If VIX says crisis, it overrides regardless of trend
-        vix_regime = "crisis"
-        trend_regime = "normal"
-        if vix_regime in ["crisis", "vol_spike"]:
-            current_regime = vix_regime
-        else:
-            current_regime = trend_regime
-        assert current_regime == "crisis"
-
-    def test_composite_regime_low_vol_with_normal_trend(self):
-        """Low vol + normal trend → low_vol."""
-        vix_regime = "low_vol"
-        trend_regime = "normal"
-        if vix_regime in ["crisis", "vol_spike"]:
-            current_regime = vix_regime
-        elif vix_regime == "low_vol" and trend_regime != "crisis":
-            current_regime = "low_vol"
-        else:
-            current_regime = trend_regime
-        assert current_regime == "low_vol"
-
-    def test_composite_regime_normal_uses_trend(self):
-        """Normal VIX + trend regime → uses trend."""
-        vix_regime = "normal"
-        trend_regime = "bull"
-        if vix_regime in ["crisis", "vol_spike"]:
-            current_regime = vix_regime
-        elif vix_regime == "low_vol" and trend_regime != "crisis":
-            current_regime = "low_vol"
-        else:
-            current_regime = trend_regime
-        assert current_regime == "bull"
-
-
 # ---------------------------------------------------------------------------
 # Data freshness tests
 # ---------------------------------------------------------------------------
@@ -4455,36 +4388,6 @@ class TestMlSignalsGridSearch:
 # VIX regime detection — boundary values at exact thresholds
 # ---------------------------------------------------------------------------
 
-class TestVIXRegimeBoundaries:
-    """VIX regime at exact boundary values."""
-
-    def test_vix_exactly_15(self):
-        """VIX exactly 15 is normal regime."""
-        gen = DashboardGenerator.__new__(DashboardGenerator)
-        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path := Path("/tmp")):
-            # Extract the classify logic
-            def classify(v):
-                if v > 25: return "crisis"
-                elif v > 20: return "vol_spike"
-                elif v < 15: return "low_vol"
-                else: return "normal"
-            assert classify(15) == "normal"
-            assert classify(20) == "normal"
-            assert classify(25) == "vol_spike"  # >20 not >=20
-
-    def test_vix_vol_spike_upper(self):
-        """VIX exactly 25 is vol_spike (>20, not >25)."""
-        gen = DashboardGenerator.__new__(DashboardGenerator)
-        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path := Path("/tmp")):
-            def classify(v):
-                if v > 25: return "crisis"
-                elif v > 20: return "vol_spike"
-                elif v < 15: return "low_vol"
-                else: return "normal"
-            assert classify(25) == "vol_spike"
-
-
-# ---------------------------------------------------------------------------
 # Graduation JSON — additional edge cases
 # ---------------------------------------------------------------------------
 
