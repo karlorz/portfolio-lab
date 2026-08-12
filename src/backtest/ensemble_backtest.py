@@ -73,7 +73,15 @@ class EnsembleBacktestEngine:
         start_date: str, 
         end_date: str
     ) -> List[Dict]:
-        """Fetch prices from database with caching"""
+        """Fetch prices from database with caching.
+
+        B1b keep+document (partial-delegation escape, Item B1b sub-task 2):
+        keeps its own market.db query — per-symbol ``SELECT date, close, open,
+        high, low, volume`` returns OHLCV dict rows (more than symbol/date/
+        close) plus a per-symbol cache; shape differs from
+        ``grid_runner.load_prices_market_db``'s date-indexed close-only dict.
+        Not delegated.
+        """
         cache_key = f"{symbol}:{start_date}:{end_date}"
         if cache_key in self._price_cache:
             return self._price_cache[cache_key]
