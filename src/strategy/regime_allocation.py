@@ -18,6 +18,8 @@ import logging
 import os
 from typing import Dict, List
 
+from src.paths import BASE_ALLOCATION
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -29,12 +31,12 @@ __all__ = [
     "validate_allocations",
 ]
 
-# Champion baseline
-DEFAULT_ALLOCATION: Dict[str, float] = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
+# Champion baseline (single source of truth: src.paths.BASE_ALLOCATION)
+DEFAULT_ALLOCATION: Dict[str, float] = dict(BASE_ALLOCATION)
 
 # Regime-conditional allocations (aggressive tilt defaults, validated by backtest)
 REGIME_ALLOCATIONS: Dict[str, Dict[str, float]] = {
-    "normal": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16},
+    "normal": dict(BASE_ALLOCATION),
     "crisis": {"SPY": 0.35, "GLD": 0.45, "TLT": 0.20},
     "high_vol": {"SPY": 0.38, "GLD": 0.42, "TLT": 0.20},
     "low_vol": {"SPY": 0.55, "GLD": 0.30, "TLT": 0.15},
