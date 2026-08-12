@@ -101,4 +101,5 @@ select = ["T201"]  # flake8-print: detect print() calls
 "src/research/regime_walk_forward.py" = ["T201"]  # research CLI summary
 "src/monitor/prod_ideas.py" = ["T201"]  # tasker/CLI operator summary
 "src/strategy/hedge_selector.py" = ["T201"]  # CLI status/selection output
+"src/dashboard/generation_store.py" = ["T201"]  # CLI entry point
 "tests/**" = ["T201"]        # Test output — print() is expected
