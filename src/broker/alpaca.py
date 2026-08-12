@@ -1215,7 +1215,7 @@ class LiveTransitionManager:
         try:
             from src.strategy.graduation_checklist import GraduationChecklist
             from src.data.fred_data import get_fred_md_cache_health
-            from src.monitor.fred_readiness import assess_fred_readiness
+            from src.data.fred_readiness import assess_fred_readiness
 
             checklist = GraduationChecklist()
             results = checklist.check()

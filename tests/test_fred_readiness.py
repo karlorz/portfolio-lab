@@ -1,11 +1,11 @@
-"""Credential-policy matrix tests for src.monitor.fred_readiness."""
+"""Credential-policy matrix tests for src.data.fred_readiness."""
 
 import json
 import logging
 
 import pytest
 
-from src.monitor.fred_readiness import (
+from src.data.fred_readiness import (
     FRED_READINESS_SCHEMA_VERSION,
     assess_fred_readiness,
     resolve_fred_operating_mode,

@@ -266,7 +266,7 @@ check_fred_readiness() {
   log "Checking FRED readiness before refreshing public data"
   local readiness_mode
   readiness_mode="${PORTFOLIO_LAB_MODE:-lab}"
-  run_app_cmd env PORTFOLIO_LAB_MODE="$readiness_mode" CRON_BACKEND="${CRON_BACKEND:-tasker}" ./scripts/python_runtime.sh -m src.monitor.fred_readiness --mode "$readiness_mode"
+  run_app_cmd env PORTFOLIO_LAB_MODE="$readiness_mode" CRON_BACKEND="${CRON_BACKEND:-tasker}" ./scripts/python_runtime.sh -m src.data.fred_readiness --mode "$readiness_mode"
 }
 
 check_public_data_consistency() {

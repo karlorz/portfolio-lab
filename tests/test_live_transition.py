@@ -62,7 +62,7 @@ def _allow_paper_live_gate(auto_pass: bool = True, manual_pass: bool = True):
             return_value={"status": "ok", "source_mode": "live", "api_key_configured": True},
         ))
         stack.enter_context(patch(
-            "src.monitor.fred_readiness.assess_fred_readiness",
+            "src.data.fred_readiness.assess_fred_readiness",
             return_value={"ready": True, "blocking": False, "status": "ok", "mode": "live"},
         ))
         yield
@@ -177,7 +177,7 @@ class TestLiveTransitionManager:
             "src.data.fred_data.get_fred_md_cache_health",
             return_value={"status": "unavailable", "source_mode": "synthetic", "api_key_configured": False},
         ), patch(
-            "src.monitor.fred_readiness.assess_fred_readiness",
+            "src.data.fred_readiness.assess_fred_readiness",
             return_value={
                 "ready": False,
                 "blocking": True,

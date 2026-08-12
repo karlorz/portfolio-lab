@@ -206,7 +206,7 @@ def test_lab_deploy_runs_fred_readiness_precheck_before_refreshing_data():
 
     assert "check_fred_readiness" in source
     assert "PORTFOLIO_LAB_MODE=lab" in source
-    assert "python_runtime.sh -m src.monitor.fred_readiness" in source
+    assert "python_runtime.sh -m src.data.fred_readiness" in source
     assert main_body.index("check_fred_readiness") < main_body.index("refresh_dashboard_data")
 
 
