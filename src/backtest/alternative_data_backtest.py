@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from src.backtest.grid_runner import load_prices
 from src.backtest.metrics import (
     BacktestConfig as _BaseConfig,
     BacktestResult,
@@ -102,8 +103,7 @@ class AlternativeDataBacktester:
             prices_path = PRICES_JSON
 
             if prices_path.exists():
-                with open(prices_path) as f:
-                    prices_data = json.load(f)
+                prices_data = load_prices(prices_path=prices_path)
 
                 self._process_price_data(prices_data)
                 logger.info(

@@ -68,12 +68,18 @@ def load_prices_market_db(
     return prices
 
 
-def load_prices() -> Dict[str, List[Dict[str, Any]]]:
+def load_prices(prices_path: Optional[Path] = None) -> Dict[str, List[Dict[str, Any]]]:
     """Load the raw prices.json payload (symbol → [{d, p}, ...]).
 
-    Deferred import keeps the ``src.data.price_cache.get_prices`` patch
-    seam live for tests (both pilots patch it via the fixture).
+    ``prices_path=None`` keeps the deferred ``src.data.price_cache.get_prices``
+    patch seam live for tests. When provided, reads that exact file with a
+    plain ``open`` + ``json.load`` — no exists() check, no try/except (pilots
+    keep their own) — so pilot tests patching module-level path vars,
+    ``builtins.open`` or ``json.load`` stay live (Item B1a seam contract).
     """
+    if prices_path is not None:
+        with open(prices_path) as f:
+            return json.load(f)
     from src.data.price_cache import get_prices
     return get_prices()
 
