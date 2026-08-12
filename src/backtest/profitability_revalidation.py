@@ -372,6 +372,12 @@ def write_results(payload: Mapping[str, Any], output_path: Path) -> None:
 
 
 def _database_symbols(path: Path) -> set[str]:
+    """Return the set of distinct symbols present in the prices table.
+
+    B1b document-only (Item B1b sub-task 5): a symbol-set query
+    (``SELECT DISTINCT symbol FROM prices``), NOT a price loader — no
+    delegation to ``grid_runner.load_prices_market_db`` is possible.
+    """
     if not path.exists():
         return set()
     with closing(sqlite_connect(path)) as connection:
