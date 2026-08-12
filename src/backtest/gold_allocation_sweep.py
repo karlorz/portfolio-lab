@@ -23,17 +23,14 @@ Usage:
     python -m src.backtest.gold_allocation_sweep run --output data/gold_sweep_results.json
 """
 
-import json
 import logging
-import math
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-import numpy as np
 
 from src.paths import DATA_DIR, BASE_ALLOCATION, PRICES_JSON
-from src.backtest.metrics import save_results_json
+from src.backtest import grid_runner
 
 logger = logging.getLogger(__name__)
 
@@ -103,8 +100,7 @@ class GoldAllocationSweep:
 
     def _load_prices(self) -> None:
         """Load real price data from prices.json."""
-        from src.data.price_cache import get_prices
-        raw = get_prices()
+        raw = grid_runner.load_prices()
 
         for symbol in ["SPY", "GLD", "TLT", "IEF"]:
             if symbol in raw:
@@ -124,47 +120,13 @@ class GoldAllocationSweep:
         self,
         weights: Dict[str, float],
     ) -> Tuple[float, float, float, float, Dict[str, float]]:
-        """Simulate portfolio with given weights, return (cagr, vol, sharpe, max_dd, year_returns)."""
-        spy_rets = self._compute_returns(self.prices["SPY"])
-        gld_rets = self._compute_returns(self.prices["GLD"])
-        tlt_rets = self._compute_returns(self.prices["TLT"])
-        ief_rets = self._compute_returns(self.prices.get("IEF", self.prices["TLT"]))
+        """Simulate portfolio with given weights, return (cagr, vol, sharpe, max_dd, year_returns).
 
-        n = min(len(spy_rets), len(gld_rets), len(tlt_rets), len(ief_rets))
-
-        values = [1.0]
-        peak = 1.0
-        daily_rets = []
-        yearly_rets: Dict[str, List[float]] = {}
-
-        for i in range(n):
-            ret = (
-                weights.get("spy", 0) * spy_rets[i] +
-                weights.get("gld", 0) * gld_rets[i] +
-                weights.get("tlt", 0) * tlt_rets[i] +
-                weights.get("ief", 0) * ief_rets[i]
-            )
-            values.append(values[-1] * (1 + ret))
-            daily_rets.append(ret)
-            peak = max(peak, values[-1])
-
-            # Track yearly returns
-            year = self.dates[i + 1][:4] if i + 1 < len(self.dates) else "unknown"
-            if year not in yearly_rets:
-                yearly_rets[year] = []
-            yearly_rets[year].append(ret)
-
-        cagr = np.mean(daily_rets) * 252 * 100
-        vol = np.std(daily_rets) * math.sqrt(252) * 100
-        sharpe = cagr / vol if vol > 0 else 0
-        max_dd = min((v / peak - 1) * 100 for v in values) if values else 0
-
-        # Year-level returns
-        year_total = {}
-        for y, rets in yearly_rets.items():
-            year_total[y] = (np.prod([1 + r for r in rets]) - 1) * 100
-
-        return round(cagr, 2), round(vol, 2), round(sharpe, 3), round(max_dd, 2), year_total
+        Delegates to the shared grid_runner implementation (Item 32 A5
+        consolidation; semantics ported faithfully — A4 output-equality
+        verified against pre-migration captures).
+        """
+        return grid_runner.simulate_portfolio(self.prices, self.dates, weights)
 
     def run_sweep(self) -> GoldSweepResult:
         """Run full gold allocation sweep."""
@@ -326,7 +288,7 @@ def run_gold_sweep(output: Optional[str] = None) -> GoldSweepResult:
 
     if output:
         out_path = Path(output)
-        save_results_json(
+        grid_runner.run_grid_and_save(
             result.to_dict(),
             out_path,
             experiment_manifest=provenance_config(out_path),
@@ -334,7 +296,7 @@ def run_gold_sweep(output: Optional[str] = None) -> GoldSweepResult:
         logger.info("Gold sweep results saved to %s", out_path)
     else:
         out_path = DATA_DIR / "gold_allocation_sweep.json"
-        save_results_json(
+        grid_runner.run_grid_and_save(
             result.to_dict(),
             out_path,
             experiment_manifest=provenance_config(out_path),

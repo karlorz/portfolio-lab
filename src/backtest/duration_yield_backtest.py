@@ -23,13 +23,11 @@ import logging
 import pandas as pd
 import numpy as np
 
-from src.paths import RISK_FREE_RATE
-
+from src.paths import DATA_DIR, MARKET_DB, sqlite_connect
 from src.backtest.metrics import (
     BacktestResult,
     save_results_json,
 )
-from src.paths import DATA_DIR, MARKET_DB, sqlite_connect
 
 
 __all__ = ['STATIC_ALLOCATION', 'DYNAMIC_ALLOCATIONS', 'REGIME_EFFECTIVE_DURATION', 'EXPENSE_RATIOS', 'TRANSACTION_COST', 'load_price_data', 'load_yield_curve_data', 'classify_regime_from_spread', 'load_yield_spread_history', 'calculate_returns', 'calculate_sharpe', 'calculate_max_drawdown', 'calculate_cagr', 'run_backtest', 'print_results', 'save_results']
@@ -76,39 +74,14 @@ TRANSACTION_COST = 0.0010  # 10 bps per trade
 
 
 def load_price_data() -> pd.DataFrame:
-    """Load price data from prices.json."""
+    """Load price data from prices.json.
+
+    Delegates to the shared grid_runner loader (Item 32 A5 consolidation;
+    semantics ported faithfully — A4 output-equality verified).
+    """
     logger.info("Loading price data...")
-    from src.data.price_cache import get_prices
-    data = get_prices()
-
-    # prices.json format: {symbol: [{"d": date, "p": price}, ...]}
-    # Convert to DataFrame with dates as rows and symbols as columns
-    all_dates = set()
-    for symbol, entries in data.items():
-        for entry in entries:
-            all_dates.add(entry["d"])
-
-    dates = sorted(all_dates)
-    records = []
-
-    for date in dates:
-        record = {"date": date}
-        for symbol, entries in data.items():
-            # Find price for this date
-            price = None
-            for entry in entries:
-                if entry["d"] == date:
-                    price = entry["p"]
-                    break
-            if price is not None:
-                record[symbol.lower()] = price
-        records.append(record)
-
-    df = pd.DataFrame(records)
-    df["date"] = pd.to_datetime(df["date"])
-    df = df.sort_values("date").reset_index(drop=True)
-
-    return df
+    from src.backtest.grid_runner import load_prices, prices_to_frame
+    return prices_to_frame(load_prices())
 
 
 def load_yield_curve_data() -> pd.DataFrame:
@@ -227,40 +200,14 @@ def calculate_returns(prices: pd.Series) -> pd.Series:
     return prices.pct_change().fillna(0)
 
 
-def calculate_sharpe(returns: pd.Series, risk_free_rate: float = RISK_FREE_RATE / 100) -> float:
-    """Calculate annualized Sharpe ratio."""
-    if len(returns) < 30:
-        return 0.0
-
-    excess_returns = returns - risk_free_rate / 252
-    if excess_returns.std() == 0:
-        return 0.0
-
-    sharpe = np.sqrt(252) * excess_returns.mean() / excess_returns.std()
-    return sharpe
-
-
-def calculate_max_drawdown(returns: pd.Series) -> float:
-    """Calculate maximum drawdown."""
-    cumulative = (1 + returns).cumprod()
-    running_max = cumulative.expanding().max()
-    drawdown = (cumulative - running_max) / running_max
-    return drawdown.min()
-
-
-def calculate_cagr(returns: pd.Series) -> float:
-    """Calculate annualized return (CAGR)."""
-    if len(returns) == 0:
-        return 0.0
-
-    total_return = (1 + returns).prod()
-    years = len(returns) / 252
-
-    if years < 0.1:
-        return 0.0
-
-    cagr = (total_return ** (1 / years)) - 1
-    return cagr
+# Metrics moved to the shared grid_runner (Item 32 A5 consolidation);
+# re-exported here so module-level names stay importable/patchable and
+# run_backtest's module-global calls resolve to the identical implementations.
+from src.backtest.grid_runner import (  # noqa: E402
+    calculate_sharpe,
+    calculate_max_drawdown,
+    calculate_cagr,
+)
 
 
 def run_backtest(
