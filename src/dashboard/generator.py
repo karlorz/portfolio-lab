@@ -7,8 +7,6 @@ Creates static dashboard from SQLite data for Vite/React app consumption.
 import json
 import sqlite3
 import logging
-import os
-import shutil
 import sys
 from collections import deque
 from dataclasses import asdict
@@ -17,11 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import numpy as np
 
-from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB, REGIME_OVERRIDES, sqlite_connect
-from src.strategy.regime_allocation import (
-    normalize_allocation_regime,
-)
-from src.utils import safe_get, classify_vix_regime
+from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB, sqlite_connect
 from src.backtest.metrics import save_results_json
 from src.dashboard.public_data_index import build_public_data_index
 from src.monitor.hermes_cron import resolve_hermes_cron_jobs_path
@@ -37,7 +31,6 @@ from src.dashboard.data_pipeline_slo_section import build_data_pipeline_slo_sect
 from src.dashboard.signal_section_builder import SignalSectionBuilder
 from src.dashboard.health_slo_alerts import build_health_slo_alerts
 from src.dashboard.kill_authority import (
-    allocation_roles_under_kill,
     build_kill_switch_alert,
     elevate_system_status_for_kill,
     load_kill_switch_payload,
@@ -66,7 +59,6 @@ __all__ = [
 
 # Re-export health-projection cluster (moved to health_projections.py by Item 8)
 from src.dashboard.health_projections import (
-    _parse_rebalance_clock,
     project_smart_rebalance_budget_onto_health,
     project_execution_timeline_onto_health,
     project_repo_public_mirror_lag_onto_health,
@@ -84,19 +76,15 @@ from src.dashboard.health_projections import (
 from src.dashboard.provenance import (
     _apply_partial_patch_git_sha_honesty,
     _enrich_duration_allocation_provenance,
-    _source_manifest_row_for,
     _yield_source_provenance,
     _first_known_value,
     _attach_signal_metadata,
     _generator_git_sha_short,
     _stamp_generator_git_sha,
-    _canonical_file_content_hash,
     _attach_dual_write_provenance,
     finalize_dual_write_provenance_after_sync,
     _finalize_signal_metadata,
-    _dist_data_dir_for_public_dir,
     _mirror_public_data_contract_files_to_dist,
-    PUBLIC_DATA_DIST_MIRROR_FILES,
     SIGNAL_EXCEPTIONS,
     MONITOR_EXCEPTIONS,
     _BUG_EXCEPTIONS,
@@ -104,12 +92,10 @@ from src.dashboard.provenance import (
 
 # Re-export alt-data cluster (moved to alternative_data.py by Item 10)
 from src.dashboard.alternative_data import (
-    _ALT_DATA_LEGACY_COMPONENT_KEYS,
     project_alternative_data_signal,
     load_alternative_data_producer_timestamp,
     refresh_public_alternative_data_projection,
     _is_predictive_fred_macro,
-    _ENSEMBLE_STALENESS_MAP,
 )
 
 from src.dashboard.sections_ensemble import _EnsembleSectionsMixin
@@ -1967,7 +1953,7 @@ def refresh_graduation_dual_surfaces(
     """
     try:
         from src.strategy.graduation_checklist import GraduationChecklist
-        from src.paths import DATA_DIR as _DEFAULT_DATA, PUBLIC_DATA_DIR as _DEFAULT_PUB
+        from src.paths import PUBLIC_DATA_DIR as _DEFAULT_PUB
 
         pub = Path(public_dir) if public_dir is not None else Path(_DEFAULT_PUB)
         # DATA_DIR for checklist is module-level; callers monkeypatch as needed.
