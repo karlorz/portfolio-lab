@@ -2,8 +2,6 @@
 Tests for v7.10 Natural Language Portfolio Query.
 Covers: context building, prompt formatting, fallback behavior, response parsing.
 """
-import json
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
 

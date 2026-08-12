@@ -4,20 +4,18 @@ Tests for network momentum lead-lag overlay — data classes, DTW distance,
 Lévy area signatures, lead-lag matrix, window signals, ensemble signals,
 and portfolio recommendation.
 """
-import json
 import numpy as np
 import pandas as pd
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 from src.strategy.network_momentum_leadlag import (
     LeadLagMatrix, WindowMomentumSignal, EnsembleNetworkSignal,
     NetworkMomentumPortfolio, NetworkMomentumLeadLag,
     NetworkMomentumBacktester,
-    LOOKBACK_WINDOWS, DEFAULT_WINDOW, MAX_DEVIATION, MIN_WEIGHT,
+    LOOKBACK_WINDOWS, MAX_DEVIATION, MIN_WEIGHT,
     ASSETS, DEFAULT_BASE_ALLOCATION,
 )
 

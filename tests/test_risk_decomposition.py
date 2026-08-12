@@ -13,8 +13,6 @@ import json
 import numpy as np
 import pandas as pd
 import pytest
-from pathlib import Path
-from datetime import datetime, timedelta
 
 from src.monitor.risk_decomposition import (
     RiskDecomposer,
@@ -28,7 +26,6 @@ from src.monitor.risk_decomposition import (
     PortfolioRiskDecomposition,
     FACTOR_DEFINITIONS,
     DEFAULT_WINDOW,
-    DEFAULT_WEIGHTS,
 )
 
 

@@ -3,14 +3,11 @@
 
 from __future__ import annotations
 
-import json
-import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from scripts import prune_logs
 

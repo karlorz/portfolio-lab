@@ -5,8 +5,6 @@ Non-ML alternative to the XGBoost stacking integrator.
 """
 
 import pytest
-import math
-import numpy as np
 from src.strategy.online_ic_weighter import OnlineICWeighter
 
 

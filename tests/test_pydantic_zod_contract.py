@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from src.monitor.signal_schemas import SIGNAL_MODELS
 

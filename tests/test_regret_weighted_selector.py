@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Dict, List
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
 
 from src.strategy.regret_weighted_selector import (

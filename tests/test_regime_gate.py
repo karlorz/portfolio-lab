@@ -1,5 +1,4 @@
 """Tests for RegimeGate — regime-adaptive signal gating."""
-import pytest
 from src.signals.regime_gate import RegimeGate
 
 
@@ -109,7 +108,7 @@ class TestFilterWeights:
 
     def test_filter_with_enum_keys(self):
         """Filter should handle Enum keys (as in REGIME_WEIGHTS)."""
-        from src.strategy.ensemble_voter import SignalSource, Regime
+        from src.strategy.ensemble_voter import SignalSource
         gate = RegimeGate()
         weights = {
             SignalSource.MULTI_SPEED_MOM: 0.05,
@@ -746,7 +745,7 @@ class TestRegimeGateIntegration:
 
     def test_filter_weights_with_enum_sources(self):
         """Integration: filter_weights with SignalSource enum keys in all regimes."""
-        from src.strategy.ensemble_voter import SignalSource, Regime
+        from src.strategy.ensemble_voter import SignalSource
         gate = RegimeGate()
         weights = {
             SignalSource.MULTI_SPEED_MOM: 0.10,

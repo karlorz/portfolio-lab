@@ -10,14 +10,13 @@ import os
 import sys
 import json
 import logging
-import math
 import sqlite3
 
 import pytest
 import numpy as np
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from src.research.features import (
     Features, FeaturePipeline, FeatureStore, main as cli_main,

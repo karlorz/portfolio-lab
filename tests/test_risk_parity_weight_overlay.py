@@ -3,7 +3,6 @@
 Tests for risk_parity_weight_overlay.py — constants, RPWeightOverlay dataclass,
 realized volatility calculation, risk parity overlay calculation, and CLI.
 """
-import sys
 import json
 import dataclasses
 import numpy as np
@@ -11,7 +10,7 @@ import pandas as pd
 
 import pytest
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict
 from unittest.mock import patch, MagicMock
 

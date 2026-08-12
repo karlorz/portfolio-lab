@@ -9,8 +9,6 @@ Tests use synthetic price data (no disk/network dependencies).
 import numpy as np
 import pandas as pd
 import pytest
-from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
 
 # Module under test — will exist after green phase
 from src.signals.multi_timeframe_fusion import (

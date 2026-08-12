@@ -1,7 +1,6 @@
 """Tests for rate limiting and retry utilities."""
 
 import time
-from unittest.mock import patch
 
 import pytest
 

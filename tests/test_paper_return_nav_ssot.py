@@ -21,8 +21,6 @@ from src.monitor.paper_return_ssot import (
     write_paper_trading_performance_from_ssot,
 )
 from scripts.capture_daily_pnl import (
-    append_performance_jsonl,
-    compute_pnl_snapshot,
     main,
     save_snapshot,
 )

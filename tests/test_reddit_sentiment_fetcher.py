@@ -8,9 +8,7 @@ import json
 import logging
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock, call
-import io
+from unittest.mock import patch, MagicMock, call
 
 # Import module under test
 from src.data.reddit_sentiment_fetcher import (

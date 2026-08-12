@@ -7,14 +7,11 @@ record_execution, get_status, create_gate_from_config.
 
 import pytest
 from datetime import datetime
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from src.rebalancing.integration import (
     SmartRebalanceGate, RebalanceGateResult, create_gate_from_config,
     _VPIN_AVAILABLE,
-)
-from src.rebalancing.smart_rebalancer import (
-    RebalanceDecision, UrgencyLevel,
 )
 
 

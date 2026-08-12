@@ -9,7 +9,6 @@ and compare_with_ensemble_source edge cases.
 import json
 import pytest
 from unittest.mock import patch, MagicMock
-from datetime import datetime
 
 from src.strategy.orchestrator_ensemble_bridge import (
     UnifiedSignalReading,
@@ -445,7 +444,6 @@ class TestExports:
     def test_all_exports_importable(self):
         from src.strategy.orchestrator_ensemble_bridge import (
             UnifiedSignalReading, OrchestratorEnsembleBridge,
-            get_unified_ensemble_signal, get_unified_ensemble_reading,
         )
         assert UnifiedSignalReading is not None
         assert OrchestratorEnsembleBridge is not None

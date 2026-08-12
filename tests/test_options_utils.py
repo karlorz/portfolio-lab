@@ -3,15 +3,13 @@ Tests for src/broker/options_utils.py — Options chain, quotes, and broker inte
 Mocks aiohttp and price fetcher to avoid network calls. No ML dependencies.
 """
 import pytest
-import json
 import sqlite3
 import asyncio
 import os
 import sys
 from datetime import datetime, date, timedelta
 from pathlib import Path
-from unittest.mock import patch, MagicMock, AsyncMock, Mock
-from decimal import Decimal
+from unittest.mock import patch, MagicMock, AsyncMock
 
 # Mock aiohttp before importing module — with cleanup
 _orig_aiohttp = sys.modules.get("aiohttp")
@@ -30,7 +28,6 @@ def _cleanup_aiohttp():
         sys.modules["aiohttp"] = _orig_aiohttp
 
 import logging
-from typing import Optional
 
 from src.broker.options_utils import (
     OptionType,
@@ -1043,7 +1040,6 @@ class TestCliGuard:
 
     def test_main_runs_via_runpy(self, capsys):
         """Verify __main__ block executes via python -m."""
-        import runpy
         with patch("src.broker.options_utils.OptionsChainFetcher") as mock_fetcher_cls:
             mock_instance = MagicMock()
             mock_fetcher_cls.return_value = mock_instance
@@ -1061,7 +1057,6 @@ class TestCliGuard:
 
     def test_main_block_runs_asyncio_run(self, capsys):
         """The __main__ block calls asyncio.run()."""
-        import runpy
         with patch("src.broker.options_utils.asyncio.run") as mock_run:
             mock_chain = MagicMock()
             mock_chain.quotes = [MagicMock()]
@@ -1076,7 +1071,6 @@ class TestCliGuard:
 
     def test_main_block_with_best_call(self, capsys):
         """When find_optimal_call returns a quote, __main__ prints its details."""
-        import runpy
         with patch("src.broker.options_utils.OptionsChainFetcher") as mock_fetcher_cls:
             mock_instance = MagicMock()
             mock_fetcher_cls.return_value = mock_instance
@@ -1105,7 +1099,6 @@ class TestCliGuard:
 
     def test_main_block_logs_fetch_counts(self, caplog):
         """__main__ should log via the fetcher initialization."""
-        import runpy
         with patch("src.broker.options_utils.OptionsChainFetcher") as mock_fetcher_cls:
             mock_instance = MagicMock()
             mock_fetcher_cls.return_value = mock_instance

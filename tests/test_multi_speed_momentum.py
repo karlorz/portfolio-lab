@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -1725,7 +1725,7 @@ class TestCLIMain:
     def test_invalid_portfolio_raises_value_error(self):
         """Backtest with invalid portfolio format should raise ValueError."""
         import io
-        from src.signals.multi_speed_momentum import main, _parse_portfolio_arg
+        from src.signals.multi_speed_momentum import main
         with patch('sys.argv', [
             'multi_speed_momentum', 'backtest', '--portfolio', '100',
         ]):

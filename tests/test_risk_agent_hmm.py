@@ -4,14 +4,12 @@ import pytest; pytestmark = pytest.mark.heavy
 Tests for HMM-LSTM regime detector — data classes, regime definitions,
 feature extraction, allocation shifts, and portfolio regime management.
 """
-import json
 import numpy as np
 import pandas as pd
 
 import pytest
 from datetime import datetime
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 from src.agents.risk_agent_hmm import (
     MarketRegime, REGIME_DESCRIPTIONS, REGIME_ALLOCATION_SHIFTS,

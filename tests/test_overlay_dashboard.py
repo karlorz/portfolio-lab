@@ -6,7 +6,6 @@ import json
 import logging
 import pytest
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from src.dashboard.overlay_dashboard import (
@@ -921,7 +920,6 @@ class TestRiskAssessmentSpecialValues:
 
     def test_vix_nan_does_not_trigger(self, gen):
         """NaN > 30 is False, NaN > 25 is False, so risk score stays 0."""
-        import math
         data = {"collar": {"vix_level": float("nan")}}
         risk, alerts = gen._assess_portfolio_risk(data)
         assert risk == "low"
@@ -929,7 +927,6 @@ class TestRiskAssessmentSpecialValues:
 
     def test_vix_inf_triggers_alert(self, gen):
         """Inf > 30 is True, score=2 -> moderate with alert."""
-        import math
         data = {"collar": {"vix_level": float("inf")}}
         risk, alerts = gen._assess_portfolio_risk(data)
         assert risk == "moderate"
@@ -951,14 +948,12 @@ class TestRiskAssessmentSpecialValues:
 
     def test_fat_tail_nan_treated_as_low(self, gen):
         """NaN > 0.7 is False, so no alert."""
-        import math
         data = {"kurtosis": {"fat_tail_risk": float("nan")}}
         risk, alerts = gen._assess_portfolio_risk(data)
         assert len(alerts) == 0
 
     def test_fat_tail_inf_triggers_alert(self, gen):
         """Inf > 0.7 is True, should trigger alert."""
-        import math
         data = {"kurtosis": {"fat_tail_risk": float("inf")}}
         risk, alerts = gen._assess_portfolio_risk(data)
         assert any("fat tail" in a.lower() for a in alerts)
@@ -1867,7 +1862,6 @@ class TestCalendarFreshnessProductionTime:
     """Calendar must stamp wall-clock production time, not assessment midnight."""
 
     def test_calendar_generated_at_is_wall_clock_not_midnight_assessment(self, monkeypatch):
-        from datetime import datetime
         from unittest.mock import MagicMock
         from src.dashboard.overlay_dashboard import OverlayDashboardGenerator
 
@@ -1913,7 +1907,6 @@ class TestCalendarFreshnessProductionTime:
 
     def test_calendar_day_roll_uses_new_production_time_not_prior_midnight(self, monkeypatch):
         """After local midnight, stamp is production time of the new day, not T00:00 alone."""
-        from datetime import datetime
         from unittest.mock import MagicMock
         from src.dashboard.overlay_dashboard import OverlayDashboardGenerator
 

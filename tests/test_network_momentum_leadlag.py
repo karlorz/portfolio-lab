@@ -11,8 +11,7 @@ import math
 import pytest
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from itertools import combinations
 
 from src.strategy.network_momentum_leadlag import (

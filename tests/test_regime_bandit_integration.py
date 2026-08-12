@@ -11,8 +11,6 @@ inside EnsembleVoter.compute_vote, covering:
 """
 
 import numpy as np
-import pytest
-from unittest.mock import patch, MagicMock
 
 from src.strategy.ensemble_voter import (
     BanditWeighter, EnsembleVoter, Regime, SignalSource,

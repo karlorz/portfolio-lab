@@ -1,6 +1,5 @@
 """Tests for regime-conditional ensemble weights in EnsembleVoter."""
 
-import pytest
 
 
 class TestRegimeConditionalWeights:

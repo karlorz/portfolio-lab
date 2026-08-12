@@ -2,7 +2,6 @@
 """
 Tests for position sync — drift calculation between broker and local.
 """
-import sys
 
 import json
 import pytest

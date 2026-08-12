@@ -72,7 +72,6 @@ def _make_stub():
         'risk_regime',
     ]
     agent.portfolio_high = None
-    from src.agents.base_agent import torch, nn
     agent.network = RiskNetwork(agent.obs_dim, agent.action_dim, agent.hidden_dim)
     agent.optimizer = None
     return agent
@@ -759,7 +758,7 @@ class TestBaseAgentIntegration:
     """Verify inherited BaseAgent functionality."""
 
     def test_send_message_adds_to_outbox(self):
-        from src.agents.base_agent import AgentType, MessageType
+        from src.agents.base_agent import MessageType
         agent = _make_stub()
         agent.send_message("controller", MessageType.SIGNAL,
                           {'test': True})
@@ -1012,7 +1011,6 @@ class TestRiskAgentActHeavy:
         assert np.isfinite(value)
 
     def test_train_step_metrics(self):
-        import torch
         agent = RiskAgent()
         obs = _make_obs(n=80)
         action = AgentAction(
@@ -1025,7 +1023,6 @@ class TestRiskAgentActHeavy:
         assert 'entropy' in result
 
     def test_train_step_empty_batch(self):
-        import torch
         agent = RiskAgent()
         result = agent.train_step([], [], [], [])
         assert result == {}

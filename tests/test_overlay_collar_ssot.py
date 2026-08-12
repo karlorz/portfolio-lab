@@ -1,12 +1,9 @@
 """Overlay collar must prefer collar_signal.json SSOT over hardcoded 550 spot."""
 import json
-from pathlib import Path
 
-import pytest
 
 
 def test_get_collar_data_loads_saved_signal_file(tmp_path, monkeypatch):
-    from src.dashboard import overlay_dashboard as od
     from src.dashboard.overlay_dashboard import OverlayDashboardGenerator
 
     signals_dir = tmp_path / "signals"

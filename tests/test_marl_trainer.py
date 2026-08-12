@@ -9,8 +9,7 @@ import json
 import numpy as np
 
 import pytest
-from unittest.mock import patch, MagicMock, PropertyMock
-from pathlib import Path
+from unittest.mock import MagicMock
 
 # Mock heavy dependencies before import
 _orig_modules = {}

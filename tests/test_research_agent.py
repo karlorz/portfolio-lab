@@ -8,7 +8,6 @@ import sqlite3
 import pytest
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 from src.research import agent as agent_module
 from src.research.agent import ResearchAgent
@@ -474,7 +473,6 @@ class TestRunDailySummaryReturnSemantics:
         import sqlite3
         from datetime import datetime, timedelta
         import src.research.agent as agent_module
-        from src.research.agent import ResearchAgent
 
         agent = _make_agent(tmp_path)
         db = agent_module.DB_PATH

@@ -544,7 +544,6 @@ class TestPipelineExtended:
         signal = _make_signal()
         pipeline.save_signal(signal)
         # Should create a file
-        import json
         json_files = list(tmp_path.glob("*.json"))
         assert len(json_files) >= 1
 

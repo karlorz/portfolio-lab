@@ -2,13 +2,11 @@
 """
 Tests for order router — signal-to-order conversion, kill switch, retry logic.
 """
-import sys
 import os
 import json
 import tempfile
 
 import pytest
-from datetime import datetime
 from unittest.mock import patch, MagicMock
 
 from src.broker.order_router import OrderRouter, Signal, OrderPlan
