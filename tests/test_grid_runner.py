@@ -164,3 +164,59 @@ def test_run_grid_and_save_writes_artifact(tmp_path):
     data = json.loads(out.read_text())
     assert data["a"] == 1
     assert data["_provenance"]["experiment_id"] == "test"
+
+
+def test_load_prices_market_db_shape_and_filtering(tmp_path):
+    """A5 pin (Item 37): date-indexed shape + None/<=0 filtering + except-path."""
+    import sqlite3
+
+    db = tmp_path / "market.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE prices (symbol TEXT, date TEXT, close REAL)")
+    conn.executemany(
+        "INSERT INTO prices VALUES (?, ?, ?)",
+        [
+            ("SPY", "2026-01-01", 100.0),
+            ("SPY", "2026-01-02", 101.0),
+            ("SPY", "2026-01-03", None),
+            ("GLD", "2026-01-01", 50.0),
+            ("GLD", "2026-01-02", 0.0),
+            ("GLD", "2026-01-03", -5.0),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    out = grid_runner.load_prices_market_db(
+        db, ["SPY", "GLD"], "2026-01-01", "2026-01-03"
+    )
+    # date-indexed {symbol: {date_str: close}}; None/0/negative filtered
+    assert out == {
+        "SPY": {"2026-01-01": 100.0, "2026-01-02": 101.0},
+        "GLD": {"2026-01-01": 50.0},
+    }
+
+    # date-range bounds respected
+    bounded = grid_runner.load_prices_market_db(
+        db, ["SPY"], "2026-01-02", "2026-01-02"
+    )
+    assert bounded == {"SPY": {"2026-01-02": 101.0}}
+
+    # except-path: non-existent cache_db -> empty dict (no raise)
+    assert grid_runner.load_prices_market_db(
+        tmp_path / "missing.db", ["SPY"], "2026-01-01", "2026-01-03"
+    ) == {"SPY": {}}
+
+
+def test_a5_behavioral_delegation_matches_pre_migration_capture():
+    """A5 pin (Item 37): behavioral _max_drawdown via grid_runner == numpy formula."""
+    import numpy as np
+
+    returns = np.array([0.01, -0.02, 0.03, -0.05, 0.02, 0.0, -0.01, 0.015])
+    cumulative = np.cumprod(1.0 + returns)
+    peak = np.maximum.accumulate(cumulative)
+    expected = float(np.min((cumulative - peak) / peak))
+
+    from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
+
+    assert BehavioralSentimentBacktest._max_drawdown(returns) == _approx(expected)

@@ -23,15 +23,48 @@ ML-safe: no ML imports. Research-only: no cron/live path.
 
 import logging
 import math
+import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
 from src.backtest.metrics import save_results_json
-from src.paths import RISK_FREE_RATE
+from src.paths import RISK_FREE_RATE, sqlite_connect
 
 logger = logging.getLogger(__name__)
+
+
+def load_prices_market_db(
+    cache_db: Path,
+    symbols: List[str],
+    start_date: str,
+    end_date: str,
+) -> Dict[str, Dict[str, float]]:
+    """Load daily close prices from market.db, indexed by date.
+
+    Ported verbatim from ``BehavioralSentimentBacktest._load_prices``
+    (behavioral_sentiment_backtest.py:70-90). Returns
+    ``{symbol: {date_str: close}}`` — the date-indexed shape, NOT the
+    prices.json symbol → [{d, p}] shape (A5 phase 2, Item 37).
+    """
+    prices: Dict[str, Dict[str, float]] = {s: {} for s in symbols}
+    try:
+        with sqlite_connect(cache_db) as conn:
+            placeholders = ",".join("?" for _ in symbols)
+            cursor = conn.execute(
+                f"""SELECT symbol, date, close FROM prices
+                    WHERE symbol IN ({placeholders})
+                    AND date >= ? AND date <= ?
+                    ORDER BY date""",
+                (*symbols, start_date, end_date),
+            )
+            for symbol, date_str, close in cursor.fetchall():
+                if close is not None and close > 0:
+                    prices[symbol][date_str] = float(close)
+    except (OSError, sqlite3.Error, KeyError, ValueError, TypeError) as e:
+        logger.error("Failed to load prices: %s", e)
+    return prices
 
 
 def load_prices() -> Dict[str, List[Dict[str, Any]]]:

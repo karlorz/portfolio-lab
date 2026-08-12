@@ -31,7 +31,9 @@ from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 
 import numpy as np
+import pandas as pd
 
+from src.backtest.grid_runner import calculate_max_drawdown, load_prices_market_db
 from src.backtest.metrics import BacktestResult, save_results_json
 from src.paths import DATA_DIR, MARKET_DB, sqlite_connect
 
@@ -71,23 +73,7 @@ class BehavioralSentimentBacktest:
         self, symbols: List[str], start_date: str, end_date: str
     ) -> Dict[str, Dict[str, float]]:
         """Load daily close prices for given symbols, indexed by date."""
-        prices: Dict[str, Dict[str, float]] = {s: {} for s in symbols}
-        try:
-            with sqlite_connect(self.cache_db) as conn:
-                placeholders = ",".join("?" for _ in symbols)
-                cursor = conn.execute(
-                    f"""SELECT symbol, date, close FROM prices
-                        WHERE symbol IN ({placeholders})
-                        AND date >= ? AND date <= ?
-                        ORDER BY date""",
-                    (*symbols, start_date, end_date),
-                )
-                for symbol, date_str, close in cursor.fetchall():
-                    if close is not None and close > 0:
-                        prices[symbol][date_str] = float(close)
-        except (OSError, sqlite3.Error, KeyError, ValueError, TypeError) as e:
-            logger.error("Failed to load prices: %s", e)
-        return prices
+        return load_prices_market_db(self.cache_db, symbols, start_date, end_date)
 
     def _load_signals(
         self, start_date: str, end_date: str
@@ -382,10 +368,7 @@ class BehavioralSentimentBacktest:
     @staticmethod
     def _max_drawdown(returns: np.ndarray) -> float:
         """Compute maximum drawdown from daily returns."""
-        cumulative = np.cumprod(1.0 + returns)
-        peak = np.maximum.accumulate(cumulative)
-        drawdown = (cumulative - peak) / peak
-        return float(np.min(drawdown))
+        return calculate_max_drawdown(pd.Series(returns))
 
     @staticmethod
     def _year_return(
