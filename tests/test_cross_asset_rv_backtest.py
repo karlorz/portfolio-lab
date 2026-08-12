@@ -746,3 +746,14 @@ class TestBacktesterExtended:
         )
         bt.save_results(result, str(tmp_path / "results.json"))
         assert (tmp_path / "results.json").exists()
+
+
+def test_a3_b1a_delegation_matches_pre_migration_capture():
+    """A3 pin (Item B1a sub-task 4): load_data delegates to grid_runner.load_prices."""
+    from src.backtest.grid_runner import load_prices
+
+    # class method stays in pilot; the shared loader is grid_runner's
+    assert CrossAssetRVBacktester.load_data.__module__ == (
+        "src.backtest.cross_asset_rv_backtest"
+    )
+    assert load_prices.__module__ == "src.backtest.grid_runner"

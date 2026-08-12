@@ -7,13 +7,13 @@ Validates whether z-score-based mean-reversion triggers between SPY/GLD/TLT
 add alpha over the baseline 46/38/16 portfolio. Signal weight: 12-33% in ensemble.
 """
 
-import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 
+from src.backtest.grid_runner import load_prices
 from src.backtest.metrics import (
     BacktestConfig as _BaseConfig,
     BacktestResult,
@@ -54,8 +54,7 @@ class CrossAssetRVBacktester:
             logger.error("Price data not found: %s", path)
             return False
 
-        with open(path) as f:
-            self.price_data = json.load(f)
+        self.price_data = load_prices(prices_path=path)
 
         all_dates = set()
         for symbol, bars in self.price_data.items():
