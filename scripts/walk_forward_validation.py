@@ -67,12 +67,21 @@ def _with_canonical_contract(result: dict) -> dict:
 
 
 def generate_grid_configs() -> list[dict[str, float]]:
-    """Generate the 94 grid search configurations for SPY/GLD/TLT.
+    """Generate the 53 grid search configurations for SPY/GLD/TLT.
 
-    Matches the grid search from src/backtest/grid-search.ts:
-    - Region 1: SPY/GLD sweep (40-70% SPY, 5% step)
-    - Region 2: SPY/GLD/TLT sweep (TLT 5-20%, SPY 50-65%, 5% step)
-    - Region 8: Fine sweep around champion (SPY 46-54%, TLT 10-20%, 2% step)
+    The Python walk-forward engine is SPY/GLD/TLT-only (load_prices drops
+    symbols outside that universe), so it mirrors the SPY/GLD/TLT subset of
+    the TypeScript grid (src/backtest/grid-search.ts) — regions 1, 2, and 8
+    — NOT the full 94-config grid. TS regions 3-7/9 (IEF, trend-following,
+    quarterly rebalance, VTI/VBR, vol-target) are intentionally excluded
+    (engine limitation; parity pinned by tests/test_walk_forward_grid_parity.py).
+
+    TS source-of-truth regions mirrored here:
+    - Region 1: SPY/GLD sweep (40-70% SPY, 5% step) — grid-search.ts:52-58
+    - Region 2: SPY/GLD/TLT sweep (TLT 5-20%, SPY 50-65%, 5% step,
+      gld 10-60) — grid-search.ts:62-71
+    - Region 8: Fine sweep around champion (SPY 46-54%, TLT 10-20%, 2%
+      step, gld 25-45) — grid-search.ts:129-136
     """
     configs = []
 
@@ -250,7 +259,8 @@ def run_walk_forward(
         n_splits: Number of walk-forward windows (default 20).
         test_size: Test period length in trading days (default 252 = 1yr).
         gap: Embargo period between train and test (default 21 = 1mo).
-        configs: Grid search configs (default: 94-config grid).
+        configs: Grid search configs (default: 53-config SPY/GLD/TLT grid =
+            TS regions 1+2+8 subset; see generate_grid_configs).
 
     Returns:
         Dict with per-window results, aggregate metrics, WFE, and DSR.
