@@ -1146,3 +1146,39 @@ class TestCliImports:
         assert hasattr(mod, "MIN_HOLDING_DAYS")
         assert hasattr(mod, "MC_TRIALS")
         assert hasattr(mod, "DEFAULT_CACHE_DB")
+
+
+def test_a3_b1b_delegation_matches_pre_migration_capture(tmp_path):
+    """A3 pin (Item B1b sub-task 4): _load_prices delegates to grid_runner.load_prices_market_db.
+
+    Delegation keeps the method name/signature; a tmp market.db flows through
+    cache_db and yields the same date-indexed shape (Item 32 tmp-db precedent,
+    test_grid_runner.py:169-207).
+    """
+    from src.backtest.grid_runner import load_prices_market_db
+    from src.backtest.stacking_ensemble_backtest import StackingEnsembleBacktest
+
+    # method stays in pilot; the shared loader is grid_runner's
+    assert StackingEnsembleBacktest._load_prices.__module__ == (
+        "src.backtest.stacking_ensemble_backtest"
+    )
+    assert load_prices_market_db.__module__ == "src.backtest.grid_runner"
+
+    # tmp market.db through cache_db -> date-indexed shape, None/<=0 filtered
+    db = tmp_path / "market.db"
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute("CREATE TABLE prices (symbol TEXT, date TEXT, close REAL)")
+        conn.executemany(
+            "INSERT INTO prices VALUES (?, ?, ?)",
+            [
+                ("SPY", "2026-01-01", 100.0),
+                ("SPY", "2026-01-02", 101.0),
+                ("GLD", "2026-01-01", 50.0),
+                ("GLD", "2026-01-02", None),
+            ],
+        )
+    bt = StackingEnsembleBacktest(cache_db=db)
+    assert bt._load_prices(["SPY", "GLD"], "2026-01-01", "2026-01-02") == {
+        "SPY": {"2026-01-01": 100.0, "2026-01-02": 101.0},
+        "GLD": {"2026-01-01": 50.0},
+    }

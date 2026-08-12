@@ -18,10 +18,8 @@ Usage:
     python -m src.backtest.stacking_ensemble_backtest run --summary
 """
 
-import json
 import logging
 import math
-import sqlite3
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -30,6 +28,7 @@ from typing import Optional, Dict, List
 import numpy as np
 
 from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult, save_results_json
+from src.backtest.grid_runner import load_prices_market_db
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +49,7 @@ MIN_HOLDING_DAYS = 5
 # Monte Carlo trials
 MC_TRIALS = 200
 
-from src.paths import DATA_DIR, MARKET_DB, sqlite_connect
+from src.paths import MARKET_DB
 
 
 __all__ = ['BASELINE_ACCURACY', 'STACKING_ACCURACY', 'BASELINE_SPY', 'BASELINE_GLD', 'BASELINE_TLT', 'MAX_EQUITY_SHIFT', 'SIGNAL_FREQUENCY', 'MIN_HOLDING_DAYS', 'MC_TRIALS', 'StackingBacktestResult', 'StackingEnsembleBacktest']
@@ -131,23 +130,9 @@ class StackingEnsembleBacktest:
     def _load_prices(
         self, symbols: List[str], start_date: str, end_date: str
     ) -> Dict[str, Dict[str, float]]:
-        prices: Dict[str, Dict[str, float]] = {s: {} for s in symbols}
-        try:
-            with sqlite_connect(self.cache_db) as conn:
-                placeholders = ",".join("?" for _ in symbols)
-                cursor = conn.execute(
-                    f"""SELECT symbol, date, close FROM prices
-                        WHERE symbol IN ({placeholders})
-                        AND date >= ? AND date <= ?
-                        ORDER BY date""",
-                    (*symbols, start_date, end_date),
-                )
-                for symbol, date_str, close in cursor.fetchall():
-                    if close is not None and close > 0:
-                        prices[symbol][date_str] = float(close)
-        except (OSError, sqlite3.Error, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
-            logger.error("Failed to load prices: %s", e)
-        return prices
+        return load_prices_market_db(
+            self.cache_db, symbols, start_date, end_date
+        )
 
     # ------------------------------------------------------------------
     # Signal simulation
