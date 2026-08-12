@@ -28,6 +28,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from src.backtest.grid_runner import load_prices
 from src.backtest.metrics import (
     BacktestConfig as _BaseConfig,
     BacktestResult,
@@ -102,8 +103,7 @@ class UnifiedOverlayBacktester:
                 logger.error("Price data not found at %s", prices_path)
                 return False
 
-            with open(prices_path) as f:
-                self.prices_raw = json.load(f)
+            self.prices_raw = load_prices(prices_path=prices_path)
 
             self.data = []
             self._data_path = prices_path
