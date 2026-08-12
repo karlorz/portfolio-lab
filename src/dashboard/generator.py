@@ -26,6 +26,7 @@ from src.backtest.metrics import save_results_json
 from src.dashboard.public_data_index import build_public_data_index
 from src.monitor.hermes_cron import resolve_hermes_cron_jobs_path
 from src.monitor.signal_schemas import validate_all_signals, validate_signal
+from src.monitor.alerting import webhook_config_state
 from src.dashboard.cron_scheduler_section import build_cron_scheduler_section
 from src.dashboard.data_freshness_section import build_data_freshness_section
 from src.dashboard.health_report import (
@@ -972,10 +973,15 @@ class DashboardGenerator(_EnsembleSectionsMixin, _HedgeSectionsMixin, _RegimeAut
         )
         alerts.extend(build_health_slo_alerts(health_payload))
         
+        webhook_configured, webhook_source = webhook_config_state()
         output = _stamp_generator_git_sha({
             "alerts": sorted(alerts, key=lambda x: x.get("timestamp", "") or "", reverse=True),
             "count": len(alerts),
-            "generated_at": datetime.now(timezone.utc).isoformat()
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "alerting": {
+                "webhook_configured": webhook_configured,
+                "webhook_source": webhook_source,
+            },
         })
         
         out_path = PUBLIC_DIR / "alerts.json"

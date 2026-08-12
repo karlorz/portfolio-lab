@@ -28,6 +28,9 @@ from src.monitor.incident_manager import IncidentManager
 logger = logging.getLogger(__name__)
 
 ALERT_WEBHOOK_URL = os.environ.get("ALERT_WEBHOOK_URL", "").strip()
+# Secret-safe file override (Item 35 / I2): path to a file whose (trimmed)
+# contents are the webhook URL. The URL itself is never logged or exposed.
+ALERT_WEBHOOK_URL_FILE = os.environ.get("ALERT_WEBHOOK_URL_FILE", "").strip()
 ALERT_MIN_INTERVAL_SECONDS = int(os.environ.get("ALERT_MIN_INTERVAL_SECONDS", "300"))
 
 # Producer-aware stale-only exception. This is deliberately separate from
@@ -105,6 +108,41 @@ def _clear_channel_dedup(channel: AlertChannel) -> None:
         del _last_alert_time[key]
 
 
+def _resolve_webhook_url() -> str:
+    """Resolve the webhook URL: ``ALERT_WEBHOOK_URL`` env > module constant > ``ALERT_WEBHOOK_URL_FILE`` file > disabled.
+
+    Call-time resolution (env/file read at call) so tests can set/clear
+    cleanly; the module constant is kept as a fallback for the existing
+    ``patch("src.monitor.alerting.ALERT_WEBHOOK_URL", ...)`` seam.
+    """
+    env_url = os.environ.get("ALERT_WEBHOOK_URL", "").strip()
+    if env_url:
+        return env_url
+    if ALERT_WEBHOOK_URL:
+        return ALERT_WEBHOOK_URL
+    file_path = os.environ.get("ALERT_WEBHOOK_URL_FILE", "").strip()
+    if file_path:
+        try:
+            with open(file_path, encoding="utf-8") as f:
+                return f.read().strip()
+        except OSError:
+            logger.warning("ALERT_WEBHOOK_URL_FILE unreadable: %s", file_path)
+    return ""
+
+
+def webhook_config_state() -> tuple[bool, str]:
+    """Return ``(configured, source)`` for runtime disclosure (Item 35 / I2).
+
+    Source ∈ env / file / none. The URL itself is never returned, logged, or
+    exposed — only the boolean + source are disclosed.
+    """
+    if os.environ.get("ALERT_WEBHOOK_URL", "").strip() or ALERT_WEBHOOK_URL:
+        return True, "env"
+    if os.environ.get("ALERT_WEBHOOK_URL_FILE", "").strip():
+        return True, "file"
+    return False, "none"
+
+
 def send_alert(
     channel: AlertChannel,
     level: AlertLevel,
@@ -127,8 +165,8 @@ def send_alert(
     if level == AlertLevel.PASS:
         _record_incident_transition(channel, level, message, details)
         _clear_channel_dedup(channel)
-        if not ALERT_WEBHOOK_URL:
-            logger.debug("Alerting disabled — no ALERT_WEBHOOK_URL configured")
+        if not _resolve_webhook_url():
+            logger.debug("Alerting disabled — no webhook URL configured")
             return True
         # PASS notifications are not deduped; still best-effort webhook.
         return _post_webhook(channel, level, message, details)
@@ -144,8 +182,8 @@ def send_alert(
     _record_incident_transition(channel, level, message, details)
     _record_alert(dedup_key)
 
-    if not ALERT_WEBHOOK_URL:
-        logger.debug("Alerting disabled — no ALERT_WEBHOOK_URL configured")
+    if not _resolve_webhook_url():
+        logger.debug("Alerting disabled — no webhook URL configured")
         return True
 
     return _post_webhook(channel, level, message, details)
@@ -170,7 +208,7 @@ def _post_webhook(
     try:
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
-            ALERT_WEBHOOK_URL,
+            _resolve_webhook_url(),
             data=data,
             headers={"Content-Type": "application/json"},
             method="POST",

@@ -701,3 +701,55 @@ def test_ineligible_message_counts_match_details_lists(monkeypatch):
     assert sent["details"]["warning_signals"] == ["factor_rotation"]
     # All four rows are ineligible here, so totals equal the ineligible sets.
     assert len(sent["details"].get("ineligible_critical_signals", [])) == msg_critical
+
+
+# ---------------------------------------------------------------------------
+# Item 35 (I2): webhook config surface — ALERT_WEBHOOK_URL_FILE override +
+# runtime state disclosure
+# ---------------------------------------------------------------------------
+class TestWebhookConfigState:
+    def test_env_source_when_url_set(self, monkeypatch):
+        from src.monitor.alerting import webhook_config_state, _resolve_webhook_url
+
+        monkeypatch.setenv("ALERT_WEBHOOK_URL", "https://hooks.example.com/x")
+        monkeypatch.delenv("ALERT_WEBHOOK_URL_FILE", raising=False)
+        assert webhook_config_state() == (True, "env")
+        assert _resolve_webhook_url() == "https://hooks.example.com/x"
+
+    def test_file_source_when_env_empty(self, monkeypatch, tmp_path):
+        from src.monitor.alerting import webhook_config_state, _resolve_webhook_url
+
+        secret_file = tmp_path / "webhook_url.txt"
+        secret_file.write_text("  https://hooks.example.com/file-secret\n")
+        monkeypatch.delenv("ALERT_WEBHOOK_URL", raising=False)
+        monkeypatch.setenv("ALERT_WEBHOOK_URL_FILE", str(secret_file))
+        assert webhook_config_state() == (True, "file")
+        # Trailing whitespace stripped; URL resolved from file contents
+        assert _resolve_webhook_url() == "https://hooks.example.com/file-secret"
+
+    def test_none_when_both_empty(self, monkeypatch):
+        from src.monitor.alerting import webhook_config_state, _resolve_webhook_url
+
+        monkeypatch.delenv("ALERT_WEBHOOK_URL", raising=False)
+        monkeypatch.delenv("ALERT_WEBHOOK_URL_FILE", raising=False)
+        assert webhook_config_state() == (False, "none")
+        assert _resolve_webhook_url() == ""
+
+    def test_env_precedence_over_file(self, monkeypatch, tmp_path):
+        from src.monitor.alerting import _resolve_webhook_url
+
+        secret_file = tmp_path / "webhook_url.txt"
+        secret_file.write_text("https://hooks.example.com/file-secret")
+        monkeypatch.setenv("ALERT_WEBHOOK_URL", "https://hooks.example.com/env")
+        monkeypatch.setenv("ALERT_WEBHOOK_URL_FILE", str(secret_file))
+        assert _resolve_webhook_url() == "https://hooks.example.com/env"
+
+    def test_secret_never_exposed(self, monkeypatch, tmp_path):
+        """webhook_config_state discloses bool+source only — no URL leakage."""
+        from src.monitor.alerting import webhook_config_state
+
+        monkeypatch.setenv("ALERT_WEBHOOK_URL", "https://hooks.example.com/top-secret")
+        configured, source = webhook_config_state()
+        assert configured is True
+        assert source == "env"
+        assert "top-secret" not in repr(webhook_config_state())

@@ -1798,6 +1798,24 @@ class TestAlertsJSON:
         assert "alerts" in data
         assert "count" in data
         assert isinstance(data["alerts"], list)
+
+    def test_alerting_block_disclosed(self, tmp_path, monkeypatch):
+        """alerts.json carries webhook disclosure; URL itself never present."""
+        monkeypatch.delenv("ALERT_WEBHOOK_URL", raising=False)
+        monkeypatch.delenv("ALERT_WEBHOOK_URL_FILE", raising=False)
+        gen, _ = _make_generator(tmp_path)
+        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
+            with patch("src.dashboard.generator.DATA_DIR", tmp_path):
+                path = gen.generate_alerts_json()
+        with open(path) as f:
+            data = json.load(f)
+        assert data["alerting"] == {
+            "webhook_configured": False,
+            "webhook_source": "none",
+        }
+        payload_text = json.dumps(data)
+        assert "https://" not in payload_text  # secret safety
+        gen.conn.close()
         gen.conn.close()
 
     def test_kill_switch_alert(self, tmp_path):
