@@ -38,7 +38,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from src.paths import DATA_DIR, PRICES_JSON, RISK_FREE_RATE
+from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON, RISK_FREE_RATE
 from src.backtest.grid_runner import load_prices_numpy
 from src.backtest.metrics import compute_metrics, save_results_json
 from src.backtest.rolling_vol import precomputed_rolling_volatility
@@ -125,9 +125,9 @@ def _compute_vol_target_leverage(
 
 def _normalized_weights(allocation: Dict[str, float]) -> tuple[float, float, float]:
     """Return normalized SPY/GLD/TLT weights preserving legacy defaults."""
-    w_spy = allocation.get("SPY", 0.46)
-    w_gld = allocation.get("GLD", 0.38)
-    w_tlt = allocation.get("TLT", 0.16)
+    w_spy = allocation.get("SPY", BASE_ALLOCATION["SPY"])
+    w_gld = allocation.get("GLD", BASE_ALLOCATION["GLD"])
+    w_tlt = allocation.get("TLT", BASE_ALLOCATION["TLT"])
     total = w_spy + w_gld + w_tlt
     if abs(total - 1.0) > 1e-6 and total > 0:
         w_spy /= total

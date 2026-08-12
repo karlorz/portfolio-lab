@@ -23,7 +23,7 @@ import logging
 import pandas as pd
 import numpy as np
 
-from src.paths import DATA_DIR, MARKET_DB, sqlite_connect
+from src.paths import BASE_ALLOCATION, DATA_DIR, MARKET_DB, sqlite_connect
 from src.backtest.metrics import (
     BacktestResult,
     save_results_json,
@@ -256,8 +256,8 @@ def run_backtest(
     # Portfolio: 46% SPY, 38% GLD, 36% Bonds (TLT/IEF/SHY)
     # We'll compare bond allocation only, keeping SPY/GLD constant
 
-    spy_weight = 0.46
-    gld_weight = 0.38
+    spy_weight = BASE_ALLOCATION["SPY"]
+    gld_weight = BASE_ALLOCATION["GLD"]
     bond_weight = 0.36
 
     # Static allocation

@@ -35,7 +35,7 @@ import pandas as pd
 
 from src.backtest.grid_runner import calculate_max_drawdown, load_prices_market_db
 from src.backtest.metrics import BacktestResult, save_results_json
-from src.paths import DATA_DIR, MARKET_DB, sqlite_connect
+from src.paths import BASE_ALLOCATION, DATA_DIR, MARKET_DB, sqlite_connect
 
 
 __all__ = ['BASELINE_SPY', 'BASELINE_GLD', 'BASELINE_TLT', 'MAX_SHIFT', 'TSMOM_EXPECTED_SHARPE', 'BehavioralSentimentBacktest']
@@ -43,9 +43,9 @@ __all__ = ['BASELINE_SPY', 'BASELINE_GLD', 'BASELINE_TLT', 'MAX_SHIFT', 'TSMOM_E
 logger = logging.getLogger(__name__)
 
 # Default baseline allocation
-BASELINE_SPY = 0.46
-BASELINE_GLD = 0.38
-BASELINE_TLT = 0.16
+BASELINE_SPY = BASE_ALLOCATION["SPY"]
+BASELINE_GLD = BASE_ALLOCATION["GLD"]
+BASELINE_TLT = BASE_ALLOCATION["TLT"]
 
 # Max equity shift from behavioral signal
 MAX_SHIFT = 0.05  # ±5%
