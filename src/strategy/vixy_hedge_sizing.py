@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Optional, Dict
 
 import numpy as np
+import pandas as pd
 
 from src.backtest.metrics import save_results_json
 from src.paths import DATA_DIR
@@ -535,7 +536,6 @@ def _run_backtest(sizer: VIXYHedgeSizer, start_date: str):
             vix_levels = np.random.lognormal(mean=2.8, sigma=0.4, size=len(dates))
             history = list(zip(dates, vix_levels))
         else:
-            import pandas as pd
             history = [(pd.Timestamp(d), v) for d, v in history if d >= start_date]
 
         allocations = []
