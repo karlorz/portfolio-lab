@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 from datetime import datetime, timezone
 import numpy as np
 
-from src.paths import HISTORICAL_JSON
+from src.paths import HISTORICAL_JSON, BASE_ALLOCATION
 
 logger = logging.getLogger(__name__)
 from src.utils import safe_get
@@ -152,7 +152,7 @@ class SectorMomentumCalculator:
         return adjusted
     
     def get_allocation(self, momentum_scores: List[Dict], top_n: int = 3,
-                      overlay_pct: float = 0.25, spy_weight: float = 0.46,
+                      overlay_pct: float = 0.25, spy_weight: float = BASE_ALLOCATION["SPY"],
                       min_momentum: float = 0.0, vix: Optional[float] = None,
                       vix_threshold: float = 30) -> Dict:
         """Generate sector overlay allocation"""
