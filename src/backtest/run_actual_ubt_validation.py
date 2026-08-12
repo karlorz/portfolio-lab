@@ -13,6 +13,7 @@ import numpy as np
 
 from src.paths import HISTORICAL_JSON, DATA_DIR, RISK_FREE_RATE
 from src.backtest.metrics import save_results_json, compute_metrics_from_returns
+from src.backtest.grid_runner import load_prices
 
 
 import logging
@@ -23,9 +24,7 @@ __all__ = ['load_historical_data', 'extract_prices', 'calculate_returns', 'find_
 
 def load_historical_data():
     """Load historical data from JSON"""
-    data_path = str(HISTORICAL_JSON)
-    with open(data_path, 'r') as f:
-        return json.load(f)
+    return load_prices(prices_path=HISTORICAL_JSON)
 
 def extract_prices(data, symbol):
     """Extract price series (using adjClose if available, else close)"""

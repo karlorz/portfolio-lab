@@ -303,6 +303,17 @@ class TestLoadHistoricalData:
                 load_historical_data()
 
 
+def test_a3_b1a_delegation_matches_pre_migration_capture():
+    """A3 pin (Item B1a sub-task 12): load_historical_data delegates to grid_runner.load_prices."""
+    from src.backtest.grid_runner import load_prices
+
+    # module-level loader stays in pilot; the shared loader is grid_runner's
+    assert load_historical_data.__module__ == (
+        "src.backtest.run_actual_ubt_validation"
+    )
+    assert load_prices.__module__ == "src.backtest.grid_runner"
+
+
 # ---------------------------------------------------------------------------
 # extract_prices extended
 # ---------------------------------------------------------------------------
