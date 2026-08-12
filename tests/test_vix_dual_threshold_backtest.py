@@ -137,3 +137,14 @@ class TestVixDualThresholdBenchmark:
         assert artifact["experiment_id"] == result.experiment_id
         assert manifest["experiment_id"] == result.experiment_id
         assert manifest["config_snapshot"]["lookback_days"] == vdt.ROLLING_LOOKBACK_DAYS
+
+
+def test_a3_b1a_delegation_matches_pre_migration_capture():
+    """A3 pin (Item B1a sub-task 8): _load_price_records delegates to grid_runner.load_prices."""
+    from src.backtest.grid_runner import load_prices
+
+    # module-level loader stays in pilot; the shared loader is grid_runner's
+    assert vdt._load_price_records.__module__ == (
+        "src.backtest.vix_dual_threshold_backtest"
+    )
+    assert load_prices.__module__ == "src.backtest.grid_runner"

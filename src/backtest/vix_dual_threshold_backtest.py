@@ -11,7 +11,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import os
 from pathlib import Path
 import logging
@@ -21,6 +20,7 @@ from typing import Mapping, Sequence
 
 import numpy as np
 
+from src.backtest.grid_runner import load_prices
 from src.backtest.metrics import compute_metrics, save_results_json
 from src.paths import (
     DATA_DIR,
@@ -215,8 +215,7 @@ def _load_price_records() -> tuple[dict[str, list[dict]], str]:
     for path in candidates:
         if not path.exists():
             continue
-        with open(path) as f:
-            records = json.load(f)
+        records = load_prices(prices_path=path)
         dates, _, _ = _align_price_records(records)
         if fallback is None:
             fallback = (records, str(path))
