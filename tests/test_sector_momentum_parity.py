@@ -53,6 +53,7 @@ intentional):
     literal ``DEFAULT_SHORT_LOOKBACK=63`` :40 — pinned via the relationship
     ``252 // 4 == 63`` (a lookback change to 504 keeps 504//4==126 and the
     test stays meaningful).
+  - PY spy_weight is BASE_ALLOCATION-delegated (live-dashboard authority, A4-SOT s3); TS spyWeight is a literal display-layer fallback — equal today (0.46); if BASE_ALLOCATION changes, TS :260 drifts silently and THIS pin alarms.
 """
 from __future__ import annotations
 
@@ -72,6 +73,7 @@ from src.strategy.sector_momentum_calc import (  # noqa: E402
     SECTOR_ETF_DEFINITIONS,
     SectorMomentumCalculator,
 )
+from src.paths import BASE_ALLOCATION  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # TS mirror — source of truth: src/strategy/sector_momentum.ts
@@ -203,6 +205,15 @@ def test_allocation_defaults_pinned():
     assert sig.parameters["min_momentum"].default == 0.0
     assert TS_GET_TOP_SECTORS_DEFAULT_N == 3
     assert TS_DEFAULT_MIN_MOMENTUM == 0
+
+
+def test_weight_defaults_parity():
+    """spy_weight/overlay_pct defaults (calc :154-155; TS :259-260)."""
+    sig = inspect.signature(SectorMomentumCalculator.get_allocation)
+    assert sig.parameters["spy_weight"].default == BASE_ALLOCATION["SPY"]
+    assert sig.parameters["overlay_pct"].default == 0.25
+    # sector_momentum.ts:260 spyWeight: number = 0.46
+    # sector_momentum.ts:259 overlayPct: number = 0.25
 
 
 # ---------------------------------------------------------------------------
