@@ -132,7 +132,7 @@ class GoldAllocationSweep:
         """Run full gold allocation sweep."""
         self._load_prices()
 
-        baseline_w = {"spy": 0.46, "gld": 0.38, "tlt": 0.16, "ief": 0.0}
+        baseline_w = {"spy": BASE_ALLOCATION["SPY"], "gld": BASE_ALLOCATION["GLD"], "tlt": BASE_ALLOCATION["TLT"], "ief": 0.0}
         b_cagr, b_vol, b_sharpe, b_dd, b_yr = self._simulate_portfolio(baseline_w)
 
         rows = []
