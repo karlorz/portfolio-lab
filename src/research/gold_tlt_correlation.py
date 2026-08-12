@@ -211,6 +211,7 @@ def analyze_correlation_regimes(
     regime_corrs = []
 
     for date, corr in rolling_corr.items():
+        prev_date = date
         if corr < -0.15:
             label = "diversifying"
         elif corr > 0.15:
@@ -233,8 +234,6 @@ def analyze_correlation_regimes(
             regime_corrs = [corr]
         else:
             regime_corrs.append(corr)
-
-        prev_date = date
 
     # Close last regime
     if current_label is not None and regime_start is not None:
