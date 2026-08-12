@@ -72,7 +72,9 @@ Domain glossary for dev-loop agents. Use these precise terms instead of paraphra
 ## Regime & Risk
 
 - **Regime detection** — Classifying market state (bull/bear/neutral/high_vol/crisis).
-  HMM-LSTM detector trained on 26,225 samples with 5-state classification.
+  HMM-LSTM detector with 5-state classification, trained dynamically on
+  historical price data (sliding-window feature sequences; sample count varies
+  with data — `src/agents/risk_agent_hmm.py:290-326`).
 - **VIX regime** — Volatility buckets: NORMAL (<20), ELEVATED (20-30), STRESS (30-40),
   CRISIS (>40). Gates collar and VIXY hedge overlays.
 - **VPIN** — Volume-synchronized Probability of Informed Trading. Microstructure
