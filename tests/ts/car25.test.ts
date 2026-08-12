@@ -35,7 +35,9 @@ describe("calculateSafeF", () => {
     });
     expect(result.safeF).toBeGreaterThan(0);
     expect(result.safeF).toBeLessThanOrEqual(4.0);
+    expect(result.safeF).toBeGreaterThanOrEqual(0.01);
     expect(result.iterations).toBeGreaterThan(0);
+    expect(result.iterations).toBeLessThanOrEqual(20);
     expect(result.toleranceUsed).toBe(0.20);
   });
 
@@ -66,6 +68,21 @@ describe("calculateSafeF", () => {
       simulations: 500, horizonYears: 1, riskTolerance: 0.20,
     });
     // With sufficient sims should converge
+    expect(result.iterations).toBeGreaterThan(0);
+  });
+
+  test("handles edge case of very short return series (blockSize path)", () => {
+    // MIGRATED from tests/test_car25.ts:385-397 (root-unique: blockSize bootstrap
+    // block param was untested in canonical — src/backtest/car25.ts :29/:95/:101)
+    const returns = makeReturns(0.10, 0.15, 50);
+    const result = calculateSafeF(returns, {
+      riskTolerance: 0.20,
+      horizonYears: 1, // Shorter horizon
+      simulations: 200,
+      blockSize: 5, // Smaller blocks
+      seed: 42,
+    });
+    expect(result.safeF).toBeGreaterThan(0);
     expect(result.iterations).toBeGreaterThan(0);
   });
 });
@@ -159,6 +176,17 @@ describe("calculateMarketCorrelation", () => {
     const resultHigh = calculateMarketCorrelation(base, high);
     expect(resultHigh.classification).toBe("high");
   });
+
+  test("handles different length arrays with correlation bounds", () => {
+    // MIGRATED from tests/test_car25.ts:201-209 (different length arrays) +
+    // :176-184 (correlation -1..1 bounds, folded per M5)
+    const pReturns = makeReturns(0.10, 0.15, 150);
+    const bReturns = makeReturns(0.12, 0.15, 100);
+    const result = calculateMarketCorrelation(pReturns, bReturns);
+    expect(result.commonDays).toBe(100);
+    expect(result.correlation).toBeGreaterThanOrEqual(-1);
+    expect(result.correlation).toBeLessThanOrEqual(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -191,6 +219,19 @@ describe("pricesToReturns", () => {
   test("single entry returns empty", () => {
     const priceData = [{ symbol: "SPY", date: "2020-01-02", price: 100 }];
     expect(pricesToReturns(priceData, "SPY")).toHaveLength(0);
+  });
+
+  test("sorts unsorted price data by date", () => {
+    // MIGRATED from tests/test_car25.ts:279-290 (root-unique: unsorted input —
+    // canonical input is pre-sorted; covers pricesToReturns sorting behavior)
+    const priceData = [
+      { date: "2024-01-03", symbol: "SPY", price: 102 },
+      { date: "2024-01-01", symbol: "SPY", price: 100 },
+      { date: "2024-01-02", symbol: "SPY", price: 101 },
+    ];
+    const returns = pricesToReturns(priceData, "SPY");
+    expect(returns).toHaveLength(2);
+    expect(returns[0]).toBeCloseTo(0.01, 4); // Jan 1 to Jan 2
   });
 });
 
