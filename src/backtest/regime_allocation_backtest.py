@@ -24,7 +24,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from src.paths import DATA_DIR, PRICES_JSON
+from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON
 from src.backtest.grid_runner import load_prices_numpy
 from src.backtest.metrics import compute_metrics, save_results_json
 from src.strategy.regime_allocation import REGIME_ALLOCATIONS, DEFAULT_ALLOCATION
@@ -35,7 +35,6 @@ __all__ = [
     "RegimeAllocBacktestRow",
     "RegimeAllocBacktestResult",
     "run_regime_alloc_backtest",
-    "run_regime_sweep",
 ]
 
 TRADING_DAYS = 252
@@ -145,9 +144,9 @@ def backtest_allocation(
         else:
             alloc = default_alloc
 
-        w_spy = alloc.get("SPY", 0.46)
-        w_gld = alloc.get("GLD", 0.38)
-        w_tlt = alloc.get("TLT", 0.16)
+        w_spy = alloc.get("SPY", BASE_ALLOCATION["SPY"])
+        w_gld = alloc.get("GLD", BASE_ALLOCATION["GLD"])
+        w_tlt = alloc.get("TLT", BASE_ALLOCATION["TLT"])
 
         # Normalize to 1.0
         total = w_spy + w_gld + w_tlt

@@ -46,7 +46,6 @@ _DEFAULT_PRICES_JSON = PRICES_JSON
 __all__ = [
     "CorrelationAdaptiveResult",
     "compute_correlation_adaptive_backtest",
-    "run_backtest",
 ]
 
 

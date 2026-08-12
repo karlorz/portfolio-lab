@@ -29,6 +29,7 @@ import numpy as np
 
 from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult, save_results_json
 from src.backtest.grid_runner import load_prices_market_db
+from src.paths import BASE_ALLOCATION, MARKET_DB
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +38,9 @@ BASELINE_ACCURACY = 0.65   # Regime-weighted voting
 STACKING_ACCURACY = 0.76   # XGBoost stacking ensemble (target)
 
 # Portfolio baseline
-BASELINE_SPY = 0.46
-BASELINE_GLD = 0.38
-BASELINE_TLT = 0.16
+BASELINE_SPY = BASE_ALLOCATION["SPY"]
+BASELINE_GLD = BASE_ALLOCATION["GLD"]
+BASELINE_TLT = BASE_ALLOCATION["TLT"]
 
 # Signal parameters
 MAX_EQUITY_SHIFT = 0.05  # +/-5%
@@ -48,8 +49,6 @@ MIN_HOLDING_DAYS = 5
 
 # Monte Carlo trials
 MC_TRIALS = 200
-
-from src.paths import MARKET_DB
 
 
 __all__ = ['BASELINE_ACCURACY', 'STACKING_ACCURACY', 'BASELINE_SPY', 'BASELINE_GLD', 'BASELINE_TLT', 'MAX_EQUITY_SHIFT', 'SIGNAL_FREQUENCY', 'MIN_HOLDING_DAYS', 'MC_TRIALS', 'StackingBacktestResult', 'StackingEnsembleBacktest']

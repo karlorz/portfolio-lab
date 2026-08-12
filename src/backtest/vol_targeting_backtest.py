@@ -54,7 +54,6 @@ __all__ = [
     "REGIME_VOL_TARGETS",
     "compute_vol_target_backtest",
     "compute_regime_conditional_vol_target_backtest",
-    "run_backtest",
 ]
 
 
