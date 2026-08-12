@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from src.paths import FACTORS_DIR, sqlite_connect
-from src.backtest.metrics import save_results_json
+from src.utils.metrics_io import save_results_json
 from dataclasses import dataclass, asdict
 import logging
 

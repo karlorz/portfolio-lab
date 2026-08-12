@@ -34,7 +34,7 @@ from typing import Optional, Dict
 import numpy as np
 
 from src.paths import DATA_DIR, PRICES_JSON
-from src.backtest.metrics import save_results_json
+from src.utils.metrics_io import save_results_json
 
 logger = logging.getLogger(__name__)
 

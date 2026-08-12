@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 
 from src.paths import DATA_DIR
-from src.backtest.metrics import save_results_json
+from src.utils.metrics_io import save_results_json
 
 logger = logging.getLogger(__name__)
 

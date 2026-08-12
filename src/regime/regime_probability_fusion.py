@@ -13,7 +13,7 @@ from typing import Dict, Mapping, Optional, Sequence
 
 import numpy as np
 
-from src.backtest.metrics import compute_metrics_from_returns
+from src.utils.metrics_io import compute_metrics_from_returns
 from src.regime.regime_transition_forecaster import REGIMES
 
 __all__ = [

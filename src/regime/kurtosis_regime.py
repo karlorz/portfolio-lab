@@ -25,7 +25,7 @@ from typing import Optional, List, Tuple
 import numpy as np
 
 from src.paths import SIGNALS_DIR
-from src.backtest.metrics import save_results_json
+from src.utils.metrics_io import save_results_json
 
 logger = logging.getLogger(__name__)
 
