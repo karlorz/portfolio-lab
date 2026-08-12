@@ -24,7 +24,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from src.paths import DATA_DIR, PRICES_JSON
+from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON
 from src.backtest.grid_runner import load_prices_dates_prices
 from src.backtest.metrics import (
     BacktestMetrics,
@@ -263,7 +263,7 @@ def run_walk_forward_comparison(
     logger.info("Loaded %d days (%s to %s)", n_total, all_dates[0], all_dates[-1])
 
     # Portfolio definitions
-    champion = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
+    champion = dict(BASE_ALLOCATION)
     challenger = {"SPY": 0.44, "GLD": 0.36, "TLT": 0.20}
     spy_only = {"SPY": 1.0, "GLD": 0.0, "TLT": 0.0}
     sixty_forty = {"SPY": 0.60, "GLD": 0.0, "TLT": 0.40}
