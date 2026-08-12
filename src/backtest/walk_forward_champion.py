@@ -25,6 +25,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from src.paths import DATA_DIR, PRICES_JSON
+from src.backtest.grid_runner import load_prices_dates_prices
 from src.backtest.metrics import (
     BacktestMetrics,
     compute_metrics,
@@ -124,18 +125,7 @@ class ChampionVsChallengerResult:
 
 def _load_prices() -> dict:
     """Load price data from prices.json."""
-    with open(PRICES_JSON) as f:
-        raw = json.load(f)
-
-    result = {}
-    for sym in ["SPY", "GLD", "TLT"]:
-        entries = raw.get(sym, [])
-        if isinstance(entries, list) and len(entries) > 0 and isinstance(entries[0], dict):
-            result[sym] = {
-                "dates": [e["d"] for e in entries],
-                "prices": [e["p"] for e in entries],
-            }
-    return result
+    return load_prices_dates_prices()
 
 
 def _compute_portfolio_returns(

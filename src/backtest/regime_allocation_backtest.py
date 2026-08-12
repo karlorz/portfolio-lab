@@ -25,6 +25,7 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from src.paths import DATA_DIR, PRICES_JSON
+from src.backtest.grid_runner import load_prices_numpy
 from src.backtest.metrics import compute_metrics, save_results_json
 from src.strategy.regime_allocation import REGIME_ALLOCATIONS, DEFAULT_ALLOCATION
 
@@ -91,13 +92,7 @@ def load_prices() -> Dict[str, np.ndarray]:
 
     Format: { "SPY": [{"d": "2005-01-03", "p": 81.38}, ...], ... }
     """
-    with open(PRICES_JSON) as f:
-        raw = json.load(f)
-    prices = {}
-    for symbol, records in raw.items():
-        if isinstance(records, list) and len(records) > 0 and isinstance(records[0], dict):
-            prices[symbol] = np.array([r["p"] for r in records], dtype=float)
-    return prices
+    return load_prices_numpy()
 
 
 def backtest_allocation(

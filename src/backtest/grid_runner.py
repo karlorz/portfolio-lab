@@ -21,6 +21,7 @@ Surface:
 ML-safe: no ML imports. Research-only: no cron/live path.
 """
 
+import json
 import logging
 import math
 import sqlite3
@@ -75,6 +76,47 @@ def load_prices() -> Dict[str, List[Dict[str, Any]]]:
     """
     from src.data.price_cache import get_prices
     return get_prices()
+
+
+def load_prices_numpy() -> Dict[str, np.ndarray]:
+    """Load prices.json as ``{symbol: np.ndarray}`` of close prices.
+
+    Ported verbatim from ``regime_allocation_backtest.load_prices`` /
+    ``combined_regime_alloc_vol_target.load_prices`` (A5 phase 3, Item 38):
+    symbol → float array of ``p`` values; records that are not
+    list-of-dicts are skipped. NO DataFrame round-trip (float-path drift).
+    """
+    from src.paths import PRICES_JSON
+
+    with open(PRICES_JSON) as f:
+        raw = json.load(f)
+    prices: Dict[str, np.ndarray] = {}
+    for symbol, records in raw.items():
+        if isinstance(records, list) and len(records) > 0 and isinstance(records[0], dict):
+            prices[symbol] = np.array([r["p"] for r in records], dtype=float)
+    return prices
+
+
+def load_prices_dates_prices() -> Dict[str, Dict[str, list]]:
+    """Load prices.json as ``{symbol: {"dates": [...], "prices": [...]}}``.
+
+    Ported verbatim from ``walk_forward_champion._load_prices``
+    (A5 phase 3, Item 38): SPY/GLD/TLT only, per-symbol dates/prices lists.
+    """
+    from src.paths import PRICES_JSON
+
+    with open(PRICES_JSON) as f:
+        raw = json.load(f)
+
+    result: Dict[str, Dict[str, list]] = {}
+    for sym in ["SPY", "GLD", "TLT"]:
+        entries = raw.get(sym, [])
+        if isinstance(entries, list) and len(entries) > 0 and isinstance(entries[0], dict):
+            result[sym] = {
+                "dates": [e["d"] for e in entries],
+                "prices": [e["p"] for e in entries],
+            }
+    return result
 
 
 def prices_to_frame(data: Dict[str, List[Dict[str, Any]]]) -> Any:

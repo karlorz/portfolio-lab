@@ -220,3 +220,61 @@ def test_a5_behavioral_delegation_matches_pre_migration_capture():
     from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
 
     assert BehavioralSentimentBacktest._max_drawdown(returns) == _approx(expected)
+
+
+def test_load_prices_numpy_shape_and_values(tmp_path, monkeypatch):
+    """A4 pin (Item 38): numpy adapter == pilot pre-migration loader output."""
+    import json as _json
+
+    fixture = tmp_path / "prices.json"
+    fixture.write_text(
+        _json.dumps(
+            {
+                "SPY": [{"d": "2026-01-01", "p": 100.0}, {"d": "2026-01-02", "p": 101.0}],
+                "GLD": [{"d": "2026-01-01", "p": 50.0}],
+                "BROKEN": "not-a-list",
+            }
+        )
+    )
+    monkeypatch.setattr("src.paths.PRICES_JSON", fixture)
+    out = grid_runner.load_prices_numpy()
+    assert set(out) == {"SPY", "GLD"}  # non-list records skipped
+    import numpy as np
+
+    assert np.array_equal(out["SPY"], np.array([100.0, 101.0]))
+    assert np.array_equal(out["GLD"], np.array([50.0]))
+
+
+def test_load_prices_dates_prices_shape(tmp_path, monkeypatch):
+    """A4 pin (Item 38): {dates, prices} adapter == walk_forward pre-migration."""
+    import json as _json
+
+    fixture = tmp_path / "prices.json"
+    fixture.write_text(
+        _json.dumps(
+            {
+                "SPY": [{"d": "2026-01-01", "p": 100.0}, {"d": "2026-01-02", "p": 101.0}],
+                "GLD": [{"d": "2026-01-01", "p": 50.0}],
+                "TLT": [],
+                "QQQ": [{"d": "2026-01-01", "p": 10.0}],
+            }
+        )
+    )
+    monkeypatch.setattr("src.paths.PRICES_JSON", fixture)
+    out = grid_runner.load_prices_dates_prices()
+    # SPY/GLD/TLT only; empty TLT skipped; QQQ not in the subset
+    assert set(out) == {"SPY", "GLD"}
+    assert out["SPY"] == {"dates": ["2026-01-01", "2026-01-02"], "prices": [100.0, 101.0]}
+
+
+def test_a4_item38_pilot_delegation_names_intact():
+    """A4 pin (Item 38): module-level loader names stay as thin wrappers."""
+    import src.backtest.regime_allocation_backtest as rab
+    import src.backtest.combined_regime_alloc_vol_target as cra
+    import src.backtest.walk_forward_champion as wfc
+
+    assert callable(rab.load_prices)
+    assert callable(cra.load_prices)
+    assert callable(wfc._load_prices)
+    assert cra.load_prices is not grid_runner.load_prices_numpy  # wrapper, not alias
+    assert wfc._load_prices is not grid_runner.load_prices_dates_prices
