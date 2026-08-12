@@ -55,6 +55,10 @@ import {
   BlackLittermanSchema,
   RegimeGateSchema,
   TSMOMSchema,
+  ExplainabilitySchema,
+  CrossAssetRVSchema,
+  VixyHedgeSchema,
+  TurnoverValidatorSchema,
 } from '../schemas/signals';
 import { z } from 'zod';
 
@@ -404,7 +408,7 @@ export function LiveDashboard({
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (explainabilityRaw) {
           const raw = explainabilityRaw;
-          const validated = validateFetchData(raw, PassthroughSchema, 'explainability');
+          const validated = validateFetchData(raw, ExplainabilitySchema, 'explainability');
           if (validated) setExplainability(validated as unknown as ExplainabilityData);
         }
         const graduationRaw = await safeParseJson(gradRes);
@@ -425,7 +429,7 @@ export function LiveDashboard({
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (vixyRaw) {
           const raw = vixyRaw;
-          const validated = validateFetchData(raw, PassthroughSchema, 'vixy_hedge');
+          const validated = validateFetchData(raw, VixyHedgeSchema, 'vixy_hedge');
           if (validated) setVixyHedgeData(validated as unknown as VixyHedgeSizingData);
         }
         const blackLittermanRaw = await safeParseJson(blRes);
@@ -439,7 +443,7 @@ export function LiveDashboard({
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (turnoverRaw) {
           const raw = turnoverRaw;
-          const validated = validateFetchData(raw, PassthroughSchema, 'turnover_validator');
+          const validated = validateFetchData(raw, TurnoverValidatorSchema, 'turnover_validator');
           if (validated) setTurnoverData(validated as unknown as TurnoverValidatorData);
         }
       } catch { /* panels render gracefully with null data */ }
@@ -469,7 +473,7 @@ export function LiveDashboard({
         if (optionalFetchGenerations.current[tab] !== requestGeneration) return;
         if (crossAssetRVRaw) {
           const raw = crossAssetRVRaw;
-          const validated = validateFetchData(raw, PassthroughSchema, 'cross_asset_rv');
+          const validated = validateFetchData(raw, CrossAssetRVSchema, 'cross_asset_rv');
           if (validated) setCrossAssetRVData(validated as unknown as CrossAssetRVData);
         }
       } catch { /* panels render gracefully with null data */ }

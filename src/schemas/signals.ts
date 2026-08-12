@@ -1971,6 +1971,102 @@ export const TSMOMSchema = z.object({
 }).passthrough();
 
 // ---------------------------------------------------------------------------
+// ExplainabilitySchema — /data/explainability/explainability_latest.json
+// (A11 extension #3; freshness carries stale_* keys only when stale —
+// .partial() required; latest_decision null when no current decision)
+// ---------------------------------------------------------------------------
+export const ExplainabilitySchema = z.object({
+  timestamp: z.string(),
+  analysis_date: z.string(),
+  latest_decision: z.unknown().nullable(),
+  recent_decisions: z.array(z.unknown()),
+  signal_deep_dives: z.record(z.string(), z.unknown()),
+  top_sources_today: z.array(z.string()),
+  decision_quality: z.record(z.string(), z.unknown()),
+  freshness: z
+    .object({
+      status: z.string(),
+      generated_at: z.string(),
+      source_file: z.string(),
+      analysis_date: z.string(),
+      latest_decision_timestamp: z.unknown(),
+      stale_source_file: z.unknown(),
+      stale_analysis_date: z.unknown(),
+    })
+    .partial()
+    .optional(),
+}).passthrough();
+
+// ---------------------------------------------------------------------------
+// CrossAssetRVSchema — /data/cross_asset_rv.json (A11 extension #3; pair
+// entries carry optional computed fields — 9 required + .passthrough())
+// ---------------------------------------------------------------------------
+export const CrossAssetRVPairSchema = z.object({
+  pair_name: z.string(),
+  symbol_a: z.string(),
+  symbol_b: z.string(),
+  return_a_60d: z.number(),
+  return_b_60d: z.number(),
+  return_differential: z.number(),
+  z_score: z.number(),
+  z_score_mean: z.number(),
+  z_score_std: z.number(),
+}).passthrough();
+
+export const CrossAssetRVSchema = z.object({
+  signal_value: z.number(),
+  pairs: z.array(CrossAssetRVPairSchema),
+  current_regime: z.string(),
+  is_gated_off: z.boolean(),
+}).passthrough();
+
+// ---------------------------------------------------------------------------
+// VixyHedgeSchema — /data/vixy_hedge.json (A11 extension #3; schema is on the
+// LIVE status shape, NOT the panel interface shape — the panel normalizes
+// client-side; canonical_controller/runtime_role are the live controller
+// payload keys, not the panel's controller_role/runtimeStatus aliases)
+// ---------------------------------------------------------------------------
+export const VixyHedgeSchema = z.object({
+  current_allocation_pct: z.number(),
+  target_allocation_pct: z.number(),
+  vix_level: z.number(),
+  regime: z.string(),
+  ytd_cost_bps: z.number(),
+  ytd_benefit_bps: z.number(),
+  hedge_efficiency: z.number(),
+  total_signals: z.number(),
+  last_rebalance: z.string(),
+  generated_at: z.string(),
+  canonical_controller: z.string(),
+  runtime_role: z.string(),
+  live_authoritative: z.boolean(),
+  routed: z.boolean(),
+}).passthrough();
+
+// ---------------------------------------------------------------------------
+// TurnoverValidatorSchema — /data/turnover_validator.json (A11 follow-up
+// post-Item 29; nested turnover-validator/v1 shape: signals → per-source
+// diagnostics, synthetic_baselines disclosed separately)
+// ---------------------------------------------------------------------------
+export const TurnoverSignalDiagnosticsSchema = z.object({
+  periods: z.number(),
+  mean: z.number(),
+  std: z.number(),
+  sign_flip_rate: z.number(),
+  mag_vol: z.number(),
+  turnover_penalty: z.number(),
+  stability_score: z.number(),
+  marginal_score: z.number(),
+}).passthrough();
+
+export const TurnoverValidatorSchema = z.object({
+  schema_version: z.string(),
+  signals: z.record(z.string(), TurnoverSignalDiagnosticsSchema),
+  synthetic_baselines: z.record(z.string(), z.unknown()).optional(),
+  generated_at: z.string(),
+}).passthrough();
+
+// ---------------------------------------------------------------------------
 // Generic validation helper with graceful degradation
 // ---------------------------------------------------------------------------
 export function validateFetchData<T>(

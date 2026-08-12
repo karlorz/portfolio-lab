@@ -32,6 +32,10 @@ import {
   IcDecaySummarySchema,
   RegimeGateSchema,
   TSMOMSchema,
+  ExplainabilitySchema,
+  CrossAssetRVSchema,
+  VixyHedgeSchema,
+  TurnoverValidatorSchema,
 } from '../../src/schemas/signals';
 import { z } from 'zod';
 
@@ -1882,5 +1886,572 @@ describe('TSMOMSchema', () => {
   it('rejects an unknown position_recommendation value', () => {
     const bad = { ...fallbackTsmom(), position_recommendation: 'sideways' };
     expect(TSMOMSchema.safeParse(bad).success).toBe(false);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Item 28 (A11 extension #3): ExplainabilitySchema / CrossAssetRVSchema /
+// VixyHedgeSchema / TurnoverValidatorSchema — fixtures = live payloads
+// captured 00:0xZ 2026-08-12 from lab.karldigi.dev/data/...
+// ---------------------------------------------------------------------------
+
+describe('explainability schema (Item 28)', () => {
+  const livePayload = {
+  "timestamp": "2026-08-12T07:48:26.740556",
+  "analysis_date": "2026-08-11",
+  "latest_decision": {
+    "timestamp": "2026-08-12T07:48:26.740556",
+    "period": "2026-08-11",
+    "regime": "normal",
+    "action": "neutral",
+    "confidence": 0.727413268694079,
+    "reasoning": "Action=neutral; raw_consensus=+0.5575 (bullish); agreement=100.0%; regime=normal.",
+    "total_signals": 9,
+    "consensus_direction": "neutral",
+    "raw_consensus_direction": "bullish",
+    "agreement_ratio": 1.0,
+    "weighted_consensus": 0.5575,
+    "signals": [
+      {
+        "source": "cross_asset_rv",
+        "display_name": "Cross Asset Rv",
+        "category": "signal",
+        "value": 0.7005,
+        "direction": "bullish",
+        "strength": 0.7005,
+        "confidence": 0.934,
+        "weight": 0.5,
+        "contribution": 0.35025
+      },
+      {
+        "source": "vix_term_structure",
+        "display_name": "Vix Term Structure",
+        "category": "signal",
+        "value": 0.6431,
+        "direction": "bullish",
+        "strength": 0.6431,
+        "confidence": 1.0,
+        "weight": 0.219,
+        "contribution": 0.140839
+      },
+      {
+        "source": "google_trends",
+        "display_name": "Google Trends",
+        "category": "signal",
+        "value": 0.4021,
+        "direction": "bullish",
+        "strength": 0.4021,
+        "confidence": 0.871,
+        "weight": 0.126,
+        "contribution": 0.050665
+      },
+      {
+        "source": "multi_timeframe_fusion",
+        "display_name": "Multi Timeframe Fusion",
+        "category": "signal",
+        "value": 0.1014,
+        "direction": "bullish",
+        "strength": 0.1014,
+        "confidence": 0.501,
+        "weight": 0.155,
+        "contribution": 0.015717
+      },
+      {
+        "source": "multi_speed_momentum",
+        "display_name": "Multi Speed Momentum",
+        "category": "signal",
+        "value": -0.3333,
+        "direction": "bearish",
+        "strength": 0.3333,
+        "confidence": 0.667,
+        "weight": 0.0,
+        "contribution": -0.0
+      }
+    ],
+    "top_drivers": [
+      {
+        "source": "cross_asset_rv",
+        "contribution": 0.35025,
+        "direction": "bullish"
+      },
+      {
+        "source": "vix_term_structure",
+        "contribution": 0.140839,
+        "direction": "bullish"
+      },
+      {
+        "source": "google_trends",
+        "contribution": 0.050665,
+        "direction": "bullish"
+      },
+      {
+        "source": "multi_timeframe_fusion",
+        "contribution": 0.015717,
+        "direction": "bullish"
+      }
+    ],
+    "top_opposers": []
+  },
+  "recent_decisions": [],
+  "signal_deep_dives": {
+    "cross_asset_rv": {
+      "source": "cross_asset_rv",
+      "display_name": "Cross Asset Rv",
+      "category": "signal",
+      "total_observations": 1,
+      "avg_value": 0.7005,
+      "avg_confidence": 0.934,
+      "avg_weight": 0.5,
+      "hit_rate": null,
+      "sharpe_contribution": null
+    },
+    "vix_term_structure": {
+      "source": "vix_term_structure",
+      "display_name": "Vix Term Structure",
+      "category": "signal",
+      "total_observations": 1,
+      "avg_value": 0.6431,
+      "avg_confidence": 1.0,
+      "avg_weight": 0.219,
+      "hit_rate": null,
+      "sharpe_contribution": null
+    },
+    "google_trends": {
+      "source": "google_trends",
+      "display_name": "Google Trends",
+      "category": "signal",
+      "total_observations": 1,
+      "avg_value": 0.4021,
+      "avg_confidence": 0.871,
+      "avg_weight": 0.126,
+      "hit_rate": null,
+      "sharpe_contribution": null
+    },
+    "multi_timeframe_fusion": {
+      "source": "multi_timeframe_fusion",
+      "display_name": "Multi Timeframe Fusion",
+      "category": "signal",
+      "total_observations": 1,
+      "avg_value": 0.1014,
+      "avg_confidence": 0.501,
+      "avg_weight": 0.155,
+      "hit_rate": null,
+      "sharpe_contribution": null
+    },
+    "multi_speed_momentum": {
+      "source": "multi_speed_momentum",
+      "display_name": "Multi Speed Momentum",
+      "category": "signal",
+      "total_observations": 1,
+      "avg_value": -0.3333,
+      "avg_confidence": 0.667,
+      "avg_weight": 0.0,
+      "hit_rate": null,
+      "sharpe_contribution": null
+    }
+  },
+  "top_sources_today": [
+    "cross_asset_rv",
+    "vix_term_structure",
+    "google_trends",
+    "multi_timeframe_fusion",
+    "multi_speed_momentum"
+  ],
+  "decision_quality": {
+    "status": "ok",
+    "agreement_ratio": 1.0,
+    "n_eff": 3.42,
+    "weight_entropy": 1.2291
+  },
+  "freshness": {
+    "status": "current",
+    "generated_at": "2026-08-12T07:48:26.740556",
+    "source_file": "signals.json",
+    "analysis_date": "2026-08-11",
+    "latest_decision_timestamp": "2026-08-12T07:48:26.740556",
+    "stale_source_file": "explainability_2026-05-18.json",
+    "stale_analysis_date": "2026-05-18"
+  },
+  "artifact_id": "explainability/explainability_latest.json",
+  "plane": "public",
+  "generated_at": "2026-08-12T07:48:26.740556",
+  "generator_git_sha": null,
+  "generator_git_sha_status": "unavailable",
+  "last_full_generator_git_sha": null,
+  "runtime_provenance": {
+    "schema_version": "runtime-provenance/v1",
+    "artifact_id": "explainability/explainability_latest.json",
+    "plane": "public",
+    "generated_at": "2026-08-12T07:48:26.740556",
+    "generator_git_sha": null,
+    "generator_git_sha_status": "unavailable",
+    "last_full_generator_git_sha": null,
+    "patch_source": null
+  }
+};
+
+  it('accepts the live explainability payload', () => {
+    const result = ExplainabilitySchema.safeParse(livePayload);
+    expect(result.success).toBe(true);
+  });
+});
+
+describe('cross_asset_rv schema (Item 28)', () => {
+  const livePayload = {
+  "signal_value": 0.2782,
+  "pairs": [
+    {
+      "pair_name": "spy_qqq",
+      "symbol_a": "SPY",
+      "symbol_b": "QQQ",
+      "return_a_60d": 4.15,
+      "return_b_60d": -0.29,
+      "return_differential": 4.44,
+      "z_score": 0.9768,
+      "z_score_mean": -0.0036,
+      "z_score_std": 0.0492,
+      "signal_value": -0.4884,
+      "regime": "neutral",
+      "conviction": 0.2442,
+      "active": false,
+      "days_active": 0,
+      "entry_zscore": 0.0,
+      "coverage_status": "available",
+      "missing_symbols": []
+    },
+    {
+      "pair_name": "spy_efa",
+      "symbol_a": "SPY",
+      "symbol_b": "EFA",
+      "return_a_60d": 4.15,
+      "return_b_60d": 4.55,
+      "return_differential": -0.4,
+      "z_score": -0.0863,
+      "z_score_mean": -0.002,
+      "z_score_std": 0.0237,
+      "signal_value": 0.0,
+      "regime": "converged",
+      "conviction": 0.0,
+      "active": false,
+      "days_active": 0,
+      "entry_zscore": 0.0,
+      "coverage_status": "available",
+      "missing_symbols": []
+    },
+    {
+      "pair_name": "gld_btc",
+      "symbol_a": "GLD",
+      "symbol_b": "BTC-USD",
+      "return_a_60d": 3.73,
+      "return_b_60d": 0.06,
+      "return_differential": 3.67,
+      "z_score": -0.0821,
+      "z_score_mean": 0.0411,
+      "z_score_std": 0.0539,
+      "signal_value": 0.0,
+      "regime": "converged",
+      "conviction": 0.0,
+      "active": false,
+      "days_active": 0,
+      "entry_zscore": 0.0,
+      "coverage_status": "available",
+      "missing_symbols": []
+    },
+    {
+      "pair_name": "tlt_ief",
+      "symbol_a": "TLT",
+      "symbol_b": "IEF",
+      "return_a_60d": -3.43,
+      "return_b_60d": -0.73,
+      "return_differential": -2.71,
+      "z_score": -1.9039,
+      "z_score_mean": -0.0015,
+      "z_score_std": 0.0134,
+      "signal_value": 0.9519,
+      "regime": "neutral",
+      "conviction": 0.476,
+      "active": false,
+      "days_active": 0,
+      "entry_zscore": 0.0,
+      "coverage_status": "available",
+      "missing_symbols": []
+    },
+    {
+      "pair_name": "spy_gld",
+      "symbol_a": "SPY",
+      "symbol_b": "GLD",
+      "return_a_60d": 4.15,
+      "return_b_60d": 3.73,
+      "return_differential": 0.42,
+      "z_score": -2.8019,
+      "z_score_mean": 0.1269,
+      "z_score_std": 0.0438,
+      "signal_value": 0.7005,
+      "regime": "diverged_bear",
+      "conviction": 0.934,
+      "active": true,
+      "days_active": 8,
+      "entry_zscore": 0.0,
+      "coverage_status": "available",
+      "missing_symbols": []
+    }
+  ],
+  "avg_z_score": -0.7795,
+  "max_divergence": 2.8019,
+  "num_diverged": 1,
+  "total_pairs": 5,
+  "available_pair_count": 5,
+  "unavailable_pair_count": 0,
+  "unavailable_pairs": {},
+  "missing_symbols": [],
+  "risk_on_score": 0.2782,
+  "duration_score": 0.9519,
+  "overall_conviction": 0.3308,
+  "current_regime": "normal",
+  "is_gated_off": false,
+  "regime_note": "Active \u2014 mean-reversion favorable",
+  "weight_in_ensemble": 0.13,
+  "generated_at": "2026-08-11T23:48:26.735424+00:00",
+  "generator_git_sha": "9f73a08881ca",
+  "generator_git_sha_status": "full_generate",
+  "last_full_generator_git_sha": "9f73a08881ca",
+  "artifact_id": "cross_asset_rv.json",
+  "plane": "public",
+  "runtime_provenance": {
+    "schema_version": "runtime-provenance/v1",
+    "artifact_id": "cross_asset_rv.json",
+    "plane": "public",
+    "generated_at": "2026-08-11T23:48:26.735424+00:00",
+    "generator_git_sha": "9f73a08881ca",
+    "generator_git_sha_status": "full_generate",
+    "last_full_generator_git_sha": "9f73a08881ca",
+    "patch_source": null
+  }
+};
+
+  it('accepts the live cross_asset_rv payload', () => {
+    const result = CrossAssetRVSchema.safeParse(livePayload);
+    expect(result.success).toBe(true);
+  });
+});
+
+describe('vixy_hedge schema (Item 28)', () => {
+  const livePayload = {
+  "current_allocation_pct": 3.0,
+  "target_allocation_pct": 2.5,
+  "vix_level": 25.0,
+  "regime": "elevated",
+  "ytd_cost_bps": 195.6,
+  "ytd_benefit_bps": 0.0,
+  "hedge_efficiency": 0.11,
+  "total_signals": 6,
+  "last_rebalance": "2026-05-24T18:56:31.826160",
+  "generated_at": "2026-08-11T23:47:59.852215+00:00",
+  "canonical_controller": "hedge_selector",
+  "runtime_role": "diagnostic_cost_evidence",
+  "live_authoritative": false,
+  "routed": false,
+  "generator_git_sha": "9f73a08881ca",
+  "generator_git_sha_status": "full_generate",
+  "last_full_generator_git_sha": "9f73a08881ca",
+  "artifact_id": "vixy_hedge.json",
+  "plane": "public",
+  "runtime_provenance": {
+    "schema_version": "runtime-provenance/v1",
+    "artifact_id": "vixy_hedge.json",
+    "plane": "public",
+    "generated_at": "2026-08-11T23:47:59.852215+00:00",
+    "generator_git_sha": "9f73a08881ca",
+    "generator_git_sha_status": "full_generate",
+    "last_full_generator_git_sha": "9f73a08881ca",
+    "patch_source": null
+  }
+};
+
+  it('accepts the live vixy_hedge payload', () => {
+    const result = VixyHedgeSchema.safeParse(livePayload);
+    expect(result.success).toBe(true);
+  });
+});
+
+describe('turnover_validator schema (Item 28)', () => {
+  const livePayload = {
+  "schema_version": "turnover-validator/v1",
+  "signals": {
+    "multi_speed_momentum": {
+      "periods": 20,
+      "mean": 0.11166666666666662,
+      "std": 0.298979746619882,
+      "sign_flip_rate": 0.05263157894736842,
+      "mag_vol": 0.03684210526315789,
+      "turnover_penalty": 0.046315789473684206,
+      "stability_score": 0.7420299668397669,
+      "marginal_score": 0.018727069122680712
+    },
+    "cross_asset_rv": {
+      "periods": 20,
+      "mean": 0.34795,
+      "std": 0.23699360972952746,
+      "sign_flip_rate": 0.0,
+      "mag_vol": 0.030973684210526316,
+      "turnover_penalty": 0.012389473684210527,
+      "stability_score": 0.8108742100314361,
+      "marginal_score": 0.2795358378132181
+    },
+    "international_momentum": {
+      "periods": 20,
+      "mean": 0.28500000000000003,
+      "std": 0.19269556026896006,
+      "sign_flip_rate": 0.05263157894736842,
+      "mag_vol": 0.031578947368421054,
+      "turnover_penalty": 0.04421052631578947,
+      "stability_score": 0.8203762657064648,
+      "marginal_score": 0.2227420042561667
+    },
+    "alternative_data": {
+      "periods": 20,
+      "mean": 0.18699382181656787,
+      "std": 0.4376369171559579,
+      "sign_flip_rate": 0.05263157894736842,
+      "mag_vol": 0.04718034478814178,
+      "turnover_penalty": 0.05045108528367776,
+      "stability_score": 0.6372162678207758,
+      "marginal_score": 0.05402734690554431
+    },
+    "cross_asset_regime_arb": {
+      "periods": 20,
+      "mean": 0.06546076355769978,
+      "std": 0.061139480647739906,
+      "sign_flip_rate": 0.10526315789473684,
+      "mag_vol": 0.02244925676450873,
+      "turnover_penalty": 0.07213759744264558,
+      "stability_score": 0.8982601578153058,
+      "marginal_score": 0.03454815785791966
+    },
+    "unified_overlay": {
+      "periods": 20,
+      "mean": -0.019999999999999997,
+      "std": 0.3254147151591416,
+      "sign_flip_rate": 0.10526315789473684,
+      "mag_vol": 0.03684210526315789,
+      "turnover_penalty": 0.07789473684210525,
+      "stability_score": 0.7024728572833377,
+      "marginal_score": -0.12720229459243473
+    },
+    "multi_timeframe_fusion": {
+      "periods": 20,
+      "mean": 0.0056143190739616445,
+      "std": 0.15043215347921526,
+      "sign_flip_rate": 0.47368421052631576,
+      "mag_vol": 0.15313828761354548,
+      "turnover_penalty": 0.34546584136120767,
+      "stability_score": 0.590370092643864,
+      "marginal_score": -0.09749591360535415
+    },
+    "google_trends": {
+      "periods": 20,
+      "mean": 0.40210251505339284,
+      "std": 0.0,
+      "sign_flip_rate": 0.0,
+      "mag_vol": 0.0,
+      "turnover_penalty": 0.0,
+      "stability_score": 1.0,
+      "marginal_score": 0.40210251505339284
+    },
+    "vix_term_structure": {
+      "periods": 20,
+      "mean": 0.64307427207206,
+      "std": 1.1390647892519134e-16,
+      "sign_flip_rate": 0.0,
+      "mag_vol": 0.0,
+      "turnover_penalty": 0.0,
+      "stability_score": 1.0,
+      "marginal_score": 0.64307427207206
+    }
+  },
+  "synthetic_baselines": {
+    "stable": {
+      "metadata": {
+        "source_type": "synthetic_or_fixture"
+      },
+      "diagnostics": {
+        "periods": 20,
+        "mean": 0.5,
+        "std": 0.0,
+        "sign_flip_rate": 0.0,
+        "mag_vol": 0.0,
+        "turnover_penalty": 0.0,
+        "stability_score": 1.0,
+        "marginal_score": 0.5
+      }
+    },
+    "noisy": {
+      "metadata": {
+        "source_type": "synthetic_or_fixture"
+      },
+      "diagnostics": {
+        "periods": 20,
+        "mean": 0.1,
+        "std": 0.5026246899500346,
+        "sign_flip_rate": 0.8421052631578947,
+        "mag_vol": 0.8421052631578947,
+        "turnover_penalty": 0.5,
+        "stability_score": 0.06315789473684212,
+        "marginal_score": -0.15120051317989705
+      }
+    },
+    "climber": {
+      "metadata": {
+        "source_type": "synthetic_or_fixture"
+      },
+      "diagnostics": {
+        "periods": 20,
+        "mean": 0.96,
+        "std": 0.4794733953433759,
+        "sign_flip_rate": 0.0,
+        "mag_vol": 0.15789473684210523,
+        "turnover_penalty": 0.0631578947368421,
+        "stability_score": 0.5459475706280579,
+        "marginal_score": 0.8215879530646191
+      }
+    },
+    "src": {
+      "metadata": {
+        "source_type": "synthetic_or_fixture"
+      },
+      "diagnostics": {
+        "periods": 5,
+        "mean": 0.6125625401603116,
+        "std": 0.44597656170567407,
+        "sign_flip_rate": 0.25,
+        "mag_vol": 0.2789669092334585,
+        "turnover_penalty": 0.2615867636933834,
+        "stability_score": 0.37859122488093433,
+        "marginal_score": 0.4523201961837943
+      }
+    }
+  },
+  "generated_at": "2026-08-11T23:48:25.874690+00:00",
+  "generator_git_sha": "9f73a08881ca",
+  "generator_git_sha_status": "full_generate",
+  "last_full_generator_git_sha": "9f73a08881ca",
+  "artifact_id": "turnover_validator.json",
+  "plane": "public",
+  "runtime_provenance": {
+    "schema_version": "runtime-provenance/v1",
+    "artifact_id": "turnover_validator.json",
+    "plane": "public",
+    "generated_at": "2026-08-11T23:48:25.874690+00:00",
+    "generator_git_sha": "9f73a08881ca",
+    "generator_git_sha_status": "full_generate",
+    "last_full_generator_git_sha": "9f73a08881ca",
+    "patch_source": null
+  }
+};
+
+  it('accepts the live turnover_validator payload', () => {
+    const result = TurnoverValidatorSchema.safeParse(livePayload);
+    expect(result.success).toBe(true);
   });
 });
