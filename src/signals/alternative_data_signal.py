@@ -12,7 +12,7 @@ Data Sources:
   5. Broad Momentum — SPY 3-month trend (market health)
   6. Crypto Sentiment — BTC momentum + volatility (sentiment proxy)
 
-Output is compatible with the existing ensemble_voter integration
+Output is compatible with the existing ensemble voter integration
 which reads data/signals/alternative_data_latest.json.
 """
 
@@ -89,7 +89,7 @@ class AlternativeDataComposite:
 
 @dataclass
 class EnsembleSignal:
-    """Format that ensemble_voter expects."""
+    """Format that the ensemble voter expects."""
     source: str
     regime: str     # 'bull', 'bear', 'neutral', 'crisis'
     probability: float
@@ -614,7 +614,7 @@ class AlternativeDataSignalGenerator:
 
     def _save_signal(self, composite: AlternativeDataComposite, signal: EnsembleSignal):
         """Save signals to disk and update state."""
-        # Ensemble format (for ensemble_voter)
+        # Ensemble format (for the ensemble voter)
         signal_file = self.signals_dir / "alternative_data_latest.json"
         save_results_json(asdict(signal), output_path=str(signal_file))
 

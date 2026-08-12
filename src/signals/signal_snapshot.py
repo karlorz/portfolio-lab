@@ -6,7 +6,7 @@ Every signal module should return a SignalSnapshot (or list thereof) from its
 main generation function. The ensemble voter's collect_signals() can then
 consume them directly without ad-hoc dict unpacking.
 
-SignalSnapshot is a superset of SignalReading (ensemble_voter.py): it adds
+SignalSnapshot is a superset of SignalReading (regime_spec.py): it adds
 metadata for diagnostics and a to_signal_reading() bridge method.
 """
 
@@ -52,12 +52,13 @@ class SignalSnapshot:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_signal_reading(self):
-        """Convert to ensemble_voter.SignalReading.
+        """Convert to regime_spec.SignalReading.
 
         Returns a SignalReading that can be fed directly into compute_vote().
         The caller must resolve the SignalSource enum from self.source.
         """
-        from src.strategy.ensemble_voter import SignalSource, SignalReading
+        from src.signals.regime_spec import SignalReading
+        from src.signals.signal_source import SignalSource
 
         # Resolve by value first (source strings use lowercase values like
         # "multi_speed_momentum"), then by enum name as fallback

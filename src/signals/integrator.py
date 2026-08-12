@@ -53,7 +53,7 @@ from typing import Dict, List, Optional, Any
 
 from src.paths import DATA_DIR
 from src.signals.signal_source import SignalSource as CanonicalSignalSource
-from src.strategy.ensemble_voter import (
+from src.signals.regime_spec import (
     REGIME_WEIGHTS as CANONICAL_REGIME_WEIGHTS,
     Regime as CanonicalRegime,
 )
@@ -122,7 +122,7 @@ def _project_canonical_source_weights(
 def _project_canonical_regime_weights() -> Dict[str, Dict[str, float]]:
     """Build the legacy integrator regime view from canonical ensemble weights.
 
-    ``ensemble_voter`` owns file/env loading. The integrator still exposes its
+    ``regime_spec`` owns file/env loading. The integrator still exposes its
     historical signal-type contract (momentum/macro/...) because its component
     signals use that domain, not ensemble source identifiers.
     """

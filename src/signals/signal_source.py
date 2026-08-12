@@ -1,7 +1,7 @@
 """Canonical SignalSource enum — single source of truth.
 
 Three modules previously had duplicate definitions with divergent member sets:
-- ensemble_voter.py (7 members: added multi_timeframe_fusion)
+- the ensemble voter (7 members: added multi_timeframe_fusion)
 - stacking_feature_engine.py (6 members)
 - health_tracker.py (6 members)
 
