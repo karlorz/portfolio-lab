@@ -819,8 +819,8 @@ class VIXTermStructureSignalGenerator:
         
         dates = sorted(historical_data.keys())[-days:]
         
-        for date in dates:
-            signal = self.generate_signal(date)
+        for d in dates:
+            signal = self.generate_signal(d)
             if signal.is_valid:
                 signals.append(signal)
         
