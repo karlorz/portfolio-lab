@@ -11,6 +11,9 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 
+from src.paths import DATA_DIR
+from src.backtest.metrics import save_results_json
+
 logger = logging.getLogger(__name__)
 
 
@@ -80,10 +83,6 @@ class VIXTermStructure:
         filtered_data["days_to_expiry_front"] = int(filtered_data["days_to_expiry_front"])
         filtered_data["is_contango"] = bool(filtered_data["is_contango"])
         return cls(**filtered_data)
-
-
-from src.paths import DATA_DIR
-from src.backtest.metrics import save_results_json
 
 
 class VIXDataManager:
