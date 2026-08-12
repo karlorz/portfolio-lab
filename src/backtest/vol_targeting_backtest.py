@@ -31,6 +31,7 @@ import numpy as np
 import pandas as pd
 
 from src.paths import (
+    BASE_ALLOCATION,
     DATA_DIR,
     PRICES_JSON,
     REGIME_VOL_LOOKBACKS,
@@ -240,7 +241,7 @@ def compute_vol_target_backtest(
         VolTargetResult
     """
     if base_allocation is None:
-        base_allocation = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16, "IEF": 0.00}
+        base_allocation = dict(BASE_ALLOCATION, IEF=0.00)
 
     logger.info("Loading prices for volatility targeting backtest")
     prices = _load_prices()
@@ -539,7 +540,7 @@ def compute_regime_conditional_vol_target_backtest(
         RegimeVolTargetResult with per-regime breakdown
     """
     if base_allocation is None:
-        base_allocation = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16, "IEF": 0.00}
+        base_allocation = dict(BASE_ALLOCATION, IEF=0.00)
     if regime_targets is None:
         regime_targets = dict(REGIME_VOL_TARGETS)
     if regime_scaling_exponents is None:
