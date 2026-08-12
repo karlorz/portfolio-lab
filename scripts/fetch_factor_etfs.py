@@ -7,6 +7,8 @@ import requests
 import time
 from datetime import datetime
 
+from src.paths import PRICES_JSON
+
 def fetch_yahoo_data(symbol: str, start_date: str = '2005-01-01'):
     """Fetch historical data from Yahoo Finance v8 API"""
     period1 = int(datetime.strptime(start_date, '%Y-%m-%d').timestamp())
@@ -38,7 +40,7 @@ def fetch_yahoo_data(symbol: str, start_date: str = '2005-01-01'):
 
 def main():
     # Load existing prices
-    with open('public/data/prices.json', 'r') as f:
+    with open(PRICES_JSON, 'r') as f:
         prices = json.load(f)
     
     print(f"Current symbols: {list(prices.keys())}")
@@ -63,7 +65,7 @@ def main():
         time.sleep(0.5)  # Rate limit
     
     # Save updated prices
-    with open('public/data/prices.json', 'w') as f:
+    with open(PRICES_JSON, 'w') as f:
         json.dump(prices, f, separators=(',', ':'))
     
     print(f"\n✓ Updated prices.json with {len(prices)} symbols")
