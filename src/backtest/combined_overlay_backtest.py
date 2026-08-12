@@ -73,7 +73,16 @@ class CombinedOverlayBacktest:
         self._data_mode = "real"
 
     def _load_historical_data(self) -> Dict:
-        """Load complete historical data or an explicitly allowed diagnostic."""
+        """Load complete historical data or an explicitly allowed diagnostic.
+
+        B1b keep+document (partial-delegation escape, Item B1b sub-task 1):
+        keeps its own market.db query — ``pd.read_sql_query`` full-table read
+        + per-symbol filter producing the ``{symbol: {"dates": [...],
+        "prices": [...]}}`` list shape, which differs from
+        ``grid_runner.load_prices_market_db``'s date-indexed
+        ``{symbol: {date: close}}`` dict shape; also maps VIX→^VIX and aligns
+        symbols to common dates. Not delegated.
+        """
         db_path = self.data_dir / "market.db"
         data = {}
 
