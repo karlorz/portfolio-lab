@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from src.paths import RISK_FREE_RATE
+from src.paths import RISK_FREE_RATE, BASE_ALLOCATION
 
 
 __all__ = [
@@ -40,12 +40,8 @@ DEFAULT_TAU: float = 0.15
 # Default BL symbols aligned with the 3-asset champion portfolio
 DEFAULT_SYMBOLS: List[str] = ["SPY", "GLD", "TLT"]
 
-# Champion baseline prior (advisory reference SPY/GLD/TLT 46/38/16)
-CHAMPION_PRIOR_WEIGHTS: Dict[str, float] = {
-    "SPY": 0.46,
-    "GLD": 0.38,
-    "TLT": 0.16,
-}
+# Champion baseline prior (advisory reference SPY/GLD/TLT 46/38/16; SoT)
+CHAMPION_PRIOR_WEIGHTS: Dict[str, float] = dict(BASE_ALLOCATION)
 
 # Floor so max_sharpe + clean_weights cannot zero a champion sleeve under
 # mild views (corner solutions BL exists to avoid). Relative to champion prior.
