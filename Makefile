@@ -185,7 +185,7 @@ test:
 		> $(DATA_DIR)/test_last_exit.json 2>/dev/null || true; \
 	exit $$EXIT
 
-.PHONY: test test-ml test-fast test-gate test-unit test-generator test-integration test-ml-extract
+.PHONY: test test-ml test-fast test-gate test-unit test-generator test-integration test-ml-extract test-ts
 
 # S18 path segments (generator is ~6.6k lines; *integration* modules host-touch).
 # test-unit = full safe suite minus those files (still ~15k tests — not a fast gate).
@@ -205,6 +205,13 @@ TEST_INTEGRATION_FILES := \
 
 # DEFAULT agent gate: alias of test-fast (<2m). Do not point agents at full `make test`.
 test-gate: test-fast
+
+# Canonical TS suite (runner matches ci.yml:60 `bun test tests/ts/`); explicit
+# path only — a bare `bun test` at root would pick up stray non-suite files.
+test-ts:
+	@echo "=== Test Suite (ts): $$(date) ==="; \
+	bun test tests/ts/; \
+	exit $$?
 
 test-fast:
 	@source scripts/test-repo-guard.sh && guard_ensure_portfolio_lab; \
