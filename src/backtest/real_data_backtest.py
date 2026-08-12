@@ -37,7 +37,16 @@ class RealDataBacktest:
     DATA_DIR = DATA_DIR
 
     def _load_market_data(self) -> Dict[str, Dict]:
-        """Load real price data from market.db."""
+        """Load real price data from market.db.
+
+        B1b keep+document (partial-delegation escape, Item B1b sub-task 3):
+        keeps its own market.db query — per-symbol ``SELECT date, close ...
+        WHERE symbol=?`` (no date-range filter) via a symbol_map (BTC→BTC-USD,
+        ETH→ETH-USD, VIX→^VIX) producing the ``{symbol: {"dates": [...],
+        "prices": [...]}}`` list shape; differs from
+        ``grid_runner.load_prices_market_db``'s date-indexed, date-bounded
+        dict shape. Not delegated.
+        """
         db_path = self.DATA_DIR / "market.db"
         # An explicitly overridden DATA_DIR is authoritative for tests and
         # callers using an isolated database.  Only use MARKET_DB as a
