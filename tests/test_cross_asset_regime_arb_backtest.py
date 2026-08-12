@@ -1505,3 +1505,14 @@ class TestEquityCurveSampling:
         assert "overlay" in entry
         assert isinstance(entry["baseline"], float)
         assert isinstance(entry["overlay"], float)
+
+
+def test_a3_b1a_delegation_matches_pre_migration_capture():
+    """A3 pin (Item B1a sub-task 3): load_data delegates to grid_runner.load_prices."""
+    from src.backtest.grid_runner import load_prices
+
+    # class method stays in pilot; the shared loader is grid_runner's
+    assert CrossAssetRegimeArbBacktester.load_data.__module__ == (
+        "src.backtest.cross_asset_regime_arb_backtest"
+    )
+    assert load_prices.__module__ == "src.backtest.grid_runner"
