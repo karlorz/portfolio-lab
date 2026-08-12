@@ -1286,3 +1286,14 @@ class TestCLI:
         )
         rc = main()
         assert rc == 1  # Still fails due to no data, but parsing works
+
+
+def test_a3_b1a_delegation_matches_pre_migration_capture():
+    """A3 pin (Item B1a sub-task 6): load_data delegates to grid_runner.load_prices."""
+    from src.backtest.grid_runner import load_prices
+
+    # class method stays in pilot; the shared loader is grid_runner's
+    assert MultiSpeedMomentumBacktester.load_data.__module__ == (
+        "src.backtest.multi_speed_momentum_backtest"
+    )
+    assert load_prices.__module__ == "src.backtest.grid_runner"

@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from src import paths as project_paths
+from src.backtest.grid_runner import load_prices
 from src.backtest.metrics import (
     BacktestConfig as _BaseConfig,
     BacktestResult,
@@ -105,8 +106,7 @@ class MultiSpeedMomentumBacktester:
 
                 self.prices_raw = get_prices()
             else:
-                with open(prices_path) as f:
-                    self.prices_raw = json.load(f)
+                self.prices_raw = load_prices(prices_path=prices_path)
 
             self._price_indexes = {}
             self._process_price_data()
