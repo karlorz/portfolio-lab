@@ -156,7 +156,6 @@ class AnalyticsCalculator:
         
         drawdowns = []
         peak_value = sorted_data[0].get('total_value', 100000)
-        peak_date = sorted_data[0].get('timestamp', sorted_data[0].get('date', ''))[:10]
         days_since_peak = 0
         
         for i, point in enumerate(sorted_data):

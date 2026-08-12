@@ -30,7 +30,6 @@ import logging
 import logging.config
 import os
 import sys
-import uuid
 
 __all__ = ["configure_logging"]
 
@@ -68,8 +67,6 @@ def configure_logging(level: str | None = None) -> None:
 
     if use_json:
         try:
-            from pythonjsonlogger.json import JsonFormatter
-
             formatter_config = {
                 "()": "pythonjsonlogger.json.JsonFormatter",
                 "format": "%(asctime)s %(name)s %(levelname)s %(message)s %(cron_run_id)s",

@@ -23,7 +23,6 @@ from src.paths import MARKET_DB, DATA_DIR, sqlite_connect
 from src.broker.circuit_breaker import (
     BrokerError,
     CircuitBreakerError,
-    PYBREAKER_AVAILABLE,
     broker_breaker,
     get_circuit_state,
 )

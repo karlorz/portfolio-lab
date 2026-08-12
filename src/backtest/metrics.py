@@ -8,12 +8,11 @@ functions that were previously copy-pasted across 11+ backtest files.
 import json
 import hashlib
 import logging
-import os
 import numpy as np
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from scipy import stats as sp_stats
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from src.paths import BASE_ALLOCATION
 from src.utils.metrics_io import (
@@ -588,7 +587,6 @@ def compute_deflated_sharpe_ratio(
     # V(SR) ≈ (1 - skew * SR + (kurtosis - 1) / 4 * SR^2) / (T - 1)
     # Simplified for SR≈0 under null: V(SR) ≈ 1 / (T - 1) * annualization
     # But using the full formula for accuracy
-    t_years = n_observations / trading_days_per_year
     var_sr = (1 - skew * sharpe_ratio + (kurtosis - 1) / 4 * sharpe_ratio ** 2) / max(n_observations - 1, 1)
 
     # Expected maximum Sharpe under null (from N independent trials)

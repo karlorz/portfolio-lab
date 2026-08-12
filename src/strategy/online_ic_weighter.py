@@ -10,15 +10,11 @@ for hybrid mode with regime-conditional static weights.
 No ML dependencies — pure numpy/stdlib.
 """
 
-import json
 import logging
 import math
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
-
-from src.paths import DATA_DIR
 
 logger = logging.getLogger(__name__)
 

@@ -3,7 +3,6 @@ Order router: Converts portfolio-lab signals to Alpaca orders.
 """
 import logging
 import os
-import sys
 import json
 import sqlite3
 import time

@@ -2,7 +2,6 @@
 Position synchronization between Alpaca broker and local portfolio-lab state.
 """
 import os
-import sys
 import json
 import sqlite3
 import logging

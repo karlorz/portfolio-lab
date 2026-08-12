@@ -35,7 +35,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
 from src.paths import BASE_ALLOCATION, DATA_DIR, SIGNALS_DIR, MARKET_DB, sqlite_connect
-from src.data.price_cache import get_prices, get_prices_df
+from src.data.price_cache import get_prices_df
 from src.signals.calendar_seasonality import get_calendar_modifier
 from src.signals.bond_duration_signal import generate_bond_duration_signal
 from src.signals.collar_signal import generate_collar_signal
@@ -620,7 +620,6 @@ class UnifiedOrchestrator:
         """
         try:
             from src.strategy.black_litterman_mapper import compute_bl_weights
-            from src.paths import DATA_DIR
         except ImportError:
             return None
 

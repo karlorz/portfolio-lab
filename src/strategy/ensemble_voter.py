@@ -46,14 +46,14 @@ from enum import Enum
 import logging
 
 from src.paths import (
-    DATA_DIR, PRICES_JSON, ATTRIBUTION_DIR, BASE_ALLOCATION, sqlite_connect,
+    DATA_DIR, ATTRIBUTION_DIR, BASE_ALLOCATION, sqlite_connect,
     ENSEMBLE_CRISIS_VOL_THRESHOLD, ENSEMBLE_CRISIS_DRAWDOWN_THRESHOLD,
     ENSEMBLE_HIGH_VOL_VOL_THRESHOLD, ENSEMBLE_HIGH_VOL_DRAWDOWN_THRESHOLD,
     ENSEMBLE_LOW_VOL_VOL_THRESHOLD, ENSEMBLE_LOW_VOL_MOM_THRESHOLD,
     ENSEMBLE_RECOVERY_DRAWDOWN_THRESHOLD, ENSEMBLE_RECOVERY_MOM_THRESHOLD,
     ENSEMBLE_CONSENSUS_THRESHOLD,
 )
-from src.data.price_cache import get_prices, get_prices_df
+from src.data.price_cache import get_prices_df
 from src.utils import safe_get
 from src.utils.computation_cache import get_realized_volatility
 from src.strategy.signal_aggregator import SignalAggregator
@@ -3666,7 +3666,7 @@ class EnsembleVoter:
             Dict with 'views' (BLViews), 'tau', 'prior', and
             'health_scores_used' keys.
         """
-        from src.strategy.black_litterman_mapper import map_biases_to_views, BLViews
+        from src.strategy.black_litterman_mapper import map_biases_to_views
 
         if vote is None:
             vote = self.compute_vote()
@@ -3719,8 +3719,8 @@ def main():
     rec_parser.add_argument('--max-shift', type=float, default=0.10, help='Max allocation shift')
     
     # Explain command
-    exp_parser = subparsers.add_parser('explain', help='Explain current vote reasoning')
-    
+    subparsers.add_parser('explain', help='Explain current vote reasoning')
+
     args = parser.parse_args()
     
     voter = EnsembleVoter()

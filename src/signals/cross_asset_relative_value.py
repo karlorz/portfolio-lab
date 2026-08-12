@@ -34,9 +34,9 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-from src.paths import DATA_DIR, PRICES_JSON
+from src.paths import DATA_DIR
 from src.backtest.metrics import save_results_json
-from src.data.price_cache import get_prices, get_prices_df
+from src.data.price_cache import get_prices_df
 
 
 __all__ = ['ZSCORE_ENTRY', 'ZSCORE_EXIT', 'LOOKBACK', 'MIN_HISTORY', 'PairReading', 'CrossAssetRVSignal', 'CrossAssetRVScanner', 'print_scan']
@@ -587,7 +587,7 @@ def main():
     scan_parser.add_argument("--pair", help="Scan specific pair (default: all)")
     scan_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
-    pairs_parser = subparsers.add_parser("pairs", help="List available pairs")
+    subparsers.add_parser("pairs", help="List available pairs")
 
     signal_parser = subparsers.add_parser("signal", help="Get ensemble signal")
     signal_parser.add_argument("--json", action="store_true", help="Output as JSON")
