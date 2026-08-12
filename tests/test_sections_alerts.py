@@ -136,6 +136,25 @@ def test_a2_promotion_gate_status_canned(monkeypatch, tmp_path):
         assert blockers == ["manual_approval", "graduation_checklist"]
 
 
+def test_a2_promotion_gate_graduation_unavailable_no_nameerror(monkeypatch, tmp_path):
+    """Raising GraduationChecklist → graceful blocker, NOT a NameError.
+
+    Regression for F821: ``except SIGNAL_EXCEPTIONS`` previously referenced an
+    undefined name (lazy import now at function top from provenance).
+    """
+    class _RaisingChecklist:
+        def __init__(self):
+            raise RuntimeError("checklist unavailable")
+
+    monkeypatch.setattr(
+        "src.strategy.graduation_checklist.GraduationChecklist", _RaisingChecklist
+    )
+    for surface in (_AlertsSectionsMixin, DashboardGenerator):
+        allowed, blockers = surface._promotion_gate_status(tmp_path)
+        assert allowed is False
+        assert blockers == ["graduation_checklist_unavailable"]
+
+
 def test_a2_graduation_candidate_alert_success(monkeypatch, tmp_path):
     """Passing gates → success alert with Sharpe from the marker."""
     monkeypatch.setattr(

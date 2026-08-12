@@ -34,6 +34,7 @@ class _AlertsSectionsMixin:
 
     @staticmethod
     def _promotion_gate_status(data_dir: Path) -> tuple[bool, list[str]]:
+        from src.dashboard.provenance import SIGNAL_EXCEPTIONS  # lazy (mixin staticmethod rule)
         from src.dashboard.generator import DashboardGenerator  # lazy (stays in generator)
         kill_switch = DashboardGenerator._load_json_file(data_dir / "kill_switch.json")
         blockers: list[str] = []
