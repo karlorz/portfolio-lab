@@ -203,8 +203,8 @@ def audit_public_prices(
 ) -> dict[str, Any]:
     """Return a machine-readable offline quality report for compact public prices."""
     resolved_prices_path = Path(prices_path)
-    prices = market_db_sync._load_prices_payload(resolved_prices_path)
-    report = market_db_sync._audit_prices_payload(
+    prices = market_db_sync.load_prices_payload(resolved_prices_path)
+    report = market_db_sync.audit_prices_payload(
         prices,
         critical_return_pct=critical_return_pct,
         split_like_return_pct=split_like_return_pct,

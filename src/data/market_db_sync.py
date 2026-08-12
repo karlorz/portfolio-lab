@@ -119,7 +119,7 @@ def _ensure_prices_schema(conn) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_prices_symbol ON prices(symbol)")
 
 
-def _load_prices_payload(prices_path: Path) -> dict[str, list[dict[str, Any]]]:
+def load_prices_payload(prices_path: Path) -> dict[str, list[dict[str, Any]]]:
     if not prices_path.exists():
         raise FileNotFoundError(f"prices.json not found: {prices_path}")
 
@@ -178,7 +178,7 @@ def _compute_return_pct(previous_price: float, current_price: float) -> float:
     return round((current_price - previous_price) / previous_price * 100, 4)
 
 
-def _audit_prices_payload(
+def audit_prices_payload(
     prices: dict[str, list[dict[str, Any]]],
     *,
     critical_return_pct: float = DEFAULT_CRITICAL_RETURN_PCT,
@@ -413,8 +413,8 @@ def sync_prices_json_to_market_db(
 
     resolved_prices_path = Path(prices_path)
     resolved_db_path = Path(db_path)
-    prices = _load_prices_payload(resolved_prices_path)
-    quality_report = _audit_prices_payload(prices)
+    prices = load_prices_payload(resolved_prices_path)
+    quality_report = audit_prices_payload(prices)
     if quality_report["blocking"] or (
         block_on_quality_warnings and quality_report["status"] == QUALITY_STATUS_WARN
     ):

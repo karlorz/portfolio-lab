@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from src.data.market_db_sync import (
-    _audit_prices_payload,
+    audit_prices_payload,
     is_volatility_index_symbol,
 )
 
@@ -48,7 +48,7 @@ def test_audit_skips_split_like_on_vix3m_crisis_jumps():
             {"d": "2018-02-05", "p": 37.0},  # ~+118% regime jump
         ],
     }
-    report = _audit_prices_payload(prices)
+    report = audit_prices_payload(prices)
     assert report["status"] == "ok"
     assert report["issue_counts"]["split_like_returns"] == 0
     assert report["issue_counts"]["extreme_returns"] == 0
@@ -64,7 +64,7 @@ def test_audit_still_flags_equity_split_like():
             {"d": "2026-06-11", "p": 45.0},  # -55% split-like
         ],
     }
-    report = _audit_prices_payload(prices)
+    report = audit_prices_payload(prices)
     assert report["status"] == "warn"
     assert report["issue_counts"]["split_like_returns"] == 1
 
