@@ -15,7 +15,6 @@ Key questions:
 Period: 2006-2026 (20+ years including GFC, COVID, 2022 rate hikes)
 """
 
-import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -23,6 +22,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from src.backtest.grid_runner import load_prices
 from src.backtest.metrics import (
     BacktestConfig as _BaseConfig,
     BacktestResult,
@@ -115,8 +115,7 @@ class WalkForwardVIXYBacktester:
             self._generate_synthetic_data()
             return
 
-        with open(prices_path) as f:
-            raw = json.load(f)
+        raw = load_prices(prices_path=prices_path)
 
         # Build ordered price lookups
         spy_data = {e["d"]: e["p"] for e in raw.get("SPY", [])}
