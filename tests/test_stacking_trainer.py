@@ -1784,10 +1784,6 @@ class TestPublicAPI:
     def test_expected_names_importable(self):
         """Key public names must be importable from the module."""
         from src.ml.stacking_trainer import (
-            StackingTrainer,
-            TrainingConfig,
-            TrainingResult,
-            PredictionResult,
             main,
         )
         assert callable(main)

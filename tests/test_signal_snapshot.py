@@ -204,7 +204,7 @@ class TestRoundTrip:
 
     def test_multiple_signals_to_vote(self):
         """Simulate the full pipeline: 3 signals -> SignalReadings -> compute_vote."""
-        from src.strategy.ensemble_voter import SignalSource, SignalReading, EnsembleVoter, Regime
+        from src.strategy.ensemble_voter import EnsembleVoter, Regime
 
         snapshots = [
             SignalSnapshot(
@@ -728,7 +728,6 @@ class TestAdditionalSignalSnapshots:
     def test_vpin_signal_snapshot(self):
         """VPINSignal.to_signal_snapshot() converts correctly."""
         from src.signals.vpin_bvc import VPINSignal
-        from datetime import datetime
         signal = VPINSignal(
             timestamp=datetime(2026, 5, 23, 12, 0, 0),
             vpin=0.45, vpin_ma=0.30, vpin_std=0.08,
@@ -746,7 +745,6 @@ class TestAdditionalSignalSnapshots:
     def test_vpin_signal_avoid(self):
         """VPIN avoid recommendation → negative value, active."""
         from src.signals.vpin_bvc import VPINSignal
-        from datetime import datetime
         signal = VPINSignal(
             timestamp=datetime(2026, 5, 23, 12, 0, 0),
             vpin=0.65, vpin_ma=0.30, vpin_std=0.08,

@@ -6,13 +6,9 @@ import pytest
 import json
 import logging
 import sys
-import os
-import importlib
-import numpy as np
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch, MagicMock, Mock
-from collections import deque
+from unittest.mock import patch, MagicMock
 
 # Create mock SentimentAnalyzer and SentimentResult — these are used by the
 # fixture that manages sys.modules isolation, so they must be defined at
@@ -540,7 +536,7 @@ class TestExports:
 
     def test_all_exports_importable(self):
         from src.strategy.sentiment_analyzer import (
-            AggregatedSentiment, SentimentAggregator, SentimentAnalyzerPipeline,
+            AggregatedSentiment, SentimentAggregator,
         )
         assert AggregatedSentiment is not None
         assert SentimentAggregator is not None

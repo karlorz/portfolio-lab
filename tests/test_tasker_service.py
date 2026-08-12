@@ -137,7 +137,6 @@ def test_drain_sets_state_and_scheduler_loop_exits():
     """Draining stops scheduling and lets the scheduler loop terminate."""
     from src.tasker.registry import TaskRegistry
     from src.tasker.runner import TaskRunner
-    from src.tasker.store import TaskerStore
     from src.tasker.models import TaskDefinition
 
     class _DrainStore:

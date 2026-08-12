@@ -2,7 +2,6 @@
 Tests for v8.01 TurnoverValidator — turnover-aware ensemble weight validation.
 """
 
-import json
 import math
 import tempfile
 from pathlib import Path

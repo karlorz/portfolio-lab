@@ -6,15 +6,13 @@ under PORTFOLIO_LAB_ENABLE_ML=0. Tests verify initialization, structure,
 and methods that work with stubs (without full torch functionality).
 """
 import os
-import pytest
-import numpy as np
 from unittest.mock import patch, MagicMock
 
 os.environ["PORTFOLIO_LAB_ENABLE_ML"] = "0"
 
 from src.agents.sentiment_agent import SentimentAgent, SentimentNetwork
 from src.agents.analyst_agent import AnalystAgent, AnalystNetwork
-from src.agents.base_agent import AgentType, AgentObservation, AgentAction
+from src.agents.base_agent import AgentType
 
 
 def _stub_torch_optim():

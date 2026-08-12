@@ -17,7 +17,6 @@ import sqlite3
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-import pytest
 
 from src.dashboard.generator import DashboardGenerator
 from src.dashboard.sections_data_loaders import _DataLoaderSectionsMixin

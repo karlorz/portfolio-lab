@@ -12,11 +12,8 @@ import os
 
 os.environ["PORTFOLIO_LAB_ENABLE_ML"] = "0"
 
-import json
-import pytest
 import numpy as np
 from datetime import datetime, timezone
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from src.strategy.ensemble_voter import (

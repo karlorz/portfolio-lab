@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from src.dashboard.signal_health_section import (
     build_fred_readiness_section,

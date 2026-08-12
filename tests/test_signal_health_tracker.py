@@ -23,7 +23,6 @@ from src.signals.health_tracker import (
     HealthScore,
     SignalSource,
     DecayAlert,
-    backfill_predictions,
 )
 
 

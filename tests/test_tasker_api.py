@@ -157,7 +157,7 @@ def test_portfolio_query_route_returns_answer(tmp_path, monkeypatch):
     """POST /api/portfolio-query → 200 with non-empty answer (wired route)."""
     monkeypatch.setattr(
         "src.chat.portfolio_query.answer_query",
-        lambda question, dashboard=None: f"Current allocation:\nSPY: 46.0%",
+        lambda question, dashboard=None: "Current allocation:\nSPY: 46.0%",
     )
     client, _, _ = _client(tmp_path)
 

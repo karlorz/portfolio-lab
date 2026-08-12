@@ -5,7 +5,7 @@ InternationalMomentumSignal dataclass, and InternationalMomentumGenerator
 """
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from dataclasses import asdict
 
 from src.signals.international_momentum import (

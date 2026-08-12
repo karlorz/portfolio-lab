@@ -14,10 +14,8 @@ A2: behavior-equality — canned fixtures for
 """
 import json
 from datetime import datetime, timezone
-from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
 
 from src.dashboard.generator import DashboardGenerator
 from src.dashboard.sections_graduation import _GraduationExplainabilitySectionsMixin

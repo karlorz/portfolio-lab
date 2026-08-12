@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from src.strategy.sector_momentum_calc import (
     SECTOR_ETF_DEFINITIONS,

@@ -10,12 +10,10 @@ A2: behavior-equality — canned fixtures for
     ``_apply_signal_postprocessors`` (stub builder), plus FakeDateTime
     deferred-timestamp checks for the two stacking dashboard builders.
 """
-import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
 
 from src.dashboard.generator import DashboardGenerator
 from src.dashboard.sections_stacking import _StackingSectionsMixin

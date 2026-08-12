@@ -7,7 +7,6 @@ import math
 import sqlite3
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -103,9 +102,6 @@ class TestImportsAndConstants:
 
     def test_import_all(self):
         from src.backtest.stacking_ensemble_backtest import (
-            BASELINE_ACCURACY, STACKING_ACCURACY,
-            BASELINE_SPY, BASELINE_GLD, BASELINE_TLT,
-            MAX_EQUITY_SHIFT, SIGNAL_FREQUENCY, MIN_HOLDING_DAYS, MC_TRIALS,
             __all__,
         )
         assert __all__ is not None
@@ -531,7 +527,6 @@ class TestBaselineReturns:
     def test_baseline_returns(self, stack_test_db):
         from src.backtest.stacking_ensemble_backtest import (
             StackingEnsembleBacktest,
-            BASELINE_SPY, BASELINE_GLD, BASELINE_TLT,
         )
 
         bt = StackingEnsembleBacktest(cache_db=stack_test_db)
@@ -659,7 +654,7 @@ class TestApplySignals:
 
     def test_apply_signals_weight_clipping(self, stack_test_db):
         from src.backtest.stacking_ensemble_backtest import (
-            StackingEnsembleBacktest, MAX_EQUITY_SHIFT,
+            StackingEnsembleBacktest,
         )
         bt = StackingEnsembleBacktest(cache_db=stack_test_db)
         prices = bt._load_prices(["SPY", "GLD", "TLT"], "2022-01-01", "2022-12-31")
@@ -696,7 +691,7 @@ class TestApplySignals:
 
     def test_apply_signals_tlt_weight_unchanged(self, stack_test_db):
         from src.backtest.stacking_ensemble_backtest import (
-            StackingEnsembleBacktest, BASELINE_TLT,
+            StackingEnsembleBacktest,
         )
         bt = StackingEnsembleBacktest(cache_db=stack_test_db)
         prices = bt._load_prices(["SPY", "GLD", "TLT"], "2022-01-01", "2022-12-31")
@@ -849,7 +844,7 @@ class TestAggregate:
 
     def test_aggregate_single_trial(self):
         from src.backtest.stacking_ensemble_backtest import (
-            StackingEnsembleBacktest, StackingBacktestResult,
+            StackingEnsembleBacktest,
         )
 
         dates = [f"2022-01-{1+i:02d}" for i in range(100)]
@@ -867,7 +862,7 @@ class TestAggregate:
 
     def test_aggregate_stacking_worse_than_voting(self):
         from src.backtest.stacking_ensemble_backtest import (
-            StackingEnsembleBacktest, StackingBacktestResult,
+            StackingEnsembleBacktest,
         )
 
         dates = [f"2022-01-{1+i:02d}" for i in range(100)]
@@ -1129,7 +1124,6 @@ class TestCliImports:
     def test_cli_imports(self, stack_test_db):
         from src.backtest.stacking_ensemble_backtest import (
             StackingEnsembleBacktest,
-            StackingBacktestResult,
         )
         bt = StackingEnsembleBacktest(cache_db=stack_test_db)
         assert bt is not None

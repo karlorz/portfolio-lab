@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-import pytest
-from pydantic import ValidationError
 
 from src.monitor.signal_schemas import (
     EnsembleVotingSignal,

@@ -13,10 +13,8 @@ A2: behavior-equality — canned fixtures for ``_resolve_current_regime_for_gate
 """
 import json
 from datetime import datetime, timezone
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from src.dashboard.generator import DashboardGenerator
 from src.dashboard.sections_regime_gate import _RegimeGateStateMixin

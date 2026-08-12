@@ -1,6 +1,5 @@
 """Tests for src.utils.safe_get — safe nested-dict traversal."""
 
-import pytest
 
 from src.utils import safe_get
 

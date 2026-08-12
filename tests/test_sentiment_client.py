@@ -4,8 +4,6 @@ import importlib
 import json
 import os
 import sys
-from datetime import date
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -41,7 +39,6 @@ from src.llm.sentiment_client import (
     OpenAIGPT4oMiniClient,
     ClaudeSonnetClient,
     BudgetExceededError,
-    LLMClient,
     _estimate_tokens,
     PRICING,
 )

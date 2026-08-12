@@ -3,14 +3,12 @@
 Tests for TSMOM overlay — data classes, formation returns, volatility scaling,
 signal computation, portfolio construction, and backtester.
 """
-import json
 import numpy as np
 import pandas as pd
 
 import pytest
-from datetime import datetime, timedelta
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from datetime import datetime
+from unittest.mock import patch
 
 from src.signals.tsmom_overlay import (
     TSMOMSignal, TSMOMPortfolio, TSMOMOverlay, TSMOMBacktester,

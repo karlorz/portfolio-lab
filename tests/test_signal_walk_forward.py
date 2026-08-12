@@ -1,14 +1,12 @@
 """Tests for per-signal walk-forward validation module."""
 
 import json
-from pathlib import Path
 
 import numpy as np
 import pytest
 
 from src.monitor.signal_walk_forward import (
     SignalWalkForwardValidator,
-    SignalWFEResult,
     SignalWFEWindow,
     compute_signal_wfe_report,
 )

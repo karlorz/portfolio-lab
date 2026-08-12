@@ -1,6 +1,5 @@
 """Tests for src.monitor.spc_monitor — SPC signal quality monitoring."""
 
-import pytest
 from src.monitor.spc_monitor import SPCMonitor
 
 
@@ -186,7 +185,6 @@ class TestSPCMonitorEdgeCases:
 
 def test_run_spc_monitor_status_not_ok_when_flags_present(tmp_path, monkeypatch):
     """Dashboard SPC block must surface non-ok status when flagged_signals non-empty."""
-    import sqlite3
     from src.dashboard.generator import DashboardGenerator
     from src.monitor.spc_monitor import SPCMonitor
 

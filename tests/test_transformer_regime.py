@@ -74,7 +74,6 @@ class TestTransformerRegimeModel:
         assert out.shape == (4, 5)
 
     def test_predict(self, model):
-        import torch
         seq = np.random.RandomState(42).normal(0, 0.01, (60, 3))
         pred_idx, conf, probs = model.predict(seq)
         assert 0 <= pred_idx < 5

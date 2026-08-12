@@ -9,7 +9,6 @@ import json
 import logging
 import inspect
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -318,7 +317,6 @@ class TestOptimalWindow:
     def test_default_clock_uses_america_new_york_not_host_local(self, monkeypatch):
         """When now is omitted, window membership follows America/New_York wall clock."""
         from zoneinfo import ZoneInfo
-        from datetime import timezone
 
         ctrl = SmartRebalancingController()
         et = ZoneInfo("America/New_York")
@@ -352,7 +350,6 @@ class TestOptimalWindow:
 
     def test_aware_utc_converted_to_et_for_window(self):
         """Timezone-aware UTC timestamps convert to ET before hour check."""
-        from zoneinfo import ZoneInfo
         from datetime import timezone
 
         ctrl = SmartRebalancingController()

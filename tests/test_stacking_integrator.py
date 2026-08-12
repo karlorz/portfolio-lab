@@ -19,8 +19,7 @@ import pickle
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch
-import tempfile
+from unittest.mock import Mock, patch
 from typing import Optional
 
 from src.signals.stacking_integrator import (

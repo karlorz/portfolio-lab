@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 
 def test_full_then_partial_preserves_last_full_and_clears_live_sha():
