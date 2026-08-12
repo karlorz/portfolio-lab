@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
 
-import pytest
 
 
 def test_classify_performance_growth_external_capture_daily_pnl(tmp_path: Path):
@@ -69,7 +66,7 @@ def test_classify_truncate_is_test_leak(tmp_path: Path):
 
 
 def test_diversity_floor_does_not_reinflate_health_slept_arms():
-    from src.strategy.ensemble_voter import EnsembleVoter, DEFAULT_DIVERSITY_FLOOR
+    from src.strategy.ensemble_voter import EnsembleVoter
     from src.signals.signal_source import SignalSource
 
     voter = EnsembleVoter.__new__(EnsembleVoter)

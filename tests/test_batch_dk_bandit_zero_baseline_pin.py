@@ -6,7 +6,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
-import pytest
 
 from src.strategy.ensemble_voter import (
     EnsembleVoter,

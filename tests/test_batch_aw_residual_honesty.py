@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 
 def test_overlay_save_dual_write_provenance(tmp_path, monkeypatch):

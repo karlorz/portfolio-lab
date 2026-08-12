@@ -1,8 +1,6 @@
 """Tests for src.monitor.alerting — webhook alerting + staleness checks."""
 
-import os
 import json
-import time
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -15,7 +13,6 @@ from src.monitor.alerting import (
     check_drift_and_alert,
     check_ic_decay_and_alert,
     _last_alert_time,
-    ALERT_MIN_INTERVAL_SECONDS,
 )
 
 
@@ -587,7 +584,7 @@ class TestCheckIcDecayAndAlert:
 
 def test_ineligible_critical_signal_does_not_send_halt(monkeypatch):
     """Misaligned/legacy critical rows cannot generate a halt-authoritative alert."""
-    from src.monitor.alerting import check_ic_decay_and_alert, AlertChannel, AlertLevel
+    from src.monitor.alerting import check_ic_decay_and_alert, AlertLevel
 
     sent = {}
 
@@ -615,7 +612,7 @@ def test_ineligible_critical_signal_does_not_send_halt(monkeypatch):
 
 
 def test_eligible_critical_signal_sends_halt(monkeypatch):
-    from src.monitor.alerting import check_ic_decay_and_alert, AlertChannel, AlertLevel
+    from src.monitor.alerting import check_ic_decay_and_alert, AlertLevel
 
     sent = {}
 

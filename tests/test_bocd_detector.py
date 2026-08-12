@@ -12,7 +12,7 @@ Tests cover:
 import numpy as np
 import pytest
 
-from src.regime.bocd_detector import BOCDDetector, BOCDResult
+from src.regime.bocd_detector import BOCDDetector
 
 
 class TestBOCDDetectorInit:

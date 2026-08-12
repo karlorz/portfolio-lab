@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from pathlib import Path
 
 
 def test_apply_ops_monitor_projects_mirror_lag_onto_dashboard_health(

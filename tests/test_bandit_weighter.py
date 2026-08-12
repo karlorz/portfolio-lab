@@ -2,7 +2,6 @@
 import json
 
 import numpy as np
-import pytest
 from src.strategy.ensemble_voter import BanditWeighter, EnsembleVoter, Regime, SignalSource
 
 

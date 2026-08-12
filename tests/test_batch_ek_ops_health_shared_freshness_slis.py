@@ -7,7 +7,6 @@ same freshness metrics — no split-brain.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from src.monitor.health_check import attach_shared_freshness_slis_to_ops_report
 

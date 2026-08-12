@@ -4,8 +4,6 @@ Tests for Bond Duration Rotation Signal Generator (v4.80)
 
 import json
 import pytest
-from datetime import datetime, date
-from dataclasses import asdict
 
 from src.signals.bond_duration_signal import (
     BondDurationCalculator,

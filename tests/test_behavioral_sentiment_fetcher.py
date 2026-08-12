@@ -1050,7 +1050,6 @@ class TestVixNaNHandling:
     """Test that NaN values from yfinance are ignored."""
 
     def test_vix_nan_returns_default(self, tmp_path):
-        import math
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
         mock_vix = MagicMock()

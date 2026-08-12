@@ -5,7 +5,6 @@ Runs without ML enabled (uses torch stubs).
 import pytest
 import numpy as np
 import os
-from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 

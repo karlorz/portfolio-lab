@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
-import pytest
 
-from src.strategy.ensemble_voter import EnsembleVoter, Regime, SignalSource
+from src.strategy.ensemble_voter import EnsembleVoter, SignalSource
 
 
 class _H:

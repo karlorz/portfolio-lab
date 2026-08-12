@@ -9,7 +9,6 @@ absent while ``data/rebalance_health.json`` already had unique=4 raw=96.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from src.monitor.health_check import refresh_signals_health_kill_fields
 

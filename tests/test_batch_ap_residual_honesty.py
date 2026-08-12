@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
-import pytest
 
 
 def test_health_check_report_stamps_generator_git_sha(tmp_path, monkeypatch):

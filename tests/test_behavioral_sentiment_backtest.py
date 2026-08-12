@@ -6,7 +6,6 @@ import json
 import math
 import sqlite3
 import tempfile
-from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -292,7 +291,7 @@ class TestBehavioralSentimentBacktest:
 
     def test_regime_sharpe_computation(self, test_db):
         """Regime Sharpe ratios are computed for different VIX buckets."""
-        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest, DEFAULT_CACHE_DB
+        from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
 
         bt = BehavioralSentimentBacktest(cache_db=test_db)
 
@@ -915,7 +914,7 @@ class TestBehavioralSentimentBacktest:
     def test_extreme_equity_shift_clamp_upper(self):
         """Large positive equity shift is clamped so adj_spy <= 1.0."""
         from src.backtest.behavioral_sentiment_backtest import (
-            BehavioralSentimentBacktest, BASELINE_SPY, BASELINE_GLD,
+            BehavioralSentimentBacktest,
         )
 
         dates = [f"2022-{1+i//21:02d}-{1+i%21:02d}" for i in range(50)]
@@ -963,7 +962,7 @@ class TestBehavioralSentimentBacktest:
     def test_extreme_equity_shift_at_max_shift_boundary(self):
         """Equity shift exactly at +MAX_SHIFT produces correct adjusted weights."""
         from src.backtest.behavioral_sentiment_backtest import (
-            BehavioralSentimentBacktest, MAX_SHIFT, BASELINE_SPY, BASELINE_GLD, BASELINE_TLT,
+            BehavioralSentimentBacktest,
         )
 
         dates = [f"2022-{1+i//21:02d}-{1+i%21:02d}" for i in range(10)]
@@ -1324,7 +1323,6 @@ class TestBehavioralSentimentBacktest:
 
     def test_run_end_date_defaults_to_now(self, test_db):
         """end_date=None defaults to current date without crashing."""
-        from datetime import datetime
         from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest
 
         bt = BehavioralSentimentBacktest(cache_db=test_db)
@@ -1449,7 +1447,7 @@ class TestBehavioralSentimentBacktest:
     def test_simulate_buy_sell_symmetry(self):
         """Buy and sell signals produce symmetric adjusted weights."""
         from src.backtest.behavioral_sentiment_backtest import (
-            BehavioralSentimentBacktest, BASELINE_SPY, BASELINE_GLD,
+            BehavioralSentimentBacktest,
         )
 
         dates = ["2022-01-03", "2022-01-04"]
@@ -1735,7 +1733,7 @@ class TestBehavioralSentimentBacktest:
     def test_overlay_symmetry_opposite_shifts(self):
         """+x% and -x% shifts produce perfectly symmetric adj weights."""
         from src.backtest.behavioral_sentiment_backtest import (
-            BehavioralSentimentBacktest, BASELINE_SPY, BASELINE_GLD, BASELINE_TLT,
+            BASELINE_SPY, BASELINE_GLD, BASELINE_TLT,
         )
 
         shift = 0.03  # 3%
@@ -1758,7 +1756,6 @@ class TestBehavioralSentimentBacktest:
 
     def test_cli_arg_defaults(self):
         """CLI argparse defaults match expected values."""
-        from argparse import Namespace
 
         # Verify the source file defines CLI with correct defaults
         from src.backtest.behavioral_sentiment_backtest import BehavioralSentimentBacktest

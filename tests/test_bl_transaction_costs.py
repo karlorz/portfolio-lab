@@ -9,7 +9,6 @@ import pytest
 import numpy as np
 
 from src.strategy.black_litterman_mapper import (
-    BLViews, BLResult,
     map_biases_to_views, run_black_litterman,
 )
 

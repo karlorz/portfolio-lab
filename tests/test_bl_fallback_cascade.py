@@ -8,7 +8,7 @@ import numpy as np
 from unittest.mock import patch, MagicMock
 
 from src.strategy.black_litterman_mapper import (
-    BLViews, BLResult,
+    BLResult,
     map_biases_to_views, run_black_litterman,
     _run_hrp_fallback,
 )

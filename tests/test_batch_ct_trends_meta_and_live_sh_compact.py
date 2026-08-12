@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
 
 from src.dashboard.generator import _compact_health_summary
 from src.signals.google_trends_signal import GoogleTrendsSignal

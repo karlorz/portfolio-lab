@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
-import pytest
 
 
 def test_refresh_graduation_dual_surfaces_matches_cb_ssot(tmp_path, monkeypatch):

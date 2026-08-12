@@ -7,7 +7,6 @@ from pathlib import Path
 
 
 def test_discover_attribution_public_paths():
-    from src.dashboard.public_data_index import _discover_attribution_public_paths
 
     # Source contract present
     src = Path("src/dashboard/public_data_index.py").read_text(encoding="utf-8")

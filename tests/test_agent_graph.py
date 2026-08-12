@@ -8,16 +8,13 @@ ML-gated agent classes (AnalystAgent, SentimentAgent, etc.) are mocked.
 """
 
 import os
-import sys
 import json
-import pytest
 import threading
 import tempfile
 import numpy as np
 from pathlib import Path
 from collections import deque
-from unittest.mock import MagicMock, patch, PropertyMock, call, ANY
-from datetime import datetime
+from unittest.mock import MagicMock, patch
 
 # Ensure ML stubs are active
 os.environ["PORTFOLIO_LAB_ENABLE_ML"] = "0"
@@ -25,7 +22,7 @@ os.environ["PORTFOLIO_LAB_ENABLE_ML"] = "0"
 # ── Import the module under test ──────────────────────────────────────────
 # The import works without real torch because all agent modules use the
 # base_agent torch stubs (nn.Module -> _StubModule) when ML is disabled.
-from src.agents.base_agent import BaseAgent, AgentMessage, MessageType
+from src.agents.base_agent import AgentMessage, MessageType
 from src.agents.agent_graph import (
     AgentGraph,
     NodeType,

@@ -8,8 +8,6 @@ import json
 import pytest
 import numpy as np
 from datetime import datetime, timedelta
-from pathlib import Path
-from unittest.mock import patch
 
 from src.analytics.calculator import (
     DrawdownPoint, RollingMetrics, BenchmarkSeries, CrisisPeriod,

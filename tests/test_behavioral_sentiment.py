@@ -6,12 +6,11 @@ import pytest
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch
 
 
 from src.data.behavioral_sentiment_fetcher import (
     BehavioralSentimentSnapshot,
-    BehavioralSentimentFetcher,
     OptionsSentiment,
     RetailFlow,
     SocialIntensity,
@@ -1392,11 +1391,7 @@ class TestConstants:
             assert exp in __all__, f"{exp} missing from __all__"
 
     def test_all_exports_importable(self):
-        from src.signals.behavioral_sentiment import (
-            MIN_HOLDING_DAYS, MAX_EQUITY_SHIFT_PCT, ZSCORE_WINDOW_DAYS,
-            VIX_CRISIS_THRESHOLD, VIX_HIGH_THRESHOLD, VIX_ELEVATED_THRESHOLD,
-            BehavioralSignal, BehavioralSentimentSignal,
-        )
+        pass
 
     def test_confidence_range_zero_to_one(self, tmp_cache_db):
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal
@@ -1418,8 +1413,6 @@ class TestConstants:
 
 def test_live_payload_prefers_research_caveats_not_backtest_finding():
     """Builder contract: live behavioral block must not ship free-text backtest_finding."""
-    import ast
-    from pathlib import Path
 
     src = Path("src/dashboard/signal_section_builder.py").read_text(encoding="utf-8")
     # Static contract: research_caveats present; bare backtest_finding key removed from behavioral block

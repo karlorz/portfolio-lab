@@ -4,20 +4,19 @@ Tests for Alternative Data Walk-Forward & Stress Test Engine —
 data classes, constants, compute_metrics, build_daily_returns,
 walk_forward_test, and stress_test.
 """
-import math
 import json
 import logging
 
 import pytest
 from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from src.backtest.alt_data_walkforward_stress import (
     DailyReturn, WindowResult, StressResult, FullBacktestResult,
     WEIGHTS, REGIME_SHIFTS, STRESS_PERIODS,
     compute_metrics, build_daily_returns, walk_forward_test, stress_test,
     load_price_data, load_alt_signals, run_full_backtest, print_results,
-    save_results, SIGNALS_DIR,
+    save_results,
 )
 
 

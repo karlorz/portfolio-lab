@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 
 def test_decision_registry_snapshot_stamps_generator_git_sha(tmp_path, monkeypatch):
@@ -58,7 +57,7 @@ def test_incident_write_summary_stamps_generator_git_sha(tmp_path, monkeypatch):
 
 
 def test_generator_alerts_json_stamps_git_sha(tmp_path, monkeypatch):
-    from src.dashboard.generator import DashboardGenerator, PUBLIC_DIR
+    from src.dashboard.generator import DashboardGenerator
 
     monkeypatch.setattr(
         "src.dashboard.generator._generator_git_sha_short",

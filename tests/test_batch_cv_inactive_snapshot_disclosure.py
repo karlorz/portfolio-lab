@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
 
 from src.signals.signal_snapshot import SignalSnapshot
 from src.strategy.ensemble_voter import SignalReading, SignalSource

@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from pathlib import Path
 
-import pytest
 
 
 def test_vix_loader_skips_meta_key(tmp_path, monkeypatch):

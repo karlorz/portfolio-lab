@@ -6,7 +6,6 @@ import hashlib
 import json
 from pathlib import Path
 
-import pytest
 
 
 def _sha256(path: Path) -> str:

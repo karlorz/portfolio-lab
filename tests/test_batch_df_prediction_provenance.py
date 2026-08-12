@@ -6,7 +6,6 @@ import json
 import sqlite3
 import tempfile
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from src.signals.health_tracker import SignalHealthTracker

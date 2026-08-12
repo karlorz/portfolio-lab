@@ -4,13 +4,11 @@ Tests for alternative_data_backfill.py — DailyAlternativeSignal dataclass,
 crisis detection, signal generation, regime classification, composite scoring,
 and metadata generation.
 """
-import sys
 import os
 import json
 
-import pytest
 from datetime import datetime
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from src.backtest.alternative_data_backfill import (
     DailyAlternativeSignal,

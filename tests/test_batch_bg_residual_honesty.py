@@ -9,7 +9,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
-import pytest
 
 from src.data.market_db_sync import (
     audit_prices_payload,

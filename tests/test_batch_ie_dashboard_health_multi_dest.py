@@ -132,7 +132,6 @@ def test_generate_health_json_public_repo_same_bytes_0644(tmp_path, monkeypatch)
 
     Private DATA_DIR/health.json must remain untouched (monitor schema SSOT).
     """
-    from src.dashboard import generator as gen_mod
     from src.monitor import signal_authority as sa
 
     public = tmp_path / "www"
@@ -207,7 +206,6 @@ def test_generate_health_json_never_passes_private_monitor_path(
     tmp_path, monkeypatch
 ):
     """Case DW: multi-dest call must use private_path=None for dashboard health."""
-    from src.dashboard import generator as gen_mod
     from src.monitor import signal_authority as sa
 
     public = tmp_path / "www"
@@ -256,7 +254,6 @@ def test_generate_health_json_fallback_save_results_on_multi_dest_failure(
     tmp_path, monkeypatch
 ):
     """Case DX: if multi-dest raises, fall back to save_results_json @ public."""
-    from src.dashboard import generator as gen_mod
 
     public = tmp_path / "www"
     private = tmp_path / "data"

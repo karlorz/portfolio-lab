@@ -1188,8 +1188,6 @@ class TestChampionMinWeightFloor:
 
     def test_negative_gold_view_keeps_gld_above_epsilon(self):
         import numpy as np
-        from pypfopt import BlackLittermanModel, EfficientFrontier
-        import pandas as pd
         from src.strategy.black_litterman_mapper import (
             map_biases_to_views,
             run_black_litterman,

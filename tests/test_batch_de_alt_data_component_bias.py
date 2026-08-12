@@ -104,7 +104,6 @@ def test_alt_component_bias_diagnostic_shape(tmp_path, monkeypatch) -> None:
 
     def _patched():
         import json
-        from pathlib import Path
 
         path = tmp_path / "signals" / "alternative_data_latest.json"
         data = json.loads(path.read_text())

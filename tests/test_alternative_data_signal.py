@@ -5,14 +5,11 @@ Tests the refactored signal generator that uses only existing pipeline data.
 """
 
 import json
-import logging
 import math
 import sys
-import tempfile
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 import pytest
 

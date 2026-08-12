@@ -2,9 +2,7 @@
 
 import json
 from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 
 
 def test_garch_risk_script_writes_public_path():

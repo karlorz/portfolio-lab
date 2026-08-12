@@ -9,7 +9,6 @@ kill warning → eval exit 2 → scheduler degraded → rebalance blocked_kill_s
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -121,7 +120,7 @@ def test_convexity_get_current_signal_uses_last_cache_bar_not_unavailable(tmp_pa
 
 def test_vol_parity_null_vix_does_not_crash_and_publishes_generated_at(tmp_path):
     """Missing VIX must not TypeError; published allocation has TTL stamp."""
-    from src.strategy.convexity_harvest import ConvexityHarvestStrategy, ConvexityPosition
+    from src.strategy.convexity_harvest import ConvexityHarvestStrategy
     from src.strategy.vol_parity_allocator import VolatilityParityAllocator
 
     class _EmptyVix:

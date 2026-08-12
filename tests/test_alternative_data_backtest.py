@@ -1557,7 +1557,7 @@ class TestLoadDataEdgeCases:
 
     def test_process_price_data_missing_price_key(self, caplog):
         """Missing 'p' key in price dict raises KeyError caught by load_data."""
-        import logging, tempfile, json
+        import logging
 
         caplog.set_level(logging.ERROR)
         bt = AlternativeDataBacktester()

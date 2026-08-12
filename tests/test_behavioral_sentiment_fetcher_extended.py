@@ -22,8 +22,7 @@ import logging
 import math
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 
 import pytest
 import pandas as pd
@@ -1351,7 +1350,7 @@ class TestCliMainGuard:
         print(f"\nComposite Score: {snapshot.composite_score:.2f} (-3 fear to +3 greed)")
         print(f"Signal Type: {snapshot.signal_type}")
         print(f"Confidence: {snapshot.confidence:.1%}")
-        print(f"\n--- Options Sentiment ---")
+        print("\n--- Options Sentiment ---")
         print(f"  SKEW Index: {snapshot.options.skew_index:.1f}")
 
         captured = capsys.readouterr()
@@ -1470,20 +1469,10 @@ class TestExportCompleteness:
         """All major classes and constants are directly importable."""
         from src.data.behavioral_sentiment_fetcher import (
             BehavioralSentimentFetcher,
-            BehavioralSentimentSnapshot,
             OptionsSentiment,
-            RetailFlow,
-            SocialIntensity,
             CACHE_TTL_HOURS,
-            EXTREME_FEAR_THRESHOLD,
-            EXTREME_GREED_THRESHOLD,
-            FEAR_THRESHOLD,
-            GREED_THRESHOLD,
-            CACHE_DB,
             CBOE_SKEW_URL,
             CBOE_VIX_URL,
-            REDDIT_AVAILABLE,
-            REDDIT_ENABLED,
         )
         # Verify classes
         assert callable(BehavioralSentimentFetcher)
@@ -1599,7 +1588,6 @@ class TestRedditIntegration:
 
     def test_social_intensity_reddit_warning_logged(self, tmp_path, caplog):
         """When REDDIT_AVAILABLE=True but REDDIT_ENABLED=False, warning is logged once."""
-        from src.data.behavioral_sentiment_fetcher import _reddit_disabled_warned
         # Reset the global flag to ensure the warning is logged
         import src.data.behavioral_sentiment_fetcher as mod
         mod._reddit_disabled_warned = False

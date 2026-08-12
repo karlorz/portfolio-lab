@@ -4,7 +4,6 @@ Tests for Bayesian Adaptive Volatility Model (v5.20)
 
 import pytest
 import numpy as np
-import math
 import sys
 import logging
 from unittest.mock import patch
@@ -374,7 +373,6 @@ class TestExports:
     def test_all_exports_importable(self):
         from src.monitor.bayesian_vol import (
             BayesianVolEstimate, BayesianVolModel,
-            BayesianVolPipeline, estimate_bayesian_vol,
         )
         assert BayesianVolEstimate is not None
         assert BayesianVolModel is not None

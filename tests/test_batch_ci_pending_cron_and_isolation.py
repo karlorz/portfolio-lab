@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from src.monitor.hermes_cron import normalize_cron_status, summarize_backend
 

@@ -3,7 +3,6 @@
 TDD red phase — defines behavior before implementation.
 """
 
-import pytest
 from src.strategy.ensemble_voter import (
     EnsembleVoter,
     Regime,

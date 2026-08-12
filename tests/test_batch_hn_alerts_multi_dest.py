@@ -9,7 +9,6 @@ operator JSON fan-out. Live TA remains signals.json.target_allocations.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 
 def test_write_json_multi_dest_same_bytes_mode_644(tmp_path):

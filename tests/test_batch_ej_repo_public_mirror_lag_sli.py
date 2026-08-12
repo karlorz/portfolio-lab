@@ -8,7 +8,6 @@ lag while cron green.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from src.dashboard.generator import project_repo_public_mirror_lag_onto_health
 from src.monitor.health_check import refresh_signals_health_kill_fields

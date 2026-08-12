@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
 
 from src.strategy.adaptive_ensemble_weights import AdaptiveEnsembleWeights
 from src.strategy.ensemble_voter import (

@@ -4,15 +4,14 @@ Tests for alternative data module — data classes, adapters, composite signals,
 earnings predictions.
 """
 import io
-import json
 import logging
 import sqlite3
 import sys
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from src.data.alternative_data import (
     AlternativeDataSignal, CompositeSignal, EarningsPrediction,
@@ -555,7 +554,6 @@ class TestAlternativeDataAdapter:
 
     def test_adapter_init(self, tmp_path):
         with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
-            from src.data.alternative_data import AlternativeDataAdapter
             adapter = SatelliteDataAdapter()
             assert adapter.source_name == "satellite"
 
@@ -1118,7 +1116,6 @@ class TestCLIMain:
     """Test the CLI main() argument parsing and dispatching."""
 
     def test_no_args_prints_usage(self, caplog):
-        import logging
         caplog.set_level(logging.INFO)
         from src.data.alternative_data import main as cli_main
         with patch.object(sys, "argv", ["alternative_data.py"]):
@@ -2153,7 +2150,6 @@ class TestCLIAdditionalCommands:
     """Additional CLI command path coverage."""
 
     def test_fetch_with_source_all(self, tmp_path, caplog):
-        import logging
         caplog.set_level(logging.INFO)
         from src.data.alternative_data import main as cli_main
         db = tmp_path / "alt.db"
@@ -2168,7 +2164,6 @@ class TestCLIAdditionalCommands:
         assert "Supply Chain Signal" in caplog.text
 
     def test_earnings_insufficient_data(self, tmp_path, caplog):
-        import logging
         caplog.set_level(logging.INFO)
         from src.data.alternative_data import main as cli_main
         db = tmp_path / "alt.db"
@@ -2181,7 +2176,6 @@ class TestCLIAdditionalCommands:
         assert "Insufficient data" in caplog.text
 
     def test_fetch_satellite_source_specific(self, tmp_path, caplog):
-        import logging
         caplog.set_level(logging.INFO)
         from src.data.alternative_data import main as cli_main
         db = tmp_path / "alt.db"

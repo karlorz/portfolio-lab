@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 
 
 def test_convexity_stale_futures_cache_is_degraded_not_ok(monkeypatch):

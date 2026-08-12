@@ -1443,7 +1443,6 @@ class TestCliMainEntry:
         """main() with --save only (no --output) should not crash."""
         from src.backtest.bond_duration_backtest import main
         import sys
-        from src.paths import BACKTEST_RESULTS_DIR
         old_argv = sys.argv
         try:
             monkeypatch.chdir(tmp_path)
@@ -1624,7 +1623,6 @@ class TestAdditionalBoundaryConditions:
     def test_load_data_empty_json(self, tmp_path, monkeypatch):
         """Loading from empty/malformed JSON should fall back to synthetic data."""
         import json
-        from src.paths import PRICES_JSON
         # Create a malformed file
         fake_prices = tmp_path / "prices.json"
         fake_prices.write_text("{bad json")
@@ -1635,7 +1633,6 @@ class TestAdditionalBoundaryConditions:
 
     def test_load_data_missing_keys(self, tmp_path, monkeypatch):
         """JSON missing SPY/GLD/TLT keys should still work (dates derived from intersection)."""
-        from src.paths import PRICES_JSON
         fake_prices = tmp_path / "prices.json"
         fake_prices.write_text(json.dumps({"SPY": [{"d": "2020-01-02", "p": 100.0}]}))
         monkeypatch.setattr("src.backtest.bond_duration_backtest.PRICES_JSON", fake_prices)
@@ -1646,7 +1643,6 @@ class TestAdditionalBoundaryConditions:
 
     def test_load_data_no_dates_in_range(self, tmp_path, monkeypatch):
         """Dates outside config range should trigger synthetic fallback."""
-        from src.paths import PRICES_JSON
         fake_prices = tmp_path / "prices.json"
         data = {
             "SPY": [{"d": "1990-01-02", "p": 100.0}],
@@ -1662,7 +1658,6 @@ class TestAdditionalBoundaryConditions:
 
     def test_load_data_ief_shy_missing(self, tmp_path, monkeypatch):
         """Missing IEF/SHY in JSON should fall back to TLT data for those fields."""
-        from src.paths import PRICES_JSON
         fake_prices = tmp_path / "prices.json"
         data = {
             "SPY": [{"d": "2020-01-02", "p": 100.0}, {"d": "2020-01-03", "p": 101.0}],
@@ -1719,7 +1714,6 @@ class TestAdditionalBoundaryConditions:
 
     def test_save_results_no_path_uses_default(self, tmp_path, monkeypatch):
         """save_results() without output_path should use default path."""
-        from src.paths import BACKTEST_RESULTS_DIR
         bt = WalkForwardBondDurationBacktester()
         bt.load_data()
         result = bt.run()

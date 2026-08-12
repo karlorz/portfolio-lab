@@ -5,9 +5,8 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 
 
 def test_adaptive_sizing_json_stamps_generator_git_sha(tmp_path, monkeypatch):

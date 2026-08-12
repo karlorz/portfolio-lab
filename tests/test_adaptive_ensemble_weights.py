@@ -13,12 +13,10 @@ Tests the AdaptiveEnsembleWeights class including:
 
 import json
 import os
-import sys
 from pathlib import Path
 from datetime import datetime, timedelta
 
 import pytest
-import numpy as np
 
 from src.strategy.adaptive_ensemble_weights import (
     AdaptiveEnsembleWeights,
