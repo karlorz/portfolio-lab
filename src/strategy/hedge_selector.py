@@ -15,7 +15,6 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, Dict, List, Tuple
 
-import numpy as np
 
 from src.paths import DATA_DIR
 from src.backtest.metrics import save_results_json

@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Optional, Dict
 import numpy as np
 
-from src.paths import DATA_DIR, PRICES_JSON
+from src.paths import DATA_DIR
 from src.utils.metrics_io import save_results_json
 
 logger = logging.getLogger(__name__)

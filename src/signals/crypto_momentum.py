@@ -14,7 +14,6 @@ Usage:
     python -m src.signals.crypto_momentum status
 """
 
-import json
 import logging
 import math
 import sqlite3

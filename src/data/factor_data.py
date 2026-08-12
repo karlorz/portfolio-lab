@@ -355,7 +355,6 @@ def fetch_factor_prices_from_pipeline(symbol: str, prices_data: Optional[Dict] =
     Integrates with the existing Yahoo Finance data pipeline to populate
     factor ETF historical data from public/data/prices.json.
     """
-    import json
     from src.data.price_cache import get_prices
 
     if prices_data is None:

@@ -16,7 +16,6 @@ Usage:
     python -m src.regime.kurtosis_regime status
 """
 
-import json
 import logging
 from dataclasses import dataclass, asdict
 from datetime import datetime

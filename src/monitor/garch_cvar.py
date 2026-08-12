@@ -481,7 +481,6 @@ def compare_cvar_methods(
 
 if __name__ == "__main__":
     # Demo/test
-    import sys
     
     logger.info("GARCH-Filtered CVaR Calculator v3.21")
     logger.info("=" * 50)

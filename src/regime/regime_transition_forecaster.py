@@ -14,7 +14,7 @@ Regime persistence data from walk-forward validation:
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 import numpy as np

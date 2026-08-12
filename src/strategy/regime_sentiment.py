@@ -12,7 +12,6 @@ Integrates with:
 - sentiment_analyzer.py (v2.30 Phase 2) for sentiment signals
 """
 
-import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path

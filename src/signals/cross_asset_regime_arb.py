@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 from src.paths import DATA_DIR, PUBLIC_DATA_DIR
 from src.backtest.metrics import save_results_json
-from src.data.price_cache import get_prices, get_prices_df
+from src.data.price_cache import get_prices_df
 
 
 __all__ = ['MOMENTUM_LOOKBACK', 'VOL_LOOKBACK', 'MIN_HISTORY', 'DIVERGENCE_LOOKBACK', 'BULL_MOMENTUM_THRESHOLD', 'BEAR_MOMENTUM_THRESHOLD', 'STRONG_MOMENTUM_THRESHOLD', 'HIGH_VOL_THRESHOLD', 'AssetRegime', 'BondRegime', 'GoldRegime', 'DivergencePattern', 'AssetRegimeReading', 'BondRegimeReading', 'GoldRegimeReading', 'DivergenceReading', 'CrossAssetRegimeArbSignal', 'CrossAssetRegimeArbDetector', 'print_signal_report']

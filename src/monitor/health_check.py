@@ -27,7 +27,6 @@ from typing import Any, Mapping
 from src.paths import DATA_DIR, PUBLIC_DATA_DIR
 from src.monitor.alerting import AlertChannel, AlertLevel, send_alert, webhook_config_state
 from src.monitor.hermes_cron import (
-    HEALTH_SELF_JOB_NAME,
     combine_scheduler_backends,
     is_health_self_job,
     load_hermes_portfolio_cron_jobs,

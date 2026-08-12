@@ -33,8 +33,8 @@ from typing import Dict, Optional, Tuple
 
 import pandas as pd
 
-from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON, PUBLIC_DATA_DIR, sqlite_connect
-from src.data.price_cache import get_prices, get_prices_df
+from src.paths import BASE_ALLOCATION, DATA_DIR, PUBLIC_DATA_DIR, sqlite_connect
+from src.data.price_cache import get_prices_df
 from src.backtest.metrics import save_results_json
 
 import numpy as np

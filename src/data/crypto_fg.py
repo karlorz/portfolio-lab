@@ -9,10 +9,8 @@ API: https://alternative.me/crypto/fear-and-greed-index/
 
 import json
 import logging
-import time
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Optional
 
 import requests

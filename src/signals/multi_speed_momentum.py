@@ -48,7 +48,7 @@ from datetime import datetime
 
 from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON, VOL_TARGET, MAX_DEVIATION, MIN_WEIGHT, REBALANCE_FREQ
 from src.backtest.metrics import save_results_json
-from src.data.price_cache import get_prices, get_prices_df
+from src.data.price_cache import get_prices_df
 from src.utils.computation_cache import get_realized_volatility
 
 

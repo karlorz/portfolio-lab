@@ -24,7 +24,7 @@ import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional, Any
 
 from src.paths import DATA_DIR, PROJECT_ROOT
 

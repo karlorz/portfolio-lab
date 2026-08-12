@@ -17,7 +17,6 @@ Usage:
     python -m src.signals.calendar_seasonality calendar 2026-01
 """
 
-import json
 import logging
 from dataclasses import dataclass, asdict
 from datetime import date, timedelta

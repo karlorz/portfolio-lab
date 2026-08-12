@@ -51,7 +51,7 @@ from itertools import combinations
 from src.backtest.metrics import save_results_json
 from src.costs.etf_cost_table import estimate_cost_bps
 from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION
-from src.data.price_cache import get_prices, get_prices_df
+from src.data.price_cache import get_prices_df
 
 
 __all__ = ['LOOKBACK_WINDOWS', 'DEFAULT_WINDOW', 'DTW_RADIUS', 'LEVY_LAGS', 'GRAPH_SPARSITY_ALPHA', 'GRAPH_SMOOTHNESS_BETA', 'MAX_DEVIATION', 'MIN_WEIGHT', 'ASSETS', 'DEFAULT_BASE_ALLOCATION', 'LeadLagMatrix', 'WindowMomentumSignal', 'EnsembleNetworkSignal', 'NetworkMomentumPortfolio', 'NetworkMomentumLeadLag', 'NetworkMomentumBacktester']

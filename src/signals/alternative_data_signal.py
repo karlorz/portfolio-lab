@@ -23,7 +23,6 @@ import os
 import statistics
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
-import numpy as np
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -35,7 +34,7 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 from src.backtest.metrics import save_results_json
 from src.data.price_cache import get_prices
-from src.data.crypto_fg import get_crypto_fg, CryptoFgData
+from src.data.crypto_fg import get_crypto_fg
 
 
 __all__ = ['SYMBOLS_REQUIRED', 'ComponentSignal', 'AlternativeDataComposite', 'EnsembleSignal', 'AlternativeDataSignalGenerator']

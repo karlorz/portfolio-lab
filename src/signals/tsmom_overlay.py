@@ -46,7 +46,7 @@ from src.backtest.metrics import (
     compute_one_way_turnover,
     save_results_json,
 )
-from src.data.price_cache import get_prices, get_prices_df
+from src.data.price_cache import get_prices_df
 
 
 __all__ = ['LOOKBACK_DAYS', 'SKIP_DAYS', 'VOL_WINDOW', 'VOL_TARGET', 'MAX_DEVIATION', 'MIN_WEIGHT', 'REBALANCE_FREQ', 'ASSET_TICKERS', 'DEFAULT_BASE_ALLOCATION', 'TSMOMSignal', 'TSMOMPortfolio', 'TSMOMOverlay', 'TSMOMBacktester']

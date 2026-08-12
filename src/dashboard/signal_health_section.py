@@ -107,7 +107,6 @@ def attach_signal_quality_disclosure(
             from src.signals.health_tracker import (
                 HEALTH_THRESHOLD_HEALTHY_COLLAPSED,
                 HEALTH_THRESHOLD_HEALTHY_FULL,
-                status_thresholds_for_scheme,
             )
 
             quality["threshold_policy"] = {

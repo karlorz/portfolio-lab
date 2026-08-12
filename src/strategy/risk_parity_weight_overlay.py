@@ -32,7 +32,7 @@ from dataclasses import dataclass, asdict
 
 from src.backtest.metrics import save_results_json
 from src.paths import DATA_DIR, PRICES_JSON, BASE_ALLOCATION
-from src.data.price_cache import get_prices, get_prices_df
+from src.data.price_cache import get_prices_df
 from src.utils.computation_cache import get_realized_volatility
 
 

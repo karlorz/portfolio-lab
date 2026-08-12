@@ -9,13 +9,10 @@ public_data_index / overlay_dashboard / experiment_registry / rebalance_health
 """
 
 import json
-import re
 import shutil
-import hashlib
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from src.paths import DATA_DIR
 
 # Dist mirror contract files (moved with _mirror_public_data_contract_files_to_dist)
 PUBLIC_DATA_DIST_MIRROR_FILES = ("source_manifest.json", "index.json", "health.json")
