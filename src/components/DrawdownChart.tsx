@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush } from 'recharts';
+import type { TooltipValueType } from 'recharts';
 import type { BacktestResult, PerformanceMetrics } from '../backtest/engine';
 import { autoDownsample } from '../utils/lttb';
 
@@ -34,7 +35,7 @@ export const DrawdownChart: React.FC<DrawdownProps> = ({ results }) => {
           <YAxis stroke="#94a3b8" domain={[-50, 0]} tickFormatter={(v) => `${v}%`} />
           <Tooltip 
             contentStyle={{ background: '#1e293b', border: '1px solid #334155' }}
-            formatter={(value: number) => [`${(value as number).toFixed(1)}%`, 'Drawdown']}
+            formatter={(value: TooltipValueType | undefined) => [`${Number(value ?? 0).toFixed(1)}%`, 'Drawdown']}
           />
           <Legend />
           <Brush dataKey="date" height={30} stroke="#ef4444" tickFormatter={(date) => new Date(date as string).getFullYear().toString()} />

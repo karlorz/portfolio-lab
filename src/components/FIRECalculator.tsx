@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from 'recharts';
+import type { TooltipValueType } from 'recharts';
 import type { BacktestResult } from '../backtest/engine';
 
 interface FIRECalculatorProps {
@@ -322,7 +323,7 @@ export const FIRECalculator: React.FC<FIRECalculatorProps> = ({ results }) => {
           <YAxis stroke="#94a3b8" tickFormatter={(v) => `${v.toFixed(0)}%`} />
           <Tooltip
             contentStyle={{ background: '#1e293b', border: '1px solid #334155' }}
-            formatter={(value: number) => [`${value.toFixed(1)}%`]}
+            formatter={(value: TooltipValueType | undefined) => [`${Number(value ?? 0).toFixed(1)}%`]}
           />
           <ReferenceLine y={0} stroke="#64748b" strokeDasharray="3 3" />
           {results.map(({ name, color }) => (

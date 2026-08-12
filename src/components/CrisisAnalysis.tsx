@@ -1,5 +1,6 @@
 import React from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
+import type { TooltipValueType } from 'recharts';
 import type { BacktestResult } from '../backtest/engine';
 
 interface CrisisPeriod {
@@ -73,7 +74,7 @@ export const CrisisAnalysis: React.FC<CrisisAnalysisProps> = ({ results }) => {
           <YAxis stroke="#94a3b8" tickFormatter={(v) => `${v.toFixed(0)}%`} />
           <Tooltip
             contentStyle={{ background: '#1e293b', border: '1px solid #334155' }}
-            formatter={(value: number, name: string) => [`${value.toFixed(1)}%`, name]}
+            formatter={(value: TooltipValueType | undefined, name: string | number | undefined) => [`${Number(value ?? 0).toFixed(1)}%`, name ?? '']}
           />
           <Legend />
           <ReferenceLine y={0} stroke="#64748b" strokeDasharray="3 3" />
@@ -97,7 +98,7 @@ export const CrisisAnalysis: React.FC<CrisisAnalysisProps> = ({ results }) => {
           <YAxis stroke="#94a3b8" tickFormatter={(v) => `${v.toFixed(0)}%`} domain={['auto', 0]} />
           <Tooltip
             contentStyle={{ background: '#1e293b', border: '1px solid #334155' }}
-            formatter={(value: number, name: string) => [`${value.toFixed(1)}%`, name]}
+            formatter={(value: TooltipValueType | undefined, name: string | number | undefined) => [`${Number(value ?? 0).toFixed(1)}%`, name ?? '']}
           />
           <Legend />
           {results.map(({ name, color }) => (

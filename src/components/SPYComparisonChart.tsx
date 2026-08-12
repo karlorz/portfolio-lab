@@ -10,6 +10,7 @@ import {
   ReferenceLine,
   Area
 } from 'recharts';
+import type { TooltipValueType } from 'recharts';
 import type { StatsData, PerformanceEntry } from '../types/live';
 import { autoDownsample } from '../utils/lttb';
 
@@ -162,8 +163,8 @@ export function SPYComparisonChart({ stats, performance }: SPYComparisonChartPro
                 borderRadius: '6px',
                 color: '#f1f5f9'
               }}
-              formatter={(value: number, name: string) => [
-                `${value.toFixed(2)} (normalized)`,
+              formatter={(value: TooltipValueType | undefined, name: string | number | undefined) => [
+                `${Number(value ?? 0).toFixed(2)} (normalized)`,
                 name === 'portfolio' ? 'Portfolio' : 'SPY'
               ]}
               labelFormatter={(label) => `Date: ${label}`}
