@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from src.paths import DATA_DIR, PRICES_JSON
+from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON
 from src.backtest.metrics import (
     compute_metrics,
     save_results_json,
@@ -119,7 +119,7 @@ def _get_adaptive_weights(
 
     In neutral zone (-0.15 to 0.15): proportional blend.
     """
-    tlt_weight = base_allocation.get("TLT", 0.16)
+    tlt_weight = base_allocation.get("TLT", BASE_ALLOCATION["TLT"])
     ief_weight = base_allocation.get("IEF", 0.0)
     total_bond = tlt_weight + ief_weight
 
@@ -238,7 +238,7 @@ def compute_correlation_adaptive_backtest(
         CorrelationAdaptiveResult
     """
     if base_allocation is None:
-        base_allocation = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16, "IEF": 0.00}
+        base_allocation = dict(BASE_ALLOCATION, IEF=0.00)
 
     logger.info("Loading prices for correlation-adaptive backtest")
     prices = _load_prices()
