@@ -14,6 +14,7 @@ from datetime import datetime
 from dataclasses import dataclass
 from typing import Dict, List
 
+from src.backtest.grid_runner import load_prices
 from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult, save_results_json
 from src.paths import PRICES_JSON, SIGNALS_DIR, BASE_ALLOCATION as WEIGHTS
 
@@ -131,8 +132,7 @@ STRESS_PERIODS = {
 
 def load_price_data(filepath: str) -> Dict[str, List[Dict]]:
     """Load price data from JSON."""
-    with open(filepath) as f:
-        return json.load(f)
+    return load_prices(prices_path=filepath)
 
 
 def load_alt_signals(filepath: str) -> Dict[str, Dict]:
