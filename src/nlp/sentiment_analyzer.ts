@@ -262,15 +262,15 @@ class SentimentAnalyzer {
       let output = '';
       let error = '';
 
-      python.stdout.on('data', (data) => {
+      python.stdout.on('data', (data: string) => {
         output += data.toString();
       });
 
-      python.stderr.on('data', (data) => {
+      python.stderr.on('data', (data: string) => {
         error += data.toString();
       });
 
-      python.on('close', (code) => {
+      python.on('close', (code: number | null) => {
         if (code !== 0) {
           console.warn(`Python process failed (code ${code}): ${error}`);
           // Fall back to mock analysis

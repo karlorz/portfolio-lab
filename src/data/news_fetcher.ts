@@ -325,7 +325,7 @@ export function getNewsStats(): {
     return { totalArticles: 0, articlesByDate: {}, articlesBySource: {} };
   }
   
-  const files = fs.readdirSync(CACHE_DIR).filter(f => f.endsWith('.json'));
+  const files = fs.readdirSync(CACHE_DIR).filter((f: string) => f.endsWith('.json'));
   
   const articlesByDate: Record<string, number> = {};
   const articlesBySource: Record<string, number> = {};
