@@ -480,6 +480,9 @@ def compare_cvar_methods(
 
 
 if __name__ == "__main__":
+    from src.utils.log_config import configure_logging
+
+    configure_logging()
     # Demo/test
     
     logger.info("GARCH-Filtered CVaR Calculator v3.21")

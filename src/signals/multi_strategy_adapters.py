@@ -380,6 +380,9 @@ def get_all_strategy_signals(
 
 
 if __name__ == "__main__":
+    from src.utils.log_config import configure_logging
+
+    configure_logging()
     # Quick test
     logger.info("Testing Multi-Strategy Adapters")
     logger.info("=" * 50)

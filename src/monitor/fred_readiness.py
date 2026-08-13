@@ -12,4 +12,7 @@ from src.data.fred_readiness import (  # noqa: F401
 )
 
 if __name__ == "__main__":
+    from src.utils.log_config import configure_logging
+
+    configure_logging()
     raise SystemExit(main())

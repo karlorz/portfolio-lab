@@ -1594,6 +1594,9 @@ def run_progress_and_exit():
 
 
 if __name__ == "__main__":
+    from src.utils.log_config import configure_logging
+
+    configure_logging()
     command = sys.argv[1] if len(sys.argv) > 1 else "check"
     
     if command == "check":

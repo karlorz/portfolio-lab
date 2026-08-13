@@ -22,6 +22,20 @@ CLI_CASES = [
     ("src.dashboard.generation_store", ["--list"]),
     ("src.monitor.prod_ideas", []),
     ("src.data.fred_readiness", []),
+    # CLI-VISIBILITY-SWEEP-2 additions (2026-08-14): 13 more entrypoints.
+    ("src.monitor.rebalance_health", []),
+    ("src.monitor.garch_cvar", []),
+    ("src.rebalancing.smart_rebalancer", []),
+    ("src.analytics.calculator", []),
+    ("src.strategy.regime_sentiment", []),
+    ("src.strategy.vol_parity_allocator", []),
+    ("src.strategy.graduation_checklist", ["report"]),
+    ("src.strategy.ensemble_voter", ["vote"]),
+    ("src.signals.multi_strategy_adapters", []),
+    ("src.data.vix_futures", []),
+    ("src.monitor.fred_readiness", []),
+    ("src.chat.portfolio_query", ["what is my equity exposure"]),
+    ("src.data.alternative_data", ["composite", "--ticker", "AAPL"]),
 ]
 
 

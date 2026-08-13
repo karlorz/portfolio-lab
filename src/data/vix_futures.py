@@ -334,6 +334,9 @@ def fetch_vix_futures_data(
 
 
 if __name__ == '__main__':
+    from src.utils.log_config import configure_logging
+
+    configure_logging()
     # Test the data manager
     manager = VIXDataManager()
     

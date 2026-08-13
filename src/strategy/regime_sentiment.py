@@ -477,4 +477,7 @@ def demo():
 
 
 if __name__ == "__main__":
+    from src.utils.log_config import configure_logging
+
+    configure_logging()
     demo()
