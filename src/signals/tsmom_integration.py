@@ -208,6 +208,9 @@ def get_tsmom_integrator_result(
 
 # CLI for testing
 if __name__ == "__main__":
+    from src.utils.log_config import configure_logging
+
+    configure_logging()
     import json
     import argparse
     

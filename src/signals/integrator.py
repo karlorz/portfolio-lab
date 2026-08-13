@@ -1356,4 +1356,7 @@ def main():
             for signal in history[:10]:
                 logger.info("   %s: %+.3f (%s)", signal.timestamp[:10], signal.composite_score, signal.detected_regime)
 if __name__ == "__main__":
+    from src.utils.log_config import configure_logging
+
+    configure_logging()
     main()
