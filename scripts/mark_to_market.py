@@ -91,16 +91,6 @@ def save_portfolio(portfolio: Dict[str, Any], mode: str = "paper") -> None:
         json.dump(portfolio, f, indent=2, default=str)
 
 
-def get_latest_portfolio_date(portfolio: Dict[str, Any]) -> Optional[str]:
-    """Get the date of the most recent history entry."""
-    history = portfolio.get("history", [])
-    for entry in reversed(history):
-        date_str = entry.get("timestamp", "")
-        if date_str:
-            return date_str[:10]  # YYYY-MM-DD
-    return None
-
-
 def mark_to_market(portfolio: Dict[str, Any], prices: Dict[str, float]) -> Dict[str, Any]:
     """Update portfolio positions with current market prices."""
     positions = portfolio.get("positions", {})

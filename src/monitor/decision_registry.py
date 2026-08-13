@@ -95,18 +95,6 @@ class DecisionRecord(BaseModel):
     extras: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _infer_decision_source(self) -> "DecisionRecord":
-        if self.decision_source is not None:
-            return self._validate_shadow_evidence_contract()
-        source = str(self.extras.get("source") or "")
-        if source == "evaluator" or self.run_id.startswith("evaluator-"):
-            self.decision_source = "evaluator_cycle"
-        elif self.run_id.startswith("dashboard-"):
-            self.decision_source = "dashboard_cycle"
-        else:
-            self.decision_source = "manual"
-        return self._validate_shadow_evidence_contract()
-
     def _validate_shadow_evidence_contract(self) -> "DecisionRecord":
         if self.decision_role != "shadow":
             return self
