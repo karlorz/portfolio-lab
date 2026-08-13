@@ -61,6 +61,9 @@ def test_ml_extract_selection_runs_without_heavy_or_ml_enabled():
         result = _run_pytest(str(probe.relative_to(REPO_ROOT)), "-q", "--include-ml-extract", "--tb=short")
     finally:
         probe.unlink(missing_ok=True)
+        # Probe pyc regenerates every run (name embeds interpreter + pytest version)
+        for stale_pyc in (REPO_ROOT / "tests" / "__pycache__").glob("_ml_extract_marker_probe.*.pyc"):
+            stale_pyc.unlink(missing_ok=True)
 
     output = result.stdout + result.stderr
     assert result.returncode == 0, output
