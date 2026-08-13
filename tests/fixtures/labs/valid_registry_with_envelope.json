@@ -1,0 +1,32 @@
+{
+  "schema_version": "labs-registry/v1",
+  "generated_at": "2026-06-08T12:00:00+00:00",
+  "experiments": [
+    {
+      "experiment_id": "gold-sweep",
+      "artifact_path": "data/gold_allocation_sweep.json",
+      "status": "validated",
+      "provenance_status": "present",
+      "metrics": {
+        "sharpe": 0.95,
+        "cagr_pct": 10.4,
+        "max_drawdown_pct": -25.0
+      },
+      "baseline_deltas": {
+        "sharpe": 0.04,
+        "cagr_pct": 0.8
+      }
+    }
+  ],
+  "artifact_id": "labs_registry.json",
+  "plane": "public",
+  "runtime_provenance": {
+    "schema_version": "public-runtime-provenance/v1",
+    "artifact_id": "labs_registry.json",
+    "plane": "public",
+    "generated_at": "2026-08-13T12:00:00+00:00"
+  },
+  "generator_git_sha": "4af3e0640e5f",
+  "generator_git_sha_status": "full_generate",
+  "last_full_generator_git_sha": "4af3e0640e5f"
+}

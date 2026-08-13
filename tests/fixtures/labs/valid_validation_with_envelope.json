@@ -1,0 +1,26 @@
+{
+  "schema_version": "labs-validation/v1",
+  "generated_at": "2026-06-08T12:00:00+00:00",
+  "results": [
+    {
+      "path": "tests/fixtures/labs/invalid_missing_metrics.json",
+      "artifact_type": "registry",
+      "schema_version": "labs-registry/v1",
+      "valid": false,
+      "errors": [
+        "$.experiments[0].metrics: missing required field"
+      ]
+    }
+  ],
+  "artifact_id": "validation.json",
+  "plane": "public",
+  "runtime_provenance": {
+    "schema_version": "public-runtime-provenance/v1",
+    "artifact_id": "labs_registry.json",
+    "plane": "public",
+    "generated_at": "2026-08-13T12:00:00+00:00"
+  },
+  "generator_git_sha": "4af3e0640e5f",
+  "generator_git_sha_status": "full_generate",
+  "last_full_generator_git_sha": "4af3e0640e5f"
+}

@@ -73,6 +73,18 @@ export const LabsRegistrySchema = z.object({
   experiments: z.array(LabsRegistryRowSchema),
   sources: z.array(z.string()).optional(),
   warnings: z.array(LabsRegistryWarningSchema).optional(),
+  // Projection envelope stamped on every published artifact
+  // (src/dashboard/public_projection.py:46-63/:464-465/:510-511;
+  // generator_git_sha family via _stamp_generator_git_sha,
+  // src/dashboard/generator.py:347). Nullable: live payloads may carry null
+  // sha fields. Optional = tolerance-only, keeps .strict() against future
+  // payload drift.
+  artifact_id: z.nullable(z.string()).optional(),
+  plane: z.nullable(z.string()).optional(),
+  runtime_provenance: z.unknown().optional(),
+  generator_git_sha: z.nullable(z.string()).optional(),
+  generator_git_sha_status: z.nullable(z.string()).optional(),
+  last_full_generator_git_sha: z.nullable(z.string()).optional(),
 }).strict();
 
 export const LabsScorecardPolicyThresholdsSchema = z.object({
@@ -163,6 +175,13 @@ export const LabsValidationReportSchema = z.object({
   generated_at: z.string(),
   results: z.array(LabsValidationResultSchema),
   truncation: LabsValidationTruncationSchema.optional(),
+  // Projection envelope — see LabsRegistrySchema comment.
+  artifact_id: z.nullable(z.string()).optional(),
+  plane: z.nullable(z.string()).optional(),
+  runtime_provenance: z.unknown().optional(),
+  generator_git_sha: z.nullable(z.string()).optional(),
+  generator_git_sha_status: z.nullable(z.string()).optional(),
+  last_full_generator_git_sha: z.nullable(z.string()).optional(),
 }).strict();
 
 export const LabsExperimentDiffSideSchema = z.object({

@@ -7,6 +7,7 @@ export const TaskerRunStatusSchema = z.enum([
   'error',
   'timeout',
   'cancelled',
+  'blocked',
 ]);
 
 export const TaskerRunSchema = z.object({

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { summarizeTaskerOperations } from '../../src/components/TasksPanel';
+import { parseTaskerStatus } from '../../src/schemas/tasker';
 import type { TaskerRun, TaskerStatus, TaskerTask } from '../../src/schemas/tasker';
 
 const task = (overrides: Partial<TaskerTask>): TaskerTask => ({
@@ -68,5 +69,30 @@ describe('Tasker operations summary', () => {
       status: 'success',
       logPath: '/root/projects/portfolio-lab/data/tasker_logs/run-data.log',
     });
+  });
+});
+
+describe('Tasker run status schema (live parity)', () => {
+  it('parses a live-shape status payload whose recent runs include blocked (RUN_BLOCKED, tasker models.py:16)', () => {
+    const status: TaskerStatus = {
+      service: 'portfolio-lab-tasker',
+      backend: 'tasker',
+      timestamp: '2026-08-13T12:30:00Z',
+      tasks: [task({ id: 'portfolio-lab-eval', manual_only: true })],
+      recent_runs: [
+        run({ task_id: 'portfolio-lab-eval', status: 'blocked' }),
+        run({ task_id: 'portfolio-lab-eval', status: 'blocked' }),
+        run({}),
+      ],
+    };
+
+    const parsed = parseTaskerStatus(status);
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.recent_runs.map((entry) => entry.status)).toEqual([
+      'blocked',
+      'blocked',
+      'success',
+    ]);
   });
 });

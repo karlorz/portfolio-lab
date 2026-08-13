@@ -27,6 +27,8 @@ describe('shared Labs fixture pack', () => {
       'stale_schema',
       'dirty_provenance',
       'valid_experiment_diff',
+      'valid_registry_with_envelope',
+      'valid_validation_with_envelope',
     ]));
 
     for (const name of LABS_FIXTURE_NAMES) {

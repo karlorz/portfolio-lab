@@ -12,6 +12,8 @@ export const LABS_FIXTURE_NAMES = [
   'stale_schema',
   'dirty_provenance',
   'valid_experiment_diff',
+  'valid_registry_with_envelope',
+  'valid_validation_with_envelope',
 ] as const;
 
 export type LabsFixtureName = typeof LABS_FIXTURE_NAMES[number];

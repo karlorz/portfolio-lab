@@ -36,6 +36,22 @@ describe('Labs artifact schemas', () => {
     );
   });
 
+  it('accepts the projection envelope stamped on live published artifacts (strict schemas, tolerance-only)', () => {
+    // Live-shape payloads (labs_registry.json / labs_validation.json carry
+    // artifact_id/plane/runtime_provenance/generator_git_sha family).
+    expect(LabsRegistrySchema.safeParse(loadLabsFixture('valid_registry_with_envelope')).success).toBe(true);
+    expect(
+      LabsValidationReportSchema.safeParse(loadLabsFixture('valid_validation_with_envelope')).success,
+    ).toBe(true);
+    // Envelope-less fixtures still parse (optional keys = backward compat).
+    expect(LabsRegistrySchema.safeParse(loadLabsFixture('valid_registry')).success).toBe(true);
+    expect(LabsValidationReportSchema.safeParse(loadLabsFixture('validation_report')).success).toBe(true);
+    // Unknown keys beyond the modelled envelope still fail loudly.
+    expect(
+      LabsRegistrySchema.safeParse({ ...loadLabsFixture('valid_registry_with_envelope'), surprise_key: 1 }).success,
+    ).toBe(false);
+  });
+
   it('validates static experiment diff artifacts for Labs dashboard consumption', () => {
     const schemas = LabsSchemas as Record<string, { safeParse: (value: unknown) => { success: boolean } }>;
 
