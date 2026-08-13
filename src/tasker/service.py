@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import fcntl
 import logging
 import os
 import signal
 import threading
 import argparse
 from datetime import datetime, timezone
+from pathlib import Path
 
+from src.paths import DATA_DIR
 from src.tasker.api import create_app
 from src.tasker.registry import TaskRegistry, load_task_registry
 from src.tasker.runner import TaskRunner
@@ -16,6 +19,57 @@ from src.tasker.store import TaskerStore
 from src.utils.log_config import configure_logging
 
 logger = logging.getLogger(__name__)
+
+# TASKER-HARDENING s1 (2026-08-14): single-instance guard. Only one tasker
+# service may hold the scheduler + serialized runner on the shared durable
+# store; a second instance (e.g. a manual `python -m src.tasker.service`
+# started while the systemd unit is up) previously duplicated every scheduled
+# run. flock auto-releases on process death (incl. SIGKILL), so there is no
+# stale-lock window across systemd RestartSec=10 restarts.
+TASKER_LOCK_PATH = DATA_DIR / "tasker.lock"
+_SINGLETON_LOCK_FD: object | None = None  # held for the process lifetime
+
+
+def acquire_singleton_lock(lock_path: Path | None = None) -> None:
+    """Take an exclusive flock so only one tasker service instance runs.
+
+    The lock file also records the holder PID for diagnostics. Raises
+    SystemExit(1) (``sys.exit(1)`` semantics) when another instance already
+    holds the lock; the message is logged via the tasker logger so
+    systemd/journald capture it. ``--once`` mirror-refresh runs deliberately
+    skip the guard (short-lived helper; must run alongside the service).
+
+    Args:
+        lock_path: Override for the lock file (tests use tmp dirs).
+    """
+    global _SINGLETON_LOCK_FD
+    path = Path(lock_path) if lock_path is not None else TASKER_LOCK_PATH
+    fd = path.open("a+")
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        holder = ""
+        try:
+            fd.seek(0)
+            holder = fd.read().strip()
+        except OSError:  # pragma: no cover - diagnostics only
+            pass
+        fd.close()
+        logger.error(
+            "tasker singleton lock already held (pid %s): refusing to start a second scheduler instance",
+            holder or "unknown",
+        )
+        raise SystemExit(1)
+    try:
+        fd.seek(0)
+        fd.truncate()
+        fd.write(str(os.getpid()))
+        fd.flush()
+    except OSError:  # pragma: no cover - the lock is held even without the note
+        pass
+    # Keep the fd referenced for the process lifetime: closing it (or GC)
+    # would release the flock and let a second instance in.
+    _SINGLETON_LOCK_FD = fd
 
 
 class TaskerService:
@@ -28,6 +82,9 @@ class TaskerService:
         self._stop = threading.Event()
         self._draining = threading.Event()
         self._last_fired: set[tuple[str, str]] = set()
+        # TASKER-HARDENING s2: tasks whose start was blocked by a busy worker
+        # warn at most once per due minute (bounded like _last_fired below).
+        self._busy_warned: set[tuple[str, str]] = set()
 
     @property
     def is_draining(self) -> bool:
@@ -86,11 +143,22 @@ class TaskerService:
                 state = self.store.get_task(task.id, self.registry)["state"]
                 if state["paused"]:
                     continue
+                if self._own_run_in_flight(task.id):
+                    # TASKER-HARDENING s2: the task's own previous run is
+                    # still active (a long run spanning its next due minute);
+                    # the busy skip is expected, not a fault — keep it at
+                    # DEBUG so long runs do not spam the journal with
+                    # warnings on every 15s tick.
+                    logger.debug("Tasker skipped %s: own in-flight run still active", task.id)
+                    self._last_fired.add(fired_key)
+                    continue
                 try:
                     self.runner.start_task(task.id, trigger="scheduled")
                     self._last_fired.add(fired_key)
                 except RuntimeError as exc:
-                    logger.warning("Tasker skipped %s: %s", task.id, exc)
+                    if fired_key not in self._busy_warned:
+                        logger.warning("Tasker skipped %s: %s", task.id, exc)
+                        self._busy_warned.add(fired_key)
             except Exception as exc:  # noqa: BLE001 - isolate per-task failures
                 # A single task's DB/read error must not kill the scheduler
                 # loop (which would silently skip every later job until a
@@ -98,10 +166,28 @@ class TaskerService:
                 logger.exception("Tasker tick failed for %s: %s", task.id, exc)
         if len(self._last_fired) > 5000:
             self._last_fired = set(list(self._last_fired)[-1000:])
+        if len(self._busy_warned) > 5000:
+            self._busy_warned = set(list(self._busy_warned)[-1000:])
         try:
             self.store.write_status_mirrors(self.registry)
         except Exception as exc:  # noqa: BLE001 - mirror writes must not kill the loop
             logger.exception("Tasker status mirror write failed: %s", exc)
+
+    def _own_run_in_flight(self, task_id: str) -> bool:
+        """True when task_id's own previous run still claims to be active.
+
+        The single worker is serialized via the shared RUNNING row, so a
+        task whose own run is still going is expected to be busy; callers
+        treat that as a quiet skip rather than a warning.
+        """
+        list_running = getattr(self.store, "list_running_runs", None)
+        if list_running is None:
+            return False
+        try:
+            running = list_running()
+        except Exception:  # noqa: BLE001 - a read failure must not block scheduling
+            return False
+        return any(run.get("task_id") == task_id for run in running)
 
     def reconcile_orphaned_runs(self, *, now: datetime | None = None) -> list[str]:
         reconciler = getattr(self.runner, "reconcile_orphaned_runs", None)
@@ -143,6 +229,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     configure_logging()
+    if not args.once:
+        # TASKER-HARDENING s1: the single-instance guard must run before
+        # build_service() — a second instance must not write mirrors,
+        # reconcile runs, or bind the API.
+        try:
+            acquire_singleton_lock()
+        except SystemExit:
+            return 1
     service, app = build_service()
 
     if args.once:
