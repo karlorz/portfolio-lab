@@ -89,15 +89,15 @@ line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["T201"]  # flake8-print: detect print() calls
+select = ["T201", "E4", "E7", "E9", "F"]  # ruff documented defaults (E4/E7/E9/F) + flake8-print
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/**" = ["T201"]   # CLI scripts — print() is expected
 "tests/test_marl_trainer.py" = ["E402", "E741"]   # ML-gated (CLAUDE.md): torch-stub bootstrap before imports
 "tests/test_risk_agent_hmm.py" = ["E402", "E741"]   # ML-gated (CLAUDE.md): hmmlearn bootstrap before imports
 "**/__main__.py" = ["T201"]  # CLI entry points
-"src/agents/**" = ["T201"]   # ML-gated — off-limits
-"src/ml/**" = ["T201"]       # ML-gated — off-limits
+"src/agents/**" = ["T201", "E4", "E7", "E9", "F"]   # ML-gated (CLAUDE.md) — off-limits
+"src/ml/**" = ["T201", "E4", "E7", "E9", "F"]       # ML-gated (CLAUDE.md) — off-limits
 "src/chat/portfolio_query.py" = ["T201"]  # CLI query output
 "src/llm/sentiment_client.py" = ["T201"]  # CLI JSON output
 "src/regime/transformer_regime.py" = ["T201"]  # ML-gated CLI output
