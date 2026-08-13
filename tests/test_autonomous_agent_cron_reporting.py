@@ -220,6 +220,6 @@ def test_cron_update_preserves_existing_tasker_backend(tmp_path: Path, monkeypat
 
     status = json.loads((data_dir / "cron_status.json").read_text())
     job = status["jobs"][0]
-    assert job["status"] == "ok"
+    assert job["status"] == "success"
     assert job["backend"] == "tasker"
     assert status.get("backend") == "tasker"

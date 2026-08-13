@@ -70,6 +70,7 @@ from src.dashboard.health_projections import (
     _remaining_budget_ratio,  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access)
     _remaining_budget_display_pct,  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access)
     _load_canonical_health_report,  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access)
+    _parse_rebalance_clock,  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access; test_health_projections.py:31 MOVED_NAMES identity)
 )
 
 # Re-export provenance/dual-write cluster (moved to provenance.py by Item 9)

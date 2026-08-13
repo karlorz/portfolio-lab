@@ -92,7 +92,7 @@ def test_execution_history_dedupes_daily_snapshot_rewrites() -> None:
     assert result["raw_history_entries"] >= 13
     assert result["snapshot_rewrite_files"] >= 10
     assert result["execution_timeline_policy"] == (
-        "canonical_event_day; raw rewrites forensic only"
+        "canonical_event_day; raw rewrites forensic only; daily snapshot retention 14 days"
     )
 
 

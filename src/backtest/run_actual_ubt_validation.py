@@ -16,6 +16,7 @@ from src.backtest.grid_runner import load_prices
 
 
 import logging
+import json  # noqa: F401  # test patch seam (test_run_actual_ubt_validation.py:295)
 
 logger = logging.getLogger(__name__)
 

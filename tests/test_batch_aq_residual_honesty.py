@@ -39,7 +39,7 @@ def test_compute_ic_decay_report_embeds_half_life_table(monkeypatch, tmp_path):
 
 def test_generator_graduation_keeps_raw_implausible_sharpe_contract():
     """Static contract: test fixture must not expect coerced Sharpe 0.0."""
-    src = Path("tests/test_generator.py").read_text(encoding="utf-8")
+    src = Path("tests/test_generator_json_sections.py").read_text(encoding="utf-8")
     assert 'criteria["min_sharpe"]["value"] == 3.38' in src
     assert 'criteria["min_sharpe"]["value"] == 0.0' not in src
     checklist = Path("src/strategy/graduation_checklist.py").read_text(encoding="utf-8")
