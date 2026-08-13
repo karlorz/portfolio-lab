@@ -154,6 +154,8 @@ dist
 dist/
 .env.local
 *.pyc
+.coverage
+crontab.backup.*
 
 # Claude Code
 .claude/scheduled_tasks.lock
@@ -167,6 +169,6 @@ raw/market/
 .claude/scheduled_tasks.json
 .claude/dev-loop-debug/
 
-# Playwright CLI runtime output
-.playwright/output/
+# Playwright CLI runtime output (machine-local config + output)
+.playwright/
 .chrome-debug-profile/
