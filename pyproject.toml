@@ -19,7 +19,7 @@ dependencies = [
     # Finance & Data Fetching
     "yfinance>=1.5.2",
     "requests>=2.32",
-    "aiohttp>=3.11",
+    "aiohttp>=3.14.3",
     "httpx>=0.28",
     # Data Validation & Serialization
     "pydantic>=2.10",
@@ -27,7 +27,7 @@ dependencies = [
     "python-dateutil>=2.9",
     # Web & API
     "flask>=3.0",
-    "beautifulsoup4>=4.12",
+    "soupsieve>=2.8.4",
     # Utilities
     "tqdm>=4.67",
     "joblib>=1.4",
