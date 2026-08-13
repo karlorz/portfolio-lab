@@ -217,8 +217,14 @@ test-ts:
 # parity with CI-free suite; first-time prerequisite: install the pinned
 # chromium headless shell via `bunx --bun playwright install chromium-headless-shell`.
 # ALSO REQUIRED: the tasker backend for /api/* via the vite dev proxy
-# (vite.config.ts -> 127.0.0.1:8000). Start/restart it before running:
-#   uv run python -m src.tasker.service --host 127.0.0.1 --port 8000
+# (vite.config.ts -> 127.0.0.1:8000). It runs as the systemd unit
+# `portfolio-lab-tasker.service` (install path: scripts/deploy-lab-app.sh);
+# start/restart it with:
+#   systemctl restart portfolio-lab-tasker
+# The service holds a single-instance flock guard (data/tasker.lock): a
+# second `uv run python -m src.tasker.service` exits 1 with "tasker
+# singleton lock already held (pid N)" while the unit runs. The `--once`
+# mirror-refresh helper is unguarded and safe to run alongside.
 # If the suite hits tab-loading timeouts (analytics/risk panels not visible),
 # the backend has degraded — restart it and re-run before debugging anything
 # else (evidence: fresh backend 20/20 vs degraded 16-19/20, all timeout-flakes).
