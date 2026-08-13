@@ -1604,7 +1604,7 @@ const CronJobStatusSchema = z.object({
   schedule: z.string(),
   last_run: z.nullable(z.string()),
   next_run: z.nullable(z.string()),
-  status: z.enum(['ok', 'error', 'unknown', 'disabled']),
+  status: z.enum(['ok', 'error', 'unknown', 'disabled', 'pending']),
   state: z.enum(['scheduled', 'paused', 'running', 'manual_only']),
   backend: z.optional(z.string()),
   source: z.optional(z.string()),
