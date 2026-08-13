@@ -299,11 +299,6 @@ class ControllerAgent(BaseAgent):
             and self.trajectory_optimizer is not None
         )
 
-    def update_price_history(self, prices: np.ndarray):
-        """Update predictive model with latest prices."""
-        if self._is_planning_ready() and self.predictive_model is not None:
-            self.predictive_model.update_prices(prices)
-
     def plan(self, obs: AgentObservation) -> Optional[Dict[str, Any]]:
         """
         FPILOT planning step: generate optimal allocation via trajectory optimization.
@@ -598,18 +593,6 @@ class ControllerAgent(BaseAgent):
         with torch.no_grad():
             _, _, _, _, value = self.network(features.unsqueeze(0))
         return float(value.squeeze())
-    
-    def update_agent_accuracy(self, agent_id: str, accuracy: float):
-        """Update accuracy tracking for an agent."""
-        self.agent_accuracy[agent_id].append(accuracy)
-        if len(self.agent_accuracy[agent_id]) > 50:
-            self.agent_accuracy[agent_id].pop(0)
-    
-    def get_agent_accuracy(self, agent_id: str) -> float:
-        """Get recent accuracy for an agent."""
-        if agent_id not in self.agent_accuracy or not self.agent_accuracy[agent_id]:
-            return 0.5
-        return np.mean(self.agent_accuracy[agent_id][-10:])
     
     def train_step(self, observations: List[AgentObservation],
                  actions: List[AgentAction],

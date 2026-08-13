@@ -172,7 +172,7 @@ class ResearchAgent:
             work_item["tasks"].append({
                 "type": "code_review",
                 "description": "Review risk management code for crisis regime handling",
-                "files": ["src/strategy/evaluator.py", "config/paper.yaml"]
+                "files": ["src/strategy/evaluator.py"]
             })
             work_item["tasks"].append({
                 "type": "implement",
@@ -302,7 +302,6 @@ Review the current strategy implementation and make necessary adjustments.
 ### Files to Review
 
 - `~/projects/portfolio-lab/src/strategy/evaluator.py` - Main strategy logic
-- `~/projects/portfolio-lab/config/paper.yaml` - Paper trading config
 - `~/projects/portfolio-lab/scripts/fetch-data.ts` - Data pipeline (bun run fetch-data)
 
 ### Suggested Changes

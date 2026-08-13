@@ -89,10 +89,6 @@ def classify_vix_regime(vix_level: float | None, trend_regime: str = "normal") -
     return trend_regime
 
 
-class _TimeoutError(Exception):
-    """Internal timeout exception for signal_timeout decorator."""
-
-
 def signal_timeout(
     default: Any = None,
     seconds: float = 30.0,

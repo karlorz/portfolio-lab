@@ -16,7 +16,7 @@ import tempfile
 from dataclasses import dataclass
 from numbers import Real
 from pathlib import Path
-from typing import Any, Mapping, MutableMapping, Optional, Sequence
+from typing import Any, Mapping, Optional
 
 from src.paths import BASE_ALLOCATION
 
@@ -98,52 +98,6 @@ def is_champion_target_allocations(payload: Mapping[str, Any]) -> bool:
         if not math.isfinite(observed) or abs(observed - expected) > 1e-9:
             return False
     return True
-
-
-def merge_signals_patch(
-    base: MutableMapping[str, Any],
-    patch: Mapping[str, Any],
-    *,
-    allowed_top_keys: Optional[Sequence[str]] = None,
-) -> dict[str, Any]:
-    """Shallow-merge patch into a copy of base; never drop authority keys.
-
-    When ``allowed_top_keys`` is set, only those keys from ``patch`` are applied
-    (plus nested merge for ``health`` if both sides have dict health).
-    """
-    if not isinstance(base, Mapping):
-        raise AuthorityValidationError("merge base must be a mapping")
-    out: dict[str, Any] = dict(base)
-    if not isinstance(patch, Mapping):
-        return out
-    keys = (
-        list(allowed_top_keys)
-        if allowed_top_keys is not None
-        else [k for k in patch.keys() if k != "target_allocations"]
-    )
-    for key in keys:
-        if key not in patch:
-            continue
-        if key == "target_allocations":
-            # Never overwrite authority from a partial patch unless explicitly
-            # validated and complete — partials must not wipe TA.
-            continue
-        val = patch[key]
-        if (
-            key == "health"
-            and isinstance(val, Mapping)
-            and isinstance(out.get("health"), Mapping)
-        ):
-            merged_h = dict(out["health"])
-            merged_h.update(dict(val))
-            out["health"] = merged_h
-        else:
-            out[key] = val
-    # Preserve TA from base always
-    if "target_allocations" in base:
-        out["target_allocations"] = base["target_allocations"]
-    validate_authority_payload(out)
-    return out
 
 
 def default_repo_signals_path() -> Path:

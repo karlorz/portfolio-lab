@@ -11,6 +11,7 @@ from pathlib import Path
 
 from src.research import agent as agent_module
 from src.research.agent import ResearchAgent
+from src.paths import PROJECT_ROOT
 
 
 # ---------------------------------------------------------------------------
@@ -367,6 +368,29 @@ class TestCreateClaudePrompt:
         content = work_file.with_suffix('.md').read_text()
         assert "Review current implementation" in content
         assert "Run tests" in content
+
+    def test_files_to_review_paths_resolve(self, tmp_path):
+        """Every path in the prompt 'Files to Review' block must exist under PROJECT_ROOT."""
+        agent = _make_agent(tmp_path)
+        work_file = agent_module.WORK_DIR / "claude_test.json"
+        with open(work_file, 'w') as f:
+            json.dump({}, f)
+
+        agent.create_claude_prompt(work_file, {"regime": "normal", "vix": 18.0,
+                                                "recommended_action": None,
+                                                "suggested_allocation": {}})
+        content = work_file.with_suffix('.md').read_text()
+
+        block = content.split("### Files to Review", 1)[1].split("### Suggested Changes", 1)[0]
+        bullets = []
+        for line in block.splitlines():
+            line = line.strip()
+            if line.startswith("- `"):
+                bullets.append(line[3:].split("`", 1)[0])
+        assert bullets, "Files to Review block must list at least one file"
+        for bullet in bullets:
+            rel = bullet.replace("~/projects/portfolio-lab/", "")
+            assert (PROJECT_ROOT / rel).exists(), f"prompt path missing: {rel}"
 
 
 # ---------------------------------------------------------------------------
