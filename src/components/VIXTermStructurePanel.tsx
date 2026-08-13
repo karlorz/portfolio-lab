@@ -459,6 +459,7 @@ export function VIXTermStructurePanel({ data, overlayState }: VIXTermStructurePa
           color: #f3f4f6;
         }
         .term-structure-viz {
+          position: relative;
           margin-bottom: 16px;
           padding: 12px;
           background: #111827;
@@ -511,11 +512,12 @@ export function VIXTermStructurePanel({ data, overlayState }: VIXTermStructurePa
         }
         .metrics-row {
           display: grid;
-          grid-template-columns: repeat(3, 1fr);
+          grid-template-columns: repeat(3, minmax(0, 1fr));
           gap: 12px;
           margin-bottom: 16px;
         }
         .metric {
+          min-width: 0;
           text-align: center;
           padding: 8px;
           background: #111827;
