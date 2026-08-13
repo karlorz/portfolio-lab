@@ -863,7 +863,7 @@ class LLMSentimentSignalAdapter(SignalSource):
             from src.llm.sentiment_client import SentimentAnalyzer
             
             if self.analyzer is None:
-                self.analyzer = SentimentAnalyzer(daily_budget=50.0)
+                self.analyzer = SentimentAnalyzer(daily_budget_usd=50.0)
             
             # Check if we have recent earnings data
             # Simplified: return neutral signal with low confidence if no data

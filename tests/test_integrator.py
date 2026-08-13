@@ -2284,6 +2284,30 @@ class TestLLMSentimentSignalAdapter:
         assert result.metadata["model"] == "gpt-4o-mini"
         assert "note" in result.metadata
 
+    def test_generate_signal_real_constructor_no_api_keys(self, tmp_path):
+        """Unmocked regression: real SentimentAnalyzer constructor accepts call-site kwargs.
+
+        Uses the REAL src.llm.sentiment_client module (no sys.modules patch) with no
+        API keys in env -> constructor disabled=True path succeeds. Pre-fix
+        (daily_budget=50.0 drift) raised TypeError -> caught at integrator.py:886 ->
+        None; post-fix (daily_budget_usd) returns the designed neutral placeholder.
+        """
+        with patch("src.signals.integrator.init_database"):
+            with patch("src.signals.integrator.DATA_DIR", tmp_path):
+                adapter = LLMSentimentSignalAdapter()
+
+        with patch.dict(
+            "os.environ",
+            {"OPENAI_API_KEY": "", "ANTHROPIC_API_KEY": ""},
+        ):
+            result = adapter.generate_signal("SPY")
+
+        assert isinstance(result, SignalSourceResult)
+        assert result.source_type == "sentiment"
+        assert result.source_name == "llm_composite"
+        assert result.signal == 0.0  # neutral placeholder
+        assert result.confidence == 0.3  # low confidence
+
 
 # ---------------------------------------------------------------------------
 # Additional edge cases
