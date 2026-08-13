@@ -565,11 +565,6 @@ def find_public_internal_paths(payload: Any) -> list[tuple[str, str]]:
     return offenders
 
 
-def public_payload_is_clean(payload: Any) -> bool:
-    """Small helper used by tests and deploy tooling."""
-    return not find_public_internal_paths(payload)
-
-
 __all__ = [
     "PUBLIC_BUSINESS_METADATA_KEYS",
     "PUBLIC_PROJECTION_SCHEMA_VERSION",
@@ -579,7 +574,6 @@ __all__ = [
     "prepare_payload_for_write",
     "project_public_business_values",
     "project_public_paths",
-    "public_payload_is_clean",
     "public_business_values_equal",
     "is_public_output_path",
 ]

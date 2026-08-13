@@ -26,7 +26,6 @@ References:
 """
 
 import logging
-from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -35,17 +34,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "BOCDDetector",
-    "BOCDResult",
 ]
-
-
-@dataclass
-class BOCDResult:
-    """Result from BOCD detection."""
-    run_length_probs: np.ndarray  # Probability distribution over run lengths at each time
-    changepoint_probs: np.ndarray  # Probability of changepoint at each time
-    regime_labels: np.ndarray  # Hard regime labels (0 = no change, 1 = change)
-    timestamps: Optional[List] = None  # Optional timestamps for each observation
 
 
 class BOCDDetector:

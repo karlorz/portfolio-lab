@@ -21,7 +21,6 @@ __all__ = [
     "elevate_system_status_for_kill",
     "build_kill_switch_alert",
     "allocation_roles_under_kill",
-    "kill_identity_tuple",
 ]
 
 
@@ -303,15 +302,3 @@ def allocation_roles_under_kill(
     if level:
         out["kill_switch_level"] = level
     return out
-
-
-def kill_identity_tuple(payload: dict[str, Any] | None) -> tuple[Any, Any, Any, Any]:
-    """Comparable identity for multi-surface consistency gates."""
-    if not payload:
-        return (None, None, None, None)
-    return (
-        payload.get("incident_id"),
-        str(payload.get("level") or "").lower() or None,
-        payload.get("reason"),
-        payload.get("mode"),
-    )
