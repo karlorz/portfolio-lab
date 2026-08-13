@@ -25,6 +25,9 @@ for mod in _mock_targets:
     _orig_modules[mod] = sys.modules.get(mod)
     sys.modules[mod] = MagicMock()
 
+# numpy 2.x scipy array-api interop: _issubclass_fast needs a real class for issubclass; MagicMock attr -> TypeError
+sys.modules["torch"].Tensor = type("Tensor", (), {})
+
 # Create proper mock for base_agent types
 mock_base = sys.modules['src.agents.base_agent']
 
