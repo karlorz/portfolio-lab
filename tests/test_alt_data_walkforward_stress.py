@@ -568,7 +568,6 @@ class TestBuildDailyReturns:
         signals = _make_alt_signals(dates, regime='risk_on', confidence=0.8)
         result = build_daily_returns(prices, signals, dates[0], dates[-1], confidence_threshold=0.3)
         if result:
-            dr = result[0]
             # Compute what the effective weights should be
             shifts = REGIME_SHIFTS['risk_on']
             raw_weights = {s: WEIGHTS[s] + shifts[s] for s in WEIGHTS}

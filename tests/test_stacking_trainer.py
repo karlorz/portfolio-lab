@@ -841,7 +841,7 @@ class TestStackingTrainerInit:
         """__init__ must create the model directory if missing."""
         d = tmp_path / "nonexistent_models"
         config = TrainingConfig(model_dir=str(d))
-        trainer = StackingTrainer(config)
+        _ = StackingTrainer(config)
         assert d.exists()
         assert d.is_dir()
 
@@ -849,7 +849,7 @@ class TestStackingTrainerInit:
         """__init__ must create nested directory."""
         d = tmp_path / "a" / "b" / "c_models"
         config = TrainingConfig(model_dir=str(d))
-        trainer = StackingTrainer(config)
+        _ = StackingTrainer(config)
         assert d.exists()
 
     def test_model_version_none_on_init(self):
@@ -1415,7 +1415,7 @@ class TestStubbedMLPipeline:
         trainer.model_version = "vtest"
         trainer.config.db_path = str(tmp_path / "test_backfill.db")
 
-        stats = trainer.backfill_predictions(start_date="2020-01-01", dry_run=False)
+        _ = trainer.backfill_predictions(start_date="2020-01-01", dry_run=False)
         db_path = Path(trainer.config.db_path)
         assert db_path.exists()
 

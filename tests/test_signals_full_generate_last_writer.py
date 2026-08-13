@@ -121,8 +121,8 @@ def test_ops_regen_makefile_dashboard_is_last_signals_writer():
     assert start >= 0
     body = makefile[start : start + 1200]
     # Next top-level target after ops-regen ends the block roughly
-    health_pos = body.find("health")
-    dashboard_pos = body.find("dashboard")
+    _ = body.find("health")
+    _ = body.find("dashboard")
     # Both must appear; last dashboard invoke must be after last health invoke
     # among make --no-print-directory lines
     make_lines = [

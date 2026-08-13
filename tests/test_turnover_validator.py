@@ -1004,8 +1004,8 @@ class TestPublicMethodsCoverage:
 
     def test_multiple_update_same_period(self, validator):
         """Calling update_and_validate multiple times with same period."""
-        r1 = validator.update_and_validate({"src": 0.5})
-        r2 = validator.update_and_validate({"src": 0.5})
+        _ = validator.update_and_validate({"src": 0.5})
+        _ = validator.update_and_validate({"src": 0.5})
         # Each call appends to history
         assert len(validator.state.signal_history["src"]) == 2
 

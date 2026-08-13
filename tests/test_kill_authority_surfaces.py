@@ -139,7 +139,7 @@ def test_build_kill_switch_alert_falls_back_to_reason():
 
 
 def test_allocation_roles_under_kill_blocks_live_authority():
-    base = DashboardGenerator._build_allocation_surface_roles()
+    _ = DashboardGenerator._build_allocation_surface_roles()
     # Without kill file DATA_DIR may or may not have kill; force via helper
     roles = {
         "schema_version": "allocation-surface-roles/v1",

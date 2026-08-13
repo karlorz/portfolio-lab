@@ -496,7 +496,7 @@ class TestDetectRegime:
     def test_crisis_regime(self, tmp_path):
         """VIX > 30 → crisis."""
         integrator = _make_integrator(tmp_path)
-        db_path = self._setup_db(tmp_path, 35.0)
+        _ = self._setup_db(tmp_path, 35.0)
 
         with patch("src.signals.integrator.DATA_DIR", tmp_path):
             regime = integrator._detect_regime()
@@ -505,7 +505,7 @@ class TestDetectRegime:
     def test_high_vol_regime(self, tmp_path):
         """VIX 25-30 → high_vol."""
         integrator = _make_integrator(tmp_path)
-        db_path = self._setup_db(tmp_path, 27.0)
+        _ = self._setup_db(tmp_path, 27.0)
 
         with patch("src.signals.integrator.DATA_DIR", tmp_path):
             regime = integrator._detect_regime()
@@ -514,7 +514,7 @@ class TestDetectRegime:
     def test_bull_regime(self, tmp_path):
         """VIX < 15 → bull."""
         integrator = _make_integrator(tmp_path)
-        db_path = self._setup_db(tmp_path, 12.0)
+        _ = self._setup_db(tmp_path, 12.0)
 
         with patch("src.signals.integrator.DATA_DIR", tmp_path):
             regime = integrator._detect_regime()
@@ -523,7 +523,7 @@ class TestDetectRegime:
     def test_neutral_regime(self, tmp_path):
         """VIX 15-25 → neutral."""
         integrator = _make_integrator(tmp_path)
-        db_path = self._setup_db(tmp_path, 20.0)
+        _ = self._setup_db(tmp_path, 20.0)
 
         with patch("src.signals.integrator.DATA_DIR", tmp_path):
             regime = integrator._detect_regime()

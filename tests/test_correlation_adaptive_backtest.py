@@ -466,7 +466,7 @@ class TestComputeAdaptiveBacktestEdgeCases:
         from src.backtest.correlation_adaptive_backtest import (
             compute_correlation_adaptive_backtest,
         )
-        prices_file = self._make_synthetic_prices_json(tmp_path)
+        _ = self._make_synthetic_prices_json(tmp_path)
         base = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16, "IEF": 0.00}
         result = compute_correlation_adaptive_backtest(
             base_allocation=base,
@@ -485,7 +485,7 @@ class TestComputeAdaptiveBacktestEdgeCases:
         from src.backtest.correlation_adaptive_backtest import (
             compute_correlation_adaptive_backtest,
         )
-        prices_file = self._make_synthetic_prices_json(tmp_path, n=60)
+        _ = self._make_synthetic_prices_json(tmp_path, n=60)
         base = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16, "IEF": 0.00}
         result = compute_correlation_adaptive_backtest(
             base_allocation=base,
@@ -502,7 +502,7 @@ class TestComputeAdaptiveBacktestEdgeCases:
         from src.backtest.correlation_adaptive_backtest import (
             compute_correlation_adaptive_backtest,
         )
-        prices_file = self._make_synthetic_prices_json(tmp_path)
+        _ = self._make_synthetic_prices_json(tmp_path)
         base = {"SPY": 0.44, "GLD": 0.36, "TLT": 0.12, "IEF": 0.08}
         result = compute_correlation_adaptive_backtest(
             base_allocation=base,

@@ -135,7 +135,6 @@ class TestRunEdgeCases:
     def test_run_closes_connection(self, tmp_path):
         """Connection is closed after run()."""
         gen, _ = _make_generator(tmp_path)
-        conn = gen.conn
         with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path):
             with patch("src.dashboard.generator.DATA_DIR", tmp_path):
                 gen.run()

@@ -1111,51 +1111,6 @@ class TestInitEdgeCases:
         assert result['SPY'] > 0
 
 
-class TestInitEdgeCases:
-    def test_no_tickers_provided_defaults(self):
-        """No tickers provided uses default ['SPY', 'GLD', 'TLT']."""
-        bt = CombinedStrategyBacktester.__new__(CombinedStrategyBacktester)
-        bt.tickers = None
-        bt.base_allocation = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16}
-        bt.transaction_cost = 0.001
-        bt.rebalance_freq = 21
-        bt.fed_overlay = MagicMock()
-        assert bt.tickers is None
-        # tickers is None; _combine_signals uses self.tickers
-        # This test verifies the attribute can be None without crashing
-
-    def test_base_allocation_empty(self):
-        """Empty base allocation doesn't crash combine_signals."""
-        bt = _make_backtester()
-        bt.tickers = ['SPY']
-        bt.base_allocation = {'SPY': 1.0}
-        result, resolution = bt._combine_signals(
-            tsmom_deltas={'SPY': 0.0},
-            hmm_regime=None,
-            hmm_deltas={'SPY': 0.0},
-            fed_regime=None,
-            fed_deltas={'SPY': 0.0},
-            current_idx=300,
-        )
-        assert 'SPY' in result
-
-    def test_base_allocation_single_ticker(self):
-        """Single ticker base allocation doesn't break combine_signals."""
-        bt = _make_backtester()
-        bt.tickers = ['SPY']
-        bt.base_allocation = {'SPY': 1.0}
-        result, resolution = bt._combine_signals(
-            tsmom_deltas={'SPY': 0.05},
-            hmm_regime='bull',
-            hmm_deltas={'SPY': 0.03},
-            fed_regime='EASING',
-            fed_deltas={'SPY': 0.02},
-            current_idx=300,
-        )
-        assert 'SPY' in result
-        assert result['SPY'] > 0
-
-
 # ---------------------------------------------------------------------------
 # Dataclass field validation via dataclasses.fields()
 # ---------------------------------------------------------------------------
@@ -2247,7 +2202,6 @@ class TestWeightClamping:
         """Extreme positive delta is clamped to 0.90."""
         bt = _make_backtester()
         bt.base_allocation = {'SPY': 0.8, 'GLD': 0.1, 'TLT': 0.1}
-        signal = {'SPY': 0.20, 'GLD': -0.05, 'TLT': -0.05}
         expected_spy = min(0.90, 0.8 + 0.20)
         assert expected_spy == 0.90
 
@@ -2255,13 +2209,12 @@ class TestWeightClamping:
         """Extreme negative delta is clamped to 0.05."""
         bt = _make_backtester()
         bt.base_allocation = {'SPY': 0.1, 'GLD': 0.45, 'TLT': 0.45}
-        signal = {'SPY': -0.10, 'GLD': 0.05, 'TLT': 0.05}
         expected_spy = max(0.05, 0.1 + (-0.10))
         assert expected_spy == 0.05
 
     def test_weight_normalization_sums_to_one(self):
         """After clamping, weights are re-normalized to sum to 1.0."""
-        bt = _make_backtester()
+        _ = _make_backtester()
         raw = {'SPY': 0.9, 'GLD': 0.05, 'TLT': 0.05}
         total = sum(raw.values())
         normalized = {t: w / total for t, w in raw.items()}

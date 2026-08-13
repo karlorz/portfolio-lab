@@ -1435,7 +1435,7 @@ class TestComputeEnsembleSignalEdgeCases:
     def test_all_agreement_confidence_is_one(self):
         """When all window signals have the same sign, confidence = 1.0."""
         e = _make_engine()
-        df = _make_prices_df(300)
+        _ = _make_prices_df(300)
         # Force all returns positive by using cumprod on positive-only noise
         np.random.seed(7)
         dates = pd.bdate_range('2024-01-02', periods=300)
@@ -1828,7 +1828,7 @@ class TestCLI:
                 main()
             except (SystemExit, FileNotFoundError, json.JSONDecodeError):
                 pass
-        captured = capsys.readouterr()
+        _ = capsys.readouterr()
         # Should either have output or gracefully fail
         assert True  # No crash is sufficient
 
@@ -1839,7 +1839,7 @@ class TestCLI:
                 main()
             except SystemExit:
                 pass
-        captured = capsys.readouterr()
+        _ = capsys.readouterr()
         assert True  # No unhandled exception
 
 

@@ -666,7 +666,7 @@ class TestRebalanceExtended:
                 "status": "dry_run", "orders_executed": 1, "orders_failed": 0,
             })
             # Default dry_run=True
-            result = router.rebalance()
+            _ = router.rebalance()
             router.execute_orders.assert_called_once()
             call_kwargs = router.execute_orders.call_args
             assert call_kwargs[1].get("dry_run", call_kwargs[0][1] if len(call_kwargs[0]) > 1 else True) is True

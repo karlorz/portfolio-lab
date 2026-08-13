@@ -335,7 +335,7 @@ class TestInternationalMomentumGenerator(unittest.TestCase):
 
         with patch.object(self.generator, '_get_vix_level', return_value=20.0):
             with patch.object(self.generator, '_get_correlation', return_value=0.85):
-                signal = self.generator.generate_signal(data)
+                _ = self.generator.generate_signal(data)
 
         # Retrieve from database
         retrieved = self.generator.get_current_signal()
@@ -920,7 +920,7 @@ class TestInternationalMomentumGeneratorAdvanced(unittest.TestCase):
         }
         with patch.object(self.generator, '_get_vix_level', return_value=20.0):
             with patch.object(self.generator, '_get_correlation', return_value=0.85):
-                signal = self.generator.generate_signal(data)
+                _ = self.generator.generate_signal(data)
 
         history = self.generator.get_signal_history(days=30)
         self.assertIsInstance(history, list)

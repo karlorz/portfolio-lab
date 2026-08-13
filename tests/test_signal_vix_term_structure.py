@@ -731,7 +731,7 @@ class TestSignalGenerator:
 class TestSignalStateMapping:
     def _gen_signal_with_composite(self, composite_value):
         """Helper: generate signal and check state based on composite."""
-        calc = VIXTermStructureCalculator()
+        _ = VIXTermStructureCalculator()
         if composite_value > 0.5:
             return VIXSignalState.RISK_ON.name
         elif composite_value < -0.5:

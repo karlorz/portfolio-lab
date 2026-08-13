@@ -239,7 +239,7 @@ class TestBehavioralSentimentSignalInit:
     def test_init_creates_zscore_table(self, tmp_cache_db):
         from src.signals.behavioral_sentiment import BehavioralSentimentSignal
 
-        sig_gen = BehavioralSentimentSignal(cache_db=tmp_cache_db)
+        _ = BehavioralSentimentSignal(cache_db=tmp_cache_db)
 
         conn = sqlite3.connect(str(tmp_cache_db))
         cursor = conn.execute(

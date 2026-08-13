@@ -62,7 +62,7 @@ def _make_synthetic_portfolio_prices(
     # Generate factor returns
     n_factors = 5
     factor_cov = np.eye(n_factors) * 0.0001 + 0.00002  # Slight cross-correlation
-    factor_returns = rng.multivariate_normal(
+    _ = rng.multivariate_normal(
         mean=np.zeros(n_factors), cov=factor_cov, size=n_factors * 5 + n_days
     )
 
@@ -77,7 +77,7 @@ def _make_synthetic_portfolio_prices(
         if symbol in prices:
             continue  # Skip if already defined as a factor
         # Asset returns = sum(beta_i * factor_i) + idiosyncratic noise
-        asset_returns = np.zeros(n_days)
+        _ = np.zeros(n_days)
         for i, fkey in enumerate(["equity", "duration", "gold", "crypto", "fx"]):
             if fkey in betas:
                 # Map factor name to index
@@ -91,7 +91,7 @@ def _make_synthetic_portfolio_prices(
 @pytest.fixture
 def synthetic_prices():
     """Generate clean synthetic prices for testing."""
-    rng = np.random.RandomState(42)
+    _ = np.random.RandomState(42)
     prices = {}
     for sym in ["SPY", "GLD", "TLT", "IEF", "QQQ", "BTC-USD", "ETH-USD", "EFA"]:
         # Each symbol gets a slightly different random walk

@@ -112,7 +112,7 @@ class TestDataLoading:
         """Price data is cached after first load."""
         gen = AlternativeDataSignalGenerator()
         gen._prices = sample_prices
-        p1 = gen._load_prices()
+        _ = gen._load_prices()
         # Modify the cache
         gen._prices["SPY"] = gen._prices["SPY"][:10]
         p2 = gen._load_prices()
@@ -156,7 +156,6 @@ class TestSectorRotationSignal:
     def test_both_bullish(self, mock_generator):
         """Both sectors up gives positive signal."""
         # Make XLF and XLY both strongly up
-        n = len(mock_generator._prices["XLF"])
         for sym in ["XLF", "XLY"]:
             base = mock_generator._prices[sym][-63]["p"]
             for i in range(63):
@@ -166,7 +165,6 @@ class TestSectorRotationSignal:
 
     def test_both_bearish(self, mock_generator):
         """Both sectors down gives negative signal."""
-        n = len(mock_generator._prices["XLF"])
         for sym in ["XLF", "XLY"]:
             base = mock_generator._prices[sym][-63]["p"]
             for i in range(63):
@@ -187,7 +185,6 @@ class TestCreditSpreadSignal:
 
     def test_agg_outperforms_ief(self, mock_generator):
         """AGG outperforming IEF gives positive signal."""
-        n = len(mock_generator._prices["AGG"])
         # Make AGG strongly outperform IEF
         base_a = mock_generator._prices["AGG"][-63]["p"]
         base_i = mock_generator._prices["IEF"][-63]["p"]
@@ -913,7 +910,7 @@ class TestRegimeClassificationBoundaries:
 
     def test_regime_risk_off_extreme(self, mock_generator):
         """Score at extreme -1.0 triggers risk_off."""
-        regime = mock_generator._determine_regime(-1.0)
+        _ = mock_generator._determine_regime(-1.0)
 
     def test_composite_score_extreme_values_do_not_crash(self, mock_generator):
         """Composite score calculation handles extreme component values gracefully."""

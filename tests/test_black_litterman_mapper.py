@@ -162,7 +162,7 @@ class TestRunBlackLitterman:
     def test_equal_prior_zero_views(self):
         """Zero views with equal prior should return near-equal weights."""
         views = map_biases_to_views(0.0, 0.0, 0.0)
-        result = run_black_litterman(sample_cov_fixture := np.array([
+        result = run_black_litterman(np.array([
             [0.0225, 0.0000, -0.0063],
             [0.0000, 0.0256,  0.0022],
             [-0.0063, 0.0022, 0.0196],
@@ -1194,7 +1194,6 @@ class TestChampionMinWeightFloor:
             CHAMPION_ABSOLUTE_MIN_WEIGHT,
         )
 
-        symbols = ["SPY", "GLD", "TLT"]
         cov = np.array([
             [0.04, 0.0, 0.01],
             [0.0, 0.03, 0.0],

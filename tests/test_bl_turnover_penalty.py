@@ -49,7 +49,7 @@ class TestBLTurnoverPenalty:
         views = _make_views()
         current = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}
         # Without penalty
-        result_no_penalty = run_black_litterman(
+        _ = run_black_litterman(
             COV, views, transaction_costs=False,
         )
         # With penalty — should produce weights closer to current

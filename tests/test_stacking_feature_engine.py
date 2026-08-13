@@ -322,7 +322,7 @@ def test_explain_features(engine, full_signals, regime_context, historical_accur
 def test_vix_normalization_custom():
     """Test: Custom VIX normalization factor works."""
     engine = StackingFeatureEngine(vix_normalization_factor=20.0)
-    regime = RegimeContext(vix_level=20.0, trend_strength=0.5, timestamp=datetime.now())
+    _ = RegimeContext(vix_level=20.0, trend_strength=0.5, timestamp=datetime.now())
 
     assert engine.vix_normalization_factor == 20.0
 
@@ -1082,7 +1082,7 @@ class TestIntegration:
         """Pipeline: create -> to_numpy mean matches explain mean."""
         fv = engine.create_features(full_signals, regime_context, historical_accuracy)
         arr = engine.to_numpy(fv)
-        names = engine.get_feature_names()
+        _ = engine.get_feature_names()
         explanation = engine.explain_features(fv)
         base_mean = np.mean(arr[0:len(SignalSource)])
         assert base_mean == pytest.approx(explanation["base_signals_summary"]["mean"])

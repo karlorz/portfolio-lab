@@ -178,7 +178,7 @@ class TestGetPricesDF:
 
     def test_invalidate_clears_df_cache(self, tmp_path):
         with self._patch_prices(tmp_path):
-            df1 = get_prices_df()
+            _ = get_prices_df()
             invalidate_price_cache()
             df2 = get_prices_df()
         # Both should still work (re-built from raw cache or file)

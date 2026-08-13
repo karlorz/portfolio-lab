@@ -136,7 +136,6 @@ def compare_weights(voter: EnsembleVoter, disable_toggle: bool = False):
     all_pass = True
     for label, check_fn in checks:
         passed = check_fn(all_results) if not disable_toggle else True
-        status = "PASS" if passed else "FAIL"
         if not passed:
             all_pass = False
         if disable_toggle and label != "NORMAL: no deltas":

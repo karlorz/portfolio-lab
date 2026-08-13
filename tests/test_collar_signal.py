@@ -275,7 +275,7 @@ class TestCollarSignalGeneration:
 
     def test_elevated_vix_lower_confidence(self, generator):
         """Higher VIX should reduce confidence somewhat."""
-        normal = generator.generate_signal(spot=550.0, vix=16.0)
+        _ = generator.generate_signal(spot=550.0, vix=16.0)
         elevated = generator.generate_signal(spot=550.0, vix=25.0)
         # Confidence should still be reasonable
         assert elevated.confidence > 30
@@ -1141,7 +1141,7 @@ class TestEnsureDirs:
     def test_called_during_init(self):
         """_ensure_dirs should be called during CollarSignalGenerator.__init__."""
         with patch.object(CollarSignalGenerator, "_ensure_dirs") as mock_ensure:
-            gen = CollarSignalGenerator()
+            _ = CollarSignalGenerator()
             mock_ensure.assert_called_once()
 
     def test_mkdir_parents_true(self, generator):
@@ -1446,7 +1446,6 @@ class TestSaveSignalEdgeCases:
 
     def test_save_output_path_uses_signals_dir(self):
         """OUTPUT_PATH should be inside SIGNALS_DIR."""
-        original = CollarSignalGenerator.OUTPUT_PATH
         try:
             expected_dir = CollarSignalGenerator.OUTPUT_PATH.parent
             assert expected_dir.name == "signals"

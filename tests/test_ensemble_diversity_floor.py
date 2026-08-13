@@ -56,7 +56,7 @@ class TestDiversityFloor:
     def test_raises_low_weights_to_floor(self, voter, concentrated_weights):
         """Signals below floor should be raised to floor level."""
         result = voter._apply_diversity_floor(concentrated_weights)
-        active = {k: v for k, v in result.items() if concentrated_weights.get(k, 0) > 0 or v > 0}
+        _ = {k: v for k, v in result.items() if concentrated_weights.get(k, 0) > 0 or v > 0}
         # At minimum, all signals that were active (>0) should still have weight
         for source, weight in result.items():
             if concentrated_weights[source] > 0:
@@ -109,7 +109,6 @@ class TestDiversityFloor:
         with patch.dict(os.environ, {"ENSEMBLE_DIVERSITY_FLOOR": "0.08"}):
             result = voter._apply_diversity_floor(concentrated_weights)
             # Active signals should have at least ~8% after normalization
-            total = sum(result.values())
             for source, weight in result.items():
                 if concentrated_weights[source] > 0:
                     assert weight > 0

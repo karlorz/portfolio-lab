@@ -202,7 +202,7 @@ class TestRegimeCovarianceInBL:
 
     def test_bl_cascade_still_works_with_regime_cov(self, simple_cov_matrix):
         """BL cascade (BL → HRP → EW) should still work with regime cov."""
-        views = BLViews(
+        _ = BLViews(
             absolute_views={"SPY": 0.05, "GLD": 0.03, "TLT": 0.02},
             view_confidences=[0.5, 0.5, 0.5],
         )

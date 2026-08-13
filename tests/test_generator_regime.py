@@ -180,8 +180,8 @@ class TestVIXRegimeBoundaries:
 
     def test_vix_exactly_15(self):
         """VIX exactly 15 is normal regime."""
-        gen = DashboardGenerator.__new__(DashboardGenerator)
-        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path := Path("/tmp")):
+        _ = DashboardGenerator.__new__(DashboardGenerator)
+        with patch("src.dashboard.generator.PUBLIC_DIR", Path("/tmp")):
             # Extract the classify logic
             def classify(v):
                 if v > 25: return "crisis"
@@ -194,8 +194,8 @@ class TestVIXRegimeBoundaries:
 
     def test_vix_vol_spike_upper(self):
         """VIX exactly 25 is vol_spike (>20, not >25)."""
-        gen = DashboardGenerator.__new__(DashboardGenerator)
-        with patch("src.dashboard.generator.PUBLIC_DIR", tmp_path := Path("/tmp")):
+        _ = DashboardGenerator.__new__(DashboardGenerator)
+        with patch("src.dashboard.generator.PUBLIC_DIR", Path("/tmp")):
             def classify(v):
                 if v > 25: return "crisis"
                 elif v > 20: return "vol_spike"

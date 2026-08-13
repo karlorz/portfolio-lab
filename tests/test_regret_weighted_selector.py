@@ -85,7 +85,6 @@ def preloaded_selector(tmp_state_path):
     )
     # Seed with 20 periods of correlated signal-decision pairs
     for period in range(20):
-        base = period * 0.02
         sel._update_history(
             {
                 "high_corr_signal": 0.5 + math.sin(period * 0.5) * 0.3,
@@ -100,43 +99,6 @@ def preloaded_selector(tmp_state_path):
 
 # ---------------------------------------------------------------------------
 # SignalRegretMetrics tests
-# ---------------------------------------------------------------------------
-
-
-class TestSignalRegretMetrics:
-    def test_default_creation(self):
-        m = SignalRegretMetrics(
-            source="test",
-            asset_covariances={"ensemble": 0.05},
-            regret_contribution=0.05,
-            regret_normalized=0.3,
-            regret_penalty=0.1,
-            regime_current="normal",
-            num_periods=20,
-        )
-        assert m.source == "test"
-        assert m.asset_covariances == {"ensemble": 0.05}
-        assert m.regret_contribution == 0.05
-        assert m.regret_normalized == 0.3
-        assert m.regret_penalty == 0.1
-        assert not m.missing_data
-
-    def test_missing_data_default(self):
-        m = SignalRegretMetrics(
-            source="test",
-            asset_covariances={},
-            regret_contribution=0.0,
-            regret_normalized=0.0,
-            regret_penalty=0.0,
-            regime_current="normal",
-            num_periods=2,
-            missing_data=True,
-        )
-        assert m.missing_data
-
-
-# ---------------------------------------------------------------------------
-# RegretAdjustmentResult tests
 # ---------------------------------------------------------------------------
 
 
@@ -157,36 +119,6 @@ class TestRegretAdjustmentResult:
 
 # ---------------------------------------------------------------------------
 # RegretWeightedState tests
-# ---------------------------------------------------------------------------
-
-
-class TestRegretWeightedState:
-    def test_default_creation(self):
-        state = RegretWeightedState()
-        assert state.signal_history == {}
-        assert state.decision_history == {}
-        assert state.rolling_window == DEFAULT_ROLLING_WINDOW
-        assert state.last_regime == "normal"
-
-    def test_round_trip_serialization(self):
-        state = RegretWeightedState(
-            signal_history={"sig_a": [0.1, 0.2, 0.3]},
-            decision_history={"ensemble": [0.5, 0.6, 0.7]},
-            rolling_window=30,
-            last_regime="crisis",
-            last_ensemble_decision=0.42,
-        )
-        data = state.to_dict()
-        restored = RegretWeightedState.from_dict(data)
-        assert restored.signal_history == {"sig_a": [0.1, 0.2, 0.3]}
-        assert restored.decision_history == {"ensemble": [0.5, 0.6, 0.7]}
-        assert restored.rolling_window == 30
-        assert restored.last_regime == "crisis"
-        assert restored.last_ensemble_decision == 0.42
-
-
-# ---------------------------------------------------------------------------
-# RegretWeightedSelector tests
 # ---------------------------------------------------------------------------
 
 
@@ -288,27 +220,6 @@ class TestAdjustWeights:
         assert result.regret_normalized < 0.5
 
 
-class TestGetAdjustedWeights:
-    def test_convenience_method(self, selector, sample_signals, sample_weights):
-        """Convenience method returns adjusted weight dict."""
-        adjusted = selector.get_adjusted_weights(
-            sample_weights, sample_signals, 0.3, "normal"
-        )
-        assert isinstance(adjusted, dict)
-        assert abs(sum(adjusted.values()) - 1.0) < 0.01
-
-    def test_same_as_adjust_weights(self, selector, sample_signals, sample_weights):
-        """Convenience method matches adjust_weights output."""
-        adjusted = selector.get_adjusted_weights(
-            sample_weights, sample_signals, 0.3, "normal"
-        )
-        result = selector.adjust_weights(
-            sample_signals, 0.3, sample_weights, "normal"
-        )
-        for sig in adjusted:
-            assert abs(adjusted[sig] - result.adjusted_weights[sig]) < 1e-10
-
-
 class TestHistoryManagement:
     def test_update_history_trims(self, selector):
         """History trimmed to rolling window."""
@@ -388,32 +299,6 @@ class TestEdgeCases:
         crisis_mult = RegretWeightedSelector._get_regime_penalty_multiplier("crisis")
         normal_mult = RegretWeightedSelector._get_regime_penalty_multiplier("normal")
         assert crisis_mult > normal_mult
-
-
-class TestStatePersistence:
-    def test_save_and_load(self, tmp_state_path):
-        """State survives round-trip save/load."""
-        s1 = RegretWeightedSelector(state_path=tmp_state_path)
-        s1._update_history({"test": 0.5}, ensemble_decision=0.3)
-        s1._save_state()
-
-        s2 = RegretWeightedSelector(state_path=tmp_state_path)
-        assert "test" in s2.state.signal_history
-        assert s2.state.signal_history["test"] == [0.5]
-        assert "ensemble" in s2.state.decision_history
-        assert s2.state.decision_history["ensemble"] == [0.3]
-
-    def test_load_missing_file(self, tmp_state_path):
-        """Missing file creates default state."""
-        nonexistent = tmp_state_path.parent / "nonexistent.json"
-        selector = RegretWeightedSelector(state_path=nonexistent)
-        assert selector.state.signal_history == {}
-
-    def test_load_corrupted_file(self, tmp_state_path):
-        """Corrupted file falls back to default state."""
-        tmp_state_path.write_text("{invalid")
-        selector = RegretWeightedSelector(state_path=tmp_state_path)
-        assert isinstance(selector.state, RegretWeightedState)
 
 
 class TestGetStateDiagnostics:
@@ -1700,7 +1585,7 @@ class TestApplyRegretAdjustmentExtended:
 
     def test_multiple_calls_accumulate_history(self):
         """Repeated calls should accumulate history in shared state."""
-        result1 = apply_regret_adjustment(
+        _ = apply_regret_adjustment(
             {"sig_a": 0.5}, {"sig_a": 0.3}, 0.4, "normal"
         )
         result2 = apply_regret_adjustment(
@@ -2000,7 +1885,7 @@ class TestAdjustWeightsVaryingHistory:
 
     def test_adjust_weights_called_twice(self, selector, sample_signals, sample_weights):
         """Calling adjust_weights twice should accumulate history."""
-        r1 = selector.adjust_weights(sample_signals, 0.3, sample_weights, "normal")
+        _ = selector.adjust_weights(sample_signals, 0.3, sample_weights, "normal")
         r2 = selector.adjust_weights(sample_signals, 0.4, sample_weights, "normal")
         assert r2.avg_regret >= 0.0
         # Second call has more history

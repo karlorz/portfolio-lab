@@ -1118,9 +1118,6 @@ class TestStackingPredictionFieldValidation:
         assert isinstance(pred.feature_vector, np.ndarray)
 
     def test_top_features_default_factory(self):
-        from dataclasses import fields
-        field_map = {f.name: f for f in fields(StackingPrediction)}
-        tf_field = field_map["top_features"]
         # default_factory should produce new list each time
         pred1 = StackingPrediction(
             direction="bullish", confidence=0.5,
@@ -1928,9 +1925,6 @@ class TestCLIGuard:
 
     def test_module_has_no_main_guard(self, capsys):
         """Verify the source module has no __main__ guard that would execute code."""
-        import src.signals.stacking_integrator as mod
-        source = open(mod.__file__).read() if hasattr(mod, "__file__") else ""
-        has_guard = 'if __name__' in source or 'if __name__ == "__main__"' in source
         # The module intentionally does NOT have a __main__ guard
         # (it's a library module, not a CLI script)
         # Verifying that importing doesn't produce output

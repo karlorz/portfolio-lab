@@ -83,7 +83,7 @@ def run_max_sharpe(prices: pd.DataFrame) -> dict:
     ef = EfficientFrontier(mu, S)
 
     try:
-        weights = ef.max_sharpe()
+        _ = ef.max_sharpe()
         cleaned = ef.clean_weights()
         perf = ef.portfolio_performance()
         return {
@@ -106,7 +106,7 @@ def run_min_volatility(prices: pd.DataFrame) -> dict:
     ef = EfficientFrontier(mu, S)
 
     try:
-        weights = ef.min_volatility()
+        _ = ef.min_volatility()
         cleaned = ef.clean_weights()
         perf = ef.portfolio_performance()
         return {
@@ -129,7 +129,7 @@ def run_efficient_risk(prices: pd.DataFrame, target_vol: float = 0.10) -> dict:
     ef = EfficientFrontier(mu, S)
 
     try:
-        weights = ef.efficient_risk(target_vol)
+        _ = ef.efficient_risk(target_vol)
         cleaned = ef.clean_weights()
         perf = ef.portfolio_performance()
         return {
@@ -152,7 +152,7 @@ def run_hrp(prices: pd.DataFrame) -> dict:
     hrp = HRPOpt(returns)
 
     try:
-        weights = hrp.optimize()
+        _ = hrp.optimize()
         cleaned = hrp.clean_weights()
         perf = hrp.portfolio_performance()
         return {

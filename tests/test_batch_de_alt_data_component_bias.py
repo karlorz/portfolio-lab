@@ -98,9 +98,7 @@ def test_alt_component_bias_diagnostic_shape(tmp_path, monkeypatch) -> None:
     with patch.dict("sys.modules", {}):
         pass
     # Direct: patch the import used in the method body
-    import src.dashboard.generator as gen_mod
 
-    real = gen_mod.DashboardGenerator._alt_data_component_bias_diagnostic
 
     def _patched():
         import json

@@ -98,30 +98,6 @@ class TestCalculateDrift:
         assert len(drift) == 0
 
 
-class TestPositionDriftDataclass:
-    """PositionDrift dataclass fields."""
-
-    def test_create_drift(self):
-        d = PositionDrift(
-            symbol="SPY", local_qty=100, broker_qty=110,
-            qty_delta=10, local_value=50000.0, broker_value=55000.0,
-            value_delta=5000.0, drift_pct=0.10,
-        )
-        assert d.symbol == "SPY"
-        assert d.qty_delta == 10
-        assert d.drift_pct == 0.10
-        assert d.value_delta == 5000.0
-
-    def test_negative_drift(self):
-        d = PositionDrift(
-            symbol="TLT", local_qty=200, broker_qty=180,
-            qty_delta=-20, local_value=20000.0, broker_value=18000.0,
-            value_delta=-2000.0, drift_pct=-0.10,
-        )
-        assert d.qty_delta < 0
-        assert d.drift_pct < 0
-
-
 class TestIsReady:
     """is_ready depends on AlpacaClient."""
 
@@ -451,7 +427,6 @@ class TestPositionDriftDataclass:
     """Test PositionDrift dataclass."""
 
     def test_position_drift_creation(self):
-        from src.broker.position_sync import PositionDrift
         drift = PositionDrift(
             symbol="SPY", local_qty=100, broker_qty=105,
             qty_delta=5, local_value=50000, broker_value=52500,
@@ -463,7 +438,6 @@ class TestPositionDriftDataclass:
 
     def test_position_drift_negative(self):
         """Negative drift should be representable."""
-        from src.broker.position_sync import PositionDrift
         drift = PositionDrift(
             symbol="GLD", local_qty=200, broker_qty=190,
             qty_delta=-10, local_value=38000, broker_value=36100,

@@ -13,7 +13,7 @@ import pytest
 
 # Skip if pandas not available
 try:
-    from src.data.factor_data import FactorDataManager, FactorETF, FACTOR_ETFS, QUALITY_WEIGHTS, fetch_factor_prices_from_pipeline, main
+    from src.data.factor_data import FactorDataManager, FactorETF, FACTOR_ETFS, QUALITY_WEIGHTS, fetch_factor_prices_from_pipeline
     HAS_DEPENDENCIES = True
 except ImportError:
     HAS_DEPENDENCIES = False

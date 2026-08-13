@@ -219,7 +219,7 @@ class TestTwoStageKMeansRegime:
         X = _make_synthetic_data(n_samples=300, n_features=15)
         model = TwoStageKMeansRegime(max_pca_components=10)
 
-        result = model.fit_predict(X)
+        _ = model.fit_predict(X)
         labels = model.predict()
         assert len(labels) == 300
 

@@ -522,7 +522,7 @@ class TestEnsembleVoter:
     def test_compute_vote_saves_to_db(self, tmp_path):
         voter = _make_voter(tmp_path)
         readings = {SignalSource.MULTI_SPEED_MOM: _make_reading(value=0.3, source=SignalSource.MULTI_SPEED_MOM)}
-        vote = voter.compute_vote(readings=readings, regime=Regime.NORMAL, regime_confidence=0.6)
+        _ = voter.compute_vote(readings=readings, regime=Regime.NORMAL, regime_confidence=0.6)
         # Check DB has the vote
         import sqlite3
         with sqlite3.connect(str(voter.db_path)) as conn:
@@ -3228,7 +3228,7 @@ class TestSaveVoteEdgeCases:
             equity_bias=0.3, duration_bias=-0.1, gold_bias=0.05,
             action='neutral', confidence=0.5, reasoning='test', source_votes=[],
         )
-        with patch('src.strategy.ensemble_voter.logger') as mock_logger:
+        with patch('src.strategy.ensemble_voter.logger'):
             # RegretWeightedSelector doesn't import, so _persist_vote logs debug
             voter._persist_vote(vote, 0.3)
             # Should not crash

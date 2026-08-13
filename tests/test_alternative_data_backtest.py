@@ -1449,7 +1449,7 @@ class TestLoadDataEdgeCases:
     def test_load_data_io_exception(self, monkeypatch):
         """IOError during file read returns False."""
         bt = AlternativeDataBacktester()
-        original_open = __builtins__["open"] if isinstance(__builtins__, dict) else __builtins__.open
+        _ = __builtins__["open"] if isinstance(__builtins__, dict) else __builtins__.open
 
         def _failing_open(*args, **kwargs):
             raise OSError("Simulated IO error")

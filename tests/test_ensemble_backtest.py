@@ -131,14 +131,14 @@ class TestEnsembleBacktestEngineInit:
     def test_default_db_path(self, tmp_path):
         """Default db_path should equal MARKET_DB."""
         with patch("src.backtest.ensemble_backtest.MARKET_DB", tmp_path / "default_market.db"):
-            with patch("src.backtest.ensemble_backtest.SignalIntegrator") as mock_si:
+            with patch("src.backtest.ensemble_backtest.SignalIntegrator"):
                 engine = EnsembleBacktestEngine()
                 assert engine.db_path == tmp_path / "default_market.db"
 
     def test_custom_db_path(self, tmp_path):
         """Custom db_path should be stored."""
         custom_path = tmp_path / "custom.db"
-        with patch("src.backtest.ensemble_backtest.SignalIntegrator") as mock_si:
+        with patch("src.backtest.ensemble_backtest.SignalIntegrator"):
             engine = EnsembleBacktestEngine(db_path=custom_path)
             assert engine.db_path == custom_path
 

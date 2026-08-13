@@ -849,7 +849,7 @@ class TestConstantsExtended:
 
     def test_regime_overrides_keys_match(self):
         """Regime override keys correspond to valid regimes."""
-        gen = DashboardGenerator.__new__(DashboardGenerator)
+        _ = DashboardGenerator.__new__(DashboardGenerator)
         # Extract the regime_overrides from generate_signals_json logic
         expected_regimes = {"crisis", "vol_spike", "low_vol"}
         overrides = {

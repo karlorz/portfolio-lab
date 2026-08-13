@@ -444,7 +444,6 @@ class TestStatePersistence:
         """Load should return None when no state file."""
         engine = SkewEngine()
         # Use a non-existent path for the test
-        original_path = STATE_FILE
         test_path = Path(tempfile.mktemp(suffix="_skew_test.json"))
 
         with patch("src.monitor.skew_engineering.STATE_FILE", test_path):

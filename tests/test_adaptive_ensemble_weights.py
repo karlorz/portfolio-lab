@@ -325,7 +325,7 @@ class TestWeightUpdate:
 
     def test_persistent_state(self, adaptive_weights, sample_attribution_good):
         """State should be saved and loadable."""
-        adapted = adaptive_weights.update_weights(sample_attribution_good, "normal")
+        _ = adaptive_weights.update_weights(sample_attribution_good, "normal")
 
         # Create new instance and verify load
         new_adaptive = AdaptiveEnsembleWeights(base_weights=adaptive_weights.base_weights)

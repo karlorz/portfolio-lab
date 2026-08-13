@@ -431,7 +431,7 @@ class TestStatePersistence:
     def test_save_creates_state_file(self, temp_data_dir, normal_regime_state):
         """Compute allocation should save state."""
         sizer = AdaptiveSizer(data_dir=normal_regime_state)
-        decision = sizer.compute_allocation()
+        _ = sizer.compute_allocation()
         state_path = normal_regime_state / "adaptive_sizing_state.json"
         assert state_path.exists()
         state = json.loads(state_path.read_text())
@@ -450,7 +450,7 @@ class TestStatePersistence:
         data_dir.joinpath("regime_classifier_state.json").write_text(json.dumps(state))
         
         sizer = AdaptiveSizer(data_dir=data_dir)
-        decision = sizer.compute_allocation()
+        _ = sizer.compute_allocation()
         state_path = data_dir / "adaptive_sizing_state.json"
         
         # Verify JSON integrity

@@ -576,7 +576,7 @@ class TestCheckIcDecayAndAlert:
         mock_send.assert_called_once()
         assert mock_send.call_args[0][1] == AlertLevel.HALT
         # Details should include both critical and warning signals
-        details = mock_send.call_args[1].get("details") or mock_send.call_args[0][3] if len(mock_send.call_args[0]) > 3 else None
+        _ = mock_send.call_args[1].get("details") or mock_send.call_args[0][3] if len(mock_send.call_args[0]) > 3 else None
         # The function passes details as keyword arg
 
 

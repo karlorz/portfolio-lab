@@ -134,7 +134,6 @@ def run_single_backtest(
     # In between, let weights drift naturally
     daily_port_returns = np.zeros(n)
     current_weights = weights.copy()
-    next_rebalance_idx = ANNUAL_DAYS  # Rebalance after first year
 
     # We need to track the actual returns of each asset to compute drift
     # But for simplicity, we rebalance at fixed intervals by resetting weights

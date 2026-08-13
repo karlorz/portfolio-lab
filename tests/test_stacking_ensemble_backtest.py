@@ -346,8 +346,6 @@ class TestGenerateSignals:
         s1 = StackingEnsembleBacktest._generate_signals(dates, 0.76, 1.0, seed=42)
         s2 = StackingEnsembleBacktest._generate_signals(dates, 0.76, 1.0, seed=99)
         # With high frequency, they likely differ
-        n1 = sum(1 for v in s1.values() if v != 0)
-        n2 = sum(1 for v in s2.values() if v != 0)
         # At least one of non-neural, frequency, or signal pattern differs
         non_zero_1 = {d for d, v in s1.items() if v != 0}
         non_zero_2 = {d for d, v in s2.items() if v != 0}
@@ -639,15 +637,9 @@ class TestApplySignals:
             StackingEnsembleBacktest, BASELINE_SPY, MAX_EQUITY_SHIFT,
         )
         bt = StackingEnsembleBacktest(cache_db=stack_test_db)
-        prices = bt._load_prices(["SPY", "GLD", "TLT"], "2022-01-01", "2022-12-31")
-        dates = sorted(
-            set(prices["SPY"].keys())
-            & set(prices["GLD"].keys())
-            & set(prices["TLT"].keys())
-        )
+        _ = bt._load_prices(["SPY", "GLD", "TLT"], "2022-01-01", "2022-12-31")  # keep call: populates backtest cache
 
         # Bearish signal should decrease SPY weight
-        spy_idx_in_prices = 0  # SPY is first in the list
         baseline_spy_w = BASELINE_SPY
         bear_spy_w = max(0.0, BASELINE_SPY - MAX_EQUITY_SHIFT)
         assert bear_spy_w <= baseline_spy_w

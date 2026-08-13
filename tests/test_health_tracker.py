@@ -1732,7 +1732,7 @@ class TestDetectDecayAlertsEdgeCases:
         # Second call with same data: previous_health=0.80, current_health=0.40 duplicates
         # The dedup check looks at last 20 alerts for this source
         alerts2 = tracker.detect_decay_alerts()
-        decay_alerts = [a for a in alerts2 if "streak" not in a.message.lower()
+        _ = [a for a in alerts2 if "streak" not in a.message.lower()
                         and "drawdown" not in a.message.lower()
                         and "ratio" not in a.message.lower()]
 
@@ -2576,7 +2576,6 @@ class TestCLIEntryPoint:
     def test_calculate_flag_no_source(self, capsys):
         """--calculate without --source should produce summary output."""
         from unittest.mock import patch
-        db = None
         with patch('src.signals.health_tracker.SignalHealthTracker.calculate_all_health_scores',
                    return_value={}):
             with patch('src.signals.health_tracker.SignalHealthTracker.save_health_scores'):

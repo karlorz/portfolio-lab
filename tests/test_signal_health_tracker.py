@@ -32,7 +32,7 @@ class TestDatabaseInitialization:
     def test_tables_created(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "test.db"
-            tracker = SignalHealthTracker(db_path)
+            _ = SignalHealthTracker(db_path)
             
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
@@ -401,10 +401,6 @@ class TestWeightAdjustment:
             # If we have valid scores, test weight adjustment
             if msm_score and crv_score:
                 # Calculate adjusted weights for just these two
-                base_weights = {
-                    "multi_speed_momentum": 0.5,
-                    "cross_asset_rv": 0.5,
-                }
 
                 # Calculate what weights should be based on health scores
                 msm_weight = 0.5 * max(0.2, msm_score.health_score)

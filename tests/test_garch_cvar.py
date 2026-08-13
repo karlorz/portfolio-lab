@@ -775,7 +775,7 @@ class TestPerformance:
         calc = GARCHFilteredCVaR()
         
         start = time.time()
-        metrics = calc.compute(returns)
+        _ = calc.compute(returns)
         elapsed = time.time() - start
         
         assert elapsed < 1.0, f"Calculation took {elapsed:.2f}s, expected < 1s"

@@ -93,11 +93,6 @@ def test_apply_weights_after_dp_sum_active_is_one(tmp_path: Path, monkeypatch) -
         SignalSource.UNIFIED_OVERLAY: _reading(SignalSource.UNIFIED_OVERLAY, -0.5),
     }
     vote = voter.compute_vote(readings, Regime.NORMAL, 0.8)
-    active_sum = sum(
-        float(r.weight or 0)
-        for r in vote.source_votes
-        if getattr(r, "is_active", True) and float(r.weight or 0) > 0
-    )
     # Health sleep may zero more arms; remaining active mass should be ~1
     # when any contribute
     pos = [float(r.weight) for r in vote.source_votes if float(r.weight or 0) > 1e-9]

@@ -196,7 +196,7 @@ class TestCalculateRPOverlay:
         overlay.max_deviation = 0.05  # Very tight
         df = _make_prices_df(["SPY", "GLD", "TLT"], days=300)
         base = {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16, "CASH": 0.0}
-        result = overlay.calculate_rp_overlay(base, df)
+        _ = overlay.calculate_rp_overlay(base, df)
         # Adjustments should be within ±max_deviation (before normalization)
         # Note: post-normalization adjustments may differ slightly
 
@@ -305,40 +305,6 @@ class TestCLI:
 # ---------------------------------------------------------------------------
 # Extended coverage tests
 # ---------------------------------------------------------------------------
-
-
-class TestRPWeightOverlayDataclass:
-    """Test RPWeightOverlay dataclass and to_dict."""
-
-    def test_to_dict(self):
-        overlay = RPWeightOverlay(
-            timestamp='2026-05-24',
-            asset_vols={'SPY': 0.15, 'GLD': 0.14, 'TLT': 0.12},
-            raw_rp_weights={'SPY': 0.34, 'GLD': 0.36, 'TLT': 0.30},
-            base_weights={'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16},
-            rp_adjustments={'SPY': -0.12, 'GLD': -0.02, 'TLT': 0.14},
-            target_weights={'SPY': 0.34, 'GLD': 0.36, 'TLT': 0.30, 'CASH': 0.0},
-            expected_vol=0.108,
-            risk_parity_score=0.95,
-        )
-        d = overlay.to_dict()
-        assert d['timestamp'] == '2026-05-24'
-        assert d['asset_vols']['SPY'] == 0.15
-        assert d['risk_parity_score'] == 0.95
-
-    def test_to_dict_has_all_fields(self):
-        overlay = RPWeightOverlay(
-            timestamp='2026-05-24',
-            asset_vols={}, raw_rp_weights={}, base_weights={},
-            rp_adjustments={}, target_weights={},
-            expected_vol=0.1, risk_parity_score=0.8,
-        )
-        d = overlay.to_dict()
-        expected_keys = {
-            'timestamp', 'asset_vols', 'raw_rp_weights', 'base_weights',
-            'rp_adjustments', 'target_weights', 'expected_vol', 'risk_parity_score',
-        }
-        assert expected_keys.issubset(set(d.keys()))
 
 
 class TestCalculateRealizedVolExtended:
@@ -581,7 +547,7 @@ class TestRiskParityOverlayExtended:
         overlay = self._make_overlay()
         df = _make_prices_df(days=300)
         try:
-            result = overlay.calculate_rp_overlay({}, df)
+            _ = overlay.calculate_rp_overlay({}, df)
         except (ValueError, KeyError):
             pass  # Acceptable to raise
 
@@ -591,7 +557,7 @@ class TestRiskParityOverlayExtended:
         df = _make_prices_df(days=10)
         base = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16, 'CASH': 0.0}
         try:
-            result = overlay.calculate_rp_overlay(base, df)
+            _ = overlay.calculate_rp_overlay(base, df)
         except (ValueError, KeyError):
             pass  # Short data may not produce valid result
 
@@ -1209,7 +1175,6 @@ class TestMainGuard:
         import importlib
         import src.strategy.risk_parity_weight_overlay as mod
         importlib.reload(mod)
-
 
 
 # ==============================================================================

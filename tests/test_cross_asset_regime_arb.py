@@ -1398,7 +1398,7 @@ class TestDivergenceEdgeCases:
 
     def test_divergence_unknown_pattern(self):
         """UNKNOWN pattern maps to zero signal."""
-        detector = CrossAssetRegimeArbDetector()
+        _ = CrossAssetRegimeArbDetector()
         from src.signals.cross_asset_regime_arb import DIVERGENCE_SIGNALS
         value, explanation = DIVERGENCE_SIGNALS[DivergencePattern.UNKNOWN]
         assert value == 0.0

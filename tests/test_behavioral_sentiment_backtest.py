@@ -1451,9 +1451,6 @@ class TestBehavioralSentimentBacktest:
         )
 
         dates = ["2022-01-03", "2022-01-04"]
-        spy_price = 400.0
-        gld_price = 170.0
-        tlt_price = 140.0
         prices = {
             "SPY": {"2022-01-03": 400.0, "2022-01-04": 400.0},
             "GLD": {"2022-01-03": 170.0, "2022-01-04": 170.0},
@@ -1725,7 +1722,7 @@ class TestBehavioralSentimentBacktest:
             BehavioralSentimentBacktest, BASELINE_TLT,
         )
 
-        bt = BehavioralSentimentBacktest()
+        _ = BehavioralSentimentBacktest()
         # We verify indirectly by checking that TLT is never adjusted
         # by looking at the overlay value formula
         assert BASELINE_TLT == 0.16

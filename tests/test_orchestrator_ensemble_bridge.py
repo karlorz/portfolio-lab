@@ -599,7 +599,7 @@ class TestCLI:
 
     def test_main_runs(self, capsys):
         from src.strategy.orchestrator_ensemble_bridge import main
-        bridge = OrchestratorEnsembleBridge()
+        _ = OrchestratorEnsembleBridge()
         mock_signal = UnifiedSignalReading(
             timestamp="2026-05-23T00:00:00", source="test",
             value=0.1, confidence=0.8, weight=0.20,

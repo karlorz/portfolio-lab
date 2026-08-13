@@ -417,7 +417,7 @@ class TestEquityCurveSimulation:
         """Position size should scale returns."""
         returns = np.array([0.10, -0.10])
 
-        equity_full = simulate_equity_curve(returns, 1.0)
+        _ = simulate_equity_curve(returns, 1.0)
         equity_half = simulate_equity_curve(returns, 0.5)
 
         # Half position should have half the effect (approximately)

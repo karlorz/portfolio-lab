@@ -1056,7 +1056,7 @@ class TestExportMetricsFunction:
         mod.RISK_HISTORY_PATH = tmp_path / "risk_history.json"
         try:
             metrics = _make_metrics()
-            result = export_metrics(metrics)
+            _ = export_metrics(metrics)
             assert mod.RISK_METRICS_PATH.exists()
             data = json.loads(mod.RISK_METRICS_PATH.read_text())
             assert data['var_95_daily'] == -2.5

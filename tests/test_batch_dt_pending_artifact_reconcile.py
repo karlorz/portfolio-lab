@@ -42,7 +42,7 @@ def test_pending_trends_reconciles_with_fresh_google_trends(tmp_path: Path) -> N
     assert evidence["artifact"] == "google_trends.json"
     assert "pending_never_run" in evidence["reason"]
 
-    normalized = normalize_cron_job(
+    _ = normalize_cron_job(
         job,
         backend="tasker",
         source=str(tmp_path / "cron_status.json"),

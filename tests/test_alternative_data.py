@@ -125,7 +125,7 @@ class TestSatelliteAdapter:
             init_database()
             adapter = SatelliteDataAdapter()
             adapter.db_path = tmp_path / "alt.db"
-            signal = adapter.calculate_signal("WMT", days=30)
+            _ = adapter.calculate_signal("WMT", days=30)
 
             conn = sqlite3.connect(str(tmp_path / "alt.db"))
             cursor = conn.cursor()
@@ -2042,7 +2042,7 @@ class TestClientAdapters:
     def test_client_init_calls_init_database(self, tmp_path):
         with patch("src.data.alternative_data.ALT_DATA_DB", tmp_path / "alt.db"):
             with patch("src.data.alternative_data.init_database") as mock_init:
-                client = AlternativeDataClient()
+                _ = AlternativeDataClient()
         assert mock_init.call_count >= 1
 
 

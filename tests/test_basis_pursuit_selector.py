@@ -73,7 +73,6 @@ def preloaded_selector(tmp_state_path):
     sel = BasisPursuitSelector(state_path=tmp_state_path, rolling_window=20)
     # Seed with 10 periods of history for correlation testing
     for period in range(10):
-        base = period * 0.1
         sel._update_history(
             {
                 "tsfm_momentum": 0.5 + math.sin(period) * 0.2,
@@ -280,7 +279,6 @@ class TestSelection:
         }
         # Seed with perfectly correlated history
         for period in range(10):
-            base = period * 0.1
             preloaded_selector._update_history(
                 {
                     "trend_a": 0.5 + math.sin(period) * 0.15,
@@ -968,7 +966,7 @@ class TestPerformanceTrackingExtended:
 
     def test_track_performance_json_decode_error(self, selector, tmp_path):
         """Corrupted performance file should not raise."""
-        perf_path = selector._resolve_perf_path()
+        _ = selector._resolve_perf_path()
         selector._resolve_perf_path = MagicMock(return_value=tmp_path / "bad_perf.json")
         bad_path = tmp_path / "bad_perf.json"
         bad_path.write_text("{corrupt json}")
@@ -980,7 +978,7 @@ class TestPerformanceTrackingExtended:
 
     def test_track_performance_os_error(self, selector, tmp_path):
         """OSError during performance tracking should not raise."""
-        perf_path = selector._resolve_perf_path()
+        _ = selector._resolve_perf_path()
         selector._resolve_perf_path = MagicMock(return_value=tmp_path / "perf.json")
         # Make perf_path.exists() raise OSError inside the try block
         with patch.object(Path, 'exists', side_effect=OSError("Permission denied")):
@@ -1017,7 +1015,7 @@ class TestSelectSignalsEdgeCases:
         signal_values = {"a": 0.5, "b": 0.5, "c": 0.5}
         base_weights = {"a": 0.33, "b": 0.33, "c": 0.34}
         # Run twice to build history for correlation check
-        result1 = selector.select_signals(signal_values, base_weights, "normal")
+        _ = selector.select_signals(signal_values, base_weights, "normal")
         result2 = selector.select_signals(signal_values, base_weights, "normal")
         # Should still have active signals; each sum ~1
         assert abs(sum(result2.active_signals.values()) - 1.0) < 0.01

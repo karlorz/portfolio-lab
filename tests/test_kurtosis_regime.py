@@ -1084,7 +1084,7 @@ class TestSaveSignal:
         """_ensure_dirs should create the signals directory if missing."""
         with patch("src.regime.kurtosis_regime.SIGNALS_DIR") as mock_dir:
             mock_dir.__truediv__.return_value = mock_dir
-            generator = KurtosisRegimeSignalGenerator()
+            _ = KurtosisRegimeSignalGenerator()
             mock_dir.mkdir.assert_called_once_with(parents=True, exist_ok=True)
 
 
@@ -1224,5 +1224,5 @@ class TestModuleExports:
         """KurtosisRegimeSignalGenerator should ensure signal dir exists."""
         with patch("src.regime.kurtosis_regime.SIGNALS_DIR") as mock_signals_dir:
             mock_signals_dir.__truediv__.return_value = mock_signals_dir
-            gen = KurtosisRegimeSignalGenerator()
+            _ = KurtosisRegimeSignalGenerator()
             mock_signals_dir.mkdir.assert_called_once_with(parents=True, exist_ok=True)

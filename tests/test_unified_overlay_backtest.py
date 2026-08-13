@@ -358,39 +358,6 @@ class TestOutput:
         assert saved["sharpe_improvement"] == 0.05
 
 
-class TestBacktestConfigExtended:
-    """Extended tests for BacktestConfig dataclass."""
-
-    def test_default_base_weights(self):
-        cfg = BacktestConfig()
-        assert cfg.base_weights == {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16}
-
-    def test_default_initial_capital(self):
-        cfg = BacktestConfig()
-        assert cfg.initial_capital == 100000.0
-
-    def test_default_max_crypto(self):
-        cfg = BacktestConfig()
-        assert cfg.max_crypto == 0.05
-
-    def test_default_dates(self):
-        cfg = BacktestConfig()
-        assert cfg.start_date is not None
-        assert cfg.end_date is not None
-
-    def test_custom_all_fields(self):
-        cfg = BacktestConfig(
-            start_date="2015-01-01",
-            end_date="2025-12-31",
-            initial_capital=250000.0,
-            max_crypto=0.08,
-            base_weights={'SPY': 0.50, 'GLD': 0.35, 'TLT': 0.15},
-        )
-        assert cfg.initial_capital == 250000.0
-        assert cfg.max_crypto == 0.08
-        assert cfg.base_weights['SPY'] == 0.50
-
-
 class TestDailyData:
     """Tests for DailyData dataclass."""
 

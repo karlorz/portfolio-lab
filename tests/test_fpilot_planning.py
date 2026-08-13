@@ -107,7 +107,7 @@ class TestPredictiveModelFit:
         """Model should handle constant prices gracefully."""
         prices = np.ones((260, 4)) * 100.0
         model = PredictiveModel(n_assets=4, window=252)
-        result = model.fit(prices)
+        _ = model.fit(prices)
         # Should fit but coefficients may be near-zero
         assert model.is_fitted
         assert model._A is not None

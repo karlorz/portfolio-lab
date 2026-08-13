@@ -195,7 +195,7 @@ class TestGenerateSignal:
         assert pos.position_type in ("short_vix", "long_vix", "flat")
 
     def test_generate_signal_stores_in_history(self, strategy_with_data):
-        pos = strategy_with_data.generate_signal("2026-05-14")
+        _ = strategy_with_data.generate_signal("2026-05-14")
         assert len(strategy_with_data.position_history) >= 1
 
     def test_generate_signal_no_data_returns_flat(self):

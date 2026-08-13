@@ -290,7 +290,6 @@ class TestMarketEnvironment:
         prices = _make_prices(300)
         env = MarketEnvironment(prices)
         env.reset()
-        initial_value = env.portfolio_value
         env.step({'allocation': [0.5, 0.3, 0.2]})
         # Value should change (unless all returns are exactly 0)
         # Just check it's still a number

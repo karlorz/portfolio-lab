@@ -79,7 +79,6 @@ def test_count_provenance_prefers_provenance_when_no_polarity() -> None:
 
 def test_resolve_dual_pass_when_newest_all_skipped() -> None:
     t = SignalHealthTracker.__new__(SignalHealthTracker)
-    calls = {"oldest": 0}
 
     def fake_list(limit=30, oldest_first=False):
         if oldest_first:

@@ -8,17 +8,6 @@ from src.dashboard.health_report import derive_system_status
 
 def test_live_shaped_zero_healthy_nine_tracked_keeps_system_ops_healthy() -> None:
     """Quality 0/9 is disclosed separately while green ops stays healthy."""
-    signal_health = {
-        "status": "degraded",
-        "overall_health": "degraded",
-        "summary": {
-            "healthy": 0,
-            "degraded": 7,
-            "unhealthy": 2,
-            "total_tracked": 9,
-            "pending_predictions": 5875,
-        },
-    }
     status = derive_system_status(
         current="healthy",
         scheduler_status="ok",

@@ -423,97 +423,6 @@ class TestPerformanceAttribution:
 # print_report test (smoke test - does not crash)
 # ---------------------------------------------------------------------------
 
-class TestPrintReport:
-    def test_print_report_empty(self, caplog):
-        report = AttributionReport(
-            timestamp="2026-01-01T00:00:00",
-            start_date="2025-10-01",
-            end_date="2026-01-01",
-            analysis_days=90,
-            sources={},
-            best_source=None,
-            worst_source=None,
-            avg_hit_rate=0.0,
-            avg_correlation=0.0,
-            avg_active_sources_per_day=0.0,
-            total_sources_tracked=0,
-            degradation_signals=[],
-            top_performers=[],
-        )
-        # Should not crash
-        with caplog.at_level(logging.INFO, logger="src.monitor.performance_attribution"):
-            print_report(report)
-        assert "PERFORMANCE ATTRIBUTION REPORT" in caplog.text
-
-    def test_print_report_none_win_rate_no_data_source(self, caplog):
-        """Sources with active_days=0 use win_rate=None — must not TypeError."""
-        src = SourceAttribution(
-            source="stale_src",
-            display_name="Stale Source",
-            category="other",
-            total_readings=3,
-            active_days=0,
-            hit_rate=None,
-            win_rate=None,
-            avg_return_bps=0.0,
-            total_return_bps=0.0,
-            sharpe_contribution=0.0,
-            max_consecutive_losses=0,
-            avg_correlation=0.0,
-            avg_weight=0.0,
-        )
-        report = AttributionReport(
-            timestamp="2026-07-20T00:00:00",
-            start_date="2026-04-21",
-            end_date="2026-07-20",
-            analysis_days=90,
-            sources={"stale_src": src},
-            best_source=None,
-            worst_source=None,
-            avg_hit_rate=None,
-            avg_correlation=0.0,
-            avg_active_sources_per_day=0.0,
-            total_sources_tracked=1,
-            degradation_signals=[],
-            top_performers=[],
-        )
-        with caplog.at_level(logging.INFO, logger="src.monitor.performance_attribution"):
-            print_report(report)
-        assert "Stale Source" in caplog.text
-        assert "n/a" in caplog.text
-
-    def test_print_report_with_data(self, caplog):
-        src = SourceAttribution(
-            source="vp_macd", display_name="VP-MACD", category="momentum",
-            total_readings=50, active_days=45, hit_rate=0.62, win_rate=0.58,
-            avg_return_bps=1.2, total_return_bps=54.0, sharpe_contribution=0.85,
-            max_consecutive_losses=4, avg_correlation=0.15, avg_weight=0.12,
-        )
-        report = AttributionReport(
-            timestamp="2026-01-01T00:00:00",
-            start_date="2025-10-01",
-            end_date="2026-01-01",
-            analysis_days=90,
-            sources={"vp_macd": src},
-            best_source="vp_macd",
-            worst_source=None,
-            avg_hit_rate=0.62,
-            avg_correlation=0.15,
-            avg_active_sources_per_day=3.0,
-            total_sources_tracked=1,
-            degradation_signals=[],
-            top_performers=["vp_macd"],
-        )
-        with caplog.at_level(logging.INFO, logger="src.monitor.performance_attribution"):
-            print_report(report)
-        assert "VP-MACD" in caplog.text
-        assert "TOP PERFORMERS" in caplog.text
-
-
-# ---------------------------------------------------------------------------
-# Patch function test
-# ---------------------------------------------------------------------------
-
 class TestPatchSaveVote:
     def test_patch_function_exists(self):
         """patch_save_vote should be callable (integration test would need EnsembleVoter)."""
@@ -916,69 +825,6 @@ class TestSaveLoadReportExtended:
         path = attributor.save_report(report)
         assert path.exists()
         assert attributor.attribution_dir.exists()
-
-
-class TestSourceAttributionExtended:
-    """Additional edge cases for SourceAttribution dataclass."""
-
-    def test_current_weight_regime_default(self):
-        """current_weight_regime should default to 'normal'."""
-        sa = SourceAttribution(
-            source="test", display_name="Test", category="trend",
-            total_readings=1, active_days=1, hit_rate=0.5, win_rate=0.5,
-            avg_return_bps=1.0, total_return_bps=1.0, sharpe_contribution=0.0,
-            max_consecutive_losses=0, avg_correlation=0.0, avg_weight=0.1,
-        )
-        assert sa.current_weight_regime == "normal"
-
-    def test_current_weight_regime_custom(self):
-        """current_weight_regime can be set to other values."""
-        sa = SourceAttribution(
-            source="test", display_name="Test", category="trend",
-            total_readings=1, active_days=1, hit_rate=0.5, win_rate=0.5,
-            avg_return_bps=1.0, total_return_bps=1.0, sharpe_contribution=0.0,
-            max_consecutive_losses=0, avg_correlation=0.0, avg_weight=0.1,
-            current_weight_regime="crisis",
-        )
-        assert sa.current_weight_regime == "crisis"
-
-    def test_to_dict_includes_weight_regime(self):
-        """to_dict should include current_weight_regime."""
-        sa = SourceAttribution(
-            source="test", display_name="Test", category="trend",
-            total_readings=1, active_days=1, hit_rate=0.5, win_rate=0.5,
-            avg_return_bps=1.0, total_return_bps=1.0, sharpe_contribution=0.0,
-            max_consecutive_losses=0, avg_correlation=0.0, avg_weight=0.1,
-            current_weight_regime="high_vol",
-        )
-        d = sa.to_dict()
-        assert d["current_weight_regime"] == "high_vol"
-
-
-class TestAttributionReportExtended:
-    """Additional edge cases for AttributionReport dataclass."""
-
-    def test_to_dict(self):
-        """to_dict should produce a complete dict."""
-        src = SourceAttribution(
-            source="test", display_name="Test", category="trend",
-            total_readings=1, active_days=1, hit_rate=0.5, win_rate=0.5,
-            avg_return_bps=1.0, total_return_bps=1.0, sharpe_contribution=0.0,
-            max_consecutive_losses=0, avg_correlation=0.0, avg_weight=0.1,
-        )
-        report = AttributionReport(
-            timestamp="2026-01-01T00:00:00",
-            start_date="2025-10-01", end_date="2026-01-01", analysis_days=90,
-            sources={"test": src}, best_source="test", worst_source=None,
-            avg_hit_rate=0.5, avg_correlation=0.0,
-            avg_active_sources_per_day=1.0, total_sources_tracked=1,
-            degradation_signals=[], top_performers=["test"],
-        )
-        d = report.to_dict()
-        assert isinstance(d, dict)
-        assert d["best_source"] == "test"
-        assert "sources" in d
-        assert d["degradation_signals"] == []
 
 
 class TestPrintReportExtended:
@@ -2069,7 +1915,6 @@ class TestSourceAttributionMetrics:
         )
         expected = 0.75 * 4.0 / 100
         assert sa.efficiency_ratio == expected
-
 
 
 class TestAttributionNoDataHonesty:

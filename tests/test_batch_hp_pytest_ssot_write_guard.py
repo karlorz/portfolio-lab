@@ -64,7 +64,6 @@ def test_write_json_multi_dest_skips_production_private_under_pytest(
     prod_priv = Path(PROJECT_ROOT) / "data" / ".batch_hp_ssot_guard_sentinel.json"
     if prod_priv.exists():
         prod_priv.unlink()
-    sentinel_before = b"MUST_NOT_CHANGE"
     # Create a non-production sibling so we can prove only prod is skipped.
     other = tmp_path / "other" / "alerts.json"
     other.parent.mkdir(parents=True)
@@ -252,7 +251,7 @@ def test_summarize_lag_falls_back_from_ephemeral_public_data_dir(
         json.dumps({"target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}}),
         encoding="utf-8",
     )
-    repo_dest = Path(PROJECT_ROOT) / "public" / "data"
+    _ = Path(PROJECT_ROOT) / "public" / "data"
     monkeypatch.setattr(
         mlag, "_resolve_live_public_data_dir", lambda: live
     )

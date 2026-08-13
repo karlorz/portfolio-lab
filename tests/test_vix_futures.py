@@ -82,7 +82,6 @@ class TestVIXTermStructureFieldValidation:
     def test_defaults_not_required(self):
         """Simpler default check: no field has a default value set."""
         flds = fields(VIXTermStructure)
-        has_default = [f for f in flds if f.default is not None or f.default_factory is not None]
         # Actually, dataclasses.MISSING means no default.  Check via dataclasses internal.
         from dataclasses import MISSING
 

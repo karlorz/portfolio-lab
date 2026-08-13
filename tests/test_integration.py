@@ -30,7 +30,6 @@ from src.rebalancing.smart_rebalancer import (
 def _isolate_smart_rebalance_state(tmp_path, monkeypatch):
     """Do not load host data/smart_rebalance_state.json into unit tests."""
     # Force empty ephemeral state for every SmartRebalanceGate / controller
-    state = tmp_path / "smart_rebalance_state.json"
     monkeypatch.setattr(
         "src.rebalancing.smart_rebalancer.DATA_DIR",
         tmp_path,

@@ -382,7 +382,7 @@ class TestCollectSignalsRegimeGating:
     def test_skips_zero_weight_signals_in_crisis(self, tmp_path):
         voter = _make_voter(tmp_path)
         # In CRISIS regime, check if MSM is zero-weight
-        crisis_weights = Regime.CRISIS.value if hasattr(Regime.CRISIS, 'value') else None
+        _ = Regime.CRISIS.value if hasattr(Regime.CRISIS, 'value') else None
         # Just verify the function runs with a regime parameter
         with patch("src.signals.multi_speed_momentum.MultiSpeedMomentum", side_effect=ImportError), \
              patch("src.signals.cross_asset_relative_value.CrossAssetRVScanner", side_effect=ImportError), \

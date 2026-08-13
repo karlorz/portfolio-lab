@@ -358,7 +358,7 @@ class TestGetSignalSnapshot:
 
         mock_snapshot_cls = MagicMock()
         with patch.dict('sys.modules', {'src.signals.signal_snapshot': MagicMock(SignalSnapshot=mock_snapshot_cls)}):
-            result = adapter.get_signal_snapshot(["SPY"])
+            _ = adapter.get_signal_snapshot(["SPY"])
             # SignalSnapshot should be called with is_active=False
             call_kwargs = mock_snapshot_cls.call_args
             assert call_kwargs is not None
@@ -456,7 +456,7 @@ class TestGetIntegratorResultExtended:
         """get_tsmom_integrator_result should pass base_allocation through."""
         mod, _, _ = tsmom_module
         custom = {"SPY": 0.50, "GLD": 0.30, "TLT": 0.20}
-        with patch.object(mod.TSMOMSignalAdapter, 'get_portfolio_signals', return_value={}) as mock:
+        with patch.object(mod.TSMOMSignalAdapter, 'get_portfolio_signals', return_value={}):
             mod.get_tsmom_integrator_result(["SPY"], base_allocation=custom)
             # Adapter should have been created with custom base_allocation
             # We can't easily check the constructor arg, but the call should succeed

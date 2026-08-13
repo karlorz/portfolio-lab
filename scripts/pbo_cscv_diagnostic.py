@@ -74,7 +74,6 @@ def cscv_pbo(
     # Generate all C(S, S/2) combinations
     half = S // 2
     all_combos = list(itertools.combinations(range(S), half))
-    n_combos = len(all_combos)
 
     logits = []
     for is_indices in all_combos:

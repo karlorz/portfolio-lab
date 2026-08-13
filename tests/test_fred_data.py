@@ -274,7 +274,7 @@ class TestFredMdFetcherConstruction:
         """Construction should create cache table when use_cache=True."""
         db = tmp_path / "market.db"
         with patch("src.data.fred_data.MARKET_DB", db):
-            with patch("src.data.fred_data._Fred") as mc:
+            with patch("src.data.fred_data._Fred"):
                 FredMdFetcher(api_key="test", use_cache=True)
             conn = sqlite3.connect(str(db))
             tables = conn.execute(

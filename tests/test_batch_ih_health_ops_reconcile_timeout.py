@@ -260,7 +260,7 @@ def test_alt_data_freshness_hours_not_hardcoded_12(
 
     now = datetime(2026, 7, 23, 12, 0, 0, tzinfo=timezone.utc)
     # Age ~2h
-    older = now - timedelta(hours=2)
+    _ = now - timedelta(hours=2)
     monkeypatch.setattr(
         "src.signals.alternative_data_signal._utc_now_iso",
         lambda: now.isoformat(),

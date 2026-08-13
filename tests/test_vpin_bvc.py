@@ -295,7 +295,7 @@ class TestVPINEngine:
 
         base = datetime(2026, 5, 14, 9, 30)
         for i in range(10):
-            bucket = engine.process_bar(
+            _ = engine.process_bar(
                 symbol="SPY",
                 timestamp=base + timedelta(minutes=i),
                 o=100.0, h=102.0, l=99.0, c=100.5 + (i % 3) * 0.5,
@@ -2767,7 +2767,6 @@ class TestVPINEngineHistoryLifecycle:
             engine.process_bar(symbol, base + timedelta(minutes=i),
                                100.0, 102.0, 99.0, 101.0, v=20000)
             engine.calculate_vpin(symbol)
-        before = len(engine.vpin_history[symbol])
         engine.calculate_vpin(symbol)
         after = len(engine.vpin_history[symbol])
         # Should still be <= 500

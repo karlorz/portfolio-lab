@@ -234,116 +234,6 @@ class TestEngineInit:
 # Compute speed signal tests
 # ---------------------------------------------------------------------------
 
-class TestComputeSpeedSignal:
-    """Test compute_speed_signal method."""
-
-    def test_returns_speed_signal(self):
-        engine = _make_engine()
-        prices_df = _make_prices_df(n_days=400)
-        engine._prices_df = prices_df
-        sig = engine.compute_speed_signal('SPY', 'fast', 0.46, prices_df)
-        assert isinstance(sig, SpeedMomentumSignal)
-        assert sig.ticker == 'SPY'
-        assert sig.tier == 'fast'
-
-    def test_signal_bounded(self):
-        engine = _make_engine()
-        prices_df = _make_prices_df(n_days=400)
-        engine._prices_df = prices_df
-        for tier in ['fast', 'medium', 'slow']:
-            sig = engine.compute_speed_signal('SPY', tier, 0.46, prices_df)
-            if sig:
-                assert sig.signal in [-1, 0, 1]
-
-    def test_target_weight_bounded(self):
-        engine = _make_engine()
-        prices_df = _make_prices_df(n_days=400)
-        engine._prices_df = prices_df
-        sig = engine.compute_speed_signal('SPY', 'fast', 0.46, prices_df)
-        if sig:
-            assert MIN_WEIGHT <= sig.target_weight <= 1.0
-
-    def test_returns_none_missing_ticker(self):
-        engine = _make_engine()
-        prices_df = _make_prices_df(n_days=400)
-        sig = engine.compute_speed_signal('NONEXISTENT', 'fast', 0.46, prices_df)
-        assert sig is None
-
-    def test_returns_none_insufficient_data(self):
-        engine = _make_engine()
-        prices_df = _make_prices_df(n_days=30)
-        sig = engine.compute_speed_signal('SPY', 'slow', 0.46, prices_df)
-        assert sig is None  # slow needs 252+21+20 days
-
-    def test_realized_vol_positive(self):
-        engine = _make_engine()
-        prices_df = _make_prices_df(n_days=400)
-        sig = engine.compute_speed_signal('SPY', 'medium', 0.46, prices_df)
-        if sig:
-            assert sig.realized_vol > 0
-
-
-# ---------------------------------------------------------------------------
-# Compute ensemble signal tests
-# ---------------------------------------------------------------------------
-
-class TestComputeEnsembleSignal:
-    """Test compute_ensemble_signal method."""
-
-    def test_returns_ensemble_signal(self):
-        engine = _make_engine()
-        prices_df = _make_prices_df(n_days=400)
-        engine._prices_df = prices_df
-        sig = engine.compute_ensemble_signal('SPY', 0.46, prices_df)
-        assert isinstance(sig, EnsembleSignal)
-
-    def test_has_all_tiers(self):
-        engine = _make_engine()
-        prices_df = _make_prices_df(n_days=400)
-        engine._prices_df = prices_df
-        sig = engine.compute_ensemble_signal('SPY', 0.46, prices_df)
-        if sig:
-            assert sig.fast_signal.tier == 'fast'
-            assert sig.medium_signal.tier == 'medium'
-            assert sig.slow_signal.tier == 'slow'
-
-    def test_confidence_bounded(self):
-        engine = _make_engine()
-        prices_df = _make_prices_df(n_days=400)
-        engine._prices_df = prices_df
-        sig = engine.compute_ensemble_signal('SPY', 0.46, prices_df)
-        if sig:
-            assert 0.0 <= sig.ensemble_confidence <= 1.0
-
-    def test_full_agreement_confidence_one(self):
-        """All tiers same signal → confidence = 1.0."""
-        engine = _make_engine()
-        # Create prices with strong uptrend
-        np.random.seed(42)
-        n = 400
-        prices = [100.0]
-        for _ in range(n - 1):
-            prices.append(prices[-1] * 1.002)  # Steady uptrend
-        dates = pd.date_range(end=datetime.now(), periods=n, freq='B')
-        prices_df = pd.DataFrame({'SPY': prices}, index=dates)
-        engine._prices_df = prices_df
-        sig = engine.compute_ensemble_signal('SPY', 0.46, prices_df)
-        if sig:
-            # All tiers should agree on positive momentum
-            assert sig.ensemble_confidence == 1.0
-
-    def test_returns_none_for_missing_ticker(self):
-        engine = _make_engine()
-        prices_df = _make_prices_df(n_days=400)
-        engine._prices_df = prices_df
-        sig = engine.compute_ensemble_signal('NONEXISTENT', 0.46, prices_df)
-        assert sig is None
-
-
-# ---------------------------------------------------------------------------
-# Get current recommendation tests
-# ---------------------------------------------------------------------------
-
 class TestGetCurrentRecommendation:
     """Test get_current_recommendation method."""
 
@@ -1210,7 +1100,7 @@ class TestAllExports:
         import types
         from src.signals import multi_speed_momentum as msm
 
-        private_names = {name for name in dir(msm) if name.startswith('_')}
+        _ = {name for name in dir(msm) if name.startswith('_')}
         public_names = {
             name for name in dir(msm)
             if not name.startswith('_')
@@ -1505,7 +1395,7 @@ class TestCLIMain:
         from src.signals.multi_speed_momentum import main
         with patch('sys.argv', ['multi_speed_momentum', 'status']):
             main()
-        output = ' '.join(caplog.text)
+        _ = ' '.join(caplog.text)
         assert 'Multi-Speed Momentum' in caplog.text
         assert 'FAST TIER' in caplog.text
         assert 'MEDIUM TIER' in caplog.text

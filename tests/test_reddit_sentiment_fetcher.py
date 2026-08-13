@@ -219,7 +219,7 @@ class TestRedditSentimentFetcherInit:
     def test_init_creates_db(self, tmp_path):
         """Test that initialization creates SQLite tables"""
         db_path = tmp_path / "test.db"
-        fetcher = RedditSentimentFetcher(cache_db=db_path)
+        _ = RedditSentimentFetcher(cache_db=db_path)
 
         # Verify tables exist
         with sqlite3.connect(db_path) as conn:
@@ -470,7 +470,7 @@ class TestCacheOperations:
             conn.commit()
 
         # Should not return stale cache (needs fresh data_json structure)
-        cached = fetcher._get_cached_sentiment()
+        _ = fetcher._get_cached_sentiment()
         # Won't parse correctly due to incomplete data structure
 
     def test_cache_ttl_boundary(self, tmp_path):
@@ -1858,7 +1858,7 @@ class TestFetchSentimentBoundaries:
             RedditSentimentFetcher, "_fetch_subreddit",
             return_value=posts
         ):
-            result = fetcher.fetch_sentiment(force_refresh=True)
+            _ = fetcher.fetch_sentiment(force_refresh=True)
 
         # 1h = 5, 24h = 50, virality = 5 > (50/24)*2 = 4.17
         # Actually 5 > 4.17, so it's viral. Let me adjust to make it non-viral.

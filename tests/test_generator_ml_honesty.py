@@ -988,7 +988,6 @@ def test_configured_source_status_has_effective_and_active_weights():
         ],
     )
     # Force google_trends stale-like missing with disclosure
-    by = {r["source"]: r for r in statuses}
     # At least some configured rows exist
     assert len(statuses) >= 2
     for row in statuses:

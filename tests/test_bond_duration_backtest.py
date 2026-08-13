@@ -1259,7 +1259,7 @@ class TestNanInfEdgeCases:
         idx = MOMENTUM_LOOKBACK + 10
         bt._daily_prices[idx - MOMENTUM_LOOKBACK].tlt = float("inf")
         bt._daily_prices[idx].tlt = float("inf")
-        mom = bt._compute_tlt_60d_momentum(idx)
+        _ = bt._compute_tlt_60d_momentum(idx)
         # inf > 0 is True so guard doesn't trigger; inf/inf - 1 = nan
         # Just verify it doesn't crash
         assert True
@@ -1292,7 +1292,7 @@ class TestNanInfEdgeCases:
                          tlt=100.0, ief=100.0, shy=100.0)
         p1 = DailyPrices(date="2020-01-03", spy=float("inf"), gld=float("inf"),
                          tlt=float("inf"), ief=float("inf"), shy=float("inf"))
-        ret = bt._compute_portfolio_return(p0, p1, 0.46, 0.38, 0.16, 1.0, 0.0, 0.0)
+        _ = bt._compute_portfolio_return(p0, p1, 0.46, 0.38, 0.16, 1.0, 0.0, 0.0)
         # inf/100 - 1 = inf, weighted sum = inf. Should not crash.
         assert True
 

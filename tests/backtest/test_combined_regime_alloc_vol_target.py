@@ -228,7 +228,7 @@ class TestBacktestStrategy:
         tlt_prices = np.linspace(100, 120, 500)
         prices = {"SPY": spy_prices, "GLD": gld_prices, "TLT": tlt_prices}
 
-        without = backtest_strategy(
+        _ = backtest_strategy(
             prices, "No VT",
             allocation_map=REGIME_ALLOCATIONS, default_alloc=DEFAULT_ALLOCATION,
             apply_vol_target=False,

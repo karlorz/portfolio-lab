@@ -211,7 +211,7 @@ class TestEnsembleVoterGetBlendedWeights:
 
     def test_bandit_blend_increases_with_observations(self, tmp_path):
         voter = EnsembleVoter(data_path=tmp_path)
-        static = voter.get_blended_weights("NORMAL")
+        _ = voter.get_blended_weights("NORMAL")
 
         # Feed 252 bandit observations
         rng = np.random.RandomState(42)

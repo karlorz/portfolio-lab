@@ -696,7 +696,7 @@ class TestOverlayDashboardConstants:
 
     def test_total_overlays_constant(self):
         """Total overlays count should match the number of overlay dict fields."""
-        gen = OverlayDashboardGenerator()
+        _ = OverlayDashboardGenerator()
         from dataclasses import fields
         overlay_fields = [f for f in fields(OverlayDashboardData)
                          if f.type == dict]

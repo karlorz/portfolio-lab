@@ -69,7 +69,7 @@ def check(condition: bool, message: str, errors: list[str]) -> None:
 def audit(args: argparse.Namespace) -> int:
     errors: list[str] = []
 
-    home = Path(args.home).expanduser()
+    _ = Path(args.home).expanduser()
     hermes_home = Path(args.hermes_home).expanduser()
     skillwiki_env = Path(args.skillwiki_env).expanduser()
     finance_profile_home = hermes_home / "profiles" / FINANCE_PROFILE

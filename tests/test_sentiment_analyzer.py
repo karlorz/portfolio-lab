@@ -367,8 +367,8 @@ class TestAggregateSources:
 
     def test_history_accumulates(self):
         agg = SentimentAggregator(lookback_days=5)
-        r1 = agg.aggregate_sources(news_results=[self.make_result("bullish", 0.8)])
-        r2 = agg.aggregate_sources(news_results=[self.make_result("bullish", 0.8)])
+        _ = agg.aggregate_sources(news_results=[self.make_result("bullish", 0.8)])
+        _ = agg.aggregate_sources(news_results=[self.make_result("bullish", 0.8)])
         assert len(agg.history) == 2
 
     def test_rounded_outputs(self):
@@ -471,16 +471,6 @@ class TestSentimentAnalyzerPipeline:
         else:
             # Fallback path — verify the pipeline didn't crash
             assert pipe.analyzer is None
-
-
-class TestDemo:
-    """Demo function runs without error."""
-
-    def test_demo_runs(self):
-        result = demo()
-        assert result is not None
-        assert isinstance(result, AggregatedSentiment)
-        assert result.regime_signal in ("risk_on", "risk_off", "neutral", "extreme_risk_off")
 
 
 class TestEdgeCases:

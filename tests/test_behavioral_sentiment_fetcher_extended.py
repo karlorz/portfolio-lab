@@ -157,7 +157,7 @@ class TestConstantsCompleteness:
 
     def test_weights_property(self):
         """Verify WEIGHTS dictionary on a default fetcher instance."""
-        fetcher = BehavioralSentimentFetcher.__new__(BehavioralSentimentFetcher)
+        _ = BehavioralSentimentFetcher.__new__(BehavioralSentimentFetcher)
         # Simulate __init__ for the WEIGHTS class attribute
         weights = BehavioralSentimentFetcher.WEIGHTS
         assert isinstance(weights, dict)
@@ -1317,7 +1317,7 @@ class TestCliMainGuard:
     def test_cli_fetch_default(self, tmp_path, capsys):
         """Running with --fetch (or no args) prints snapshot."""
         db = tmp_path / "test.db"
-        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        _ = BehavioralSentimentFetcher(cache_db=db)
 
         # Build a fixed snapshot for predictable output
         snap = BehavioralSentimentSnapshot(
@@ -1401,7 +1401,7 @@ class TestCliMainGuard:
     def test_cli_history(self, tmp_path, capsys):
         """Running with --history 30 prints history records."""
         db = tmp_path / "test.db"
-        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        _ = BehavioralSentimentFetcher(cache_db=db)
 
         # Simulate __main__ history output
         history = [{"timestamp": "2026-05-24T12:00:00", "composite_score": 0.5, "signal_type": "greed"}]
@@ -1544,8 +1544,8 @@ class TestInitCache:
     def test_init_cache_idempotent(self, tmp_path):
         """Calling _init_cache twice doesn't fail."""
         db = tmp_path / "test.db"
-        fetcher1 = BehavioralSentimentFetcher(cache_db=db)
-        fetcher2 = BehavioralSentimentFetcher(cache_db=db)  # Should not raise
+        _ = BehavioralSentimentFetcher(cache_db=db)
+        _ = BehavioralSentimentFetcher(cache_db=db)  # Should not raise
 
     def test_init_cache_with_existing_data(self, tmp_path):
         """Initializing with an existing database that has data."""
@@ -1569,7 +1569,7 @@ class TestInitCache:
         conn.commit()
         conn.close()
         # Now init should work without data loss
-        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        _ = BehavioralSentimentFetcher(cache_db=db)
         with sqlite3.connect(db) as conn:
             count = conn.execute("SELECT COUNT(*) FROM behavioral_sentiment_cache").fetchone()[0]
             assert count == 1  # Data preserved
@@ -1618,7 +1618,6 @@ class TestRedditIntegration:
                     # First call logs
                     fetcher._estimate_social_intensity()
                     assert caplog.records
-                    first_count = len(caplog.records)
                     # Second call should not log again
                     fetcher._estimate_social_intensity()
                     # Check the warning count stayed the same

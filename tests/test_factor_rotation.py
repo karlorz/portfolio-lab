@@ -1727,7 +1727,6 @@ class TestEvaluateEmptyEdgeCases:
     def test_evaluate_with_only_one_factor_available(self):
         """Only one symbol has data, rest return None."""
         engine = FactorMomentumEngine()
-        real_fetch = engine._fetch_price_data
 
         def mock_fetch(sym, days=300):
             if sym == "SPY":
@@ -2235,7 +2234,6 @@ class TestMLEvaluateBoundaries:
         """ML enhanced runs even when SPY is not in factor_scores."""
         engine = _make_engine_with_mocked_db()
         # Force only non-SPY symbols
-        original_fetch = engine._fetch_price_data
         def no_spy_fetch(sym, days=300):
             if sym == "SPY" or sym == "^VIX":
                 return []

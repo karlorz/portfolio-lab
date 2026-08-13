@@ -1144,7 +1144,6 @@ class TestNumericStability:
         integrator = RegimeSentimentIntegrator()
         sentiment = _make_mock_sentiment("risk_on", 0.8)
         signal = integrator.combine_signals("expansion", 0.7, sentiment)
-        score_str = f"{signal.combined_score:.10f}"
         # Verify precision by checking roundtrip
         assert signal.combined_score == round(signal.combined_score, 4)
 

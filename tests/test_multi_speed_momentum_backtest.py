@@ -270,21 +270,6 @@ class TestMultiSpeedMomentumBacktester:
             assert isinstance(dr.gld_return, float)
             assert isinstance(dr.tlt_return, float)
 
-    def test_load_data_honors_explicit_data_path(self, tmp_path):
-        """Explicit temporary price files should not be ignored."""
-        path = tmp_path / "prices.json"
-        path.write_text(json.dumps({
-            "SPY": [{"d": "2020-01-02", "p": 100.0}, {"d": "2020-01-03", "p": 101.0}],
-            "GLD": [{"d": "2020-01-02", "p": 50.0}, {"d": "2020-01-03", "p": 51.0}],
-            "TLT": [{"d": "2020-01-02", "p": 80.0}, {"d": "2020-01-03", "p": 79.0}],
-        }))
-        bt = MultiSpeedMomentumBacktester()
-
-        assert bt.load_data(str(path)) is True
-
-        assert len(bt.data) == 1
-        assert bt.prices_raw["SPY"][0]["p"] == 100.0
-
     def test_get_prices_slice_uses_loaded_indexes(self):
         """Slice lookup should use built indexes instead of scanning every raw row."""
 

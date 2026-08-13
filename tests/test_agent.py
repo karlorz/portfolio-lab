@@ -192,7 +192,6 @@ class TestCheckTriggers:
         agent.conn.close()
 
     def test_regime_trigger_found_and_consumed(self, patched_paths):
-        tmp_path = patched_paths
         trigger_data = {"regime": "crisis", "vix": 35.0}
         trigger_file = agent_module.DATA_DIR / ".regime_trigger"
         with open(trigger_file, 'w') as f:
@@ -210,7 +209,6 @@ class TestCheckTriggers:
         agent.conn.close()
 
     def test_pending_work_renamed_to_in_progress(self, patched_paths):
-        tmp_path = patched_paths
         work_data = {"task": "analysis", "priority": "high"}
         pending = agent_module.WORK_DIR / "pending_work.json"
         with open(pending, 'w') as f:
@@ -228,7 +226,6 @@ class TestCheckTriggers:
         agent.conn.close()
 
     def test_non_pending_work_ignored(self, patched_paths):
-        tmp_path = patched_paths
         done = agent_module.WORK_DIR / "done_work.json"
         with open(done, 'w') as f:
             json.dump({"task": "done"}, f)
@@ -240,7 +237,6 @@ class TestCheckTriggers:
         agent.conn.close()
 
     def test_both_triggers_returned(self, patched_paths):
-        tmp_path = patched_paths
         # Regime trigger
         with open(agent_module.DATA_DIR / ".regime_trigger", 'w') as f:
             json.dump({"regime": "vol_spike"}, f)
@@ -254,7 +250,6 @@ class TestCheckTriggers:
         agent.conn.close()
 
     def test_malformed_regime_trigger_raises(self, patched_paths):
-        tmp_path = patched_paths
         trigger_file = agent_module.DATA_DIR / ".regime_trigger"
         with open(trigger_file, 'w') as f:
             f.write("NOT JSON {{{")
@@ -265,7 +260,6 @@ class TestCheckTriggers:
         agent.conn.close()
 
     def test_empty_pending_files(self, patched_paths):
-        tmp_path = patched_paths
         pending = agent_module.WORK_DIR / "pending_empty.json"
         with open(pending, 'w') as f:
             f.write("")
@@ -1060,7 +1054,7 @@ class TestLogging:
         monkeypatch.setattr(agent_module, "DB_PATH", seeded_db)
         agent = ResearchAgent()
         with caplog.at_level("INFO"):
-            summary = agent.run_daily_summary()
+            _ = agent.run_daily_summary()
 
         assert "Daily summary" in caplog.text
         agent.conn.close()

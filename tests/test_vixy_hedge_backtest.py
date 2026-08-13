@@ -496,7 +496,7 @@ class TestWalkForwardVIXYBacktester:
         # idx=4: only 5 prices -> 4 returns -> insufficient (<5) -> 18.0
         assert bt._compute_vix_proxy(4) == 18.0
         # idx=5: 6 prices -> 5 returns -> sufficient -> real computation
-        vix = bt._compute_vix_proxy(5)
+        _ = bt._compute_vix_proxy(5)
 
     def test_compute_vix_proxy_stable_output(self):
         """VIX proxy should produce deterministic output with synthetic data."""

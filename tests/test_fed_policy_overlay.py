@@ -290,7 +290,7 @@ class TestFedPolicyOverlay:
             'DGS2': pd.DataFrame({'date': dates, 'value': [3.0] * 30}),
             'T10YIE': pd.DataFrame({'date': dates, 'value': [2.0] * 30}),
         }
-        result = overlay.detect_regime()
+        _ = overlay.detect_regime()
         assert overlay.current_regime is not None
 
     def test_get_allocation_recommendation(self):
@@ -690,7 +690,7 @@ class TestFetchAllFredData:
         })
 
         with patch('src.signals.fed_policy_overlay.fetch_fred_series', return_value=mock_df) as mock_fetch:
-            result = fetch_all_fred_data(cache_path=cache_file)
+            _ = fetch_all_fred_data(cache_path=cache_file)
             assert mock_fetch.call_count >= 1
             assert cache_file.exists()
 
@@ -1033,7 +1033,7 @@ class TestFedPolicyOverlayMore:
 
         with patch('src.signals.fed_policy_overlay.fetch_all_fred_data') as mock_fetch:
             mock_fetch.return_value = {}
-            result = overlay.fetch_data(force_refresh=True)
+            _ = overlay.fetch_data(force_refresh=True)
             mock_fetch.assert_called_once_with(overlay.cache_path, True)
 
 

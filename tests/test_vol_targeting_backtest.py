@@ -316,7 +316,7 @@ class TestRegimeVolTargetBacktest:
             max_leverage=1.5,
         )
 
-        d = result.__dict__ if hasattr(result, '__dict__') else {}
+        _ = result.__dict__ if hasattr(result, '__dict__') else {}
         # Should have key fields
         assert "static_sharpe" in str(result) or hasattr(result, 'static_sharpe')
 

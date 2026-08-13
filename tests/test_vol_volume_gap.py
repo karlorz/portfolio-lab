@@ -297,7 +297,7 @@ class TestEndToEnd:
             "features": {"daily_return": 0.01, "volume_anomaly": 1.0, "return_vol_ratio": 1.2, "regime": "trend_up", "confidence": 0.7},
             "timestamp": "2026-05-16T10:30:00",
         }
-        with pytest.MonkeyPatch.context() as mp:
+        with pytest.MonkeyPatch.context():
             import tempfile
             tmpdir = tempfile.mkdtemp()
             state_file = Path(tmpdir) / "test_state.json"
@@ -407,7 +407,6 @@ class TestEdgeCases:
         """A 2% return in a low-vol regime should still be HIGH_VOL at large threshold."""
         # Create data with very high volatility first, then low volatility last
         rng = np.random.RandomState(42)
-        n_total = 80
         # First 60 days: high vol (2% daily)
         high_vol_returns = rng.randn(60) * 0.02
         # Next 20 days: low vol (0.1% daily)

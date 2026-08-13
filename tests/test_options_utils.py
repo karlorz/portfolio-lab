@@ -541,7 +541,7 @@ class TestOptionsChainCache:
     """OptionsChainCache sqlite-based caching."""
 
     def test_init_creates_cache_dir(self, tmp_path):
-        cache = OptionsChainCache(cache_dir=str(tmp_path))
+        _ = OptionsChainCache(cache_dir=str(tmp_path))
         assert tmp_path.exists()
 
     def test_get_history_empty(self, tmp_path):
@@ -1209,7 +1209,7 @@ class TestOptionsChainFetcherMore:
     def test_init_no_credentials_warning(self, caplog):
         with patch.dict(os.environ, {"ALPACA_API_KEY": "", "ALPACA_SECRET_KEY": ""}, clear=True):
             caplog.set_level(logging.WARNING)
-            fetcher = OptionsChainFetcher()
+            _ = OptionsChainFetcher()
             assert "No Alpaca API credentials" in caplog.text
 
     def test_cache_chain_empty_does_not_crash(self, tmp_path):
@@ -1256,7 +1256,7 @@ class TestOptionsChainFetcherMore:
             with patch.object(fetcher, "_generate_simulated_chain") as mock_gen:
                 mock_gen.return_value = OptionsChain(underlying="SPY", quotes=[])
                 caplog.set_level(logging.ERROR)
-                result = asyncio.run(fetcher.fetch_0dte_chain("SPY"))
+                _ = asyncio.run(fetcher.fetch_0dte_chain("SPY"))
 
         assert "falling back" in caplog.text
 

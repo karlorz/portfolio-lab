@@ -148,7 +148,6 @@ def simulate_unified_overlay(spy_returns: np.ndarray, tlt_returns: np.ndarray,
         cal_sig = 0.05  # small constant positive
 
         # Gold hedge: positive in crisis
-        r_gld = gld_returns[window]
         spy_dd = (np.cumprod(1 + r_spy)[-1] / np.maximum.accumulate(
             np.cumprod(1 + r_spy))[-1]) - 1
         gold_sig = np.clip(abs(spy_dd) * 2, 0, 0.2) if spy_dd < -0.03 else 0.0
@@ -245,7 +244,7 @@ def analyze_recovery_regime(spy_returns: np.ndarray, regime_labels: list) -> dic
     for i, regime in enumerate(regime_labels):
         if regime == "recovery" and prev_regime is not None and prev_regime != "recovery":
             # Entry day statistics
-            entry_window = spy_returns[max(0, i - 5):i + 6]
+            _ = spy_returns[max(0, i - 5):i + 6]
             recovery_entries.append({
                 "day": i,
                 "prev_regime": prev_regime,
@@ -297,7 +296,7 @@ def verify_low_vol_detection(spy_returns: np.ndarray) -> dict:
         mom_20d = np.sum(window)
         cum_ret = np.cumprod(1 + spy_returns[:i + 1])
         running_max = np.maximum.accumulate(cum_ret)
-        drawdown = (cum_ret[-1] / running_max[-1]) - 1
+        _ = (cum_ret[-1] / running_max[-1]) - 1
 
         if vol_20d < LOW_VOL_VOL_THRESHOLD and mom_20d > LOW_VOL_MOM_THRESHOLD:
             low_vol_days += 1
@@ -420,7 +419,7 @@ def main():
     def recommend_gates(results: dict, signal_name: str) -> list:
         """Determine if gates are needed based on regime Sharpe analysis."""
         recommendations = []
-        overall = results.get("overall", {}).get("sharpe", 0)
+        _ = results.get("overall", {}).get("sharpe", 0)
         for regime, info in results.items():
             if regime == "overall":
                 continue

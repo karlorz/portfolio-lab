@@ -402,7 +402,6 @@ class TestRunBacktest:
         bt.dates = dates
         bt.prices = prices
         result = bt.run_backtest()
-        initial = result.extras["initial_capital"]
         final = result.extras["final_value"]
         # Final value should be a reasonable number
         assert final > 0

@@ -423,7 +423,7 @@ class TestValidateSignal:
     def test_invalid_data_returns_original(self):
         # Pass a non-dict to regime which expects specific types
         data = {"regime": 42, "vix": "not-a-number"}  # Both types OK
-        result = validate_signal("regime", data)
+        _ = validate_signal("regime", data)
         # These types are actually fine for Pydantic (coercible),
         # so this should pass. Let's test with truly bad data:
         pass
@@ -488,7 +488,7 @@ class TestValidateSignal:
         the original data should be returned unchanged, not the validated model."""
         # GarchCvarSignal has garch_active as bool — non-bool
         data = {"cvar_95": -0.01, "garch_active": "not-a-bool"}
-        result = validate_signal("garch_cvar", data)
+        _ = validate_signal("garch_cvar", data)
         # Pydantic v2 auto-coerces "not-a-bool" to True... so this won't fail.
         # Use something that truly fails: a non-dict already tested above.
         # For a real validation failure that Pydantic won't coerce, try a
@@ -613,6 +613,6 @@ class TestValidateAllSignals:
     def test_original_data_not_mutated(self):
         data = {"regime": {"regime": "normal"}}
         original_copy = dict(data)
-        result = validate_all_signals(data)
+        _ = validate_all_signals(data)
         # Original should remain unchanged
         assert data == original_copy

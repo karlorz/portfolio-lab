@@ -159,7 +159,7 @@ class TestBehavioralSentimentSnapshot:
 class TestFetcherInit:
     def test_init_creates_cache_table(self, tmp_path):
         db = tmp_path / "test.db"
-        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        _ = BehavioralSentimentFetcher(cache_db=db)
         # Table should exist
         conn = sqlite3.connect(db)
         cursor = conn.execute(
@@ -1555,7 +1555,7 @@ class TestFetchSnapshotIntegration:
         with patch.object(fetcher, "_fetch_vix_data", return_value=(22.0, 20.0)):
             with patch.object(fetcher, "_fetch_skew_index", return_value=140.0):
                 with patch.object(fetcher, "_fetch_put_call_ratio", return_value=0.70):
-                    snap = fetcher.fetch_snapshot(use_cache=False)
+                    _ = fetcher.fetch_snapshot(use_cache=False)
         # Verify it was saved
         with sqlite3.connect(db) as conn:
             count = conn.execute("SELECT COUNT(*) FROM behavioral_sentiment_cache").fetchone()[0]

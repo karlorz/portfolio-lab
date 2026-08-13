@@ -937,7 +937,6 @@ class TestCalculateOrdersExtended:
         p.positions = {
             "SPY": _make_position(shares=20, current_price=460, value=9200),
         }
-        total = 50000 + 9200
         # SPY weight = 9200/59200 = 0.155, drift = |0.46 - 0.155| = 0.305 > 0.10
         orders = p.calculate_orders(BASE_ALLOCATION, {"SPY": 460})
         assert len(orders) == 1
@@ -960,7 +959,7 @@ class TestExecuteOrdersExtended:
         ]
         prices = {"SPY": 460}
         before_cash = p.cash
-        executed = p.execute_orders(orders, prices, slippage=0.0)
+        _ = p.execute_orders(orders, prices, slippage=0.0)
         # SPY not in positions → sell skipped → cash unchanged
         assert "SPY" not in p.positions
         assert p.cash == before_cash
@@ -985,7 +984,7 @@ class TestExecuteOrdersExtended:
         ]
         prices = {"SPY": 460}
         before_cash = p.cash
-        executed = p.execute_orders(orders, prices, slippage=0.0)
+        _ = p.execute_orders(orders, prices, slippage=0.0)
         # Sell condition: symbol in positions AND shares >= fill_shares
         # 5 >= 100 → False → sell skipped → shares and cash unchanged
         assert p.positions["SPY"].shares == 5

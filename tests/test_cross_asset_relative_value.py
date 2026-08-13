@@ -258,7 +258,7 @@ class TestStatePersistence:
 
     def test_state_updates_on_scan(self, scanner):
         scanner._load_price_data()
-        reading = scanner.scan_pair("spy_qqq")
+        _ = scanner.scan_pair("spy_qqq")
         state = scanner._load_state()
         assert "spy_qqq" in state
         assert "last_zscore" in state["spy_qqq"]

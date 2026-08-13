@@ -41,7 +41,7 @@ class TestModuleExports:
         }
         # module-level __all__ is not declared, so we check names that
         # start with an uppercase letter (public API)
-        public_names = {
+        _ = {
             name for name in dir(self)
             if name.startswith("Test")
         }

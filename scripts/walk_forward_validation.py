@@ -271,8 +271,6 @@ def run_walk_forward(
     tscv = TimeSeriesSplit(n_splits=n_splits, test_size=test_size, gap=gap)
 
     window_results = []
-    all_train_idx = []
-    all_test_idx = []
 
     for split_idx, (train_idx, test_idx) in enumerate(tscv.split(prices)):
         logger.info(
