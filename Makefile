@@ -185,7 +185,7 @@ test:
 		> $(DATA_DIR)/test_last_exit.json 2>/dev/null || true; \
 	exit $$EXIT
 
-.PHONY: test test-ml test-fast test-gate test-unit test-generator test-integration test-ml-extract test-ts
+.PHONY: test test-ml test-fast test-gate test-unit test-generator test-integration test-ml-extract test-ts test-browser
 
 # S18 path segments (generator is ~6.6k lines; *integration* modules host-touch).
 # test-unit = full safe suite minus those files (still ~15k tests — not a fast gate).
@@ -211,6 +211,14 @@ test-gate: test-fast
 test-ts:
 	@echo "=== Test Suite (ts): $$(date) ==="; \
 	bun test tests/ts/; \
+	exit $$?
+
+# Dashboard browser presentation contract (playwright, tests/browser/). Local
+# parity with CI-free suite; first-time prerequisite: install the pinned
+# chromium headless shell via `bunx --bun playwright install chromium-headless-shell`.
+test-browser:
+	@echo "=== Test Suite (browser): $$(date) ==="; \
+	bun run test:dashboard-browser; \
 	exit $$?
 
 test-fast:
