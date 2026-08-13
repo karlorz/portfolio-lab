@@ -24,6 +24,7 @@ import numpy as np
 
 from src.backtest.metrics import compute_metrics_from_returns, save_results_json
 
+from src.paths import BASE_ALLOCATION, DATA_DIR
 logger = logging.getLogger(__name__)
 
 
@@ -70,7 +71,6 @@ class DBCSweepResult:
         d["rows"] = [r.to_dict() for r in self.rows]
         return d
 
-from src.paths import BASE_ALLOCATION, DATA_DIR
 
 
 __all__ = ['DBCSweepRow', 'DBCSweepResult', 'DBCWeightSweep', 'run_dbc_sweep']

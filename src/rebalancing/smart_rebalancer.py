@@ -354,7 +354,7 @@ class CostBudgetTracker:
         return self.ytd_total_pct >= self.warning_threshold_pct
 
 
-from src.costs.etf_cost_table import (
+from src.costs.etf_cost_table import (  # noqa: E402  # mid-file: cycle-avoidance (cost table imports backtest metrics)
     ETF_COST_BPS,
     DEFAULT_COST_BPS as _DEFAULT_COST_BPS,
     get_cost_bps as _get_etf_cost_bps,

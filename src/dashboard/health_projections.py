@@ -729,7 +729,8 @@ def _apply_kill_to_smart_rebalance(
     try:
         from src.dashboard.kill_authority import is_kill_execution_blocked
     except ImportError:
-        is_kill_execution_blocked = lambda p: bool(isinstance(p, dict) and p.get("enabled"))
+        def is_kill_execution_blocked(p):
+            return bool(isinstance(p, dict) and p.get("enabled"))
 
     if not is_kill_execution_blocked(kill_payload):
         # Explicit clear fields when kill is off (stable schema for consumers)

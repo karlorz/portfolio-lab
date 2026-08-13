@@ -21,8 +21,8 @@ from src.utils.metrics_io import (
     save_results_json,
 )
 
-logger = logging.getLogger(__name__)
 from src.costs.etf_cost_table import ETF_COST_BPS as _ETF_COST_BPS
+logger = logging.getLogger(__name__)
 
 
 __all__ = ['BacktestConfig', 'DailyPrices', 'BacktestResult', 'BacktestMetrics', 'OverlayMetrics', 'CrisisReturns', 'compute_metrics', 'compute_one_way_turnover', 'build_profitability_evidence', 'compute_crisis_returns', 'print_metrics_report', 'compute_deflated_sharpe_ratio', 'build_data_snapshot_provenance', 'require_data_snapshot_provenance', 'save_results_json']

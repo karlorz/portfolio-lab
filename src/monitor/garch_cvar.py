@@ -25,6 +25,10 @@ import warnings
 from typing import Optional, Tuple, Dict, Literal
 from dataclasses import dataclass
 
+from src.monitor.cvar_metrics import (
+    CVaRMetrics, calculate_var, calculate_cvar, 
+    get_tail_severity, calculate_volatility
+)
 logger = logging.getLogger(__name__)
 
 # Try to import arch, fallback gracefully if not available
@@ -36,10 +40,6 @@ except ImportError:
     warnings.warn("arch library not available. GARCH-CVaR will fallback to historical CVaR.")
 
 
-from src.monitor.cvar_metrics import (
-    CVaRMetrics, calculate_var, calculate_cvar, 
-    get_tail_severity, calculate_volatility
-)
 
 __all__ = [
     'GARCHParams', 'GARCHCVaRMetrics', 'GARCHFilteredCVaR',

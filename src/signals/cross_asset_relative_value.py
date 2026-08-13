@@ -32,11 +32,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
-logger = logging.getLogger(__name__)
-
 from src.paths import DATA_DIR
 from src.backtest.metrics import save_results_json
 from src.data.price_cache import get_prices_df
+logger = logging.getLogger(__name__)
+
 
 
 __all__ = ['ZSCORE_ENTRY', 'ZSCORE_EXIT', 'LOOKBACK', 'MIN_HISTORY', 'PairReading', 'CrossAssetRVSignal', 'CrossAssetRVScanner', 'print_scan']

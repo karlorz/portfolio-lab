@@ -521,8 +521,8 @@ class TwoStageKMeansRegime:
         """Return portfolio-lab regime name for each sample."""
         if self._result is None:
             raise ValueError("Model not fitted. Call fit() first.")
-        return [self._result.regime_map.get(l, f"Regime_{l}")
-                for l in self._result.combined_labels]
+        return [self._result.regime_map.get(lab, f"Regime_{lab}")
+                for lab in self._result.combined_labels]
 
     def get_signal(self, latest_index: int = -1) -> dict:
         """Return a FredSignal-compatible dict for the specified sample.

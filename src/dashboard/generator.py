@@ -767,9 +767,9 @@ class DashboardGenerator(_EnsembleSectionsMixin, _HedgeSectionsMixin, _RegimeAut
                     # lines to form a 3-day session series after filters.
                     if len(tail_lines) >= 3:
                         raw_entries = []
-                        for l in tail_lines:
+                        for line in tail_lines:
                             try:
-                                raw_entries.append(json.loads(l))
+                                raw_entries.append(json.loads(line))
                             except json.JSONDecodeError:
                                 continue
                         daily_entries = self._deduplicate_performance_entries_by_date(

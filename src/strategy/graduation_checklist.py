@@ -25,10 +25,10 @@ from typing import Any, Dict, Optional, NamedTuple
 
 import numpy as np
 
-logger = logging.getLogger(__name__)
-
 from src.paths import DATA_DIR, PUBLIC_DATA_DIR, SIGNALS_JSON
 from src.backtest.metrics import save_results_json
+logger = logging.getLogger(__name__)
+
 
 
 PERFORMANCE_LOG_TAIL_LINES = int(os.environ.get("GRADUATION_PERFORMANCE_LOG_TAIL_LINES", "500"))

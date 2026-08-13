@@ -24,6 +24,7 @@ from src.paths import DATA_DIR, MARKET_DB, sqlite_connect
 from src.backtest.metrics import save_results_json
 
 
+from src.signals.signal_source import SignalSource  # canonical, consolidated May 2026
 __all__ = [
     'SignalSource',
     'SignalHealthStatus',
@@ -45,7 +46,6 @@ logger = logging.getLogger(__name__)
 DB_PATH = MARKET_DB
 STATE_PATH = DATA_DIR / ".signal_health_state.json"
 
-from src.signals.signal_source import SignalSource  # canonical, consolidated May 2026
 
 class SignalHealthStatus(Enum):
     """Health status classification.

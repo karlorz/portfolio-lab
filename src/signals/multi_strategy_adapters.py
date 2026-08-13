@@ -20,13 +20,13 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional
 
-logger = logging.getLogger(__name__)
-
 from src.signals.integrator import SignalSourceResult
 from src.signals.sample_counts import get_live_sample_count
 from src.signals.multi_speed_momentum import MultiSpeedMomentum, SPEED_TIERS, DEFAULT_BASE_ALLOCATION
 from src.strategy.risk_parity_weight_overlay import RiskParityWeightOverlay, DEFAULT_BASE as RP_DEFAULT
 from src.strategy.network_momentum_leadlag import NetworkMomentumLeadLag, DEFAULT_BASE_ALLOCATION as NM_DEFAULT
+logger = logging.getLogger(__name__)
+
 
 
 

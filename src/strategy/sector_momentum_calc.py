@@ -13,8 +13,8 @@ import numpy as np
 
 from src.paths import HISTORICAL_JSON, BASE_ALLOCATION
 
-logger = logging.getLogger(__name__)
 from src.utils import safe_get
+logger = logging.getLogger(__name__)
 
 
 __all__ = ['SECTOR_ETF_DEFINITIONS', 'SECTOR_ETF_MAP', 'REGIME_SECTOR_PREFERENCES', 'SectorMomentumCalculator', 'generate_sector_signals']

@@ -329,7 +329,7 @@ def compute_vol_target_backtest(
     mean_leverage = round(float(np.mean(leverage_history)), 4)
     max_lev = round(float(np.max(leverage_history)), 4)
     above_1_pct = round(
-        float(sum(1 for l in leverage_history if l > 1.01) / len(leverage_history)), 4
+        float(sum(1 for lev in leverage_history if lev > 1.01) / len(leverage_history)), 4
     )
 
     # Summary
@@ -699,7 +699,7 @@ def compute_regime_conditional_vol_target_backtest(
     mean_leverage = round(float(np.mean(leverage_history)), 4)
     max_lev = round(float(np.max(leverage_history)), 4)
     above_1_pct = round(
-        float(sum(1 for l in leverage_history if l > 1.01) / len(leverage_history)), 4
+        float(sum(1 for lev in leverage_history if lev > 1.01) / len(leverage_history)), 4
     )
 
     # Per-regime breakdown

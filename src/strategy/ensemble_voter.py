@@ -107,12 +107,12 @@ def _get_health_tracker():
 
 
 
-from src.signals.signal_source import SignalSource  # canonical, consolidated May 2026
+from src.signals.signal_source import SignalSource  # noqa: E402  # canonical, consolidated May 2026 (lazy init above)
 
 # Re-export regime spec (A1-CYCLE-BREAK s2): keep ensemble_voter.{Regime,
 # SignalReading, REGIME_WEIGHTS, _load_regime_weights, _build_hardcoded_weights}
 # attribute targets alive for patch/read consumers (test_batch_cs_ensemble_weights_stamp.py:66).
-from src.signals.regime_spec import (  # noqa: F401
+from src.signals.regime_spec import (  # noqa: E402, F401
     Regime,
     SignalReading,
     REGIME_WEIGHTS,

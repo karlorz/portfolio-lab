@@ -29,10 +29,10 @@ from datetime import datetime
 from typing import Optional, Tuple
 import numpy as np
 
-logger = logging.getLogger(__name__)
-
 from src.paths import DATA_DIR, MARKET_DB, PRICES_JSON
 from src.backtest.metrics import save_results_json
+logger = logging.getLogger(__name__)
+
 
 
 __all__ = ['SkewRegime', 'SkewMetrics', 'SkewState', 'SkewEngine', 'cli_compute', 'cli_summary', 'cli_adjust']

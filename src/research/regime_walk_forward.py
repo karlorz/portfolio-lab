@@ -203,7 +203,7 @@ def _check_economic_coherence(regime_series: pd.Series) -> Dict[str, bool]:
             continue
 
         # At least 30% of crisis period should be CRISIS or HIGH_VOL
-        crisis_count = sum(1 for l in period_labels if l in ("CRISIS", "HIGH_VOL"))
+        crisis_count = sum(1 for lab in period_labels if lab in ("CRISIS", "HIGH_VOL"))
         coherence[name] = crisis_count / len(period_labels) >= 0.3
 
     return coherence

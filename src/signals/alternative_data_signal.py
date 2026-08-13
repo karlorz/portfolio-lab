@@ -29,12 +29,12 @@ from typing import Any, Dict, List, Optional
 from src.paths import PRICES_JSON, SIGNALS_DIR, DATA_DIR
 
 
-def _utc_now_iso() -> str:
-    """UTC ISO timestamp so staleness parsers (naive→UTC) never see local wall clock."""
-    return datetime.now(timezone.utc).isoformat()
 from src.backtest.metrics import save_results_json
 from src.data.price_cache import get_prices
 from src.data.crypto_fg import get_crypto_fg
+def _utc_now_iso() -> str:
+    """UTC ISO timestamp so staleness parsers (naive→UTC) never see local wall clock."""
+    return datetime.now(timezone.utc).isoformat()
 
 
 __all__ = ['SYMBOLS_REQUIRED', 'ComponentSignal', 'AlternativeDataComposite', 'EnsembleSignal', 'AlternativeDataSignalGenerator']

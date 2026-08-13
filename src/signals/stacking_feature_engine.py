@@ -33,6 +33,7 @@ from itertools import combinations
 from pathlib import Path
 
 
+from src.signals.signal_source import SignalSource  # canonical, consolidated May 2026
 logger = logging.getLogger(__name__)
 
 
@@ -53,7 +54,6 @@ __all__ = [
     'main',
 ]
 
-from src.signals.signal_source import SignalSource  # canonical, consolidated May 2026
 
 
 STACKING_SOURCE_ROSTER = tuple(SignalSource)

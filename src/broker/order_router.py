@@ -10,16 +10,16 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 from dataclasses import dataclass
 
-logger = logging.getLogger(__name__)
-
 from src.broker.alpaca import (
     AlpacaClient, OrderRequest, OrderSide, OrderType,
     PaperTradingManager, resolve_alpaca_market_session,
     resolve_unavailable_alpaca_market_session
 )
-
 from src.paths import MARKET_DB, SIGNALS_JSON, DATA_DIR, sqlite_connect
 from src.data.price_cache import get_prices
+logger = logging.getLogger(__name__)
+
+
 
 
 

@@ -25,11 +25,11 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-logger = logging.getLogger(__name__)
-
 from src.signals.tsmom_overlay import TSMOMOverlay, TSMOMSignal, DEFAULT_BASE_ALLOCATION
 from src.signals.integrator import SignalSourceResult
 from src.signals.sample_counts import get_live_sample_count
+logger = logging.getLogger(__name__)
+
 
 
 

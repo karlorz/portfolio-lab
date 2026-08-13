@@ -20,6 +20,8 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
+from src.backtest.metrics import save_results_json
+from src.paths import DATA_DIR, RISK_FREE_RATE
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -31,8 +33,6 @@ MAX_TURNOVER_PENALTY = 0.5           # max weight reduction (50%)
 MIN_SIGNAL_HISTORY = 5               # minimum history needed for computation
 DEFAULT_SIGNAL_COST = 0.0005         # assumed transaction cost per signal unit (5bps, median ETF cost)
 
-from src.backtest.metrics import save_results_json
-from src.paths import DATA_DIR, RISK_FREE_RATE
 
 DEFAULT_RISK_FREE_RATE = RISK_FREE_RATE / 100   # annual risk-free rate (paths.py stores as percent)
 

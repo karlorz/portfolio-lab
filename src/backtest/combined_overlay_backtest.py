@@ -360,9 +360,13 @@ class CombinedOverlayBacktest:
 
             # Normalize
             total = spy_w + gld_w + tlt_alloc + ief_alloc + shy_alloc + btc_w + eth_w
-            spy_w /= total; gld_w /= total; tlt_alloc /= total
-            ief_alloc /= total; shy_alloc /= total
-            btc_w /= total; eth_w /= total
+            spy_w /= total
+            gld_w /= total
+            tlt_alloc /= total
+            ief_alloc /= total
+            shy_alloc /= total
+            btc_w /= total
+            eth_w /= total
             current_weights = {
                 "SPY": spy_w,
                 "GLD": gld_w,

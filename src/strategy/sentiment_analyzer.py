@@ -18,13 +18,13 @@ from pathlib import Path
 from typing import List, Dict, Optional, Any
 from collections import deque
 
-logger = logging.getLogger(__name__)
 import numpy as np
-
 from src.backtest.metrics import save_results_json
 from src.paths import DATA_DIR
-
 from src.llm.sentiment_client import SentimentAnalyzer, SentimentResult
+logger = logging.getLogger(__name__)
+
+
 
 
 

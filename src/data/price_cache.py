@@ -58,7 +58,7 @@ def get_prices() -> Dict[str, Any]:
     return data
 
 
-def get_prices_df(symbols: Optional[List[str]] = None) -> "pandas.DataFrame":
+def get_prices_df(symbols: Optional[List[str]] = None) -> "pandas.DataFrame":  # noqa: F821  # function-local import pandas below (hot-path cost, intentional)
     """Return a pivoted DataFrame of close prices, cached by symbol subset.
 
     Converts the raw {symbol: [{d, p}, ...]} dict into a DataFrame with

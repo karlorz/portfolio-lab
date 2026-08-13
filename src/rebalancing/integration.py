@@ -30,7 +30,7 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-from .smart_rebalancer import (
+from .smart_rebalancer import (  # noqa: E402  # mid-file: avoids circular import at module load
     SmartRebalancingController,
     PortfolioSnapshot,
     MarketConditions,
@@ -124,7 +124,7 @@ class SmartRebalanceGate:
                     timestamp=row.Index if isinstance(row.Index, datetime) else datetime.now(),
                     o=getattr(row, 'open', 0),
                     h=getattr(row, 'high', 0),
-                    l=getattr(row, 'low', 0),
+                    low=getattr(row, 'low', 0),
                     c=getattr(row, 'close', 0),
                     v=getattr(row, 'volume', 0),
                 )

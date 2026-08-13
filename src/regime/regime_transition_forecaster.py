@@ -142,13 +142,13 @@ class RegimeTransitionForecaster:
         # Convert to string regime names
         if regime_map is not None:
             str_labels = []
-            for l in labels:
-                name = regime_map.get(int(l) if isinstance(l, (int, np.integer)) else l)
+            for label in labels:
+                name = regime_map.get(int(label) if isinstance(label, (int, np.integer)) else label)
                 if name is None:
-                    raise ValueError(f"Unknown regime label: {l}")
+                    raise ValueError(f"Unknown regime label: {label}")
                 str_labels.append(name)
         else:
-            str_labels = [str(l) for l in labels]
+            str_labels = [str(label) for label in labels]
 
         # Validate and normalize regime names (handle lowercase from classify_vix_regime)
         normalized = []

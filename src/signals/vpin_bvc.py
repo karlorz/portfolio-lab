@@ -120,12 +120,12 @@ class BVCCalculator:
         self.bars: List[BVCBar] = []
     
     def classify_bar(self, timestamp: datetime, o: float, h: float, 
-                     l: float, c: float, v: float) -> BVCBar:
+                     low: float, c: float, v: float) -> BVCBar:
         """Classify a single bar using BVC"""
-        if h == l:  # Avoid division by zero
+        if h == low:  # Avoid division by zero
             buy_volume = v * 0.5
         else:
-            buy_volume = v * (c - l) / (h - l)
+            buy_volume = v * (c - low) / (h - low)
         
         sell_volume = v - buy_volume
         
@@ -139,7 +139,7 @@ class BVCCalculator:
             timestamp=timestamp,
             open=o,
             high=h,
-            low=l,
+            low=low,
             close=c,
             volume=v,
             buy_volume=buy_volume,
@@ -203,7 +203,7 @@ class VPINEngine:
         }
     
     def process_bar(self, symbol: str, timestamp: datetime,
-                    o: float, h: float, l: float, c: float, 
+                    o: float, h: float, low: float, c: float, 
                     v: float) -> Optional[VPINBucket]:
         """
         Process a new bar and update VPIN buckets
@@ -211,7 +211,7 @@ class VPINEngine:
         """
         # Classify bar with BVC
         bvc = self.bvc_calcs[symbol]
-        bar = bvc.classify_bar(timestamp, o, h, l, c, v)
+        bar = bvc.classify_bar(timestamp, o, h, low, c, v)
         bvc.add_bar(bar)
         
         # Get or create current bucket
@@ -621,7 +621,7 @@ def backtest_vpin(symbols: List[str], days: int = 30) -> Dict[str, Any]:
                 timestamp=row.Index if isinstance(row.Index, datetime) else datetime.now(),
                 o=getattr(row, 'open', 0),
                 h=getattr(row, 'high', 0),
-                l=getattr(row, 'low', 0),
+                low=getattr(row, 'low', 0),
                 c=getattr(row, 'close', 0),
                 v=getattr(row, 'volume', 0)
             )

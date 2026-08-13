@@ -498,13 +498,17 @@ def main():
     i = 0
     while i < len(args):
         if args[i] == "--model" and i + 1 < len(args):
-            force_model = args[i + 1]; i += 2
+            force_model = args[i + 1]
+            i += 2
         elif args[i] == "--type" and i + 1 < len(args):
-            document_type = args[i + 1]; i += 2
+            document_type = args[i + 1]
+            i += 2
         elif args[i] == "--file" and i + 1 < len(args):
-            filepath = args[i + 1]; i += 2
+            filepath = args[i + 1]
+            i += 2
         else:
-            text = args[i]; i += 1
+            text = args[i]
+            i += 1
 
     if filepath:
         text = Path(filepath).read_text()
