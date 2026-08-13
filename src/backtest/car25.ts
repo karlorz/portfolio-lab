@@ -11,7 +11,7 @@
  * Companion metric: Correlation to SPY benchmark
  */
 
-import type { PriceData, PortfolioConfig } from './engine';
+import type { PriceData } from './engine';
 
 // Default simulation parameters
 const DEFAULT_SIMULATIONS = 1000;

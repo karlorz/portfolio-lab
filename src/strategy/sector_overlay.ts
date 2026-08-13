@@ -10,7 +10,6 @@ import {
   calculateAllSectorMomentum, 
   getTopSectors, 
   adjustForRegime,
-  SectorAllocation,
   SECTOR_ETF_MAP,
 } from './sector_momentum';
 

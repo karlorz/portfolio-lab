@@ -75,7 +75,6 @@ export function downsampleLTTB<T>(
     // Calculate next bucket boundaries
     const avgStart = Math.floor((i + 0) * bucketSize) + 1;
     const avgEnd = Math.floor((i + 1) * bucketSize) + 1;
-    const nextBucketStart = Math.min(avgEnd, data.length - 1);
 
     // Calculate average point in next bucket
     let avgX = 0;

@@ -164,7 +164,7 @@ export function calculateCapitalFreed(
  */
 export function simulateLeveragedReturn(
   underlyingDailyReturn: number,
-  underlyingAnnualVolatility: number,
+  _underlyingAnnualVolatility: number,
   etfMetadata: LeveragedETFMetadata,
   isTrending: boolean = false  // Trending markets have less decay
 ): number {
@@ -289,7 +289,7 @@ export const LEVERAGED_BACKTEST_SCENARIOS: LeveragedBacktestScenario[] = [
   {
     name: 'RiskParity_Levered',
     description: 'Heavy UBT weight for risk-parity style bond allocation',
-    allocationFn: (regime) => {
+    allocationFn: (_regime) => {
       // Risk parity: equal risk contribution → more bonds (levered)
       return { 
         tlt: 0, 

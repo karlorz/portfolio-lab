@@ -9,15 +9,13 @@
  */
 
 import { 
-  LeveragedETFMetadata, 
   LEVERAGED_ETF_REGISTRY,
   LeveragedDurationAllocation,
   simulateLeveragedReturn,
   calculateLeveragedDrag,
   LEVERAGED_BACKTEST_SCENARIOS,
   DurationRegime,
-  getBaseAllocation,
-  convertToLeveragedAllocation
+  getBaseAllocation
 } from '../utils/duration-signals';
 import { getDefaultRiskFreeRate } from './constants';
 
@@ -300,7 +298,7 @@ function runScenarioBacktest(
 function calculatePortfolioReturn(
   tltReturn: number,
   allocation: LeveragedDurationAllocation,
-  dayIndex: number
+  _dayIndex: number
 ): number {
   // Simplified simulation - assumes TLT performance maps to other duration instruments
   const iefReturn = tltReturn * 0.4;  // IEF ~40% of TLT volatility

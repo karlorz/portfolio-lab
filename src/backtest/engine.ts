@@ -338,7 +338,7 @@ export class BacktestEngine {
     currentIndex: number,
     lastRebalanceIndex: number,
     frequency: PortfolioConfig['rebalanceFrequency'],
-    dates: string[]
+    _dates: string[]
   ): boolean {
     if (frequency === 'none') return false;
 

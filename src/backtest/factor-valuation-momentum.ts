@@ -57,7 +57,6 @@ interface FactorRecommendation {
 }
 
 const FACTOR_ETFS = ['MTUM', 'VLUE', 'USMV', 'QUAL', 'IJR'];
-const BASE_DATE = '2013-07-18'; // QUAL inception date (most recent factor ETF)
 
 function loadData(): Record<string, PricePoint[]> {
   const dataPath = path.resolve(__dirname, '../../public/data/prices.json');
@@ -74,14 +73,6 @@ function getPriceOnDate(prices: PricePoint[], date: string): number | null {
   const earlier = prices.filter(p => p.d < date);
   if (earlier.length === 0) return null;
   return earlier[earlier.length - 1].p;
-}
-
-function getPriceNDaysAgo(prices: PricePoint[], currentDate: string, days: number): number | null {
-  const currentIdx = prices.findIndex(p => p.d === currentDate);
-  if (currentIdx === -1) return null;
-  const targetIdx = currentIdx - days;
-  if (targetIdx < 0) return null;
-  return prices[targetIdx].p;
 }
 
 function calculateReturn(prices: PricePoint[], startDate: string, endDate: string): number | null {
@@ -174,7 +165,7 @@ function identifyRegime(spyPrices: PricePoint[], currentDate: string): string {
 function calculateRegimePerformance(
   spyPrices: PricePoint[],
   factorPrices: PricePoint[],
-  currentDate: string
+  _currentDate: string
 ): Record<string, number> {
   // Calculate factor performance in different historical regimes
   const regimes: Record<string, number[]> = {

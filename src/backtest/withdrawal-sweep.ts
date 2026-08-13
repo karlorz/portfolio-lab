@@ -161,9 +161,6 @@ async function main() {
       !portfolioResults.some(r => r.rate === rate && r.broke)
     );
     const maxSafe = safeRates.length > 0 ? Math.max(...safeRates) : 0;
-    const brokeAt = WITHDRAWAL_RATES.find(rate =>
-      portfolioResults.some(r => r.rate === rate && r.broke)
-    );
 
     // For each rate, show worst-case drawdown across all scenarios
     console.log(`\n${config.name}:`);

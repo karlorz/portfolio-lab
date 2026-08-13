@@ -259,8 +259,6 @@ async function main() {
   console.log('|-----------|----------------|-----------|--------|--------|-------------|');
 
   // Compute historical 30-year result
-  const histStart = '2005-01-03';
-  const histEnd30yr = '2035-01-01'; // We only have 20 years of data, so use full period
   // Actually use the longest available: 2005-2026 = 21 years
   for (const config of PORTFOLIOS) {
     const result = engine.runBacktest(config, startDate, endDate, INITIAL_AMOUNT);

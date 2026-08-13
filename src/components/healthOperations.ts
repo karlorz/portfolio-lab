@@ -339,7 +339,6 @@ export function summarizeHealthOperations(
         ? 'scheduler failures'
         : 'all tracked subsystems nominal';
   const headline = `System ${normalizeSystemStatus(health.system_status)}: ${primaryCause}; scheduler ${schedulerStatus}`;
-  const headerText = `${headline} (${totalJobs} scheduled jobs, ${failedJobs} failed)`;
 
   const freshnessCauses = freshnessEntries
     .filter(([, data]) => data.status !== 'fresh')

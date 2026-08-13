@@ -369,7 +369,6 @@ export function updateSectorPortfolio(
   // Update existing positions
   for (const pos of portfolio.positions) {
     const newAlloc = allocation.sectorAllocations.find(a => a.symbol === pos.symbol);
-    const momentum = momentumScores.find(m => m.symbol === pos.symbol);
     
     if (newAlloc) {
       // Position continues - update

@@ -45,36 +45,6 @@ function computeReturns(prices: Map<string, Map<string, number>>, symbols: strin
   return returns;
 }
 
-function rollingCorrelation(
-  returnsA: number[],
-  returnsB: number[],
-  window: number
-): { date: string; corr: number }[] {
-  const results: { date: string; corr: number }[] = [];
-  const len = Math.min(returnsA.length, returnsB.length);
-
-  for (let i = window; i < len; i++) {
-    const aSlice = returnsA.slice(i - window, i);
-    const bSlice = returnsB.slice(i - window, i);
-
-    const meanA = aSlice.reduce((s, v) => s + v, 0) / window;
-    const meanB = bSlice.reduce((s, v) => s + v, 0) / window;
-
-    let cov = 0, varA = 0, varB = 0;
-    for (let j = 0; j < window; j++) {
-      const da = aSlice[j] - meanA;
-      const db = bSlice[j] - meanB;
-      cov += da * db;
-      varA += da * da;
-      varB += db * db;
-    }
-
-    const corr = varA && varB ? cov / Math.sqrt(varA * varB) : 0;
-    results.push({ date: '', corr });
-  }
-  return results;
-}
-
 function correlation(returnsA: number[], returnsB: number[]): number {
   const len = Math.min(returnsA.length, returnsB.length);
   if (len < 20) return 0;

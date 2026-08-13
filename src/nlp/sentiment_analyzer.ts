@@ -12,11 +12,8 @@ import { execSync, spawn } from 'child_process';
 
 // Configuration
 const MODEL_CACHE_DIR = './models';
-const DATA_DIR = './data';
 const SIGNALS_DIR = './data/signals';
 
-// FinBERT model identifier
-const FINBERT_MODEL = 'yiyanghkust/finbert-tone';
 
 interface SentimentResult {
   text: string;
@@ -175,14 +172,12 @@ except (ImportError, OSError, RuntimeError, ValueError, KeyError) as e:
 class SentimentAnalyzer {
   private device: 'cuda' | 'mps' | 'cpu';
   private pythonPath: string;
-  private usePython: boolean;
   private mockMode: boolean;
 
   constructor(options: { mock?: boolean; pythonPath?: string } = {}) {
     this.device = detectComputeDevice();
     this.pythonPath = options.pythonPath || 'python3';
     this.mockMode = options.mock || false;
-    this.usePython = !this.mockMode;
 
     // Ensure directories exist
     if (!fs.existsSync(MODEL_CACHE_DIR)) {
@@ -251,7 +246,7 @@ class SentimentAnalyzer {
    * Python-based FinBERT analysis
    */
   private async pythonAnalyze(texts: string[]): Promise<SentimentResult[]> {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve, _reject) => {
       // Write script to temp file
       const scriptPath = path.join(MODEL_CACHE_DIR, 'finbert_infer.py');
       fs.writeFileSync(scriptPath, FINBERT_SCRIPT);

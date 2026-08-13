@@ -220,7 +220,6 @@ function calculateFactorWeights(
   config: FactorTimingConfig,
   prevWeights?: Record<string, number>
 ): { weights: Record<string, number>; turnover: number } {
-  const baseWeight = config.factorSleeveWeight / FACTOR_ETFS.length; // equal base
   const weights: Record<string, number> = {};
   
   // Calculate raw scores based on strategy

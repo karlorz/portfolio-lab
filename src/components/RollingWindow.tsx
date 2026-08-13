@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { BacktestEngine } from '../backtest/engine';
-import type { PortfolioConfig, PriceData, PerformanceMetrics } from '../backtest/engine';
+import type { PortfolioConfig, PriceData } from '../backtest/engine';
 
 interface RollingWindowProps {
   portfolios: PortfolioConfig[];
@@ -68,7 +68,7 @@ export const RollingWindow: React.FC<RollingWindowProps> = ({ portfolios, priceD
             {gridData.map((row, wi) => (
               <tr key={WINDOWS[wi].name}>
                 <td style={{ color: '#e2e8f0', fontWeight: 600 }}>{row.window}</td>
-                {portfolios.map((p, pi) => {
+                {portfolios.map((p, _pi) => {
                   const sharpe = row[p.name + '_sharpe'] as number;
                   const cagr = row[p.name + '_cagr'] as number;
                   const isBest = bestPerWindow[wi] === p.name;

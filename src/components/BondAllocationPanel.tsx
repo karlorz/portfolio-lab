@@ -163,7 +163,7 @@ export function BondAllocationPanel({
           <svg viewBox="0 0 100 100" className="pie-chart">
             {(() => {
               let cumulativePct = 0;
-              return etfKeys.map((key, i) => {
+              return etfKeys.map((key, _i) => {
                 const pct = targetAllocation[key];
                 if (pct < 0.01) return null; // Skip if < 1%
                 

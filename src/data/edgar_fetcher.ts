@@ -10,8 +10,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-const EDGAR_BASE_URL = 'https://www.sec.gov/Archives/edgar/daily-index';
-const EDGAR_BULK_URL = 'https://www.sec.gov/Archives/edgar/full-index';
 const USER_AGENT = 'Portfolio-Lab Research (contact@portfolio-lab.local)';
 
 // Rate limiting: 10 requests per second

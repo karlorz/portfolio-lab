@@ -7,7 +7,6 @@
 import type { MarketDataSourceMode, MarketDataSourceStatus } from './source_manifest';
 import {
   CORE_SYMBOLS,
-  FACTOR_ETFS,
   FRED_SERIES,
   FX_SYMBOLS,
   MARKET_DATA_SYMBOLS,

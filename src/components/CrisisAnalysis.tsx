@@ -58,8 +58,6 @@ export const CrisisAnalysis: React.FC<CrisisAnalysisProps> = ({ results }) => {
     return row;
   });
 
-  // Flatten for display
-  const portfolios = results.map(r => r.name);
 
   return (
     <div className="chart-container">

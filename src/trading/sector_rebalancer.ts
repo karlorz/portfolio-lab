@@ -13,8 +13,6 @@ import {
   RebalanceSignal, 
   RebalanceAction,
   REBALANCE_CONFIG,
-  calculateDrift,
-  isQuarterlyRebalanceDue,
   generateRebalanceSignal
 } from './sector_positions';
 import { SectorAllocationItem } from '../types/sector';
@@ -284,8 +282,6 @@ export function executePaperRebalance(
         const newShares = pos.shares - shares;
         
         if (newShares <= 0) {
-          // Close position
-          const realizedPnL = (price - pos.entryPrice) * pos.shares;
           updatedPositions.splice(existingIndex, 1);
         } else {
           updatedPositions[existingIndex] = {
@@ -537,7 +533,7 @@ export function runRebalancerCycle(
   updatedState.lastSignal = signal;
   
   // Check if we should proceed
-  const { proceed, reason } = shouldRebalanceProceed(signal, portfolioValue);
+  const { proceed } = shouldRebalanceProceed(signal, portfolioValue);
   
   if (signal.triggered && proceed) {
     // Create execution record

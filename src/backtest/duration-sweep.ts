@@ -9,7 +9,7 @@
  * - Real yield adjusted allocations
  */
 
-import { calculateDurationAllocation, classifyRegime, DurationRegime, getExpectedAlpha } from '../utils/duration-signals';
+import { calculateDurationAllocation, DurationRegime } from '../utils/duration-signals';
 import { getDefaultRiskFreeRate } from './constants';
 import { BacktestEngine, PortfolioConfig, PriceData, BacktestResult, PerformanceMetrics } from './engine';
 
@@ -100,7 +100,6 @@ function generateSyntheticYieldData(startDate: string, endDate: string): {
   
   while (current <= end) {
     const year = current.getFullYear();
-    const month = current.getMonth();
     
     // Regime-based base spread
     let baseSpread = 100;

@@ -9,7 +9,7 @@
  * SPY/GLD/TLT 46/38/16 over 2005-2026.
  */
 import { BacktestEngine } from './engine';
-import type { PortfolioConfig, PriceData } from './engine';
+import type { PriceData } from './engine';
 import * as fs from 'fs';
 
 function loadData(): PriceData[] {
@@ -93,12 +93,10 @@ function runTacticalBacktest(
 
     // Check if we should rebalance
     let shouldRebalance = false;
-    let reason = '';
 
     // Annual calendar rebalance
     if (options.annualRebalance && i - lastRebalanceIndex >= options.minDaysBetweenRebalances) {
       shouldRebalance = true;
-      reason = 'calendar';
     }
 
     // Drift-based: check if any allocation has drifted > threshold
@@ -112,7 +110,6 @@ function runTacticalBacktest(
           const targetWt = allocation[symbol] || 0;
           if (Math.abs(currentWt - targetWt) > options.driftThreshold) {
             shouldRebalance = true;
-            reason = 'drift';
             break;
           }
         }
@@ -124,7 +121,6 @@ function runTacticalBacktest(
       const daysSinceLast = i - lastRebalanceIndex;
       if (daysSinceLast >= options.minDaysBetweenRebalances && drawdown < -options.drawdownThreshold) {
         shouldRebalance = true;
-        reason = 'drawdown';
       }
     }
 

@@ -51,7 +51,6 @@ export class PurgedKFold {
       
       // Embargo period before and after test set
       const embargoStart = Math.max(0, testStart - this.config.embargoDays);
-      const embargoEnd = Math.min(n, testEnd + this.config.embargoDays);
       
       // Training data excludes embargo period around test
       // For simplicity: use all data before embargoStart
@@ -89,7 +88,6 @@ export class PurgedKFold {
       
       // Embargo periods
       const embargoStart = Math.max(0, testStart - this.config.embargoDays);
-      const embargoEnd = Math.min(n, testEnd + this.config.embargoDays);
 
       if (embargoStart < this.config.minTrainPeriods) {
         continue;
@@ -119,7 +117,6 @@ export class PurgedKFold {
     for (let i = 1; i <= this.config.nSplits; i++) {
       const testEnd = Math.floor(n * (i / this.config.nSplits));
       const testStart = Math.floor(n * ((i - 1) / this.config.nSplits));
-      const embargoEnd = Math.min(n, testEnd + this.config.embargoDays);
 
       // Train from start to testStart minus embargo
       const trainEnd = Math.max(0, testStart - this.config.embargoDays);
