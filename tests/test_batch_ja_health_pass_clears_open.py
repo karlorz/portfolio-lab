@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 
-
 def _intentional_only_staleness() -> dict:
     return {
         "stale_signals": [],
@@ -42,7 +41,6 @@ def _intentional_only_staleness() -> dict:
         "healthy_count": 20,
         "total_count": 23,
     }
-
 
 def _stub_health_heavy(hc, monkeypatch: pytest.MonkeyPatch) -> None:
     """Minimal stubs so run_health_check does not depend on live SSOT I/O."""
@@ -78,7 +76,6 @@ def _stub_health_heavy(hc, monkeypatch: pytest.MonkeyPatch) -> None:
         lambda report, data_dir=None: report,
     )
     monkeypatch.setattr(hc, "_stamp_health_self_job_running_success", lambda freshness: None)
-
 
 def test_ja_do2_health_clears_open_when_staleness_pass(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -125,8 +122,24 @@ def test_ja_do2_health_clears_open_when_staleness_pass(
 
     monkeypatch.setattr(alerting, "_incident_manager", mgr)
     monkeypatch.setattr(hc, "DATA_DIR", data)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data, raising=False)
     monkeypatch.setattr(hc, "HEALTH_PATH", data / "health.json")
     monkeypatch.setattr(hc, "PUBLIC_DATA_DIR", public)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
     monkeypatch.delenv("ALERT_WEBHOOK_URL", raising=False)
     _stub_health_heavy(hc, monkeypatch)
 
@@ -140,7 +153,6 @@ def test_ja_do2_health_clears_open_when_staleness_pass(
     )
     open_check = report["checks"]["open_incidents"]
     assert int(open_check.get("open_count") or 0) == 0
-
 
 def test_ja_do2_health_invokes_check_staleness_and_alert(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -167,8 +179,24 @@ def test_ja_do2_health_invokes_check_staleness_and_alert(
     )
 
     monkeypatch.setattr(hc, "DATA_DIR", data)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data, raising=False)
     monkeypatch.setattr(hc, "HEALTH_PATH", data / "health.json")
     monkeypatch.setattr(hc, "PUBLIC_DATA_DIR", public)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
     _stub_health_heavy(hc, monkeypatch)
 
     calls: list[dict] = []

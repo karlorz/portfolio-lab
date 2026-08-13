@@ -6,7 +6,6 @@ import json
 import shutil
 from pathlib import Path
 
-
 from src.dashboard.generator import DashboardGenerator, _compact_health_summary
 from src.dashboard.kill_authority import (
     allocation_roles_under_kill,
@@ -18,9 +17,7 @@ from src.dashboard.kill_authority import (
 )
 from scripts.check_public_data_consistency import check_public_data_consistency
 
-
 INCIDENT_ID = "4d9e4f53-test-kill-authority"
-
 
 def _kill_payload(**overrides):
     base = {
@@ -36,7 +33,6 @@ def _kill_payload(**overrides):
     }
     base.update(overrides)
     return base
-
 
 def test_project_compact_kill_fields_from_monitor_health():
     report = {
@@ -58,7 +54,6 @@ def test_project_compact_kill_fields_from_monitor_health():
     assert compact["kill_switch_level"] == "halt"
     assert compact["kill_switch_incident_id"] == INCIDENT_ID
     assert compact["open_incidents_status"] == "critical"
-
 
 def test_compact_health_summary_projects_kill_under_halt():
     summary = _compact_health_summary(
@@ -85,7 +80,6 @@ def test_compact_health_summary_projects_kill_under_halt():
     assert summary["kill_switch_incident_id"] == INCIDENT_ID
     assert summary["open_incidents_count"] == 1
 
-
 def test_elevate_system_status_for_kill_halt():
     assert elevate_system_status_for_kill(
         "healthy",
@@ -97,7 +91,6 @@ def test_elevate_system_status_for_kill_halt():
     ) == "warning"
     assert elevate_system_status_for_kill("healthy", {"enabled": False}) == "healthy"
 
-
 def test_build_kill_switch_alert_prefers_human_message():
     alert = build_kill_switch_alert(_kill_payload())
     assert alert is not None
@@ -107,7 +100,6 @@ def test_build_kill_switch_alert_prefers_human_message():
     assert alert["incident_id"] == INCIDENT_ID
     assert alert["channel"] == "risk"
     assert "PAPER" in alert["title"]
-
 
 def test_build_kill_switch_alert_maps_payload_level_to_alert_level():
     """Alert row level must follow kill payload level (not always error)."""
@@ -128,7 +120,6 @@ def test_build_kill_switch_alert_maps_payload_level_to_alert_level():
     assert halt["kill_switch_level"] == "halt"
     assert halt["requires_action"] is True
 
-
 def test_build_kill_switch_alert_falls_back_to_reason():
     alert = build_kill_switch_alert(
         _kill_payload(message=None)
@@ -136,7 +127,6 @@ def test_build_kill_switch_alert_falls_back_to_reason():
     assert alert is not None
     assert alert["message"] == "max_drawdown_-25.0%"
     assert alert["reason"] == "max_drawdown_-25.0%"
-
 
 def test_allocation_roles_under_kill_blocks_live_authority():
     _ = DashboardGenerator._build_allocation_surface_roles()
@@ -163,7 +153,6 @@ def test_allocation_roles_under_kill_blocks_live_authority():
     assert target["role"] == "execution_blocked"
     assert blocked["execution_blocked"] is True
 
-
 def test_build_allocation_surface_roles_kill_on(tmp_path, monkeypatch):
     from src.dashboard import generator as gen_mod
 
@@ -175,7 +164,6 @@ def test_build_allocation_surface_roles_kill_on(tmp_path, monkeypatch):
     assert target["execution_blocked"] is True
     assert target["kill_switch_level"] == "halt"
 
-
 def test_build_allocation_surface_roles_kill_off(tmp_path, monkeypatch):
     from src.dashboard import generator as gen_mod
 
@@ -184,7 +172,6 @@ def test_build_allocation_surface_roles_kill_off(tmp_path, monkeypatch):
     target = roles["surfaces"]["target_allocations"]
     assert target["live_authoritative"] is True
     assert target.get("execution_blocked") is not True
-
 
 def _make_generator(tmp_path: Path):
     import sqlite3
@@ -195,7 +182,6 @@ def _make_generator(tmp_path: Path):
     conn.commit()
     # DashboardGenerator expects MARKET_DB; patch paths
     return db
-
 
 def test_generate_alerts_json_includes_human_message_and_incident(tmp_path, monkeypatch):
     import sqlite3
@@ -220,7 +206,6 @@ def test_generate_alerts_json_includes_human_message_and_incident(tmp_path, monk
     assert kill_alerts[0]["reason"] == "max_drawdown_-25.0%"
     assert kill_alerts[0]["incident_id"] == INCIDENT_ID
     gen.conn.close()
-
 
 def test_generate_health_json_includes_kill_and_elevates(tmp_path, monkeypatch):
     import sqlite3
@@ -261,7 +246,6 @@ def test_generate_health_json_includes_kill_and_elevates(tmp_path, monkeypatch):
     assert health["system_status"] == "critical"
     assert health["open_incidents"]["status"] == "critical"
     gen.conn.close()
-
 
 def test_generate_health_json_cleared_kill_not_reintroduced_by_stale_ops_monitor(
     tmp_path, monkeypatch
@@ -357,7 +341,6 @@ def test_generate_health_json_cleared_kill_not_reintroduced_by_stale_ops_monitor
     assert monitor.get("ssot_reconcile_source") == "disk_incidents_kill"
     gen.conn.close()
 
-
 def test_reconcile_monitor_health_with_disk_ssot_clears_sticky_open_incidents(
     tmp_path, monkeypatch
 ):
@@ -401,6 +384,14 @@ def test_reconcile_monitor_health_with_disk_ssot_clears_sticky_open_incidents(
         )
     )
     monkeypatch.setattr(hc, "DATA_DIR", data_dir)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data_dir, raising=False)
     wrote = hc.reconcile_monitor_health_with_disk_ssot(data_dir=data_dir)
     assert wrote is True
     on_disk = json.loads((data_dir / "health.json").read_text())
@@ -408,7 +399,6 @@ def test_reconcile_monitor_health_with_disk_ssot_clears_sticky_open_incidents(
     assert on_disk["checks"]["open_incidents"]["status"] == "ok"
     assert on_disk["status"] == "ok"
     assert on_disk.get("ssot_reconcile_source") == "disk_incidents_kill"
-
 
 def test_publish_ops_health_surfaces_clears_sticky_public_kill_after_resolve(
     tmp_path, monkeypatch
@@ -459,7 +449,23 @@ def test_publish_ops_health_surfaces_clears_sticky_public_kill_after_resolve(
     )
 
     monkeypatch.setattr(hc, "DATA_DIR", data_dir)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data_dir, raising=False)
     monkeypatch.setattr(hc, "PUBLIC_DATA_DIR", public_dir)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public_dir, raising=False)
     monkeypatch.setattr(hc, "HEALTH_PATH", data_dir / "health.json")
     monkeypatch.setattr(hc, "health_ops_path", lambda: public_dir / "health_ops.json")
 
@@ -487,7 +493,6 @@ def test_publish_ops_health_surfaces_clears_sticky_public_kill_after_resolve(
     # Kill-driven critical must not stick after clear
     assert public["system_status"] not in {"critical"}, public.get("system_status")
     assert public.get("ops_health_source") == "monitor.health_check"
-
 
 def test_apply_ops_monitor_prefers_disk_kill_over_stale_monitor_when_enabled(
     tmp_path, monkeypatch
@@ -616,7 +621,6 @@ def test_apply_ops_monitor_prefers_disk_kill_over_stale_monitor_when_enabled(
     assert open_inc["incidents"][0]["incident_id"] == live_id
     assert health_data.get("ops_health_source") == "monitor.health_check"
 
-
 def test_publish_ops_health_surfaces_overwrites_stale_public_kill_with_disk(
     tmp_path, monkeypatch
 ):
@@ -675,7 +679,23 @@ def test_publish_ops_health_surfaces_overwrites_stale_public_kill_with_disk(
     )
 
     monkeypatch.setattr(hc, "DATA_DIR", data_dir)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data_dir, raising=False)
     monkeypatch.setattr(hc, "PUBLIC_DATA_DIR", public_dir)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public_dir, raising=False)
     monkeypatch.setattr(hc, "HEALTH_PATH", data_dir / "health.json")
     monkeypatch.setattr(hc, "health_ops_path", lambda: public_dir / "health_ops.json")
 
@@ -713,11 +733,18 @@ def test_publish_ops_health_surfaces_overwrites_stale_public_kill_with_disk(
     assert pc.get("dual_write_attempted") is True
     assert pc.get("dual_write_ok") is True
 
-
 def test_run_health_check_persists_kill_fields(tmp_path, monkeypatch):
     from src.monitor import health_check as hc
 
     monkeypatch.setattr(hc, "DATA_DIR", tmp_path)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
     monkeypatch.setattr(hc, "HEALTH_PATH", tmp_path / "health.json")
     (tmp_path / "kill_switch.json").write_text(json.dumps(_kill_payload()))
     # Fresh enough market data not required — function still writes
@@ -727,7 +754,6 @@ def test_run_health_check_persists_kill_fields(tmp_path, monkeypatch):
     assert on_disk["checks"]["kill_switch"]["enabled"] is True
     assert on_disk["checks"]["kill_switch"]["level"] == "halt"
     assert on_disk["checks"]["kill_switch"]["incident_id"] == INCIDENT_ID
-
 
 def _write_consistent_public_data_set(app_dir: Path) -> None:
     import hashlib
@@ -778,7 +804,6 @@ def _write_consistent_public_data_set(app_dir: Path) -> None:
     for filename in ("source_manifest.json", "index.json", "health.json"):
         shutil.copyfile(public_data / filename, dist_data / filename)
 
-
 def test_consistency_requires_kill_switch_alert_when_enabled(tmp_path: Path) -> None:
     _write_consistent_public_data_set(tmp_path)
     data_dir = tmp_path / "data"
@@ -800,7 +825,6 @@ def test_consistency_requires_kill_switch_alert_when_enabled(tmp_path: Path) -> 
     assert result.ok is False
     assert any("kill_switch" in e for e in result.errors)
 
-
 def test_consistency_requires_graduation_candidate_when_promote_present(tmp_path: Path) -> None:
     _write_consistent_public_data_set(tmp_path)
     data_dir = tmp_path / "data"
@@ -821,7 +845,6 @@ def test_consistency_requires_graduation_candidate_when_promote_present(tmp_path
     result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
     assert result.ok is False
     assert any("graduation_candidate" in e for e in result.errors)
-
 
 def test_consistency_skips_graduation_alert_for_promote_blocked_tombstone(
     tmp_path: Path,
@@ -852,7 +875,6 @@ def test_consistency_skips_graduation_alert_for_promote_blocked_tombstone(
 
     result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
     assert result.ok is True, result.errors
-
 
 def test_consistency_accepts_matching_kill_identity(tmp_path: Path) -> None:
     _write_consistent_public_data_set(tmp_path)
@@ -885,7 +907,6 @@ def test_consistency_accepts_matching_kill_identity(tmp_path: Path) -> None:
     result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
     assert result.ok is True, result.errors
 
-
 def test_consistency_rejects_divergent_kill_incident_id(tmp_path: Path) -> None:
     _write_consistent_public_data_set(tmp_path)
     data_dir = tmp_path / "data"
@@ -917,7 +938,6 @@ def test_consistency_rejects_divergent_kill_incident_id(tmp_path: Path) -> None:
     result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
     assert result.ok is False
     assert any("incident_id" in e for e in result.errors)
-
 
 def test_consistency_rejects_missing_alert_identity_fields(tmp_path: Path) -> None:
     """Kill alert present but missing incident_id/level/reason must fail gate."""
@@ -959,7 +979,6 @@ def test_consistency_rejects_missing_alert_identity_fields(tmp_path: Path) -> No
     assert "missing incident_id" in joined
     assert "missing kill_switch_level" in joined or "missing reason" in joined
 
-
 def test_consistency_rejects_missing_public_health_kill_switch(tmp_path: Path) -> None:
     """When kill enabled, public health must project kill_switch block."""
     _write_consistent_public_data_set(tmp_path)
@@ -992,7 +1011,6 @@ def test_consistency_rejects_missing_public_health_kill_switch(tmp_path: Path) -
     result = check_public_data_consistency(tmp_path, env={}, allow_repo_public_data=True)
     assert result.ok is False
     assert any("missing kill_switch" in e for e in result.errors)
-
 
 def test_generate_alerts_json_rewrites_stale_public_kill_row(tmp_path, monkeypatch):
     """Stale LIVE/position_limit public kill row is replaced by SSOT paper halt identity."""
@@ -1051,7 +1069,6 @@ def test_generate_alerts_json_rewrites_stale_public_kill_row(tmp_path, monkeypat
     disk_kills = [a for a in disk["alerts"] if a.get("type") == "kill_switch"]
     assert disk_kills[0]["incident_id"] == INCIDENT_ID
 
-
 def test_publish_ops_health_refreshes_signals_health_kill_fields(tmp_path, monkeypatch):
     """make health / publish_ops must clear stale signals.health kill without full dashboard.
 
@@ -1088,7 +1105,23 @@ def test_publish_ops_health_refreshes_signals_health_kill_fields(tmp_path, monke
     # No kill_switch.json (cleared)
 
     monkeypatch.setattr(hc, "DATA_DIR", data_dir)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data_dir, raising=False)
     monkeypatch.setattr(hc, "PUBLIC_DATA_DIR", public_dir)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public_dir, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public_dir, raising=False)
     monkeypatch.setattr(hc, "HEALTH_PATH", data_dir / "health.json")
 
     report = {

@@ -14,12 +14,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
-
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-
 
 def _sticky_clear_monitor(ts: str = "2026-07-23T13:30:00+00:00") -> dict:
     return {
@@ -37,7 +34,6 @@ def _sticky_clear_monitor(ts: str = "2026-07-23T13:30:00+00:00") -> dict:
             },
         },
     }
-
 
 def _sticky_armed_monitor(
     *,
@@ -77,7 +73,6 @@ def _sticky_armed_monitor(
         },
     }
 
-
 def _sticky_public_dashboard(*, armed: bool, incident_id: str = "inc-dn") -> dict:
     if armed:
         return {
@@ -115,7 +110,6 @@ def _sticky_public_dashboard(*, armed: bool, incident_id: str = "inc-dn") -> dic
         "repo_public_mirror_lag": {"lagging_count": 0, "status": "ok"},
     }
 
-
 def _seed_surfaces(
     data: Path,
     public: Path,
@@ -132,11 +126,9 @@ def _seed_surfaces(
         pub if pub is not None else _sticky_public_dashboard(armed=False),
     )
 
-
 # ---------------------------------------------------------------------------
 # DN — kill arm/clear write-through
 # ---------------------------------------------------------------------------
-
 
 def test_dn1_kill_arm_projects_mon_ops_public(tmp_path, monkeypatch) -> None:
     """DN1: IncidentManager escalate arm → mon/ops/pub kill.enabled within call."""
@@ -155,7 +147,23 @@ def test_dn1_kill_arm_projects_mon_ops_public(tmp_path, monkeypatch) -> None:
     )
 
     monkeypatch.setattr("src.monitor.health_check.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data, raising=False)
     monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
     monkeypatch.setattr("src.monitor.incident_manager.DATA_DIR", data, raising=False)
     monkeypatch.setattr("src.monitor.incident_manager.PUBLIC_DATA_DIR", public, raising=False)
 
@@ -191,7 +199,6 @@ def test_dn1_kill_arm_projects_mon_ops_public(tmp_path, monkeypatch) -> None:
     assert ops["checks"]["open_incidents"].get("open_count") == 1
     assert pub["open_incidents"].get("open_count") == 1
 
-
 def test_dn2_kill_clear_projects_all_surfaces(tmp_path, monkeypatch) -> None:
     """DN2: PASS resolve clears kill on mon/ops/pub."""
     from src.monitor.health_check import project_disk_kill_open_to_all_surfaces
@@ -225,7 +232,23 @@ def test_dn2_kill_clear_projects_all_surfaces(tmp_path, monkeypatch) -> None:
         pub=_sticky_public_dashboard(armed=True, incident_id=incident_id),
     )
     monkeypatch.setattr("src.monitor.health_check.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data, raising=False)
     monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
     monkeypatch.setattr("src.monitor.incident_manager.DATA_DIR", data, raising=False)
     monkeypatch.setattr("src.monitor.incident_manager.PUBLIC_DATA_DIR", public, raising=False)
 
@@ -249,7 +272,6 @@ def test_dn2_kill_clear_projects_all_surfaces(tmp_path, monkeypatch) -> None:
     assert ops["checks"]["open_incidents"].get("open_count") == 0
     assert pub["open_incidents"].get("open_count") == 0
 
-
 def test_dn_write_through_on_incident_manager(tmp_path, monkeypatch) -> None:
     """DN: IncidentManager.record_alert itself fans out without external call."""
     from src.monitor.incident_manager import IncidentManager
@@ -266,7 +288,23 @@ def test_dn_write_through_on_incident_manager(tmp_path, monkeypatch) -> None:
     )
 
     monkeypatch.setattr("src.monitor.health_check.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data, raising=False)
     monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
     monkeypatch.setattr("src.monitor.incident_manager.DATA_DIR", data, raising=False)
     monkeypatch.setattr("src.monitor.incident_manager.PUBLIC_DATA_DIR", public, raising=False)
 
@@ -291,11 +329,9 @@ def test_dn_write_through_on_incident_manager(tmp_path, monkeypatch) -> None:
     assert ops["checks"]["kill_switch"].get("enabled") is True
     assert pub["kill_switch"].get("enabled") is True
 
-
 # ---------------------------------------------------------------------------
 # DO — PASS clear mid-cycle
 # ---------------------------------------------------------------------------
-
 
 def test_do1_pass_clears_sticky_open_and_kill(tmp_path, monkeypatch) -> None:
     """DO1: check_staleness_and_alert PASS clears open + kill surfaces."""
@@ -331,7 +367,23 @@ def test_do1_pass_clears_sticky_open_and_kill(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr(alerting, "_incident_manager", mgr)
     monkeypatch.setattr("src.monitor.health_check.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data, raising=False)
     monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
     monkeypatch.setattr("src.monitor.incident_manager.DATA_DIR", data, raising=False)
     monkeypatch.setattr("src.monitor.incident_manager.PUBLIC_DATA_DIR", public, raising=False)
     monkeypatch.delenv("ALERT_WEBHOOK_URL", raising=False)
@@ -376,11 +428,9 @@ def test_do1_pass_clears_sticky_open_and_kill(tmp_path, monkeypatch) -> None:
     assert mon["checks"]["kill_switch"].get("enabled") in (False, None, 0)
     assert mon["checks"]["open_incidents"].get("open_count") == 0
 
-
 # ---------------------------------------------------------------------------
 # DP — advisory sole-stale must not WARN
 # ---------------------------------------------------------------------------
-
 
 def test_dp1_sole_advisory_alt_data_stale_is_pass() -> None:
     """DP1: sole stale=alternative_data (advisory_shadow) → PASS, not WARN."""
@@ -399,7 +449,6 @@ def test_dp1_sole_advisory_alt_data_stale_is_pass() -> None:
     level, message, details = result
     assert level == AlertLevel.PASS
     assert "advisory" in str(details.get("policy") or "").lower() or "alternative" in message.lower()
-
 
 def test_dp2_required_stale_still_warns() -> None:
     """DP2: required missing/stale still WARNs and can escalate."""
@@ -420,7 +469,6 @@ def test_dp2_required_stale_still_warns() -> None:
     assert "ensemble_voting" in message
     # advisory may be filtered from message but required must remain
     assert "ensemble_voting" in (details.get("actionable_stale") or details.get("stale_signals") or [])
-
 
 def test_dp1b_sole_alt_without_roles_key_still_advisory() -> None:
     """DP: alternative_data is advisory by default even without signal_roles."""
@@ -452,11 +500,9 @@ def test_dp1b_sole_alt_without_roles_key_still_advisory() -> None:
         "advisory_or_intentional_only_pass",
     }
 
-
 # ---------------------------------------------------------------------------
 # DN3 — restamp honesty
 # ---------------------------------------------------------------------------
-
 
 def test_dn3_restamp_reprojects_kill_from_disk(tmp_path, monkeypatch) -> None:
     """DN3: lag restamp of sticky-armed health must clear when disk kill gone."""
@@ -495,7 +541,23 @@ def test_dn3_restamp_reprojects_kill_from_disk(tmp_path, monkeypatch) -> None:
     _write_json(public / "health.json", pub)
 
     monkeypatch.setattr("src.monitor.health_check.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data, raising=False)
     monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+    monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
     monkeypatch.setattr(
         "src.monitor.repo_public_mirror_lag.DATA_DIR", data, raising=False
     )

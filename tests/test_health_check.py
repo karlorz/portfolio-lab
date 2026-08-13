@@ -19,7 +19,6 @@ from src.monitor.health_check import (
 from src.monitor.alerting import AlertChannel, AlertLevel
 from src.monitor.fred_readiness import assess_fred_readiness, resolve_fred_operating_mode
 
-
 class TestCheckDataFreshness:
     """Test data freshness checks."""
 
@@ -30,7 +29,23 @@ class TestCheckDataFreshness:
         public.mkdir()
         private.mkdir()
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", public)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", private)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", private, raising=False)
         freshness = _check_data_freshness()
         assert freshness["prices"]["status"] == "missing"
 
@@ -41,7 +56,23 @@ class TestCheckDataFreshness:
         public.mkdir()
         private.mkdir()
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", public)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", private)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", private, raising=False)
         (public / "prices.json").write_text("{}")
         freshness = _check_data_freshness()
         assert freshness["prices"]["status"] == "ok"
@@ -54,7 +85,23 @@ class TestCheckDataFreshness:
         public.mkdir()
         private.mkdir()
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", public)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", private)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", private, raising=False)
         prices_file = public / "prices.json"
         prices_file.write_text("{}")
         # Set mtime to 48 hours ago
@@ -67,7 +114,23 @@ class TestCheckDataFreshness:
     def test_missing_signals(self, tmp_path, monkeypatch):
         """Missing signals.json should report missing."""
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path / "private")
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path / "private", raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path / "private", raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path / "private", raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path / "private", raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path / "private", raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path / "private", raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path / "private", raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path / "private", raising=False)
         (tmp_path / "private").mkdir()
         freshness = _check_data_freshness()
         assert freshness["signals"]["status"] == "missing"
@@ -82,7 +145,23 @@ class TestCheckDataFreshness:
             json.dumps({"target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}})
         )
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", public)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", private)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", private, raising=False)
         # Outside pytest path would use live fallback; force production-like
         # candidate walk by clearing PYTEST only for the helper's private twin.
         freshness = _check_data_freshness()
@@ -109,7 +188,23 @@ class TestCheckDataFreshness:
         private.mkdir()
 
         monkeypatch.setattr(hc, "PUBLIC_DATA_DIR", ephemeral)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", ephemeral, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", ephemeral, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", ephemeral, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", ephemeral, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", ephemeral, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", ephemeral, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", ephemeral, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", ephemeral, raising=False)
         monkeypatch.setattr(hc, "DATA_DIR", private)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", private, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", private, raising=False)
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
         import src.paths as paths_mod
 
@@ -144,7 +239,23 @@ class TestCheckDataFreshness:
         (data_dir / "signals.json").write_text(json.dumps(before), encoding="utf-8")
 
         monkeypatch.setattr(hc, "PUBLIC_DATA_DIR", public_dir)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public_dir, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public_dir, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public_dir, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public_dir, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public_dir, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public_dir, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public_dir, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public_dir, raising=False)
         monkeypatch.setattr(hc, "DATA_DIR", data_dir)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data_dir, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data_dir, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data_dir, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data_dir, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data_dir, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", data_dir, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", data_dir, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", data_dir, raising=False)
 
         with patch.object(
             hc,
@@ -178,7 +289,23 @@ class TestCheckDataFreshness:
     def test_hermes_cron_error_degrades_cron_check(self, tmp_path, monkeypatch):
         """Hermes scheduler errors should be included in health cron checks."""
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
         (tmp_path / "cron_status.json").write_text(json.dumps({
             "jobs": [{"name": "portfolio-lab-data", "status": "ok"}]
         }))
@@ -213,7 +340,23 @@ class TestCheckDataFreshness:
         Counting that row as failed_jobs made make health exit 1 forever.
         """
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
         (tmp_path / "cron_status.json").write_text(json.dumps({
             "backend": "tasker",
             "jobs": [
@@ -278,7 +421,23 @@ class TestCheckDataFreshness:
     def test_non_self_job_error_still_degrades_cron(self, tmp_path, monkeypatch):
         """Sibling job errors continue to degrade the cron rollup."""
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
         (tmp_path / "cron_status.json").write_text(json.dumps({
             "backend": "tasker",
             "jobs": [
@@ -308,7 +467,23 @@ class TestCheckDataFreshness:
     def test_missing_hermes_cron_state_warns(self, tmp_path, monkeypatch):
         """Missing configured Hermes state should be a warning, not a crash."""
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
         (tmp_path / "cron_status.json").write_text(json.dumps({
             "jobs": [{"name": "portfolio-lab-data", "status": "ok"}]
         }))
@@ -323,7 +498,23 @@ class TestCheckDataFreshness:
     def test_manual_only_tasker_rows_do_not_degrade_cron_health(self, tmp_path, monkeypatch):
         """Disabled/manual-only tasker rows remain explicit but do not imply active unknown jobs."""
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
         (tmp_path / "cron_status.json").write_text(json.dumps({
             "backend": "tasker",
             "jobs": [
@@ -350,7 +541,23 @@ class TestCheckDataFreshness:
     def test_enabled_unknown_tasker_rows_degrade_cron_health(self, tmp_path, monkeypatch):
         """Enabled scheduled rows with unmapped status still degrade (true unknown)."""
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
         (tmp_path / "cron_status.json").write_text(json.dumps({
             "backend": "tasker",
             "jobs": [
@@ -375,12 +582,44 @@ class TestCheckDataFreshness:
     def test_pending_never_run_weekly_job_does_not_degrade_cron(self, tmp_path, monkeypatch):
         """Batch CI: pending weekly fetch-trends must not force cron degraded."""
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
         # Batch DT: hermes_cron also searches DATA_DIR for trends artifacts
         import src.monitor.hermes_cron as hc
 
         monkeypatch.setattr(hc, "DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
         monkeypatch.setattr(hc, "PUBLIC_DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
         (tmp_path / "cron_status.json").write_text(json.dumps({
             "backend": "tasker",
             "jobs": [
@@ -529,7 +768,23 @@ class TestCheckDataFreshness:
     def test_data_freshness_includes_scheduler_drift_summary(self, tmp_path, monkeypatch):
         """Cron health output should expose scheduler drift metadata for dashboards."""
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
         (tmp_path / "cron_status.json").write_text(json.dumps({
             "backend": "tasker",
             "jobs": [{"name": "portfolio-lab-data", "status": "ok"}],
@@ -555,7 +810,6 @@ class TestCheckDataFreshness:
         assert drift["consecutive_mismatches"] == 1
         assert drift["backend_statuses"] == {"tasker": "ok", "hermes": "degraded"}
 
-
 class TestCheckCircuitBreaker:
     """Test circuit breaker state check."""
 
@@ -565,7 +819,6 @@ class TestCheckCircuitBreaker:
         assert result["status"] in ("ok", "unavailable")
         if result["status"] == "ok":
             assert result["state"] == "closed"
-
 
 class TestComputeSystemStatus:
     """Test overall status derivation."""
@@ -666,13 +919,20 @@ class TestComputeSystemStatus:
         circuit = {"status": "ok"}
         assert _compute_system_status(checks, circuit) == "critical"
 
-
 class TestRunHealthCheck:
     """Test full health check execution."""
 
     def test_produces_report(self, tmp_path, monkeypatch):
         """run_health_check should return a structured report."""
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
         monkeypatch.setattr("src.monitor.health_check.HEALTH_PATH", tmp_path / "health.json")
         monkeypatch.setattr(
             "src.monitor.health_check._check_fred_md_cache",
@@ -702,9 +962,25 @@ class TestRunHealthCheck:
     def test_writes_health_json(self, tmp_path, monkeypatch):
         """run_health_check should write health.json to disk."""
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
         health_path = tmp_path / "health.json"
         monkeypatch.setattr("src.monitor.health_check.HEALTH_PATH", health_path)
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path / "public")
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path / "public", raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path / "public", raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path / "public", raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path / "public", raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path / "public", raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path / "public", raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path / "public", raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path / "public", raising=False)
 
         (tmp_path / "prices.json").write_text("{}")
         (tmp_path / "signals.json").write_text("{}")
@@ -720,7 +996,23 @@ class TestRunHealthCheck:
         public = tmp_path / "public"
         public.mkdir()
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", public)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
         monkeypatch.setattr("src.monitor.health_check.HEALTH_PATH", tmp_path / "health.json")
         monkeypatch.setattr(
             "src.monitor.health_check._check_fred_md_cache",
@@ -763,7 +1055,23 @@ class TestRunHealthCheck:
             )
         )
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", public)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False)
         monkeypatch.setattr("src.monitor.health_check.HEALTH_PATH", tmp_path / "health.json")
         monkeypatch.setattr(
             "src.monitor.health_check._check_fred_md_cache",
@@ -800,6 +1108,14 @@ class TestRunHealthCheck:
         monkeypatch.setenv("PORTFOLIO_LAB_MODE", "live")
         monkeypatch.setenv("FRED_API_KEY", "super-secret-fred-key")
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
         monkeypatch.setattr("src.monitor.health_check.HEALTH_PATH", tmp_path / "health.json")
         monkeypatch.setattr(
             "src.monitor.health_check._check_fred_md_cache",
@@ -826,7 +1142,23 @@ class TestRunHealthCheck:
     ):
         """Active incident HALT must not leave data/health.json as warning-only."""
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
         monkeypatch.setattr("src.monitor.health_check.HEALTH_PATH", tmp_path / "health.json")
         monkeypatch.setattr(
             "src.monitor.health_check._check_fred_md_cache",
@@ -877,7 +1209,23 @@ class TestRunHealthCheck:
     def test_no_kill_switch_or_incidents_reports_ok_dimensions(self, tmp_path, monkeypatch):
         """Absent safety controls should not invent critical dimensions."""
         monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", tmp_path, raising=False)
         monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path, raising=False)
+        monkeypatch.setattr("src.monitor.health_rollup.PUBLIC_DATA_DIR", tmp_path, raising=False)
         monkeypatch.setattr("src.monitor.health_check.HEALTH_PATH", tmp_path / "health.json")
         monkeypatch.setattr(
             "src.monitor.health_check._check_fred_md_cache",
@@ -893,7 +1241,6 @@ class TestRunHealthCheck:
         assert report["checks"]["kill_switch"]["enabled"] is False
         assert report["checks"]["open_incidents"]["status"] == "ok"
         assert report["checks"]["open_incidents"]["open_count"] == 0
-
 
 class TestFredReadiness:
     """Test FRED credential readiness policy without live provider calls."""
@@ -978,7 +1325,6 @@ class TestFredReadiness:
         assert readiness["ready"] is True
         assert "super-secret-fred-key" not in json.dumps(readiness)
 
-
 class TestGraduationCircuitBreakerProducer:
     """consecutive_ok producer for graduation circuit_breaker_confidence."""
 
@@ -1033,7 +1379,6 @@ class TestGraduationCircuitBreakerProducer:
             data_dir=tmp_path,
         )
         assert p["consecutive_ok"] == 1
-
 
     def test_signal_health_zero_of_n_blocks_streak_increment(self, tmp_path):
         """Batch CB: SH 0/N must not climb consecutive_ok even when ops status ok."""

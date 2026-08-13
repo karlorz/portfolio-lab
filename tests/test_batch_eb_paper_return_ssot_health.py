@@ -136,6 +136,22 @@ def test_partial_refresh_reprojects_ssot(
         "src.monitor.health_check.PUBLIC_DATA_DIR", public, raising=False
     )
     monkeypatch.setattr("src.monitor.health_check.DATA_DIR", private, raising=False)
+    monkeypatch.setattr(
+        "src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", public, raising=False
+    )
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", private, raising=False)
+    monkeypatch.setattr(
+        "src.monitor.health_dashboard_apply.PUBLIC_DATA_DIR", public, raising=False
+    )
+    monkeypatch.setattr("src.monitor.health_dashboard_apply.DATA_DIR", private, raising=False)
+    monkeypatch.setattr(
+        "src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", public, raising=False
+    )
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", private, raising=False)
+    monkeypatch.setattr(
+        "src.monitor.health_rollup.PUBLIC_DATA_DIR", public, raising=False
+    )
+    monkeypatch.setattr("src.monitor.health_rollup.DATA_DIR", private, raising=False)
 
     report = {
         "status": "ok",
