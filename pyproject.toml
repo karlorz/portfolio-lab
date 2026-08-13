@@ -93,6 +93,8 @@ select = ["T201"]  # flake8-print: detect print() calls
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/**" = ["T201"]   # CLI scripts — print() is expected
+"tests/test_marl_trainer.py" = ["E402", "E741"]   # ML-gated (CLAUDE.md): torch-stub bootstrap before imports
+"tests/test_risk_agent_hmm.py" = ["E402", "E741"]   # ML-gated (CLAUDE.md): hmmlearn bootstrap before imports
 "**/__main__.py" = ["T201"]  # CLI entry points
 "src/agents/**" = ["T201"]   # ML-gated — off-limits
 "src/ml/**" = ["T201"]       # ML-gated — off-limits

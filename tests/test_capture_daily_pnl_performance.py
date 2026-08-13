@@ -17,7 +17,7 @@ def test_append_performance_jsonl_writes_row(tmp_path, monkeypatch):
     }
     assert cap.append_performance_jsonl(snap, performance_path=tmp_path / "performance.jsonl")
     path = tmp_path / "performance.jsonl"
-    rows = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+    rows = [json.loads(item) for item in path.read_text().splitlines() if item.strip()]
     assert len(rows) == 1
     assert rows[0]["daily_return"] == 0.001
     assert rows[0]["source"] == "capture_daily_pnl"
@@ -45,7 +45,7 @@ def test_append_performance_jsonl_dedupes_same_day(tmp_path):
         "mode": "paper",
     }
     cap.append_performance_jsonl(snap, performance_path=path)
-    rows = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+    rows = [json.loads(item) for item in path.read_text().splitlines() if item.strip()]
     assert len(rows) == 1
     assert rows[0]["timestamp"] == "2026-07-20T15:40:28"
     assert rows[0]["total_value"] == 94162.54

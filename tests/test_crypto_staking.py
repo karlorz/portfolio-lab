@@ -57,7 +57,7 @@ class TestETHStakingMetrics:
         )
         assert metrics.annual_yield == 0.035
         assert metrics.staking_ratio == 0.28
-        assert metrics.is_attractive == False
+        assert not metrics.is_attractive
 
     def test_attractive_yield(self):
         metrics = ETHStakingMetrics(
@@ -71,7 +71,7 @@ class TestETHStakingMetrics:
             excess_over_rfr=0.027,
             is_attractive=True,
         )
-        assert metrics.is_attractive == True
+        assert metrics.is_attractive
 
 
 class TestETHStakingModel:

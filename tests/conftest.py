@@ -303,8 +303,8 @@ def _clear_price_cache():
 # time. Tests that forget to patch DATA_DIR would still append phantom cash
 # rows to the live paper journal on this host. Isolate by default + guard hash.
 
-from pathlib import Path
-import hashlib
+from pathlib import Path  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
+import hashlib  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _LIVE_PERFORMANCE_JSONL = _PROJECT_ROOT / "data" / "performance.jsonl"

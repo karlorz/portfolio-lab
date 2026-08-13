@@ -101,7 +101,7 @@ def cscv_pbo(
         logit = math.log(omega_bar / (1 - omega_bar))
         logits.append(logit)
 
-    pbo = sum(1 for l in logits if l <= 0) / len(logits)
+    pbo = sum(1 for item in logits if item <= 0) / len(logits)
     return pbo, logits
 
 

@@ -206,8 +206,7 @@ class TestComputePnlSnapshotEdgeCases:
         pf = {"cash": 0, "positions": {
             "SPY": {"value": 1000, "shares": 1, "avg_price": 1000,
                      "current_price": 1000, "unrealized_pnl": 0},
-        }, "history": [], "updated": "2026-05-23", "mode": "paper",
-              "cash": 0}
+        }, "history": [], "updated": "2026-05-23", "mode": "paper"}
         # Override total to 0 by making positions empty within the dict
         pf["positions"] = {}
         snap = compute_pnl_snapshot(pf)
@@ -344,7 +343,7 @@ class TestSaveSnapshot:
         save_snapshot(snap1, append_path, latest_path)
         save_snapshot(snap2, append_path, latest_path)
         with open(append_path) as f:
-            lines = [l.strip() for l in f if l.strip()]
+            lines = [item.strip() for item in f if item.strip()]
         assert len(lines) == 2
 
     def test_idempotent_same_date(self, tmp_path):
@@ -355,7 +354,7 @@ class TestSaveSnapshot:
         save_snapshot(snap1, append_path, latest_path)
         save_snapshot(snap2, append_path, latest_path)
         with open(append_path) as f:
-            lines = [l.strip() for l in f if l.strip()]
+            lines = [item.strip() for item in f if item.strip()]
         assert len(lines) == 1
         entry = json.loads(lines[0])
         assert entry["total_value"] == 100000  # Updated, not duplicated
@@ -384,7 +383,7 @@ class TestSaveSnapshotEdgeCases:
         save_snapshot(snap2, append_path, latest_path)
         save_snapshot(snap3, append_path, latest_path)
         with open(append_path) as f:
-            lines = [l.strip() for l in f if l.strip()]
+            lines = [item.strip() for item in f if item.strip()]
         assert len(lines) == 3
 
     def test_handles_corrupted_jsonl_lines(self, tmp_path):
@@ -399,7 +398,7 @@ class TestSaveSnapshotEdgeCases:
         snap = {"date": "2026-05-23", "total_value": 100000}
         save_snapshot(snap, append_path, latest_path)
         with open(append_path) as f:
-            lines = [l.strip() for l in f if l.strip()]
+            lines = [item.strip() for item in f if item.strip()]
         assert len(lines) == 4
         assert "corrupted garbage line" in lines
 
@@ -410,7 +409,7 @@ class TestSaveSnapshotEdgeCases:
         snap = {"date": "2026-05-23", "total_value": 100000}
         save_snapshot(snap, append_path, latest_path)
         with open(append_path) as f:
-            lines = [l.strip() for l in f if l.strip()]
+            lines = [item.strip() for item in f if item.strip()]
         assert len(lines) == 1
 
     def test_jsonl_with_blank_and_whitespace_lines(self, tmp_path):
@@ -420,7 +419,7 @@ class TestSaveSnapshotEdgeCases:
         snap = {"date": "2026-05-23", "total_value": 100000}
         save_snapshot(snap, append_path, latest_path)
         with open(append_path) as f:
-            lines = [l.strip() for l in f if l.strip()]
+            lines = [item.strip() for item in f if item.strip()]
         assert len(lines) == 2
 
     def test_snapshot_with_datetime_uses_default_str(self, tmp_path):
@@ -433,7 +432,7 @@ class TestSaveSnapshotEdgeCases:
         latest_path = tmp_path / "daily_pnl_latest.json"
         save_snapshot(snap, append_path, latest_path)
         with open(append_path) as f:
-            lines = [l.strip() for l in f if l.strip()]
+            lines = [item.strip() for item in f if item.strip()]
         assert len(lines) == 1
 
     def test_overwrites_latest_json_each_time(self, tmp_path):
@@ -458,7 +457,7 @@ class TestSaveSnapshotEdgeCases:
         save_snapshot(snap1, append_path, latest_path)
         save_snapshot(snap2, append_path, latest_path)
         with open(append_path) as f:
-            lines = [l.strip() for l in f if l.strip()]
+            lines = [item.strip() for item in f if item.strip()]
         assert len(lines) == 1
         entry = json.loads(lines[0])
         assert entry["total_value"] == 100000

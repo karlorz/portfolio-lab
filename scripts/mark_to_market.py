@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.paths import DATA_DIR, resolve_runtime_public_data_dir
+from src.paths import DATA_DIR, resolve_runtime_public_data_dir  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
 
 INITIAL_CAPITAL = 100000  # Default from evaluator PAPER_CONFIG
 

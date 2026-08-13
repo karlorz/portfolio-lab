@@ -20,7 +20,7 @@ for _key in ('data.vix_futures', 'strategy.convexity_harvest'):
     _ORIG_MODULES[_key] = sys.modules.get(_key)
     sys.modules[_key] = MagicMock()
 
-from src.strategy.vol_parity_allocator import (
+from src.strategy.vol_parity_allocator import (  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
     VolParityAllocation,
     VolatilityParityAllocator,
 )

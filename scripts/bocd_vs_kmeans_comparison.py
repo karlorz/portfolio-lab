@@ -22,9 +22,9 @@ from datetime import datetime
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.regime.bocd_detector import BOCDDetector
-from src.regime.fred_md_two_stage_kmeans import TwoStageKMeansRegime
-from src.data.price_cache import get_prices_df
+from src.regime.bocd_detector import BOCDDetector  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
+from src.regime.fred_md_two_stage_kmeans import TwoStageKMeansRegime  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
+from src.data.price_cache import get_prices_df  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

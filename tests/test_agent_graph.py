@@ -127,7 +127,8 @@ class TestGraphEdge:
         assert MessageType.SIGNAL in edge.msg_types
 
     def test_with_filter_fn(self):
-        fn = lambda m: m.priority > 2
+        def fn(m):
+            return m.priority > 2
         edge = GraphEdge(source="a", target="b", filter_fn=fn)
         assert edge.filter_fn is not None
         assert edge.filter_fn(MagicMock(priority=3)) is True
@@ -1024,8 +1025,8 @@ class TestAgentGraphTopologyViz:
         viz = g.get_topology_viz()
         assert "Edges:" in viz
         lines = viz.split("\n")
-        edges_idx = next(i for i, l in enumerate(lines) if "Edges:" in l)
-        edge_lines = [l for l in lines[edges_idx:] if "->" in l]
+        edges_idx = next(i for i, item in enumerate(lines) if "Edges:" in item)
+        edge_lines = [item for item in lines[edges_idx:] if "->" in item]
         assert len(edge_lines) == 0
 
     def test_viz_with_priority_boost(self):
@@ -1063,6 +1064,6 @@ class TestAgentGraphTopologyViz:
         viz = g.get_topology_viz()
         # Count edge lines after "Edges:" header
         lines = viz.split("\n")
-        edges_idx = next(i for i, l in enumerate(lines) if "Edges:" in l)
-        edge_lines = [l for l in lines[edges_idx:] if "->" in l]
+        edges_idx = next(i for i, item in enumerate(lines) if "Edges:" in item)
+        edge_lines = [item for item in lines[edges_idx:] if "->" in item]
         assert len(edge_lines) == 11

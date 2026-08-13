@@ -184,10 +184,14 @@ class TestVIXRegimeBoundaries:
         with patch("src.dashboard.generator.PUBLIC_DIR", Path("/tmp")):
             # Extract the classify logic
             def classify(v):
-                if v > 25: return "crisis"
-                elif v > 20: return "vol_spike"
-                elif v < 15: return "low_vol"
-                else: return "normal"
+                if v > 25:
+                    return "crisis"
+                elif v > 20:
+                    return "vol_spike"
+                elif v < 15:
+                    return "low_vol"
+                else:
+                    return "normal"
             assert classify(15) == "normal"
             assert classify(20) == "normal"
             assert classify(25) == "vol_spike"  # >20 not >=20
@@ -197,9 +201,13 @@ class TestVIXRegimeBoundaries:
         _ = DashboardGenerator.__new__(DashboardGenerator)
         with patch("src.dashboard.generator.PUBLIC_DIR", Path("/tmp")):
             def classify(v):
-                if v > 25: return "crisis"
-                elif v > 20: return "vol_spike"
-                elif v < 15: return "low_vol"
-                else: return "normal"
+                if v > 25:
+                    return "crisis"
+                elif v > 20:
+                    return "vol_spike"
+                elif v < 15:
+                    return "low_vol"
+                else:
+                    return "normal"
             assert classify(25) == "vol_spike"
 

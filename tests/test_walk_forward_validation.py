@@ -28,7 +28,7 @@ if _project_root not in sys.path:
 
 # Import under scripts namespace
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-from walk_forward_validation import (
+from walk_forward_validation import (  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
     generate_grid_configs,
     load_prices,
     run_single_window,

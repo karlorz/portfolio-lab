@@ -444,10 +444,10 @@ class TestSignalGenerationExtended:
 #
 
 
-import dataclasses
-import math
-import sys
-from unittest.mock import patch
+import dataclasses  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
+import math  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
+import sys  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
+from unittest.mock import patch  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
 
 
 class TestKurtosisRegimeSignalDataclass:
@@ -1146,7 +1146,7 @@ class TestCLI:
         main()
         captured = capsys.readouterr()
         lines = captured.err.split("\n")
-        regime_lines = [l for l in lines if "Regime:" in l and "Preference" not in l]
+        regime_lines = [item for item in lines if "Regime:" in item and "Preference" not in item]
         assert len(regime_lines) > 0
         # Strip logger prefix (e.g. "INFO:src.regime.kurtosis_regime:")
         line = regime_lines[0]

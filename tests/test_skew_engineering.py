@@ -737,21 +737,21 @@ class TestDataclassFieldValidation:
     def test_skew_metrics_field_names_and_defaults(self):
         import dataclasses
         fields = {f.name: f for f in dataclasses.fields(SkewMetrics)}
-        assert fields["symbol"].type == str
+        assert fields["symbol"].type is str
         assert fields["symbol"].default is dataclasses.MISSING
-        assert fields["timestamp"].type == str
+        assert fields["timestamp"].type is str
         assert fields["timestamp"].default is dataclasses.MISSING
-        assert fields["window_21d"].type == int
+        assert fields["window_21d"].type is int
         assert fields["window_21d"].default == 21
-        assert fields["window_63d"].type == int
+        assert fields["window_63d"].type is int
         assert fields["window_63d"].default == 63
-        assert fields["window_252d"].type == int
+        assert fields["window_252d"].type is int
         assert fields["window_252d"].default == 252
-        assert fields["upside_var_21d"].type == float
+        assert fields["upside_var_21d"].type is float
         assert fields["upside_var_21d"].default == 0.0
-        assert fields["downside_var_21d"].type == float
+        assert fields["downside_var_21d"].type is float
         assert fields["downside_var_21d"].default == 0.0
-        assert fields["skew_ratio_21d"].type == float
+        assert fields["skew_ratio_21d"].type is float
         assert fields["skew_ratio_21d"].default == 1.0
 
     def test_skew_metrics_required_fields(self):
@@ -764,10 +764,10 @@ class TestDataclassFieldValidation:
     def test_skew_metrics_regime_type(self):
         import dataclasses
         fields = {f.name: f for f in dataclasses.fields(SkewMetrics)}
-        assert fields["regime_21d"].type == str
-        assert fields["regime_63d"].type == str
-        assert fields["regime_252d"].type == str
-        assert fields["composite_regime"].type == str
+        assert fields["regime_21d"].type is str
+        assert fields["regime_63d"].type is str
+        assert fields["regime_252d"].type is str
+        assert fields["composite_regime"].type is str
 
     def test_skew_state_field_count(self):
         import dataclasses
@@ -777,12 +777,12 @@ class TestDataclassFieldValidation:
     def test_skew_state_field_types(self):
         import dataclasses
         fields = {f.name: f for f in dataclasses.fields(SkewState)}
-        assert fields["symbol"].type == str
-        assert fields["last_update"].type == str
-        assert fields["composite_regime"].type == str
-        assert fields["vol_penalty"].type == float
-        assert fields["side_computed"].type == bool
-        assert fields["n_obs"].type == int
+        assert fields["symbol"].type is str
+        assert fields["last_update"].type is str
+        assert fields["composite_regime"].type is str
+        assert fields["vol_penalty"].type is float
+        assert fields["side_computed"].type is bool
+        assert fields["n_obs"].type is int
 
     def test_skew_state_all_required(self):
         import dataclasses

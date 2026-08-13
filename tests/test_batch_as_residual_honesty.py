@@ -132,7 +132,8 @@ def test_attach_dual_write_content_hash_clears_lag_when_payloads_match(tmp_path)
     priv.write_bytes(body + b"\n")
     pub.write_bytes(body)  # no trailing newline — path-different trees, same content
     # Stagger mtimes so naive lag would look stale
-    import os, time
+    import os
+    import time
     now = time.time()
     os.utime(priv, (now, now))
     os.utime(pub, (now - 600, now - 600))  # public 10 min older

@@ -26,7 +26,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 logger = logging.getLogger(__name__)
 
-from src.paths import DATA_DIR
+from src.paths import DATA_DIR  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
 
 try:
     from src.strategy.evaluator import PAPER_CONFIG

@@ -574,10 +574,10 @@ class TestEdgeCases:
             "  PRIMARY KEY (symbol, date)"
             ")"
         )
-        for date, close in [("2021-01-04", 370.0), ("2021-01-05", 371.0)]:
+        for dt, close in [("2021-01-04", 370.0), ("2021-01-05", 371.0)]:
             conn.execute(
                 "INSERT INTO prices (symbol, date, close) VALUES (?, ?, ?)",
-                ("SPY", date, close),
+                ("SPY", dt, close),
             )
         conn.commit()
         conn.close()
@@ -601,10 +601,10 @@ class TestEdgeCases:
             "  PRIMARY KEY (symbol, date)"
             ")"
         )
-        for date in ["2021-01-04", "2021-01-05", "2021-01-06", "2021-01-07"]:
+        for dt in ["2021-01-04", "2021-01-05", "2021-01-06", "2021-01-07"]:
             conn.execute(
                 "INSERT INTO prices (symbol, date, close) VALUES (?, ?, ?)",
-                ("SPY", date, 370.0),
+                ("SPY", dt, 370.0),
             )
         conn.commit()
         conn.close()

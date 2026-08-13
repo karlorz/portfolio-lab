@@ -213,7 +213,7 @@ class TestStackingTrainer:
         prediction = trainer.predict(X_test, confidence_threshold=0.9)
 
         # With zero features, confidence likely below 0.9
-        assert prediction.using_fallback == True or prediction.using_fallback == np.True_
+        assert prediction.using_fallback or prediction.using_fallback == np.True_
         assert "Confidence" in prediction.fallback_reason
 
 
@@ -1593,7 +1593,8 @@ class TestCliMain:
 
     def test_main_module_guard(self):
         """__name__ == '__main__' guard must reference main()."""
-        import ast, inspect
+        import ast
+        import inspect
         from src.ml import stacking_trainer as st
         source = inspect.getsource(st)
         tree = ast.parse(source)

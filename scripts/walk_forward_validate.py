@@ -16,7 +16,7 @@ _project_root = str(Path(__file__).resolve().parent.parent)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from walk_forward_validation import main as canonical_main
+from walk_forward_validation import main as canonical_main  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
 
 CANONICAL_SCRIPT = "scripts/walk_forward_validation.py"
 

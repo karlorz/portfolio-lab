@@ -29,10 +29,10 @@ _ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
 if _ML_ENABLED:
     import torch  # noqa: F811
 
-from src.agents.base_agent import (
+from src.agents.base_agent import (  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
     AgentType, AgentObservation, AgentAction, AgentMessage, MessageType
 )
-from src.agents.execution_agent import (
+from src.agents.execution_agent import (  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
     ExecutionStyle,
     ExecutionNetwork,
     ExecutionAgent,
@@ -42,7 +42,7 @@ from src.agents.execution_agent import (
 # OrderUrgency mock -- referenced by _check_scheduling but not defined in codebase.
 # Inject directly into the execution_agent module namespace so _check_scheduling
 # can resolve it at call time.
-from src.agents import execution_agent as _execution_agent
+from src.agents import execution_agent as _execution_agent  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
 _MOCK_ORDER_URGENCY = type('OrderUrgency', (), {
     'LOW': 'low',
     'NORMAL': 'normal',
@@ -1038,10 +1038,10 @@ class TestDataclassFields:
     def test_agent_observation_field_types(self):
         """Verify AgentObservation field types."""
         fields = {f.name: f.type for f in dataclasses.fields(AgentObservation)}
-        assert fields['volatility'] == float or fields['volatility'] == 'float'
-        assert fields['portfolio_value'] == float or fields['portfolio_value'] == 'float'
-        assert fields['cash_available'] == float or fields['cash_available'] == 'float'
-        assert fields['regime'] == str or fields['regime'] == 'str'
+        assert fields['volatility']  is float or fields['volatility'] == 'float'
+        assert fields['portfolio_value']  is float or fields['portfolio_value'] == 'float'
+        assert fields['cash_available']  is float or fields['cash_available'] == 'float'
+        assert fields['regime']  is str or fields['regime'] == 'str'
 
     def test_agent_action_fields(self):
         """AgentAction should have expected fields."""
@@ -1057,9 +1057,9 @@ class TestDataclassFields:
     def test_agent_action_field_types(self):
         """Verify AgentAction field types."""
         fields = {f.name: f.type for f in dataclasses.fields(AgentAction)}
-        assert fields['score'] == float or fields['score'] == 'float'
-        assert fields['direction'] == float or fields['direction'] == 'float'
-        assert fields['confidence'] == float or fields['confidence'] == 'float'
+        assert fields['score']  is float or fields['score'] == 'float'
+        assert fields['direction']  is float or fields['direction'] == 'float'
+        assert fields['confidence']  is float or fields['confidence'] == 'float'
 
     def test_agent_message_fields(self):
         """AgentMessage should have expected fields."""

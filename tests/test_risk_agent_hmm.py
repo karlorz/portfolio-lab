@@ -1,4 +1,5 @@
-import pytest; pytestmark = pytest.mark.heavy
+import pytest
+pytestmark = pytest.mark.heavy
 #!/usr/bin/env python3
 """
 Tests for HMM-LSTM regime detector — data classes, regime definitions,

@@ -1415,7 +1415,8 @@ class TestLoadDataEdgeCases:
 
     def test_load_data_malformed_json(self, caplog, monkeypatch):
         """Malformed JSON returns False."""
-        import logging, tempfile
+        import logging
+        import tempfile
 
         caplog.set_level(logging.ERROR)
         bt = AlternativeDataBacktester()
@@ -1432,7 +1433,8 @@ class TestLoadDataEdgeCases:
 
     def test_load_data_empty_json_object(self, monkeypatch):
         """Empty JSON object {} with no SPY key returns False."""
-        import tempfile, json
+        import tempfile
+        import json
 
         bt = AlternativeDataBacktester()
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
@@ -1586,7 +1588,8 @@ class TestLoadDataEdgeCases:
 
     def test_load_data_valid_no_spy_returns_true_empty_data(self, monkeypatch):
         """load_data returns True, but data stays empty when SPY missing."""
-        import tempfile, json
+        import tempfile
+        import json
 
         bt = AlternativeDataBacktester()
         prices = {
@@ -2007,7 +2010,8 @@ class TestSaveResultsEdgeCases:
 
     def test_save_results_default_path(self, monkeypatch):
         """save_results with default path writes a JSON file."""
-        import tempfile, json
+        import tempfile
+        import json
 
         data = TestRunBacktest._make_synthetic_data(TestRunBacktest(), n_days=100)
         bt = AlternativeDataBacktester(
@@ -2032,7 +2036,8 @@ class TestSaveResultsEdgeCases:
 
     def test_save_results_none_in_extras(self):
         """save_results handles None values in extras gracefully."""
-        import tempfile, json
+        import tempfile
+        import json
 
         # _annualize_regime_returns never returns None, but extras can contain None
         result = BacktestResult(
@@ -2069,7 +2074,8 @@ class TestSaveResultsEdgeCases:
 
     def test_save_results_creates_parent_dir(self, monkeypatch):
         """save_results creates parent directory if it does not exist."""
-        import tempfile, json
+        import tempfile
+        import json
 
         result = BacktestResult(
             total_return=1.0,
@@ -2409,7 +2415,8 @@ class TestDataLoadingExceptions:
     def test_load_data_catches_key_error(self, caplog, monkeypatch):
         """KeyError in _process_price_data is caught and logged."""
         import logging
-        import tempfile, json
+        import tempfile
+        import json
 
         caplog: pytest.LogCaptureFixture
         caplog.set_level(logging.ERROR)

@@ -20,8 +20,8 @@ from datetime import datetime, timezone
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.paths import MARKET_DB, DATA_DIR, PUBLIC_DATA_DIR, BASE_ALLOCATION
-from src.monitor.garch_cvar import calculate_garch_cvar, ARCH_AVAILABLE
+from src.paths import MARKET_DB, DATA_DIR, PUBLIC_DATA_DIR, BASE_ALLOCATION  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
+from src.monitor.garch_cvar import calculate_garch_cvar, ARCH_AVAILABLE  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
 
 
 def append_risk_metrics_history(

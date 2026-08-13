@@ -27,9 +27,9 @@ def _cleanup_aiohttp():
     else:
         sys.modules["aiohttp"] = _orig_aiohttp
 
-import logging
+import logging  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
 
-from src.broker.options_utils import (
+from src.broker.options_utils import (  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
     OptionType,
     OptionStatus,
     OptionQuote,
@@ -690,7 +690,8 @@ class TestDataclassFields:
         assert "bid_ask_spread_pct" in fields
 
     def test_option_quote_field_types(self):
-        import dataclasses, typing
+        import dataclasses
+        import typing
         fields = {f.name: f for f in dataclasses.fields(OptionQuote)}
         assert fields["symbol"].type is str
         assert fields["strike"].type is float

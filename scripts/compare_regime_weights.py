@@ -21,7 +21,7 @@ _project_root = Path(__file__).resolve().parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from src.strategy.ensemble_voter import (
+from src.strategy.ensemble_voter import (  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
     EnsembleVoter,
     Regime,
     SignalSource,

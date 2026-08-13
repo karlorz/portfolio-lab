@@ -28,15 +28,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.backtest.metrics import (
+from src.backtest.metrics import (  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
     BacktestMetrics,
     compute_crisis_returns,
     compute_metrics,
     save_results_json,
 )
-from src.paths import DATA_DIR, PRICES_JSON
-from src.backtest.metrics import TRADING_DAYS_PER_YEAR
-from src.utils.log_config import configure_logging
+from src.paths import DATA_DIR, PRICES_JSON  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
+from src.backtest.metrics import TRADING_DAYS_PER_YEAR  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
+from src.utils.log_config import configure_logging  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
 
 logger = logging.getLogger("gold_sweep")
 

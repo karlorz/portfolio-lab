@@ -30,9 +30,9 @@ if _SC_KEY in sys.modules:
         del sys.modules[_SC_KEY]
         importlib.invalidate_caches()
 
-import src.llm.sentiment_client as _sc_mod
+import src.llm.sentiment_client as _sc_mod  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
 
-from src.llm.sentiment_client import (
+from src.llm.sentiment_client import (  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
     CostTracker,
     SentimentResult,
     SentimentAnalyzer,
@@ -55,9 +55,16 @@ class _StubOpenAIError(Exception):
         self.body = body
         super().__init__(message)
 
-class _StubRateLimitError(_StubOpenAIError): pass
-class _StubAuthenticationError(_StubOpenAIError): pass
-class _StubAPIConnectionError(_StubOpenAIError): pass
+class _StubRateLimitError(_StubOpenAIError):
+
+
+    pass
+class _StubAuthenticationError(_StubOpenAIError):
+
+    pass
+class _StubAPIConnectionError(_StubOpenAIError):
+
+    pass
 class _StubAPIStatusError(_StubOpenAIError):
     def __init__(self, message="", response=None, body=None):
         self.status_code = getattr(response, "status_code", 0) if response else 0
@@ -70,9 +77,16 @@ class _StubAnthError(Exception):
         self.body = body
         super().__init__(message)
 
-class _StubAnthRateLimitError(_StubAnthError): pass
-class _StubAnthAuthenticationError(_StubAnthError): pass
-class _StubAnthAPIConnectionError(_StubAnthError): pass
+class _StubAnthRateLimitError(_StubAnthError):
+
+
+    pass
+class _StubAnthAuthenticationError(_StubAnthError):
+
+    pass
+class _StubAnthAPIConnectionError(_StubAnthError):
+
+    pass
 class _StubAnthAPIStatusError(_StubAnthError):
     def __init__(self, message="", response=None, body=None):
         self.status_code = getattr(response, "status_code", 0) if response else 0

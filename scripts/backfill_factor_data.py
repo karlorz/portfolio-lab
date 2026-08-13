@@ -15,7 +15,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.data.factor_data import FactorDataManager, FACTOR_ETFS, fetch_factor_prices_from_pipeline
+from src.data.factor_data import FactorDataManager, FACTOR_ETFS, fetch_factor_prices_from_pipeline  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
 
 def backfill_factor_data():
     """Populate factor database with historical data from pipeline."""

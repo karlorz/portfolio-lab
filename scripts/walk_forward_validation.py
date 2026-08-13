@@ -30,12 +30,12 @@ _project_root = str(Path(__file__).resolve().parent.parent)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-import numpy as np
-import pandas as pd
-from sklearn.model_selection import TimeSeriesSplit
+import numpy as np  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
+import pandas as pd  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
+from sklearn.model_selection import TimeSeriesSplit  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
 
-from src.paths import PRICES_JSON, DATA_DIR
-from src.backtest.metrics import (
+from src.paths import PRICES_JSON, DATA_DIR  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
+from src.backtest.metrics import (  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
     compute_metrics, compute_crisis_returns,
     compute_deflated_sharpe_ratio, DEFAULT_CRISIS_YEARS, save_results_json,
 )

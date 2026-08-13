@@ -28,10 +28,10 @@ _project_root = str(Path(__file__).resolve().parent.parent)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-import pandas as pd
+import pandas as pd  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
 
-from src.paths import PRICES_JSON, DATA_DIR
-from src.research.optimizer_labs_contract import save_optimizer_labs_output
+from src.paths import PRICES_JSON, DATA_DIR  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
+from src.research.optimizer_labs_contract import save_optimizer_labs_output  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

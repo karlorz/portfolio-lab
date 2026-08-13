@@ -699,7 +699,7 @@ class TestOverlayDashboardConstants:
         _ = OverlayDashboardGenerator()
         from dataclasses import fields
         overlay_fields = [f for f in fields(OverlayDashboardData)
-                         if f.type == dict]
+                         if f.type  is dict]
         dashboard = OverlayDashboardData(
             timestamp="", generated_at="",
             collar={}, crypto={}, bond_duration={},
@@ -868,13 +868,13 @@ class TestOverlayDashboardDataclassValidation:
         import dataclasses
         for f in dataclasses.fields(OverlayDashboardData):
             if f.name in ("active_overlays", "total_overlays"):
-                assert f.type == int
+                assert f.type is int
 
     def test_str_fields_have_str_type(self):
         import dataclasses
         for f in dataclasses.fields(OverlayDashboardData):
             if f.name in ("timestamp", "generated_at", "portfolio_risk"):
-                assert f.type == str
+                assert f.type is str
 
     def test_alerts_field_is_list_of_str(self):
         import dataclasses

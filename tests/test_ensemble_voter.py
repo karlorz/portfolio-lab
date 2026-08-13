@@ -1892,8 +1892,8 @@ class TestBuildVoteAdditional:
         )
         vote = voter._build_vote(signals, consensus, Regime.NORMAL, 0.6)
         # Should only have 3 source detail lines (first 3 sources)
-        source_lines = [l for l in vote.reasoning.split('\n') if any(
-            src in l for src in ['multi_speed', 'cross_asset_rv', 'international', 'alternative']
+        source_lines = [item for item in vote.reasoning.split('\n') if any(
+            src in item for src in ['multi_speed', 'cross_asset_rv', 'international', 'alternative']
         )]
         assert len(source_lines) <= 3
 
@@ -2160,11 +2160,11 @@ class TestSignalReadingFieldValidation:
         """Verify type annotations for all SignalReading fields."""
         flds = {f.name: f.type for f in fields(SignalReading)}
         assert flds['source'] == SignalSource
-        assert flds['timestamp'] == str
-        assert flds['value'] == float
-        assert flds['confidence'] == float
-        assert flds['weight'] == float
-        assert flds['regime_fit'] == str
+        assert flds['timestamp'] is str
+        assert flds['value'] is float
+        assert flds['confidence'] is float
+        assert flds['weight'] is float
+        assert flds['regime_fit'] is str
 
     def test_asset_signals_optional_type(self):
         """asset_signals should be Optional[Dict[str, float]]."""
@@ -2226,18 +2226,18 @@ class TestEnsembleVoteFieldValidation:
     def test_all_field_types(self):
         """Verify specific type annotations for EnsembleVote fields."""
         flds = {f.name: f.type for f in fields(EnsembleVote)}
-        assert flds['timestamp'] == str
+        assert flds['timestamp'] is str
         assert flds['regime'] == Regime
-        assert flds['regime_confidence'] == float
-        assert flds['num_sources'] == int
-        assert flds['weighted_consensus'] == float
-        assert flds['agreement_ratio'] == float
-        assert flds['equity_bias'] == float
-        assert flds['duration_bias'] == float
-        assert flds['gold_bias'] == float
-        assert flds['action'] == str
-        assert flds['confidence'] == float
-        assert flds['reasoning'] == str
+        assert flds['regime_confidence'] is float
+        assert flds['num_sources'] is int
+        assert flds['weighted_consensus'] is float
+        assert flds['agreement_ratio'] is float
+        assert flds['equity_bias'] is float
+        assert flds['duration_bias'] is float
+        assert flds['gold_bias'] is float
+        assert flds['action'] is str
+        assert flds['confidence'] is float
+        assert flds['reasoning'] is str
 
     def test_source_votes_is_list_of_signal_reading(self):
         """source_votes should be typed as List[SignalReading]."""

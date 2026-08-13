@@ -838,8 +838,8 @@ class TestCliGuard:
         with open(source) as f:
             content = f.read()
         # Only allow print inside docstrings/comments, not as executable code
-        lines = [l for l in content.split('\n')
-                 if 'print(' in l and not l.strip().startswith('#')]
+        lines = [item for item in content.split('\n')
+                 if 'print(' in item and not item.strip().startswith('#')]
         assert len(lines) == 0, f"Found print() statements: {lines}"
 
 

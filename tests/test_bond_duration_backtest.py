@@ -1129,12 +1129,12 @@ class TestDataclassFieldValidation:
         """BacktestConfig field types should be correct."""
         import dataclasses
         fields = {f.name: f.type for f in dataclasses.fields(BacktestConfig)}
-        assert fields["start_date"] == str
-        assert fields["end_date"] == str
-        assert fields["initial_capital"] == float
-        assert fields["momentum_lookback_days"] == int
-        assert fields["rebalance_frequency_days"] == int
-        assert fields["transaction_cost_bps"] == float
+        assert fields["start_date"] is str
+        assert fields["end_date"] is str
+        assert fields["initial_capital"] is float
+        assert fields["momentum_lookback_days"] is int
+        assert fields["rebalance_frequency_days"] is int
+        assert fields["transaction_cost_bps"] is float
 
     def test_backtest_config_field_defaults(self):
         """BacktestConfig inherited field defaults via dataclasses.fields()."""
@@ -1176,10 +1176,10 @@ class TestDataclassFieldValidation:
         import dataclasses
         from src.backtest.metrics import DailyPrices as DP
         fields = {f.name: f.type for f in dataclasses.fields(DP)}
-        assert fields["date"] == str
-        assert fields["spy"] == float
-        assert fields["gld"] == float
-        assert fields["tlt"] == float
+        assert fields["date"] is str
+        assert fields["spy"] is float
+        assert fields["gld"] is float
+        assert fields["tlt"] is float
 
     def test_daily_prices_optional_fields(self):
         """DailyPrices optional fields should default to None."""

@@ -341,8 +341,8 @@ class TestSyncRegimeAnalysis:
         path = db_with_regimes.sync_regime_analysis()
         content = path.read_text()
         # Count data rows (lines with | that have numbers in them, not header/separator)
-        rows = [l for l in content.split("\n") if l.startswith("| ") and "---" not in l
-                and "Date" not in l]
+        rows = [item for item in content.split("\n") if item.startswith("| ") and "---" not in item
+                and "Date" not in item]
         # There should be at most 10 data rows (the fixture has 5, plus more)
         assert len(rows) <= 10
 
@@ -516,7 +516,7 @@ class TestRegimeDistribution:
             {"regime": "normal"} for _ in range(5)
         ]
         result = wiki_sync._regime_distribution(regimes)
-        lines = [l for l in result.split("\n") if l.strip()]
+        lines = [item for item in result.split("\n") if item.strip()]
         # crisis (10) should be before normal (5)
         assert lines[0].strip().startswith("crisis")
 
@@ -972,7 +972,7 @@ class TestSyncRegimeAnalysisEdgeCases:
         content = path.read_text()
         assert "normal" in content
         # Only one data row
-        data_rows = [l for l in content.split("\n") if l.startswith("| ") and "Date" not in l and "---" not in l]
+        data_rows = [item for item in content.split("\n") if item.startswith("| ") and "Date" not in item and "---" not in item]
         assert len(data_rows) == 1
 
     def test_extreme_vix_value(self, wiki_sync):
@@ -1769,13 +1769,13 @@ class TestRegimeDistributionFormatting:
         # 100% -> 20 blocks
         regimes_100 = [{"regime": "normal"}]
         result_100 = wiki_sync._regime_distribution(regimes_100)
-        bar_line_100 = [l for l in result_100.split("\n") if "normal" in l][0]
+        bar_line_100 = [item for item in result_100.split("\n") if "normal" in item][0]
         block_count_100 = bar_line_100.count("█")
 
         # 50% -> 10 blocks
         regimes_50 = [{"regime": "normal"}, {"regime": "crisis"}]
         result_50 = wiki_sync._regime_distribution(regimes_50)
-        bar_line_50 = [l for l in result_50.split("\n") if "normal" in l][0]
+        bar_line_50 = [item for item in result_50.split("\n") if "normal" in item][0]
         block_count_50 = bar_line_50.count("█")
 
         assert block_count_100 == 20
@@ -1785,7 +1785,7 @@ class TestRegimeDistributionFormatting:
         """Very small percentages (under 5%) show 0 or 1 blocks."""
         regimes = [{"regime": "rare"}] + [{"regime": "common"} for _ in range(99)]
         result = wiki_sync._regime_distribution(regimes)
-        rare_line = [l for l in result.split("\n") if "rare" in l][0]
+        rare_line = [item for item in result.split("\n") if "rare" in item][0]
         block_count = rare_line.count("█")
         # 1% -> int(1/5) = 0 blocks
         assert block_count == 0
@@ -1794,7 +1794,7 @@ class TestRegimeDistributionFormatting:
         """Each line in distribution shows percentage number."""
         regimes = [{"regime": "normal"}, {"regime": "normal"}, {"regime": "crisis"}]
         result = wiki_sync._regime_distribution(regimes)
-        lines = [l for l in result.split("\n") if l.strip()]
+        lines = [item for item in result.split("\n") if item.strip()]
         for line in lines:
             assert "%" in line
 

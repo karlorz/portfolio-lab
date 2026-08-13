@@ -143,9 +143,9 @@ class TestDryRun:
             log_path = os.path.join(d, "broker_orders.jsonl")
             assert os.path.exists(log_path)
             with open(log_path) as f:
-                lines = [json.loads(l) for l in f.readlines()]
+                lines = [json.loads(item) for item in f.readlines()]
             assert len(lines) == 2
-            assert all(l["status"] == "dry_run" for l in lines)
+            assert all(item["status"] == "dry_run" for item in lines)
 
 
 class TestMarketSessionGuard:

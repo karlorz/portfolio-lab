@@ -55,8 +55,8 @@ class TestVPINEngine:
             ret = np.random.normal(0.001, 0.015)
             c = base * (1 + ret)
             h = max(base, c) * (1 + abs(np.random.normal(0, 0.005)))
-            l = min(base, c) * (1 - abs(np.random.normal(0, 0.005)))
-            engine.process_bar(symbol, datetime.now(), base, h, l, c, 500000)
+            low = min(base, c) * (1 - abs(np.random.normal(0, 0.005)))
+            engine.process_bar(symbol, datetime.now(), base, h, low, c, 500000)
             base = c
 
     def test_vpin_returns_value_after_buckets(self):
@@ -270,8 +270,8 @@ class TestVPINEngineExtended:
             ret = np.random.normal(0.001, 0.015)
             c = base * (1 + ret)
             h = max(base, c) * (1 + abs(np.random.normal(0, 0.005)))
-            l = min(base, c) * (1 - abs(np.random.normal(0, 0.005)))
-            engine.process_bar(symbol, datetime.now(), base, h, l, c, 500000)
+            low = min(base, c) * (1 - abs(np.random.normal(0, 0.005)))
+            engine.process_bar(symbol, datetime.now(), base, h, low, c, 500000)
             base = c
 
     def test_multiple_symbols(self):
@@ -309,8 +309,8 @@ class TestRebalanceOptimizer:
             ret = np.random.normal(0.001, 0.015)
             c = base * (1 + ret)
             h = max(base, c) * (1 + abs(np.random.normal(0, 0.005)))
-            l = min(base, c) * (1 - abs(np.random.normal(0, 0.005)))
-            engine.process_bar('SPY', datetime.now(), base, h, l, c, 500000)
+            low = min(base, c) * (1 - abs(np.random.normal(0, 0.005)))
+            engine.process_bar('SPY', datetime.now(), base, h, low, c, 500000)
             base = c
         return engine
 
@@ -342,8 +342,8 @@ class TestVPINSignalAdapter:
             ret = np.random.normal(0.001, 0.015)
             c = base * (1 + ret)
             h = max(base, c) * (1 + abs(np.random.normal(0, 0.005)))
-            l = min(base, c) * (1 - abs(np.random.normal(0, 0.005)))
-            engine.process_bar('SPY', datetime.now(), base, h, l, c, 500000)
+            low = min(base, c) * (1 - abs(np.random.normal(0, 0.005)))
+            engine.process_bar('SPY', datetime.now(), base, h, low, c, 500000)
             base = c
         return engine
 

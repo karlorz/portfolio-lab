@@ -44,9 +44,9 @@ def _make_daily_history(n_days: int, start_val: float = 100000,
 
 
 
-import tempfile
-from pathlib import Path as _Path
-from unittest.mock import patch as _patch
+import tempfile  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
+from pathlib import Path as _Path  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
+from unittest.mock import patch as _patch  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
 
 def _isolated_checklist(tmp_path=None):
     """GraduationChecklist with DATA_DIR pointed at empty tmp (no host daily_pnl)."""

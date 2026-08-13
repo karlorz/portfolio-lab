@@ -627,20 +627,20 @@ class TestDataclassFieldValidation:
         int_fields = {"num_periods"}
         bool_fields = {"missing_data"}
         for name in str_fields:
-            assert fields[name].type is str or fields[name].type == str, f"{name} should be str"
+            assert fields[name].type is str or fields[name].type  is str, f"{name} should be str"
         for name in float_fields:
-            assert fields[name].type is float or fields[name].type == float, f"{name} should be float"
+            assert fields[name].type is float or fields[name].type  is float, f"{name} should be float"
         for name in int_fields:
-            assert fields[name].type is int or fields[name].type == int, f"{name} should be int"
+            assert fields[name].type is int or fields[name].type  is int, f"{name} should be int"
         for name in bool_fields:
-            assert fields[name].type is bool or fields[name].type == bool, f"{name} should be bool"
+            assert fields[name].type is bool or fields[name].type  is bool, f"{name} should be bool"
 
     def test_turnover_validator_state_field_types(self):
         """Verify state dataclass field types."""
         import src.strategy.turnover_validator as tv
         fields = tv.TurnoverValidatorState.__dataclass_fields__
         assert fields["signal_history"].type == Dict[str, List[float]]
-        assert fields["rolling_window"].type is int or fields["rolling_window"].type == int
+        assert fields["rolling_window"].type is int or fields["rolling_window"].type is int
 
 
 # ---------------------------------------------------------------------------

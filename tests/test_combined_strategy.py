@@ -29,12 +29,12 @@ sys.modules['src.signals.tsmom_overlay'] = mock_tsmom
 sys.modules['src.agents.risk_agent_hmm'] = mock_hmm
 sys.modules['src.signals.fed_policy_overlay'] = mock_fed
 
-from src.backtest.combined_strategy import (
+from src.backtest.combined_strategy import (  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
     DailyPosition, CombinedStrategyBacktester,
     TRANSACTION_COST, REBALANCE_FREQ, MIN_HISTORY_DAYS,
     START_DATE, END_DATE, __all__,
 )
-from src.backtest.metrics import BacktestResult
+from src.backtest.metrics import BacktestResult  # noqa: E402  # deliberate placement (bootstrap/sys.path ordering)
 
 # Restore original modules to prevent polluting other test files
 for _k, _v in _orig_modules.items():
@@ -1361,7 +1361,7 @@ class TestCombineSignalsWeightClamping:
         """When total_weight is 0, division is skipped (no ZeroDivisionError)."""
         bt = _make_backtester()
         with patch.object(bt, '_combine_signals') as mock_cs:
-            mock_cs.side_effect = lambda *a, **kw: _simulate_zero_weight(*a, **kw)
+            mock_cs.side_effect = lambda *a, **kw: _simulate_zero_weight(*a, **kw)  # noqa: F821  # latent dead ref: lambda never invoked in this test (body = pass)
             # We test that the actual combine_signals handles zero total_weight
             pass
         # Direct path: weights with zero total_weight should not divide
