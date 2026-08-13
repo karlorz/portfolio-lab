@@ -216,6 +216,12 @@ test-ts:
 # Dashboard browser presentation contract (playwright, tests/browser/). Local
 # parity with CI-free suite; first-time prerequisite: install the pinned
 # chromium headless shell via `bunx --bun playwright install chromium-headless-shell`.
+# ALSO REQUIRED: the tasker backend for /api/* via the vite dev proxy
+# (vite.config.ts -> 127.0.0.1:8000). Start/restart it before running:
+#   uv run python -m src.tasker.service --host 127.0.0.1 --port 8000
+# If the suite hits tab-loading timeouts (analytics/risk panels not visible),
+# the backend has degraded — restart it and re-run before debugging anything
+# else (evidence: fresh backend 20/20 vs degraded 16-19/20, all timeout-flakes).
 test-browser:
 	@echo "=== Test Suite (browser): $$(date) ==="; \
 	bun run test:dashboard-browser; \
