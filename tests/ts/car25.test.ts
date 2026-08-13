@@ -311,3 +311,34 @@ describe("analyzeCAR25", () => {
     expect(result.config.seed).toBe(99);
   });
 });
+
+// ---------------------------------------------------------------------------
+// CAR25 twin parity pins (Item 4 CAR25-TWIN-PARITY-PIN, 2026-08-14).
+// car25.ts constants/drawdown are intentionally NOT exported (read-only
+// file), so the constants side of the parity contract is pinned by the
+// Python test tests/test_car25_parity.py via TS source parsing. Here we pin
+// observable behavior consistent with the shared deterministic surface:
+// the maxIterations=20 cap (car25.ts:165) and the positive max-drawdown
+// convention surfaced through calculateSafeF.
+// ---------------------------------------------------------------------------
+
+describe("CAR25 twin parity pins (Item 4)", () => {
+  test("maxIterations cap: monotone series runs the full 20 iterations", () => {
+    // Constant positive returns -> equity strictly increases -> drawdown is
+    // 0 for every f -> |dd - 0.20| = 0.20 >= 0.005 never converges -> the
+    // binary search exhausts maxIterations = 20 (car25.ts:165, :191).
+    const returns = new Array(300).fill(0.001);
+    const result = calculateSafeF(returns, { riskTolerance: 0.20, simulations: 50 });
+    expect(result.iterations).toBe(20);
+    expect(result.toleranceUsed).toBe(0.20);
+  });
+
+  test("max drawdown is reported positive (sign convention)", () => {
+    // The shared convention: TS reports positive drawdown magnitude
+    // (car25.ts:112-123); the Python twin reports negative (car25.py:125-131,
+    // normalized in tests/test_car25_parity.py).
+    const returns = makeReturns(0.10, 0.12, 500);
+    const result = calculateSafeF(returns, { simulations: 50, seed: 42 });
+    expect(result.drawdown95).toBeGreaterThan(0);
+  });
+});
