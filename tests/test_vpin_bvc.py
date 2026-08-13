@@ -32,7 +32,7 @@ class TestBVCBar:
         calc = BVCCalculator()
         bar = calc.classify_bar(
             timestamp=datetime(2026, 5, 14, 10, 0),
-            o=100.0, h=102.0, l=99.0, c=101.5, v=10000
+            o=100.0, h=102.0, low=99.0, c=101.5, v=10000
         )
         # buy_volume = 10000 * (101.5 - 99) / (102 - 99) = 10000 * 2.5/3 = 8333.33
         assert bar.buy_volume > bar.sell_volume
@@ -45,7 +45,7 @@ class TestBVCBar:
         calc = BVCCalculator()
         bar = calc.classify_bar(
             timestamp=datetime(2026, 5, 14, 10, 0),
-            o=100.0, h=102.0, l=99.0, c=99.5, v=10000
+            o=100.0, h=102.0, low=99.0, c=99.5, v=10000
         )
         # buy_volume = 10000 * (99.5 - 99) / (102 - 99) = 10000 * 0.5/3 = 1666.67
         assert bar.buy_volume < bar.sell_volume
@@ -57,7 +57,7 @@ class TestBVCBar:
         calc = BVCCalculator()
         bar = calc.classify_bar(
             timestamp=datetime(2026, 5, 14, 10, 0),
-            o=100.0, h=100.0, l=100.0, c=100.0, v=10000
+            o=100.0, h=100.0, low=100.0, c=100.0, v=10000
         )
         assert bar.buy_volume == pytest.approx(5000)
         assert bar.sell_volume == pytest.approx(5000)
@@ -69,7 +69,7 @@ class TestBVCBar:
         calc = BVCCalculator()
         bar = calc.classify_bar(
             timestamp=datetime(2026, 5, 14, 10, 0),
-            o=100.0, h=102.0, l=99.0, c=101.0, v=0
+            o=100.0, h=102.0, low=99.0, c=101.0, v=0
         )
         assert bar.vpin_local == 0.0
         assert bar.buy_volume == 0.0
@@ -81,7 +81,7 @@ class TestBVCBar:
         calc = BVCCalculator()
         bar = calc.classify_bar(
             timestamp=datetime(2026, 5, 14),
-            o=100.0, h=102.0, l=99.0, c=102.0, v=10000
+            o=100.0, h=102.0, low=99.0, c=102.0, v=10000
         )
         assert bar.buy_volume == pytest.approx(10000)
         assert bar.sell_volume == pytest.approx(0)
@@ -93,7 +93,7 @@ class TestBVCBar:
         calc = BVCCalculator()
         bar = calc.classify_bar(
             timestamp=datetime(2026, 5, 14),
-            o=100.0, h=102.0, l=99.0, c=99.0, v=10000
+            o=100.0, h=102.0, low=99.0, c=99.0, v=10000
         )
         assert bar.buy_volume == pytest.approx(0)
         assert bar.sell_volume == pytest.approx(10000)
@@ -282,7 +282,7 @@ class TestVPINEngine:
         bucket = engine.process_bar(
             symbol="SPY",
             timestamp=datetime(2026, 5, 14, 9, 30),
-            o=100.0, h=102.0, l=99.0, c=101.0, v=10000
+            o=100.0, h=102.0, low=99.0, c=101.0, v=10000
         )
         # Single bar may or may not fill a bucket
         # But it should not raise
@@ -298,7 +298,7 @@ class TestVPINEngine:
             _ = engine.process_bar(
                 symbol="SPY",
                 timestamp=base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=100.5 + (i % 3) * 0.5,
+                o=100.0, h=102.0, low=99.0, c=100.5 + (i % 3) * 0.5,
                 v=5000
             )
 
@@ -383,7 +383,7 @@ class TestBVCCalculatorExtended:
         calc = BVCCalculator()
         bar = calc.classify_bar(
             timestamp=datetime(2026, 5, 14, 10, 0),
-            o=100.0, h=100.0, l=100.0, c=100.0, v=10000
+            o=100.0, h=100.0, low=100.0, c=100.0, v=10000
         )
         assert bar.buy_volume == pytest.approx(5000.0)
         assert bar.sell_volume == pytest.approx(5000.0)
@@ -394,7 +394,7 @@ class TestBVCCalculatorExtended:
         calc = BVCCalculator()
         bar = calc.classify_bar(
             timestamp=datetime(2026, 5, 14, 10, 0),
-            o=100.0, h=102.0, l=99.0, c=101.0, v=0
+            o=100.0, h=102.0, low=99.0, c=101.0, v=0
         )
         assert bar.volume == 0
         assert bar.vpin_local == 0.0
@@ -429,7 +429,7 @@ class TestBVCCalculatorExtended:
         for i in range(5):
             bar = calc.classify_bar(
                 timestamp=datetime(2026, 5, 14, 10, i),
-                o=100.0, h=102.0, l=99.0, c=101.5, v=10000
+                o=100.0, h=102.0, low=99.0, c=101.5, v=10000
             )
             calc.add_bar(bar)
         buy, sell, imbalance = calc.get_buy_sell_imbalance(window=5)
@@ -443,7 +443,7 @@ class TestBVCCalculatorExtended:
         # Even though close != open/high/low, h==l triggers the 50% split
         bar = calc.classify_bar(
             timestamp=datetime(2026, 5, 14, 10, 0),
-            o=100.0, h=105.0, l=105.0, c=103.0, v=10000
+            o=100.0, h=105.0, low=105.0, c=103.0, v=10000
         )
         assert bar.buy_volume == pytest.approx(5000.0)
         assert bar.sell_volume == pytest.approx(5000.0)
@@ -455,7 +455,7 @@ class TestBVCCalculatorExtended:
         calc = BVCCalculator()
         bar = calc.classify_bar(
             timestamp=datetime(2026, 5, 14, 10, 0),
-            o=1e-6, h=1e6, l=1e-6, c=5e5, v=1e9
+            o=1e-6, h=1e6, low=1e-6, c=5e5, v=1e9
         )
         assert bar.buy_volume > 0
         assert bar.sell_volume > 0
@@ -812,7 +812,7 @@ class TestVPINSignalAdapterExtended:
         for i in range(10):
             engine.process_bar(
                 symbol, base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0,
+                o=100.0, h=102.0, low=99.0, c=101.0,
                 v=engine.volume_bucket_size,
             )
         # Verify calculate_vpin works
@@ -872,7 +872,7 @@ class TestVPINEngineExtended:
         for i in range(15):
             engine.process_bar(
                 "SPY", base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0, v=10000
+                o=100.0, h=102.0, low=99.0, c=101.0, v=10000
             )
         # At least some completed buckets
         assert len(engine.completed_buckets["SPY"]) > 0
@@ -889,7 +889,7 @@ class TestVPINEngineExtended:
         for i in range(4):
             result = engine.process_bar(
                 "SPY", base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0, v=5000
+                o=100.0, h=102.0, low=99.0, c=101.0, v=5000
             )
             if result is not None:
                 completed = result
@@ -906,7 +906,7 @@ class TestVPINEngineExtended:
         for i in range(10):
             engine.process_bar(
                 "SPY", base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0, v=0
+                o=100.0, h=102.0, low=99.0, c=101.0, v=0
             )
         assert len(engine.completed_buckets["SPY"]) == 0
         # Current bucket should exist but have actual_volume == 0
@@ -922,7 +922,7 @@ class TestVPINEngineExtended:
         for i in range(5):
             engine.process_bar(
                 "SPY", base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0, v=50000
+                o=100.0, h=102.0, low=99.0, c=101.0, v=50000
             )
         vpin = engine.calculate_vpin("SPY")
         assert vpin is None  # Only 5 buckets, need 50
@@ -936,7 +936,7 @@ class TestVPINEngineExtended:
         for i in range(10):
             engine.process_bar(
                 "SPY", base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0, v=10000
+                o=100.0, h=102.0, low=99.0, c=101.0, v=10000
             )
         assert len(engine.completed_buckets["SPY"]) == 5
         vpin = engine.calculate_vpin("SPY")
@@ -954,7 +954,7 @@ class TestVPINEngineExtended:
         for i in range(200):
             engine.process_bar(
                 symbol, base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0, v=20000
+                o=100.0, h=102.0, low=99.0, c=101.0, v=20000
             )
             engine.calculate_vpin(symbol)
 
@@ -972,7 +972,7 @@ class TestVPINEngineExtended:
         for i in range(30):
             engine.process_bar(
                 symbol, base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0, v=5000
+                o=100.0, h=102.0, low=99.0, c=101.0, v=5000
             )
 
         assert len(engine.completed_buckets[symbol]) <= 10  # vpin_window * 2
@@ -988,7 +988,7 @@ class TestVPINEngineExtended:
         for i in range(10):
             engine.process_bar(
                 symbol, base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0, v=10000
+                o=100.0, h=102.0, low=99.0, c=101.0, v=10000
             )
         # calculate_vpin works with 3+ buckets (vpin_window=3)
         vpin = engine.calculate_vpin(symbol)
@@ -1008,7 +1008,7 @@ class TestVPINEngineExtended:
         for i in range(18):
             engine.process_bar(
                 symbol, base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0, v=10000
+                o=100.0, h=102.0, low=99.0, c=101.0, v=10000
             )
         assert len(engine.completed_buckets[symbol]) == 9
         assert engine.calculate_vpin(symbol) is None
@@ -1172,7 +1172,7 @@ class TestVpinSignalBoundaryConditions:
         for i in range(10):
             engine.process_bar(
                 "SPY", base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0, v=50000
+                o=100.0, h=102.0, low=99.0, c=101.0, v=50000
             )
 
         current_vpin = engine.calculate_vpin("SPY")
@@ -1219,7 +1219,7 @@ class TestVpinSignalBoundaryConditions:
         for i in range(10):
             engine.process_bar(
                 "SPY", base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0, v=50000
+                o=100.0, h=102.0, low=99.0, c=101.0, v=50000
             )
 
         current_vpin = engine.calculate_vpin("SPY")
@@ -1243,7 +1243,7 @@ class TestVpinSignalBoundaryConditions:
         for i in range(10):
             engine.process_bar(
                 "SPY", base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0, v=50000
+                o=100.0, h=102.0, low=99.0, c=101.0, v=50000
             )
 
         current_vpin = engine.calculate_vpin("SPY")
@@ -1311,7 +1311,7 @@ class TestVpinRebalanceOptimizerSignal:
         for i in range(10):
             engine.process_bar(
                 "SPY", base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0, v=50000
+                o=100.0, h=102.0, low=99.0, c=101.0, v=50000
             )
 
         current_vpin = engine.calculate_vpin("SPY")
@@ -1337,7 +1337,7 @@ class TestVpinRebalanceOptimizerSignal:
         for i in range(10):
             engine.process_bar(
                 "SPY", base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0, v=50000
+                o=100.0, h=102.0, low=99.0, c=101.0, v=50000
             )
 
         current_vpin = engine.calculate_vpin("SPY")
@@ -1365,7 +1365,7 @@ class TestVpinRebalanceOptimizerSignal:
         for i in range(10):
             engine.process_bar(
                 "SPY", base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0, v=50000
+                o=100.0, h=102.0, low=99.0, c=101.0, v=50000
             )
 
         current_vpin = engine.calculate_vpin("SPY")
@@ -1398,7 +1398,7 @@ class TestVPINSignalAdapterDataFlow:
         for i in range(10):
             engine.process_bar(
                 "SPY", base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0, v=50000
+                o=100.0, h=102.0, low=99.0, c=101.0, v=50000
             )
 
         current_vpin = engine.calculate_vpin("SPY")
@@ -1424,7 +1424,7 @@ class TestVPINSignalAdapterDataFlow:
         for i in range(10):
             engine.process_bar(
                 "SPY", base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0, v=50000
+                o=100.0, h=102.0, low=99.0, c=101.0, v=50000
             )
 
         current_vpin = engine.calculate_vpin("SPY")
@@ -1668,7 +1668,7 @@ class TestBVCCalculatorNaNInf:
         calc = BVCCalculator()
         bar = calc.classify_bar(
             timestamp=datetime(2026, 5, 14, 10, 0),
-            o=100.0, h=float('nan'), l=99.0, c=101.0, v=10000
+            o=100.0, h=float('nan'), low=99.0, c=101.0, v=10000
         )
         # high == low is False (nan != nan), so the else branch is taken
         # (nan - 99) / (nan - 99) == nan / nan == nan
@@ -1683,7 +1683,7 @@ class TestBVCCalculatorNaNInf:
         calc = BVCCalculator()
         bar = calc.classify_bar(
             timestamp=datetime(2026, 5, 14, 10, 0),
-            o=100.0, h=102.0, l=99.0, c=float('inf'), v=10000
+            o=100.0, h=102.0, low=99.0, c=float('inf'), v=10000
         )
         # buy_volume = 10000 * (inf - 99) / (102 - 99) = inf
         assert math.isinf(bar.buy_volume)
@@ -1697,7 +1697,7 @@ class TestBVCCalculatorNaNInf:
         calc = BVCCalculator()
         bar = calc.classify_bar(
             timestamp=datetime(2026, 5, 14, 10, 0),
-            o=100.0, h=102.0, l=99.0, c=101.0, v=-10000
+            o=100.0, h=102.0, low=99.0, c=101.0, v=-10000
         )
         # buy_volume = -10000 * 2/3 < 0
         assert bar.buy_volume < 0
@@ -1713,7 +1713,7 @@ class TestBVCCalculatorNaNInf:
         calc = BVCCalculator()
         bar = calc.classify_bar(
             timestamp=datetime(2026, 5, 14, 10, 0),
-            o=100.0, h=102.0, l=99.0, c=105.0, v=10000
+            o=100.0, h=102.0, low=99.0, c=105.0, v=10000
         )
         # buy_volume = 10000 * (105 - 99) / (102 - 99) = 10000 * 6/3 = 20000
         assert bar.buy_volume == pytest.approx(20000.0)
@@ -1728,7 +1728,7 @@ class TestBVCCalculatorNaNInf:
         calc = BVCCalculator()
         bar = calc.classify_bar(
             timestamp=datetime(2026, 5, 14, 10, 0),
-            o=100.0, h=102.0, l=99.0, c=98.0, v=10000
+            o=100.0, h=102.0, low=99.0, c=98.0, v=10000
         )
         # buy_volume = 10000 * (98 - 99) / (102 - 99) = -3333.33
         assert bar.buy_volume == pytest.approx(-3333.33, rel=1e-3)
@@ -1741,7 +1741,7 @@ class TestBVCCalculatorNaNInf:
         calc = BVCCalculator()
         bar = calc.classify_bar(
             timestamp=datetime(2026, 5, 14, 10, 0),
-            o=-10.0, h=-5.0, l=-15.0, c=-8.0, v=10000
+            o=-10.0, h=-5.0, low=-15.0, c=-8.0, v=10000
         )
         # buy_volume = 10000 * (-8 - (-15)) / (-5 - (-15)) = 10000 * 7/10 = 7000
         assert bar.buy_volume == pytest.approx(7000.0)
@@ -1772,7 +1772,7 @@ class TestBVCCalculatorNaNInf:
         calc = BVCCalculator()
         bar = calc.classify_bar(
             timestamp=datetime(2026, 5, 14, 10, 0),
-            o=100.0, h=102.0, l=99.0, c=101.0, v=float('nan')
+            o=100.0, h=102.0, low=99.0, c=101.0, v=float('nan')
         )
         # v > 0 is False for NaN, so vpin_local = 0.0
         assert math.isnan(bar.volume)
@@ -1786,7 +1786,7 @@ class TestBVCCalculatorNaNInf:
         calc = BVCCalculator()
         bar = calc.classify_bar(
             timestamp=datetime(2026, 5, 14, 10, 0),
-            o=100.0, h=float('inf'), l=float('inf'), c=101.0, v=10000
+            o=100.0, h=float('inf'), low=float('inf'), c=101.0, v=10000
         )
         # inf == inf is True, so buy_volume = 10000 * 0.5 = 5000
         assert bar.buy_volume == pytest.approx(5000.0)
@@ -1811,7 +1811,7 @@ class TestVPINEngineExtremeParams:
         for i in range(5):
             result = engine.process_bar(
                 "SPY", base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0, v=10000
+                o=100.0, h=102.0, low=99.0, c=101.0, v=10000
             )
             if result is not None:
                 completed_count += 1
@@ -1827,7 +1827,7 @@ class TestVPINEngineExtremeParams:
         for i in range(10):
             engine.process_bar(
                 "SPY", base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0, v=10000
+                o=100.0, h=102.0, low=99.0, c=101.0, v=10000
             )
         # Should have 10 completed buckets
         assert len(engine.completed_buckets["SPY"]) == 10
@@ -1840,7 +1840,7 @@ class TestVPINEngineExtremeParams:
         for i in range(5):
             engine.process_bar(
                 "SPY", base + timedelta(minutes=i),
-                o=100.0, h=102.0, l=99.0, c=101.0, v=10000
+                o=100.0, h=102.0, low=99.0, c=101.0, v=10000
             )
         # With bucket_size=-1000, actual_volume (10000 >= -1000) is always True
         assert len(engine.completed_buckets["SPY"]) == 5

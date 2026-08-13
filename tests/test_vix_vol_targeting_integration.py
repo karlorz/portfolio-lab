@@ -158,12 +158,12 @@ class TestVIXEnhancedRegimeClassification:
 
     def test_vix_term_structure_import(self):
         """Verify VIXTermStructureSignalGenerator is imported."""
-        from src.backtest.vol_targeting_backtest import VIXTermStructureSignalGenerator
+        from src.signals.vix_term_structure import VIXTermStructureSignalGenerator
         assert VIXTermStructureSignalGenerator is not None
 
     def test_vix_regime_enum_import(self):
         """Verify VIXRegime enum is imported."""
-        from src.backtest.vol_targeting_backtest import VIXRegime
+        from src.signals.vix_term_structure import VIXRegime
         assert hasattr(VIXRegime, 'EXTREME_CONTANGO')
         assert hasattr(VIXRegime, 'BACKWARDATION')
 
