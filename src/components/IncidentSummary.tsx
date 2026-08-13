@@ -1,4 +1,3 @@
-import React from 'react';
 import { AlertTriangle, CheckCircle2, Info } from 'lucide-react';
 import type { DashboardIncident, IncidentSeverity, IncidentTab } from './dashboardIncidents';
 

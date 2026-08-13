@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, lazy, Suspense } from 'react';
+import { useState, useMemo, useEffect, lazy, Suspense } from 'react';
 import { BacktestEngine, PORTFOLIOS } from './backtest/engine';
 import type { BacktestResult, PerformanceMetrics, PriceData } from './backtest/engine';
 import { fetchCompactPriceData, symbolsForPortfolios, toBacktestData } from './backtest/price-loader';

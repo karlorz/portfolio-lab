@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { KeyRound, Pause, Play, RefreshCw, RotateCcw, Square, Unlock } from 'lucide-react';
 import { parseTaskerStatus, parseTaskerTasks, type TaskerRun, type TaskerStatus, type TaskerTask } from '../schemas/tasker';
 

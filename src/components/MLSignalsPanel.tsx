@@ -1,4 +1,3 @@
-import React from 'react';
 import type { SignalsData } from '../types/live';
 
 type MLSignalsData = SignalsData['ml_signals'];

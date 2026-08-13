@@ -1,4 +1,3 @@
-import React from 'react';
 import type { EntropyData } from '../types/live';
 
 interface EntropyPanelProps {

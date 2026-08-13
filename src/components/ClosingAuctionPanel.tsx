@@ -1,4 +1,3 @@
-import React from 'react';
 import type { ClosingAuctionSignal } from '../types/live';
 
 interface ClosingAuctionPanelProps {

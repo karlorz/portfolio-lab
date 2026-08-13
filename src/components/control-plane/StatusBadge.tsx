@@ -1,4 +1,3 @@
-import React from 'react';
 
 export type StatusTone = 'neutral' | 'info' | 'success' | 'warning' | 'critical' | 'stale';
 

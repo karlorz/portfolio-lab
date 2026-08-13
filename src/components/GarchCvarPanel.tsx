@@ -1,4 +1,3 @@
-import React from 'react';
 import type { GarchCvarData } from '../types/live';
 
 interface GarchCvarPanelProps {

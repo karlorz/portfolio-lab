@@ -1,4 +1,3 @@
-import React from 'react';
 
 export interface BLView {
   signal_name: string;

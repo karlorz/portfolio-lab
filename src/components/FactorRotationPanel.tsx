@@ -1,4 +1,3 @@
-import React from 'react';
 import type { FactorRotationSignalData } from '../types/live';
 
 interface FactorRotationPanelProps {

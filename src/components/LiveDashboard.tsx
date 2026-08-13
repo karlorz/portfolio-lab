@@ -1,8 +1,8 @@
-import React, { lazy, Suspense, useState, useEffect, useMemo, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useMemo, useRef } from 'react';
 import { YieldCurveIndicator } from './YieldCurveIndicator';
 import { BondAllocationPanel } from './BondAllocationPanel';
 import DurationOverlayPanel from './DurationOverlayPanel';
-import type { SignalsData, PerformanceEntry, Alert, AssetStat, DashboardData, HealthData, StatsData, AnalyticsData, GarchCvarData, EntropyData, HedgeSelectorData, IncidentLifecycleSummary } from '../types/live';
+import type { SignalsData, PerformanceEntry, Alert, DashboardData, HealthData, StatsData, AnalyticsData, GarchCvarData, EntropyData, HedgeSelectorData, IncidentLifecycleSummary } from '../types/live';
 import type { RebalanceHealthData } from './RebalanceHealthPanel';
 import type { ExplainabilityData } from './PortfolioExplainabilityPanel';
 import { BehavioralSentimentPanel } from './BehavioralSentimentPanel';
@@ -18,17 +18,7 @@ import type { TSMOMData } from './TSMOMPanel';
 import type { CrossAssetRVData } from './CrossAssetRVPanel';
 import { PanelErrorBoundary } from './PanelErrorBoundary';
 import type { BehavioralSentimentData } from './BehavioralSentimentPanel';
-import type { CryptoData } from './CryptoAllocationPanel';
-import type { CalendarData } from './CalendarSeasonalityPanel';
-import type { AllocationSurfaceRole, EnsembleVotingData } from './EnsembleVotingPanel';
-import type { AlternativeData } from './AlternativeDataPanel';
-import type { StackingEnsembleData } from './StackingEnsemblePanel';
-import type { ConvexityHarvestData } from './ConvexityHarvestPanel';
-import type { LLMSentimentData } from './LLMSentimentPanel';
-import type { SectorRotationData } from './SectorRotationPanel';
-import type { FactorRotationDashboardData } from './FactorRotationDashboardPanel';
-import type { CollarData } from './CollarPanel';
-import type { KurtosisData } from './KurtosisRegimePanel';
+import type { AllocationSurfaceRole } from './EnsembleVotingPanel';
 import type { VolatilityParityData } from './VolatilityParityPanel';
 import { summarizeHealthOperations } from './healthOperations';
 import { IncidentSummary } from './IncidentSummary';
@@ -60,10 +50,6 @@ import {
   VixyHedgeSchema,
   TurnoverValidatorSchema,
 } from '../schemas/signals';
-import { z } from 'zod';
-
-// Catch-all schema for panel endpoints without dedicated schemas
-const PassthroughSchema = z.object({}).passthrough();
 
 const HealthPanel = lazy(() => import('./HealthPanel').then((module) => ({ default: module.HealthPanel })));
 const RegimeTimeline = lazy(() => import('./RegimeTimeline').then((module) => ({ default: module.RegimeTimeline })));

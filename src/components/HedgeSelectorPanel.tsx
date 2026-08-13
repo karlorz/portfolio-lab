@@ -1,4 +1,3 @@
-import React from 'react';
 import type { HedgeSelectorData } from '../types/live';
 
 interface HedgeSelectorPanelProps {

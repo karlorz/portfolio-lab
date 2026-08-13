@@ -1,4 +1,3 @@
-import React from 'react';
 
 export interface MarlRuntimeStatusData {
   schema_version: 'marl-runtime-status/v1';

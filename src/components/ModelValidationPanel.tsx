@@ -1,4 +1,3 @@
-import React from 'react';
 
 interface ModelValidationProps {
   /** Deflated Sharpe Ratio value (0-1), null if unavailable */

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { WORKSPACES, type WorkspaceId } from './navigation';
 
 interface CommandPaletteProps {

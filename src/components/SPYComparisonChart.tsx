@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import {
   LineChart,
   Line,
@@ -7,8 +7,7 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  ReferenceLine,
-  Area
+  ReferenceLine
 } from 'recharts';
 import type { TooltipValueType } from 'recharts';
 import type { StatsData, PerformanceEntry } from '../types/live';
@@ -34,13 +33,11 @@ export function SPYComparisonChart({ stats, performance }: SPYComparisonChartPro
 
     // Normalize both to start at 100 for comparison
     const startValue = performance[0]?.v || 100000;
-    const startDate = performance[0]?.t || '';
     
     // Calculate SPY benchmark (assume SPY started at same value)
     // In real implementation, this would come from historical SPY data
     // For now, we simulate SPY from the spy_comparison relative_return
     const spyComparison = stats?.spy_comparison;
-    const spyStartValue = startValue;
     
     const data: ChartDataPoint[] = performance.map((entry, index) => {
       const portfolioNormalized = (entry.v / startValue) * 100;

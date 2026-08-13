@@ -1,5 +1,4 @@
-import React from 'react';
-import type { ZeroDTEPosition, ZeroDTEConfig, ZeroDTETrade } from '../types/live';
+import type { ZeroDTEPosition, ZeroDTEConfig } from '../types/live';
 
 interface ZeroDTEPanelProps {
   positions: ZeroDTEPosition[];

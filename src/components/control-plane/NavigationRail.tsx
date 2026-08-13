@@ -1,4 +1,3 @@
-import React from 'react';
 import {
   WORKSPACE_GROUPS,
   type WorkspaceId,

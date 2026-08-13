@@ -1,4 +1,3 @@
-import React from 'react';
 import type { DashboardIncident } from '../dashboardIncidents';
 import { ActionCenter } from './ActionCenter';
 import { AuthorityBadge } from './AuthorityBadge';

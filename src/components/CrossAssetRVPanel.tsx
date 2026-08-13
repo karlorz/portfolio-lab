@@ -1,4 +1,3 @@
-import React from 'react';
 
 export interface AssetPairRV {
   pair: string;           // "SPY/GLD", "SPY/TLT", "GLD/TLT"

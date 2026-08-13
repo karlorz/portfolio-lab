@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import type { SmartRebalanceData } from '../types/live';
 
 interface SmartRebalancePanelProps {

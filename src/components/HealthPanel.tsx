@@ -1,5 +1,4 @@
-import React from 'react';
-import type { HealthData, CronJobStatus, DataFreshness } from '../types/live';
+import type { HealthData } from '../types/live';
 import { summarizeHealthOperations } from './healthOperations';
 
 interface HealthPanelProps {

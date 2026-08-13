@@ -1,4 +1,3 @@
-import React from 'react';
 import type { BrokerData } from '../types/live';
 
 interface BrokerPanelProps {
