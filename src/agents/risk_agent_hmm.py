@@ -45,7 +45,7 @@ from datetime import datetime
 from collections import defaultdict, deque
 from enum import Enum
 
-from src.paths import PROJECT_ROOT, DATA_DIR
+from src.paths import PROJECT_ROOT, DATA_DIR, BASE_ALLOCATION
 from pathlib import Path
 
 import logging
@@ -428,11 +428,7 @@ class PortfolioRegimeManager:
         max_weight: float = 0.80
     ):
         self.detector = HMMRegimeDetector()
-        self.base_allocation = base_allocation or {
-            'SPY': 0.46,
-            'GLD': 0.38,
-            'TLT': 0.16,
-        }
+        self.base_allocation = base_allocation or BASE_ALLOCATION
         self.min_weight = min_weight
         self.max_weight = max_weight
         
