@@ -116,9 +116,9 @@ def test_canary_warns_on_dual_write_lag_stale(tmp_path):
 
 
 def test_batch_au_source_contracts():
-    gen = Path("src/dashboard/generator.py").read_text(encoding="utf-8")
-    assert "dual_write_lag_seconds" in gen
-    assert "dual_write_lag_stale" in gen
+    provenance = Path("src/dashboard/provenance.py").read_text(encoding="utf-8")
+    assert "dual_write_lag_seconds" in provenance
+    assert "dual_write_lag_stale" in provenance
 
     cpc = Path("scripts/check_public_data_consistency.py").read_text(encoding="utf-8")
     assert "dual_write_lag_stale" in cpc

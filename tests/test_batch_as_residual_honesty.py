@@ -111,9 +111,9 @@ def test_health_ops_publish_attaches_provenance(tmp_path, monkeypatch):
 
 
 def test_batch_as_source_contracts():
-    gen = Path("src/dashboard/generator.py").read_text(encoding="utf-8")
-    assert "def _attach_dual_write_provenance" in gen
-    assert "provenance_completeness" in gen
+    provenance = Path("src/dashboard/provenance.py").read_text(encoding="utf-8")
+    assert "def _attach_dual_write_provenance" in provenance
+    assert "provenance_completeness" in provenance
 
     incidents = Path("src/monitor/incident_manager.py").read_text(encoding="utf-8")
     assert "_attach_dual_write_provenance" in incidents

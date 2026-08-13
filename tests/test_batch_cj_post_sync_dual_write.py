@@ -108,7 +108,9 @@ def test_unified_save_post_sync_not_stale(tmp_path, monkeypatch):
 def test_batch_cj_source_contracts():
     gen = Path("src/dashboard/generator.py").read_text(encoding="utf-8")
     assert "finalize_dual_write_provenance_after_sync" in gen
-    assert "post_sync" in gen
+
+    provenance = Path("src/dashboard/provenance.py").read_text(encoding="utf-8")
+    assert "post_sync" in provenance
 
     unified = Path("src/monitor/unified_dashboard.py").read_text(encoding="utf-8")
     assert "finalize_dual_write_provenance_after_sync" in unified

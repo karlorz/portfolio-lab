@@ -1664,7 +1664,7 @@ class TestInternationalMomentumGeneratorStatisticsExtended(unittest.TestCase):
         for i in range(3):
             self._generate_signal(
                 efa_vs_spy=-0.10, eem_vs_spy=0.12,
-                timestamp=f'2026-05-{14+i}T10:00:00',
+                timestamp=(datetime.now() - timedelta(days=4 - i)).strftime('%Y-%m-%dT10:00:00'),
             )
         stats = self.generator.get_signal_statistics(days=90)
         self.assertEqual(stats['total_signals'], 3)
@@ -1674,10 +1674,10 @@ class TestInternationalMomentumGeneratorStatisticsExtended(unittest.TestCase):
 
     def test_statistics_mixed_regimes(self):
         """Statistics with a mix of EFA, EEM, and neutral signals."""
-        self._generate_signal(efa_vs_spy=0.08, eem_vs_spy=-0.04, timestamp='2026-05-14T10:00:00')
-        self._generate_signal(efa_vs_spy=-0.04, eem_vs_spy=0.12, timestamp='2026-05-15T10:00:00')
-        self._generate_signal(efa_vs_spy=-0.02, eem_vs_spy=-0.03, timestamp='2026-05-16T10:00:00')
-        self._generate_signal(efa_vs_spy=0.09, eem_vs_spy=-0.02, timestamp='2026-05-17T10:00:00')
+        self._generate_signal(efa_vs_spy=0.08, eem_vs_spy=-0.04, timestamp=(datetime.now() - timedelta(days=4)).strftime('%Y-%m-%dT10:00:00'))
+        self._generate_signal(efa_vs_spy=-0.04, eem_vs_spy=0.12, timestamp=(datetime.now() - timedelta(days=3)).strftime('%Y-%m-%dT10:00:00'))
+        self._generate_signal(efa_vs_spy=-0.02, eem_vs_spy=-0.03, timestamp=(datetime.now() - timedelta(days=2)).strftime('%Y-%m-%dT10:00:00'))
+        self._generate_signal(efa_vs_spy=0.09, eem_vs_spy=-0.02, timestamp=(datetime.now() - timedelta(days=1)).strftime('%Y-%m-%dT10:00:00'))
         stats = self.generator.get_signal_statistics(days=90)
         self.assertEqual(stats['total_signals'], 4)
         self.assertEqual(stats['efa_lead_count'], 2)
@@ -1686,15 +1686,15 @@ class TestInternationalMomentumGeneratorStatisticsExtended(unittest.TestCase):
 
     def test_statistics_activation_rate(self):
         """Activation rate should be between 0 and 1."""
-        self._generate_signal(efa_vs_spy=0.08, eem_vs_spy=-0.04, timestamp='2026-05-14T10:00:00')
+        self._generate_signal(efa_vs_spy=0.08, eem_vs_spy=-0.04, timestamp=(datetime.now() - timedelta(days=4)).strftime('%Y-%m-%dT10:00:00'))
         stats = self.generator.get_signal_statistics(days=90)
         self.assertGreaterEqual(stats['activation_rate'], 0.0)
         self.assertLessEqual(stats['activation_rate'], 1.0)
 
     def test_statistics_current_regime(self):
         """Current regime should be the most recent signal type."""
-        self._generate_signal(efa_vs_spy=-0.02, eem_vs_spy=-0.03, timestamp='2026-05-14T10:00:00')
-        self._generate_signal(efa_vs_spy=0.08, eem_vs_spy=-0.04, timestamp='2026-05-15T10:00:00')
+        self._generate_signal(efa_vs_spy=-0.02, eem_vs_spy=-0.03, timestamp=(datetime.now() - timedelta(days=4)).strftime('%Y-%m-%dT10:00:00'))
+        self._generate_signal(efa_vs_spy=0.08, eem_vs_spy=-0.04, timestamp=(datetime.now() - timedelta(days=3)).strftime('%Y-%m-%dT10:00:00'))
         stats = self.generator.get_signal_statistics(days=90)
         self.assertEqual(stats['current_regime'], 'efa_lead')
 
@@ -1704,7 +1704,7 @@ class TestInternationalMomentumSignalAdditionalMethods(unittest.TestCase):
 
     def _make_signal(self, **overrides):
         defaults = dict(
-            timestamp='2026-05-14T10:00:00', signal_type='neutral',
+            timestamp=(datetime.now() - timedelta(days=4)).strftime('%Y-%m-%dT10:00:00'), signal_type='neutral',
             confidence=0.0, confidence_level='low',
             efa_momentum_6m=0.12, eem_momentum_6m=0.08, spy_momentum_6m=0.15,
             efa_vs_spy=-0.03, eem_vs_spy=-0.07,

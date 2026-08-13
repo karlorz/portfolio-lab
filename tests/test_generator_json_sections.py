@@ -3216,8 +3216,9 @@ class TestAlertsJSONEdgeCasesExtended:
             with patch("src.dashboard.generator.DATA_DIR", tmp_path):
                 path = gen.generate_alerts_json()
         with open(path) as f:
-            _ = json.load(f)  # smoke-read: file must exist and parse
+            data = json.load(f)
         # With today's data, there should be no stale data alerts
         # If all data is fresh, alerts should be empty
+        assert data["alerts"] == []
         gen.conn.close()
 
