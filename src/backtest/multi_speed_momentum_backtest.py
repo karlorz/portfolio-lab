@@ -207,7 +207,7 @@ class MultiSpeedMomentumBacktester:
                     self._signal_engine = MultiSpeedMomentum()
 
                 # Build a temporary prices dict with history up to end_date
-                temp_prices = self._get_prices_slice(end_date, lookback=400)
+                _ = self._get_prices_slice(end_date, lookback=400)
 
                 # The MultiSpeedMomentum engine reads from self.prices_path.
                 # We can't easily hot-swap the file, so we use the public API

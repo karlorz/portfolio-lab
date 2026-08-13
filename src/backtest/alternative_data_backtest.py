@@ -636,7 +636,7 @@ class AlternativeDataBacktester:
             f"  Initial cap:    "
             f"${self.config.initial_capital:,.0f}"
         )
-        logger.info(f"  Baseline:       46/38/16 (SPY/GLD/TLT)")
+        logger.info("  Baseline:       46/38/16 (SPY/GLD/TLT)")
         logger.info("")
 
         # -- Performance metrics --

@@ -19,11 +19,9 @@ Usage:
 
 import json
 import logging
-import os
 from dataclasses import dataclass, asdict
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -418,7 +416,7 @@ def main():
 
     # Print summary
     print(f"\n{'='*60}")
-    print(f"GOLD-TLT CORRELATION REGIME ANALYSIS")
+    print("GOLD-TLT CORRELATION REGIME ANALYSIS")
     print(f"{'='*60}")
     print(f"  Current Correlation:  {analysis.current_correlation:.4f} ({analysis.current_regime})")
     print(f"  Mean Correlation:     {analysis.mean_correlation:.4f}")
@@ -426,7 +424,7 @@ def main():
     print(f"  Trend:                {analysis.correlation_trend}")
     print(f"  Structural Breaks:    {len(analysis.structural_breaks)}")
     print(f"  Regimes Identified:   {len(analysis.regimes)}")
-    print(f"\nIMPLICATIONS:")
+    print("\nIMPLICATIONS:")
     print(f"  {analysis.implications}")
     print(f"{'='*60}")
 

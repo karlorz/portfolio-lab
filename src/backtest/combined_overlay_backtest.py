@@ -20,7 +20,7 @@ import math
 import sys
 from datetime import datetime, date, timedelta
 from pathlib import Path
-from src.paths import BASE_ALLOCATION, DATA_DIR, MARKET_DB, sqlite_connect
+from src.paths import BASE_ALLOCATION, DATA_DIR, sqlite_connect
 from typing import Optional, Dict, List, Tuple
 
 import numpy as np
@@ -89,7 +89,6 @@ class CombinedOverlayBacktest:
         # Try loading from market database
         if db_path.exists():
             try:
-                import sqlite3
                 import pandas as pd
                 with sqlite_connect(str(db_path)) as conn:
                     df = pd.read_sql_query(
@@ -318,7 +317,6 @@ class CombinedOverlayBacktest:
             vix = vix_data[min(i, len(vix_data)-1)]
 
             # 6-month momentum
-            spy_mom = spy_prices[i] / spy_prices[max(0, i-126)] - 1 if i >= 126 else 0
             btc_mom = btc_prices[i] / btc_prices[max(0, i-126)] - 1 if i >= 126 else 0
             eth_mom = eth_prices[i] / eth_prices[max(0, i-126)] - 1 if i >= 126 else 0
 

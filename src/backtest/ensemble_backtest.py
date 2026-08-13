@@ -13,7 +13,6 @@ Usage:
     python -m src.backtest.ensemble_backtest plot --output results.png
 """
 
-import json
 import logging
 import numpy as np
 import argparse
@@ -210,12 +209,12 @@ class EnsembleBacktestEngine:
         # Normalize signal scores
         total_score = sum(abs(s["score"]) for s in signals.values())
         if total_score > 0:
-            weights = {
+            _ = {
                 asset: abs(s["score"]) / total_score
                 for asset, s in signals.items()
             }
         else:
-            weights = {asset: 1.0/len(signals) for asset in signals} if signals else {}
+            _ = {asset: 1.0/len(signals) for asset in signals} if signals else {}
         
         # Calculate target based on signal strength and direction
         for asset, signal in signals.items():
@@ -450,15 +449,15 @@ class EnsembleBacktestEngine:
         logger.info(f"Max Drawdown:      {result.max_drawdown*100:.1f}%")
         logger.info(f"Sortino:           {e['sortino_ratio']:.2f}")
         logger.info(f"Calmar:            {e['calmar_ratio']:.2f}")
-        logger.info(f"\nCrisis Alpha:")
+        logger.info("\nCrisis Alpha:")
         logger.info(f"  2008 GFC:        {e['crisis_alpha_2008']*100:+.1f}%")
         logger.info(f"  2020 COVID:      {e['crisis_alpha_2020']*100:+.1f}%")
         logger.info(f"  2022 Bear:       {e['crisis_alpha_2022']*100:+.1f}%")
-        logger.info(f"\nSource Contributions:")
+        logger.info("\nSource Contributions:")
         for src, stats in sorted(e['source_contributions'].items(),
                                  key=lambda x: x[1].get("hits", 0), reverse=True)[:5]:
             logger.info(f"  {src:20s}: {stats['hits']:4d} hits, conf={stats['avg_confidence']:.2f}")
-        logger.info(f"\nRegime Distribution:")
+        logger.info("\nRegime Distribution:")
         for regime, pct in sorted(e['regime_distribution'].items(), key=lambda x: -x[1]):
             logger.info(f"  {regime:12s}: {pct*100:.1f}%")
         logger.info(f"{'='*60}")
@@ -519,11 +518,11 @@ def main():
     total = sum(portfolio.values())
     portfolio = {k: v/total for k, v in portfolio.items()}
     
-    logger.info(f"Portfolio-Lab v2.82: 8-Source Ensemble Backtest")
+    logger.info("Portfolio-Lab v2.82: 8-Source Ensemble Backtest")
     logger.info(f"Portfolio: {portfolio}")
     logger.info(f"Period: {args.start} to {args.end}")
     logger.info(f"Rebalance: {args.rebalance}")
-    logger.info(f"Initializing SignalIntegrator with 8 sources...")
+    logger.info("Initializing SignalIntegrator with 8 sources...")
     
     engine = EnsembleBacktestEngine()
     
@@ -571,12 +570,12 @@ def main():
             rebalance_freq="yearly"  # Static rebalances only yearly for drift
         )
         
-        logger.info(f"\nEnsemble (8-source):")
+        logger.info("\nEnsemble (8-source):")
         logger.info(f"  Sharpe: {ensemble_result.sharpe_ratio:.2f}")
         logger.info(f"  CAGR:   {ensemble_result.cagr*100:.2f}%")
         logger.info(f"  MaxDD:  {ensemble_result.max_drawdown*100:.1f}%")
 
-        logger.info(f"\nStatic (46/38/16):")
+        logger.info("\nStatic (46/38/16):")
         logger.info(f"  Sharpe: {static_result.sharpe_ratio:.2f}")
         logger.info(f"  CAGR:   {static_result.cagr*100:.2f}%")
         logger.info(f"  MaxDD:  {static_result.max_drawdown*100:.1f}%")

@@ -16,7 +16,6 @@ Usage:
 """
 
 import argparse
-import json
 import logging
 from dataclasses import asdict, dataclass
 from datetime import datetime

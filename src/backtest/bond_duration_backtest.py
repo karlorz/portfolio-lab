@@ -655,7 +655,7 @@ class WalkForwardBondDurationBacktester:
         logger.info(f"  {'Max Drawdown':<30} {e['baseline_max_drawdown']:>9.2f}% {result.max_drawdown:>9.2f}% "
               f"{result.max_drawdown - e['baseline_max_drawdown']:>+9.2f}%")
 
-        logger.info(f"\n  -- Rotation Activity --")
+        logger.info("\n  -- Rotation Activity --")
         logger.info(f"  Rotation active days:  {e['rotation_active_days']} ({e['rotation_active_pct']:.1f}%)")
         logger.info(f"  Avg effective duration: {e['avg_effective_duration']:.1f} yr")
         logger.info(f"  Avg sleeve weights:    TLT {e['avg_tlt_weight']:.1%} / "
@@ -663,7 +663,7 @@ class WalkForwardBondDurationBacktester:
         logger.info(f"  Rebalances:            {result.total_rebalances}")
         logger.info(f"  Transaction costs:     ${result.total_transaction_costs:.2f}")
 
-        logger.info(f"\n  -- Crisis Returns (%) --")
+        logger.info("\n  -- Crisis Returns (%) --")
         logger.info(f"  {'Year':<10} {'Baseline':>10} {'Rotated':>10}")
         logger.info(f"  {'-'*10} {'-'*10} {'-'*10}")
         crisis_baseline = e.get("crisis_returns_baseline", {})
@@ -676,7 +676,7 @@ class WalkForwardBondDurationBacktester:
             r = crisis_rotated.get(year, 0.0)
             logger.info(f"  {year:<10} {b:>10.2f} {r:>10.2f}")
 
-        logger.info(f"\n  -- Regime Breakdown --")
+        logger.info("\n  -- Regime Breakdown --")
         logger.info(f"  {'Regime':<12} {'% Time':>8} {'Avg Dur':>8} {'TLT':>8} {'IEF':>8} {'SHY':>8}")
         logger.info(f"  {'-'*12} {'-'*8} {'-'*8} {'-'*8} {'-'*8} {'-'*8}")
         regime_breakdown = e.get("regime_breakdown", {})

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Dict, List
 
 from src.backtest.grid_runner import load_prices
-from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult, save_results_json
+from src.backtest.metrics import save_results_json
 from src.paths import PRICES_JSON, SIGNALS_DIR, BASE_ALLOCATION as WEIGHTS
 
 
@@ -341,7 +341,7 @@ def stress_test(
 ) -> List[StressResult]:
     """Stress test across known crisis periods."""
     results = []
-    dr_by_date = {dr.date: dr for dr in daily_returns}
+    _ = {dr.date: dr for dr in daily_returns}
 
     for period_name, config in STRESS_PERIODS.items():
         period_returns = [

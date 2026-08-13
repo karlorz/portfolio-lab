@@ -650,10 +650,10 @@ def main():
     backtest_parser.add_argument('--output', help='Output JSON file')
 
     # summary command
-    summary_parser = subparsers.add_parser('summary', help='Show backtest summary')
+    _ = subparsers.add_parser('summary', help='Show backtest summary')
 
     # status command
-    status_parser = subparsers.add_parser('status', help='Show backtest status')
+    _ = subparsers.add_parser('status', help='Show backtest status')
 
     args = parser.parse_args()
 
@@ -746,10 +746,10 @@ def main():
         logger.info(f"  Min history: {MIN_HISTORY_DAYS} days")
         logger.info("")
         logger.info("Modules:")
-        logger.info(f"  TSMOM: ready")
+        logger.info("  TSMOM: ready")
         hmm_status = backtester.hmm_manager.detector.is_fitted if backtester.hmm_manager else "unavailable"
         logger.info(f"  HMM: {hmm_status}")
-        logger.info(f"  Fed Policy: heuristic-based for backtest")
+        logger.info("  Fed Policy: heuristic-based for backtest")
 
     else:
         parser.print_help()

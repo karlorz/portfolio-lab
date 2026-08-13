@@ -19,11 +19,9 @@ Usage:
 
 import json
 import logging
-import os
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
@@ -154,7 +152,6 @@ def compute_ari(labels1: List[str], labels2: List[str]) -> float:
         return 0.0
 
     # Build contingency table
-    all_labels = sorted(set(labels1 + labels2))
     n = len(labels1)
 
     # Count pairs
@@ -241,7 +238,6 @@ def run_walk_forward_validation(
 
     # Walk-forward windows
     window_results = []
-    prev_test_labels = None
     ari_scores = []
 
     for w in range(n_windows):
@@ -251,7 +247,6 @@ def run_walk_forward_validation(
 
         train_prices = prices.iloc[:train_end_idx]
         test_end_idx = min(train_end_idx + expansion_step, len(prices))
-        test_prices = prices.iloc[train_end_idx - 20:test_end_idx]  # need 20 days for vol
 
         # Classify using expanding window
         train_regimes = classify_regime_series(train_prices)
@@ -373,7 +368,7 @@ def main():
     )
 
     print(f"\n{'='*60}")
-    print(f"WALK-FORWARD REGIME VALIDATION")
+    print("WALK-FORWARD REGIME VALIDATION")
     print(f"{'='*60}")
     print(f"  Windows:              {result.n_windows}")
     print(f"  Overall ARI:          {result.overall_regime_stability:.4f}")

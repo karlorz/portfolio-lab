@@ -18,8 +18,6 @@ from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 
-from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult
-from src.paths import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -529,24 +527,24 @@ def print_car25_result(result: CAR25FullResult, json_output: bool = False):
         logger.info(f"\n{'='*60}")
         logger.info(f"CAR25 Analysis: {result.portfolio}")
         logger.info(f"{'='*60}")
-        logger.info(f"\nStage 1: Safe-f (Risk Normalization)")
+        logger.info("\nStage 1: Safe-f (Risk Normalization)")
         logger.info(f"  Position Size (safe-f): {result.safe_f.safe_f:.4f}")
         logger.info(f"  95th %ile Max Drawdown: {result.safe_f.drawdown95*100:.2f}%")
         logger.info(f"  Iterations: {result.safe_f.iterations}")
         logger.info(f"  Converged: {result.safe_f.converged}")
         
-        logger.info(f"\nStage 2: CAR25 (Profit Estimation)")
+        logger.info("\nStage 2: CAR25 (Profit Estimation)")
         logger.info(f"  CAR25 (25th percentile): {result.car25.car25*100:.2f}%")
         logger.info(f"  CAR50 (median):          {result.car25.car50*100:.2f}%")
         logger.info(f"  CAR75 (75th percentile): {result.car25.car75*100:.2f}%")
         logger.info(f"  TWR25: {result.car25.twr25:.4f}")
         
-        logger.info(f"\nMarket Correlation (SPY)")
+        logger.info("\nMarket Correlation (SPY)")
         logger.info(f"  Correlation: {result.correlation.correlation:.4f}")
         logger.info(f"  Classification: {result.correlation.classification}")
         logger.info(f"  Common Days: {result.correlation.common_days}")
         
-        logger.info(f"\nConfig")
+        logger.info("\nConfig")
         logger.info(f"  Simulations: {result.config['simulations']}")
         logger.info(f"  Horizon: {result.config['horizon_years']} years")
         logger.info(f"  Risk Tolerance: {result.config['risk_tolerance']*100:.0f}%")

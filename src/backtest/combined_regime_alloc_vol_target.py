@@ -30,7 +30,6 @@ Usage:
     python -m src.backtest.combined_regime_alloc_vol_target run --save
 """
 
-import json
 import logging
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone

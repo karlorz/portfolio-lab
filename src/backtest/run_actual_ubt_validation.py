@@ -6,12 +6,11 @@ v2.35 Capital Efficiency Strategy
 Uses real historical UBT/TMF data to validate synthetic simulation accuracy.
 """
 
-import json
 from datetime import datetime
 from math import sqrt, pow
 import numpy as np
 
-from src.paths import HISTORICAL_JSON, DATA_DIR, RISK_FREE_RATE
+from src.paths import HISTORICAL_JSON, DATA_DIR
 from src.backtest.metrics import save_results_json, compute_metrics_from_returns
 from src.backtest.grid_runner import load_prices
 
@@ -277,14 +276,14 @@ def main():
     
     logger.info('Validation complete! Results saved to: %s', output_path)
     logger.info('\n=== VALIDATION SUMMARY ===')
-    logger.info(f"Data Quality:")
+    logger.info("Data Quality:")
     logger.info(f"  TLT: {report['dataQuality']['tltDays']} days")
     logger.info(f"  UBT: {report['dataQuality']['ubtDays']} days")
     logger.info(f"  TMF: {report['dataQuality']['tmfDays']} days")
     logger.info(f"\nSynthetic vs Actual Accuracy: {report['syntheticVsActual']['syntheticAccuracy'].upper()}")
     logger.info(f"  UBT Correlation: {report['syntheticVsActual']['ubtCorrelation']*100:.1f}%")
     logger.error(f"  UBT Tracking Error: {report['syntheticVsActual']['ubtAnnualizedTrackingError']*100:.2f}%")
-    logger.info(f"\n=== BACKTEST RESULTS ===")
+    logger.info("\n=== BACKTEST RESULTS ===")
     for r in results:
         logger.info(f"{r['scenario']}:")
         logger.info(f"  Period: {r['startDate']} to {r['endDate']} ({r['days']} days)")
@@ -295,7 +294,7 @@ def main():
         if r['trackingErrorVsTLT'] != 0:
             logger.error(f"  Tracking Error vs TLT: {r['trackingErrorVsTLT']*100:.2f}%")
         logger.info(f"  Est. Vol Decay: {r['volatilityDecayEstimate']*100:.2f}%")
-    logger.info(f"\n=== RECOMMENDATION ===")
+    logger.info("\n=== RECOMMENDATION ===")
     logger.info(f"Proceed to Paper Trading: {'YES' if proceed_to_paper else 'NO'}")
     logger.info(f"Recommended Scenario: {recommended_scenario}")
     logger.info(f"Confidence: {confidence.upper()}")

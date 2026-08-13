@@ -27,7 +27,7 @@ from typing import Optional, Dict, List
 
 import numpy as np
 
-from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult, save_results_json
+from src.backtest.metrics import save_results_json
 from src.backtest.grid_runner import load_prices_market_db
 from src.paths import BASE_ALLOCATION, MARKET_DB
 
@@ -440,10 +440,10 @@ if __name__ == "__main__":
     )
 
     if args.mode == "summary" or args.summary:
-        logger.info(f"\n=== Stacking Ensemble Backtest ===")
+        logger.info("\n=== Stacking Ensemble Backtest ===")
         logger.info(f"Period: {result.start_date} to {result.end_date} "
               f"({result.trading_days} days, {result.mc_trials} MC trials)")
-        logger.info(f"\nBaseline 46/38/16 (no signals):")
+        logger.info("\nBaseline 46/38/16 (no signals):")
         logger.info(f"  CAGR: {result.baseline_cagr}%  Vol: {result.baseline_vol}%  "
               f"Sharpe: {result.baseline_sharpe}  MaxDD: {result.baseline_max_dd}%")
         logger.info(f"\nWeighted Voting ({BASELINE_ACCURACY:.0%} accuracy):")
@@ -454,12 +454,12 @@ if __name__ == "__main__":
         logger.info(f"  Sharpe: {result.stacking_sharpe_mean:.3f} +/- {result.stacking_sharpe_std:.3f}  "
               f"CAGR: {result.stacking_cagr_mean:.2f}%  MaxDD: {result.stacking_max_dd_mean:.1f}%")
         logger.info(f"  P(Sharpe > baseline): {result.stacking_sharpe_gt_baseline_pct:.0f}%")
-        logger.info(f"\nStacking vs Voting Delta:")
+        logger.info("\nStacking vs Voting Delta:")
         logger.info(f"  Sharpe: {result.sharpe_delta_mean:+.3f} +/- {result.sharpe_delta_std:.3f}  "
               f"CAGR: {result.cagr_delta_mean:+.2f}pp  MaxDD: {result.dd_delta_mean:+.1f}pp")
         logger.info(f"  t-stat: {result.sharpe_delta_t_stat:.2f}  "
               f"Significant: {'YES' if result.sharpe_delta_significant else 'NO'}")
-        logger.info(f"\nTargets:")
+        logger.info("\nTargets:")
         logger.info(f"  Sharpe delta >= +0.05 -> "
               f"{'MET' if result.meets_sharpe_target else 'NOT MET'}")
         logger.info(f"  Accuracy >= 76% -> "

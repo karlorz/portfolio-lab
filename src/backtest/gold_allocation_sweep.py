@@ -181,7 +181,7 @@ class GoldAllocationSweep:
                 continue
             rows.append(make_row(
                 {"spy": spy_w, "gld": gld_w, "tlt": tlt_w, "ief": 0},
-                f"GLD+from TLT"
+                "GLD+from TLT"
             ))
 
         # === Strategy 2: Fund GLD increase from SPY ===
@@ -193,7 +193,7 @@ class GoldAllocationSweep:
                 continue
             rows.append(make_row(
                 {"spy": spy_w, "gld": gld_w, "tlt": tlt_w, "ief": 0},
-                f"GLD+from SPY"
+                "GLD+from SPY"
             ))
 
         # === Strategy 3: Replace TLT with IEF + increase GLD ===
@@ -206,7 +206,7 @@ class GoldAllocationSweep:
                     continue
                 rows.append(make_row(
                     {"spy": spy_w, "gld": gld_w, "tlt": 0, "ief": ief_w},
-                    f"GLD+IEF (no TLT)"
+                    "GLD+IEF (no TLT)"
                 ))
 
         # === Strategy 4: Partial IEF replacement (TLT + IEF mix) ===
@@ -311,7 +311,7 @@ def run_gold_sweep(output: Optional[str] = None) -> GoldSweepResult:
     logger.info(f"{'='*70}")
 
     # Top 10 by Sharpe
-    logger.info(f"\nTop 10 by Sharpe Ratio:")
+    logger.info("\nTop 10 by Sharpe Ratio:")
     logger.info(f"{'SPY':>5} {'GLD':>5} {'TLT':>5} {'IEF':>5} | {'CAGR':>6} {'Vol':>6} {'Sharpe':>7} {'MaxDD':>7} {'Δ':>6} | {'2008':>7} {'2020':>7} {'2022':>7} | Label")
     logger.info("-" * 110)
     for row in result.rows[:10]:

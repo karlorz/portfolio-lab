@@ -209,7 +209,7 @@ class InternationalMomentumBacktester:
     def print_report(self, result: BacktestResult):
         ex = result.extras
         logger.info(f"\n{'='*60}")
-        logger.info(f"International Momentum Signal Backtest")
+        logger.info("International Momentum Signal Backtest")
         logger.info(f"{'='*60}")
         logger.info(f"Period: {ex.get('start_date', '?')} to {ex.get('end_date', '?')}")
         logger.info(f"CAGR: {result.cagr:.2f}%")
@@ -217,10 +217,10 @@ class InternationalMomentumBacktester:
         logger.info(f"Max Drawdown: {result.max_drawdown:.2f}%")
         logger.info(f"Rebalances: {result.total_rebalances}")
         logger.info(f"Total Cost: {result.total_transaction_costs:.1f} bps")
-        logger.info(f"\nCrisis Years:")
+        logger.info("\nCrisis Years:")
         for year, ret in sorted((result.crisis_returns or {}).items()):
             logger.info(f"  {year}: {ret:+.2f}%")
-        logger.info(f"\nSignal Distribution:")
+        logger.info("\nSignal Distribution:")
         for sig, count in ex.get('signal_distribution', {}).items():
             logger.info(f"  {sig}: {count}")
 

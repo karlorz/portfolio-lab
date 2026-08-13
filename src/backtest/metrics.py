@@ -17,7 +17,6 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 from src.paths import BASE_ALLOCATION
 from src.utils.metrics_io import (
     TRADING_DAYS_PER_YEAR,
-    compute_metrics_from_returns,
     save_results_json,
 )
 

@@ -21,7 +21,6 @@ Usage:
     python -m src.backtest.behavioral_sentiment_backtest run --start 2021-05-10
 """
 
-import json
 import logging
 import math
 import sqlite3
@@ -35,7 +34,7 @@ import pandas as pd
 
 from src.backtest.grid_runner import calculate_max_drawdown, load_prices_market_db
 from src.backtest.metrics import BacktestResult, save_results_json
-from src.paths import BASE_ALLOCATION, DATA_DIR, MARKET_DB, sqlite_connect
+from src.paths import BASE_ALLOCATION, MARKET_DB, sqlite_connect
 
 
 __all__ = ['BASELINE_SPY', 'BASELINE_GLD', 'BASELINE_TLT', 'MAX_SHIFT', 'TSMOM_EXPECTED_SHARPE', 'BehavioralSentimentBacktest']
@@ -502,28 +501,28 @@ if __name__ == "__main__":
 
     if args.mode == "summary" or args.summary:
         e = result.extras
-        logger.info(f"\n=== Behavioral Sentiment Backtest Summary ===")
+        logger.info("\n=== Behavioral Sentiment Backtest Summary ===")
         logger.info(f"Period: {e['start_date']} → {e['end_date']} ({e['trading_days']} days)")
-        logger.info(f"\nBaseline 46/38/16:")
+        logger.info("\nBaseline 46/38/16:")
         logger.info(f"  CAGR: {e['baseline_cagr']}%  Vol: {e['baseline_vol']}%  "
               f"Sharpe: {result.baseline_sharpe}  MaxDD: {e['baseline_max_dd']}%")
         logger.info(f"  2022: {e['baseline_crisis_2022']}%")
-        logger.info(f"\nBehavioral Overlay:")
+        logger.info("\nBehavioral Overlay:")
         logger.info(f"  CAGR: {result.cagr}%  Vol: {result.volatility}%  "
               f"Sharpe: {result.sharpe_ratio}  MaxDD: {result.max_drawdown}%")
         logger.info(f"  2022: {e['overlay_crisis_2022']}%")
-        logger.info(f"\nDelta:")
+        logger.info("\nDelta:")
         logger.info(f"  Sharpe: {result.sharpe_improvement:+.3f}  "
               f"MaxDD: {e['dd_improvement']:+.1f}pp  "
               f"CAGR: {e['cagr_delta']:+.1f}pp")
-        logger.info(f"\nSignal Quality:")
+        logger.info("\nSignal Quality:")
         logger.info(f"  Active: {e['signal_days_pct']}% of days  "
               f"Buy: {e['buy_signal_days']}  Sell: {e['sell_signal_days']}  "
               f"Neutral: {e['neutral_days']}")
         logger.info(f"  Avg equity shift: {e['avg_equity_shift']}%  "
               f"False positive rate: {e['false_positive_rate']}%")
         logger.info(f"  Mean 20d signal return: {e['mean_signal_return_20d']}%")
-        logger.info(f"\nRegime Sharpe (overlay):")
+        logger.info("\nRegime Sharpe (overlay):")
         logger.info(f"  VIX<15: {e['regime_vix_low_sharpe']}  "
               f"VIX 15-20: {e['regime_vix_normal_sharpe']}  "
               f"VIX 20-25: {e['regime_vix_elevated_sharpe']}")

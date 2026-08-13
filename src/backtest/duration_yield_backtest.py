@@ -17,7 +17,6 @@ Dynamic Allocation: Regime-based shifts in TLT/IEF/SHY weights
 
 import json
 from datetime import datetime
-from typing import Dict
 import logging
 
 import pandas as pd

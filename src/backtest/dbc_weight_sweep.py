@@ -16,16 +16,13 @@ Usage:
     python -m src.backtest.dbc_weight_sweep run --output results.json
 """
 
-import json
 import logging
-import math
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import Dict, List, Tuple
 import numpy as np
 
-from src.backtest.metrics import BacktestConfig as _BaseConfig, BacktestResult, \
-    compute_metrics_from_returns, save_results_json
+from src.backtest.metrics import compute_metrics_from_returns, save_results_json
 
 logger = logging.getLogger(__name__)
 
@@ -234,7 +231,7 @@ class DBCWeightSweep:
                     best_source = source
 
         # Recommendation
-        best_row = next(
+        _ = next(
             (r for r in rows
              if r.dbc_weight == best_weight and r.funded_from == best_source),
             None

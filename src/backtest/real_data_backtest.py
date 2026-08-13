@@ -9,7 +9,6 @@ Usage:
     python -m src.backtest.real_data_backtest run
 """
 
-import json
 import logging
 import math
 import sqlite3
@@ -272,7 +271,6 @@ class RealDataBacktest:
             vix = vix_d[min(i, len(vix_d)-1)]
 
             # 6-month momentum
-            spy_mom = spy_p[i] / spy_p[max(0, i-126)] - 1 if i >= 126 else 0
             btc_mom = btc_p[i] / btc_p[max(0, i-126)] - 1 if i >= 126 else 0
             eth_mom = eth_p[i] / eth_p[max(0, i-126)] - 1 if i >= 126 else 0
             tlt_mom = tlt_p[i] / tlt_p[max(0, i-126)] - 1 if i >= 126 else 0

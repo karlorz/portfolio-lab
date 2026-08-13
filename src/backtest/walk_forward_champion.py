@@ -16,18 +16,16 @@ Usage:
     python -m src.backtest.walk_forward_champion --save
 """
 
-import json
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 
 import numpy as np
 
-from src.paths import BASE_ALLOCATION, DATA_DIR, PRICES_JSON
+from src.paths import BASE_ALLOCATION, DATA_DIR
 from src.backtest.grid_runner import load_prices_dates_prices
 from src.backtest.metrics import (
-    BacktestMetrics,
     compute_metrics,
     save_results_json,
 )

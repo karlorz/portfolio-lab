@@ -24,8 +24,7 @@ import logging
 from bisect import bisect_right
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -39,12 +38,10 @@ from src.paths import (
     RISK_FREE_RATE,
 )
 from src.backtest.metrics import (
-    BacktestMetrics,
     compute_metrics,
     save_results_json,
 )
 from src.data.price_cache import get_prices_df
-from src.signals.vix_term_structure import VIXTermStructureSignalGenerator, VIXRegime
 
 logger = logging.getLogger(__name__)
 
@@ -272,7 +269,6 @@ def compute_vol_target_backtest(
     vol_target_equity = [capital]
     leverage_history = [1.0]
     prev_leverage = 1.0
-    cash = 0.0
     sanitized_vol_lookback = max(2, int(vol_lookback))
     realized_vols = _precompute_realized_vols(
         portfolio_returns,

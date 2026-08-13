@@ -593,14 +593,14 @@ class WalkForwardVIXYBacktester:
         logger.info(f"  {'Max Drawdown':<30} {result.extras['baseline_max_drawdown']:>9.2f}% {result.max_drawdown:>9.2f}% "
               f"{result.max_drawdown - result.extras['baseline_max_drawdown']:>+9.2f}%")
 
-        logger.info(f"\n  ── Hedge Activity ──")
+        logger.info("\n  ── Hedge Activity ──")
         logger.info(f"  Hedge active days:  {result.extras['hedge_active_days']} ({result.extras['hedge_active_pct']:.1f}%)")
         logger.info(f"  Avg hedge:          {result.extras['avg_hedge_pct']:.2f}%")
         logger.info(f"  Max hedge:          {result.extras['max_hedge_pct']:.2f}%")
         logger.info(f"  Rebalances:         {result.total_rebalances}")
         logger.info(f"  Transaction costs:  ${result.total_transaction_costs:.2f}")
 
-        logger.info(f"\n  ── Crisis Returns (%) ──")
+        logger.info("\n  ── Crisis Returns (%) ──")
         logger.info(f"  {'Year':<10} {'Baseline':>10} {'Hedged':>10}")
         logger.info(f"  {'-'*10} {'-'*10} {'-'*10}")
         crisis_baseline = result.extras.get('crisis_returns_baseline', {})
@@ -613,7 +613,7 @@ class WalkForwardVIXYBacktester:
             h = crisis_hedged.get(year, 0.0)
             logger.info(f"  {year:<10} {b:>10.2f} {h:>10.2f}")
 
-        logger.info(f"\n  ── Regime Breakdown ──")
+        logger.info("\n  ── Regime Breakdown ──")
         logger.info(f"  {'Regime':<15} {'% Time':>8} {'Avg Hedge':>10} {'Max Hedge':>10}")
         logger.info(f"  {'-'*15} {'-'*8} {'-'*10} {'-'*10}")
         for reg_name, stats in sorted(result.extras.get('regime_breakdown', {}).items()):
