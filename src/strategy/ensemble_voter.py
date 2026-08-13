@@ -42,7 +42,6 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from pathlib import Path
-from enum import Enum
 import logging
 
 from src.paths import (

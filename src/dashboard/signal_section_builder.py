@@ -702,7 +702,7 @@ class SignalSectionBuilder:
             generator.project_voting_mass_quality_onto_health
         )
         validate_signal = generator.validate_signal
-        cursor = context["cursor"]
+        _ = context["cursor"]
         current_regime = context["current_regime"]
 
         # FRED-MD macro regime signal

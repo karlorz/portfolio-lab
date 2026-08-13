@@ -666,7 +666,7 @@ def main():
     show_parser.add_argument("--top", type=int, default=20, help="Show top N sources")
 
     # Reset command
-    reset_parser = subparsers.add_parser("reset", help="Reset weights to baseline")
+    _ = subparsers.add_parser("reset", help="Reset weights to baseline")
 
     # Batch CS: stamp only
     stamp_parser = subparsers.add_parser(

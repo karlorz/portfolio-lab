@@ -1161,8 +1161,6 @@ class SignalHealthTracker:
                 continue
 
             # Get IC history from rolling windows
-            end_date = datetime.now().strftime("%Y-%m-%d")
-            start_date = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
             # Compute IC at multiple lookback points to build history
             ic_history = []

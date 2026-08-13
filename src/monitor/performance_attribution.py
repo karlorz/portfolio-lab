@@ -1025,9 +1025,9 @@ def main():
     report_parser.add_argument("--days", type=int, default=90, help="Analysis window (days)")
     report_parser.add_argument("--save", action="store_true", help="Save report to disk")
 
-    dashboard_parser = subparsers.add_parser("dashboard", help="Show latest saved report")
+    _ = subparsers.add_parser("dashboard", help="Show latest saved report")
 
-    patch_parser = subparsers.add_parser("patch", help="Patch EnsembleVoter to log source readings")
+    _ = subparsers.add_parser("patch", help="Patch EnsembleVoter to log source readings")
 
     args = parser.parse_args()
     attributor = PerformanceAttribution()

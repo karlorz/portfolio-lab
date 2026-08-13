@@ -268,7 +268,6 @@ class RedditSentimentFetcher:
         # Calculate ticker metrics
         now = datetime.now(timezone.utc)
         one_hour_ago = now - timedelta(hours=1)
-        one_day_ago = now - timedelta(days=1)
         
         ticker_metrics = {}
         for ticker in TICKERS:

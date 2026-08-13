@@ -481,7 +481,7 @@ def run_black_litterman(
         logger.info("BL turnover penalty applied: lambda=%.2f", turnover_penalty)
 
     try:
-        raw_weights = ef.max_sharpe(risk_free_rate=risk_free_rate)
+        _ = ef.max_sharpe(risk_free_rate=risk_free_rate)
         cleaned = ef.clean_weights()
         perf = ef.portfolio_performance(risk_free_rate=risk_free_rate)
     except (KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError) as e:

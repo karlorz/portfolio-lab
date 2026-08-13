@@ -139,7 +139,6 @@ class BayesianVolModel:
 
         # Likelihood: mean and variance of recent vols
         likelihood_vol = float(np.mean(recent_vols))
-        likelihood_var = float(np.var(recent_vols)) if n > 1 else likelihood_vol**2
 
         # Posterior: precision-weighted average
         alpha_post = alpha_eff + n

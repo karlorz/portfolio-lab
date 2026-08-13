@@ -600,7 +600,7 @@ def main():
     backtest_parser.add_argument('--end', help='End date')
     
     # status command
-    status_parser = subparsers.add_parser('status', help='Show overlay status')
+    _ = subparsers.add_parser('status', help='Show overlay status')
     
     args = parser.parse_args()
     

@@ -329,7 +329,6 @@ class IncidentManager:
             pass
 
         public_summary = Path(PUBLIC_DATA_DIR) / "incidents.json"
-        dual_ok: bool | None = None
         paths_identical = False
         skip_dual_for_isolation = False
         try:
@@ -489,7 +488,7 @@ class IncidentManager:
                 )
                 tmp.write_text(public_body, encoding="utf-8")
                 tmp.replace(public_summary)
-                dual_ok = True
+                _ = True
                 # Batch CJ: post-sync lag/hash so sticky dual_write_lag_stale clears
                 try:
                     from src.dashboard.generator import (
@@ -522,7 +521,6 @@ class IncidentManager:
                 except Exception:  # noqa: BLE001
                     pass
         except OSError as exc:
-            dual_ok = False
             logger.warning("Public incidents dual-write failed: %s", exc)
             try:
                 from src.dashboard.generator import _attach_dual_write_provenance

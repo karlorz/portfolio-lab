@@ -57,7 +57,7 @@ class VIXTermStructure:
         # forced convexity_harvest status=unavailable and sticky kill).
         vix_spot = float(filtered_data["vix_spot"])
         second_month = float(filtered_data["second_month"])
-        third_month = float(filtered_data["third_month"])
+        _ = float(filtered_data["third_month"])
         if filtered_data.get("contango_1m_2m") is None:
             if front_month:
                 filtered_data["contango_1m_2m"] = (second_month / front_month - 1.0) * 100.0

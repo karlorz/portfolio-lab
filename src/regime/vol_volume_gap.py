@@ -121,9 +121,8 @@ def compute_features(
 
         # OHLCV mode: use overnight gap and opening range
         today_open = prices[-1, 0]
-        today_high = prices[-1, 1]
+        _ = prices[-1, 1]
         overnight_gap = (today_open - prev_close) / prev_close if prev_close != 0 else 0.0
-        opening_half_range = (today_high - today_open) / today_open if today_open != 0 else 0.0
 
         # For close-only compat, use daily return as primary feature
         daily_return = (today_close - prev_close) / prev_close if prev_close != 0 else 0.0

@@ -432,7 +432,6 @@ class TwoStageKMeansRegime:
 
         # Relabel: crisis=0, normal=1 (temporary)
         is_crisis = (l1_labels == crisis_cluster)
-        crisis_idx = np.where(is_crisis)[0]
         normal_idx = np.where(~is_crisis)[0]
 
         # Step 3: Layer 2 — Cosine k-means (k=5) on normal months

@@ -738,7 +738,7 @@ def main():
     live_parser.add_argument('--output', help='Output JSON file')
     
     # status command
-    status_parser = subparsers.add_parser('status', help='Show TSMOM status')
+    _ = subparsers.add_parser('status', help='Show TSMOM status')
     
     args = parser.parse_args()
     

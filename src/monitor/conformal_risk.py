@@ -288,7 +288,6 @@ def _coverage_summary(
         n10 = int(np.sum(previous & ~current))
         n11 = int(np.sum(previous & current))
         transition_exceedances = n01 + n11
-        transition_non_exceedances = n00 + n10
         transition_count = n_obs - 1
         pi = transition_exceedances / transition_count if transition_count else 0.0
         pi01 = n01 / (n00 + n01) if (n00 + n01) else 0.0

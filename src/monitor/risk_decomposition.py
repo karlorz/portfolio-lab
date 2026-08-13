@@ -832,7 +832,7 @@ def main():
     p_check.add_argument("--window", type=int, default=DEFAULT_WINDOW)
 
     # factors
-    p_factors = sub.add_parser("factors", help="Show factor correlation matrix")
+    _ = sub.add_parser("factors", help="Show factor correlation matrix")
 
     args = parser.parse_args()
 

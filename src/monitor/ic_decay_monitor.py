@@ -362,7 +362,6 @@ def _spearman_rank_correlation(
     y_rank = _average_midranks(y_arr)
 
     # Pearson correlation of ranks
-    n = len(x_rank)
     x_mean = x_rank.mean()
     y_mean = y_rank.mean()
 

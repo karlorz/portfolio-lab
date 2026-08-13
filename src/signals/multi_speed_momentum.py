@@ -583,7 +583,6 @@ class MultiSpeedBacktester:
         rebalance_dates = []
         
         # Tier performance tracking
-        tier_returns = {'fast': [], 'medium': [], 'slow': []}
         
         max_lookback = max(t['lookback_days'] + t['skip_days'] for t in SPEED_TIERS.values())
         

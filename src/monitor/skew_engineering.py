@@ -456,12 +456,12 @@ def main():
     subparsers = parser.add_subparsers(dest="command", help="Command")
 
     # compute
-    p_compute = subparsers.add_parser(
+    _ = subparsers.add_parser(
         "compute", help="Compute skew metrics"
     )
 
     # summary
-    p_summary = subparsers.add_parser(
+    _ = subparsers.add_parser(
         "summary", help="Human-readable summary"
     )
 

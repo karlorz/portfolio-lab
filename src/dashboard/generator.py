@@ -15,11 +15,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import numpy as np
 
-from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB, sqlite_connect
+from src.paths import BASE_ALLOCATION, YIELDS_JSON, DATA_DIR, PUBLIC_DATA_DIR, MARKET_DB, sqlite_connect  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access)
 from src.backtest.metrics import save_results_json
 from src.dashboard.public_data_index import build_public_data_index
 from src.monitor.hermes_cron import resolve_hermes_cron_jobs_path
-from src.monitor.signal_schemas import validate_all_signals, validate_signal
+from src.monitor.signal_schemas import validate_all_signals, validate_signal  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access)
 from src.monitor.alerting import webhook_config_state
 from src.dashboard.cron_scheduler_section import build_cron_scheduler_section
 from src.dashboard.data_freshness_section import build_data_freshness_section
@@ -66,36 +66,36 @@ from src.dashboard.health_projections import (
     project_reentry_eligibility_onto_health,
     project_voting_mass_quality_onto_health,
     project_paper_return_ssot_onto_health,
-    _apply_kill_to_smart_rebalance,
-    _remaining_budget_ratio,
-    _remaining_budget_display_pct,
-    _load_canonical_health_report,
+    _apply_kill_to_smart_rebalance,  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access)
+    _remaining_budget_ratio,  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access)
+    _remaining_budget_display_pct,  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access)
+    _load_canonical_health_report,  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access)
 )
 
 # Re-export provenance/dual-write cluster (moved to provenance.py by Item 9)
 from src.dashboard.provenance import (
-    _apply_partial_patch_git_sha_honesty,
-    _enrich_duration_allocation_provenance,
-    _yield_source_provenance,
-    _first_known_value,
+    _apply_partial_patch_git_sha_honesty,  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access)
+    _enrich_duration_allocation_provenance,  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access)
+    _yield_source_provenance,  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access)
+    _first_known_value,  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access)
     _attach_signal_metadata,
-    _generator_git_sha_short,
+    _generator_git_sha_short,  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access)
     _stamp_generator_git_sha,
-    _attach_dual_write_provenance,
-    finalize_dual_write_provenance_after_sync,
+    _attach_dual_write_provenance,  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access)
+    finalize_dual_write_provenance_after_sync,  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access)
     _finalize_signal_metadata,
     _mirror_public_data_contract_files_to_dist,
     SIGNAL_EXCEPTIONS,
-    MONITOR_EXCEPTIONS,
+    MONITOR_EXCEPTIONS,  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access)
     _BUG_EXCEPTIONS,
 )
 
 # Re-export alt-data cluster (moved to alternative_data.py by Item 10)
 from src.dashboard.alternative_data import (
     project_alternative_data_signal,
-    load_alternative_data_producer_timestamp,
-    refresh_public_alternative_data_projection,
-    _is_predictive_fred_macro,
+    load_alternative_data_producer_timestamp,  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access)
+    refresh_public_alternative_data_projection,  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access)
+    _is_predictive_fred_macro,  # noqa: F401  # re-export hub: consumers import via generator.X (patch seams + src lazy-access)
 )
 
 from src.dashboard.sections_ensemble import _EnsembleSectionsMixin

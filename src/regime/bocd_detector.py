@@ -191,11 +191,10 @@ class BOCDDetector:
             #   mu_post = (kappa_0 * mu_0 + sum_x) / (kappa_0 + count)
             #   var_post = obs_var * (1 + 1/(kappa_0 + count))
             
-            counts = self._count[:t+1] + 1  # Will have count+1 after this observation
-            sums = self._sum_x[:t+1] + x
+            _ = self._count[:t+1] + 1  # Will have count+1 after this observation
+            _ = self._sum_x[:t+1] + x
             
             # Posterior mean after including x
-            posterior_mu = (self.kappa_0 * self.mu_0 + sums) / (self.kappa_0 + counts)
             
             # Predictive variance (before observing x)
             # var_pred = obs_var * (1 + 1/(kappa_0 + count))
