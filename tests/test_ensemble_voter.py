@@ -5,6 +5,7 @@ regime detection, vote computation, allocation recommendation.
 """
 import json
 import logging
+import random
 
 import numpy as np
 import pandas as pd
@@ -53,6 +54,26 @@ def _make_reading(source=SignalSource.MULTI_SPEED_MOM, value=0.5, confidence=0.8
         asset_signals=asset_signals or {'SPY': 0.5, 'TLT': -0.2, 'GLD': 0.1},
         explanation='test',
     )
+
+
+@pytest.fixture
+def _deterministic_exploration_rng():
+    """Pin stdlib + numpy global RNG for one test, restore afterwards.
+
+    _apply_exploration_noise (ensemble_voter_vote.py:792-830) draws from
+    unseeded global RNGs (random.random() epsilon gate + np.random.dirichlet
+    draw), which makes |consensus|-bound assertions in compute_vote tests
+    state-dependent (observed flake: test_compute_vote_conflicting_signals).
+    Seeding per-test makes the outcome deterministic; the prior global state
+    is restored so other tests' randomness is not coupled.
+    """
+    py_state = random.getstate()
+    np_state = np.random.get_state()
+    random.seed(42)
+    np.random.seed(42)
+    yield
+    random.setstate(py_state)
+    np.random.set_state(np_state)
 
 
 def _make_voter(tmp_path):
@@ -649,6 +670,7 @@ class TestEnsembleVoter:
         vote = voter.compute_vote(readings=readings, regime=Regime.HIGH_VOL, regime_confidence=0.7)
         assert vote is not None
 
+    @pytest.mark.usefixtures("_deterministic_exploration_rng")
     def test_compute_vote_conflicting_signals(self, tmp_path):
         """Conflicting signals should moderate the consensus."""
         voter = _make_voter(tmp_path)
