@@ -650,3 +650,82 @@ def test_legacy_ic_decay_incident_without_flag_survives_pass_alert(tmp_path):
     events = [json.loads(line) for line in log_path.read_text().splitlines()]
     assert events[-1]["event"] == "pass_held_for_manual_review"
     assert events[-1]["manual_review_reason"] == "ic_evidence_correction"
+
+
+# ── Item 16 s2: operator resolution CLI path ─────────────────────────
+
+def test_operator_resolve_appends_event_clears_kill_and_reloads_resolved(tmp_path):
+    """Explicit operator resolution: journal append + kill clear + summary;
+    a fresh manager replaying the journal sees the incident resolved."""
+    manager = IncidentManager(
+        log_path=tmp_path / "incidents.jsonl",
+        summary_path=tmp_path / "incidents.json",
+        kill_switch_path=tmp_path / "kill_switch.json",
+        escalation_cycles=1,  # first alert arms the kill switch immediately
+    )
+    opened = manager.record_alert(
+        channel="ic_decay",
+        level="halt",
+        message="signal critical",
+        now=datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc),
+    )
+    assert opened is not None
+    kill = json.loads((tmp_path / "kill_switch.json").read_text())
+    assert kill["incident_id"] == opened.incident_id
+    assert kill["level"] == "warning"  # escalation_cycles=1 → stage 1
+
+    resolved = manager.resolve_operator(
+        opened.incident_id,
+        "operator reviewed IC evidence; resolved",
+        now=datetime(2026, 7, 1, 0, 5, tzinfo=timezone.utc),
+    )
+    assert resolved is not None
+    assert resolved.state == IncidentState.RESOLVED
+    assert resolved.resolution_notes == "operator reviewed IC evidence; resolved"
+    assert resolved.mttr_seconds == 300.0
+
+    events = _read_jsonl(tmp_path / "incidents.jsonl")
+    assert events[-1]["event"] == "resolved"
+    assert events[-1]["state"] == "resolved"
+    # Kill switch cleared by the resolution (incident_lifecycle-owned).
+    assert not (tmp_path / "kill_switch.json").exists()
+
+    summary = json.loads((tmp_path / "incidents.json").read_text())
+    assert summary["open_count"] == 0
+
+    # Replay from the journal in a fresh manager: resolved, 0 open.
+    reloaded = IncidentManager(
+        log_path=tmp_path / "incidents.jsonl",
+        summary_path=tmp_path / "incidents.json",
+        kill_switch_path=tmp_path / "kill_switch.json",
+    )
+    assert reloaded.open_incidents() == []
+    assert reloaded.incident_state(opened.incident_id) == "resolved"
+
+
+def test_operator_resolve_idempotent_and_unknown(tmp_path):
+    manager = IncidentManager(
+        log_path=tmp_path / "incidents.jsonl",
+        summary_path=tmp_path / "incidents.json",
+    )
+    opened = manager.record_alert(
+        channel="cron_failure",
+        level="warn",
+        message="cron failed",
+        now=datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc),
+    )
+    assert opened is not None
+
+    first = manager.resolve_operator(opened.incident_id, "fixed manually")
+    assert first is not None
+
+    # Already resolved: no-op (no duplicate event, still resolved).
+    second = manager.resolve_operator(opened.incident_id, "again")
+    assert second is None
+    events = _read_jsonl(tmp_path / "incidents.jsonl")
+    assert [event["event"] for event in events].count("resolved") == 1
+    assert manager.incident_state(opened.incident_id) == "resolved"
+
+    # Unknown id: None + incident_state None (CLI refuses with exit 1).
+    assert manager.resolve_operator("00000000-unknown", "nope") is None
+    assert manager.incident_state("00000000-unknown") is None

@@ -241,6 +241,74 @@ class IncidentManager:
         self._project_disk_kill_open_surfaces()
         return incident
 
+    def resolve_operator(
+        self,
+        incident_id: str,
+        message: str,
+        now: datetime | None = None,
+    ) -> Incident | None:
+        """Explicit operator resolution (Task 2A path) by incident id.
+
+        The operator's own action — bypasses the PASS-only manual-review hold
+        (``_resolve`` :614-645) by design, but is never invoked by alert
+        transitions. Mirrors the ``handle_alert`` resolution branch
+        (journal append + ``_clear_matching_incident_kill_switch`` +
+        ``write_summary`` + ``_project_disk_kill_open_surfaces``).
+
+        Returns the resolved ``Incident``, or ``None`` when no OPEN incident
+        matches (already resolved, or unknown id — callers distinguish via
+        ``incident_state``).
+        """
+        event_time = now or _utc_now()
+        existing = next(
+            (
+                incident
+                for incident in self.open_incidents()
+                if incident.incident_id == incident_id
+            ),
+            None,
+        )
+        if existing is None:
+            return None
+
+        resolved_at = _iso(event_time)
+        created = datetime.fromisoformat(existing.created_at)
+        mttr_seconds = (
+            event_time.astimezone(timezone.utc)
+            - created.astimezone(timezone.utc)
+        ).total_seconds()
+        incident = Incident(
+            incident_id=existing.incident_id,
+            channel=existing.channel,
+            severity=existing.severity,
+            state=IncidentState.RESOLVED,
+            message=message,
+            details=existing.details,
+            created_at=existing.created_at,
+            updated_at=resolved_at,
+            resolved_at=resolved_at,
+            resolution_notes=message,
+            mttr_seconds=mttr_seconds,
+            alert_count=existing.alert_count,
+            kill_switch_level=existing.kill_switch_level,
+        )
+        self._append_event("resolved", incident)
+        self._clear_matching_incident_kill_switch(incident)
+        self.write_summary()
+        self._project_disk_kill_open_surfaces()
+        logger.info(
+            "Operator resolved incident %s (%s): %s",
+            incident.incident_id,
+            incident.channel,
+            message,
+        )
+        return incident
+
+    def incident_state(self, incident_id: str) -> str | None:
+        """Latest lifecycle state for an incident id (``None`` if unknown)."""
+        latest = self._latest_incidents().get(incident_id)
+        return latest.state.value if latest is not None else None
+
     def _project_disk_kill_open_surfaces(self) -> None:
         """Best-effort fan-out of kill_switch.json + incidents onto health surfaces."""
         try:
