@@ -44,6 +44,7 @@ help:
 	@echo ""
 	@echo "  make test-gate    DEFAULT agent gate (= test-fast; <2m ensemble/signal)"
 	@echo "  make test-fast    Ensemble/signal subset only (alias of test-gate)"
+	@echo "  make lint         Ruff lint src/ tests/ scripts/ (CI parity, opt-in)"
 	@echo "  make test         Full safe suite merge gate (ML off, 6GB VSZ, ~30-45m, 3600s)"
 	@echo "  make test-unit    Safe suite excluding generator + *integration* (still ~15k tests)"
 	@echo "  make test-generator  Only tests/test_generator.py (heavy dashboard path)"
@@ -205,6 +206,11 @@ TEST_INTEGRATION_FILES := \
 
 # DEFAULT agent gate: alias of test-fast (<2m). Do not point agents at full `make test`.
 test-gate: test-fast
+
+# Lint gate: local parity with the CI ruff step (ci.yml lint step runs the same command).
+.PHONY: lint
+lint:
+	@uv run ruff check src/ tests/ scripts/
 
 # Canonical TS suite (runner matches ci.yml:60 `bun test tests/ts/`); explicit
 # path only — a bare `bun test` at root would pick up stray non-suite files.
