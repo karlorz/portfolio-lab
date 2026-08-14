@@ -234,10 +234,11 @@ def test_ops_monitor_merge_does_not_refold_signal_quality_into_system_status(
     (data / "incidents.json").write_text(
         json.dumps({"open_count": 0, "incidents": []}), encoding="utf-8"
     )
-    monkeypatch.setattr(hc, "DATA_DIR", data)
+    # apply_ops_monitor_to_dashboard_health receives data_dir/public_dir
+    # kwargs and calls the mirror-lag projector from its own module (post
+    # HEALTH-CHECK-SPLIT); the hub hc.DATA_DIR binding is not read here.
     monkeypatch.setattr(
-        hc,
-        "_project_mirror_lag_onto_dashboard_health",
+        "src.monitor.health_dashboard_apply._project_mirror_lag_onto_dashboard_health",
         lambda *args, **kwargs: None,
     )
 
@@ -275,15 +276,16 @@ def test_partial_ops_restamp_clears_sticky_quality_only_system_status_warning(
     data.mkdir()
     public.mkdir()
     _write_clear_kill_ssot(data)
-    monkeypatch.setattr(hc, "DATA_DIR", data)
+    # Retarget to health_dashboard_apply module globals: the ops merge calls
+    # its own bindings, so hub re-export patches would be silent no-ops.
     monkeypatch.setattr(
-        hc,
-        "_project_mirror_lag_onto_dashboard_health",
+        "src.monitor.health_dashboard_apply._project_mirror_lag_onto_dashboard_health",
         lambda *args, **kwargs: None,
     )
+    # load_graduation_cb_ssot is a function-local lazy import inside
+    # apply_ops_monitor_to_dashboard_health; patch its owner module.
     monkeypatch.setattr(
-        hc,
-        "load_graduation_cb_ssot",
+        "src.monitor.health_freshness_cb.load_graduation_cb_ssot",
         lambda *args, **kwargs: None,
     )
 

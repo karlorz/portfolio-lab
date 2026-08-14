@@ -55,6 +55,25 @@ SEVERITY_THRESHOLDS = {
 
 MODEL_VALIDATION_BENCHMARK_PATH = DATA_DIR / "daily_brief_model_validation_benchmark.json"
 
+# Frozen champion tuple from the 94-config base-grid sweep (vault:
+# projects/portfolio-lab/compound/grid-search-results). Used when the operator
+# manifest file is absent so DSR reporting stays deterministic and hermetic —
+# it never depends on ignored local data. A present manifest file still wins.
+_DEFAULT_MODEL_VALIDATION_BENCHMARK: Dict[str, Any] = {
+    "benchmark_id": "base-grid-champion-94-config",
+    "description": (
+        "Champion SPY/GLD/TLT 46/38/16 from the frozen 94-config base-grid "
+        "sweep (5371 trading days, 2005-01-03 to 2026-05-08); frozen "
+        "benchmark, not a live snapshot."
+    ),
+    "sharpe_ratio": 0.79,
+    "n_trials": 94,
+    "n_observations": 5371,
+    "date_range": {"start": "2005-01-03", "end": "2026-05-08"},
+    "provenance": "projects/portfolio-lab/compound/grid-search-results",
+    "observation_semantics": "frozen_benchmark_not_live_snapshot",
+}
+
 
 @dataclass
 class BriefSection:
@@ -82,7 +101,13 @@ def load_model_validation_benchmark(
 ) -> ModelValidationBenchmark:
     """Load the frozen benchmark tuple used for daily-brief DSR reporting."""
     benchmark_path = Path(path) if path is not None else MODEL_VALIDATION_BENCHMARK_PATH
-    payload = json.loads(benchmark_path.read_text())
+    try:
+        payload = json.loads(benchmark_path.read_text())
+    except FileNotFoundError:
+        # Deterministic fallback to the documented frozen grid-search tuple so
+        # hermetic runs never depend on an ignored local data file. The loader
+        # only reads the payload, so the constant is used directly.
+        payload = _DEFAULT_MODEL_VALIDATION_BENCHMARK
     date_range = payload["date_range"]
     if not isinstance(date_range, dict):
         raise ValueError("model validation benchmark date_range must be an object")

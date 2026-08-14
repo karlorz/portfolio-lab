@@ -483,17 +483,21 @@ class TechnicalSignal(SignalSource):
         if not self.market_db.exists():
             return None
 
-        with sqlite_connect(self.market_db) as conn:
-            cursor = conn.cursor()
+        try:
+            with sqlite_connect(self.market_db) as conn:
+                cursor = conn.cursor()
 
-            cursor.execute("""
-                SELECT date, close FROM prices
-                WHERE symbol = ?
-                AND date >= date('now', '-400 days')
-                ORDER BY date DESC
-            """, (ticker,))
+                cursor.execute("""
+                    SELECT date, close FROM prices
+                    WHERE symbol = ?
+                    AND date >= date('now', '-400 days')
+                    ORDER BY date DESC
+                """, (ticker,))
 
-            rows = cursor.fetchall()
+                rows = cursor.fetchall()
+        except sqlite3.Error as e:
+            warnings.warn(f"Momentum price query failed for {ticker}: {e}")
+            return None
 
         if len(rows) < 200:
             return None
@@ -540,17 +544,21 @@ class TechnicalSignal(SignalSource):
         if not self.market_db.exists():
             return 0.0
 
-        with sqlite_connect(self.market_db) as conn:
-            cursor = conn.cursor()
+        try:
+            with sqlite_connect(self.market_db) as conn:
+                cursor = conn.cursor()
 
-            cursor.execute("""
-                SELECT close FROM prices
-                WHERE symbol = ?
-                AND date >= date('now', '-30 days')
-                ORDER BY date DESC
-            """, (ticker,))
+                cursor.execute("""
+                    SELECT close FROM prices
+                    WHERE symbol = ?
+                    AND date >= date('now', '-30 days')
+                    ORDER BY date DESC
+                """, (ticker,))
 
-            rows = cursor.fetchall()
+                rows = cursor.fetchall()
+        except sqlite3.Error as e:
+            warnings.warn(f"Mean-reversion price query failed for {ticker}: {e}")
+            return 0.0
 
         if len(rows) < 14:
             return 0.0

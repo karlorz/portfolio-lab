@@ -97,7 +97,11 @@ def test_tasker_health_ignores_hermes_by_default_when_tasker_active(tmp_path, mo
     from src.monitor.health_check import _check_data_freshness
 
     monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
-    monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+    # _check_data_freshness resolves DATA_DIR/PUBLIC_DATA_DIR in
+    # health_freshness_cb (post HEALTH-CHECK-SPLIT); the hub PUBLIC_DATA_DIR
+    # binding is not read on this path.
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path)
     monkeypatch.setenv("CRON_BACKEND", "tasker")
     monkeypatch.delenv("TASKER_INCLUDE_HERMES_AUDIT", raising=False)
 
@@ -139,7 +143,11 @@ def test_tasker_health_can_include_hermes_audit_when_explicitly_enabled(tmp_path
     from src.monitor.health_check import _check_data_freshness
 
     monkeypatch.setattr("src.monitor.health_check.DATA_DIR", tmp_path)
-    monkeypatch.setattr("src.monitor.health_check.PUBLIC_DATA_DIR", tmp_path)
+    # _check_data_freshness resolves DATA_DIR/PUBLIC_DATA_DIR in
+    # health_freshness_cb (post HEALTH-CHECK-SPLIT); the hub PUBLIC_DATA_DIR
+    # binding is not read on this path.
+    monkeypatch.setattr("src.monitor.health_freshness_cb.DATA_DIR", tmp_path)
+    monkeypatch.setattr("src.monitor.health_freshness_cb.PUBLIC_DATA_DIR", tmp_path)
     monkeypatch.setenv("CRON_BACKEND", "tasker")
     monkeypatch.setenv("TASKER_INCLUDE_HERMES_AUDIT", "1")
 

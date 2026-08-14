@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 
@@ -60,11 +60,17 @@ def test_exploration_noise_does_not_reinflate_soft_delete(tmp_path: Path) -> Non
         SignalSource.CROSS_ASSET_RV: 0.7,
         SignalSource.ALTERNATIVE_DATA: 0.3,
     }
-    # Force exploration path
-    with patch("src.strategy.ensemble_voter.random.random", return_value=0.0):
-        with patch("src.strategy.ensemble_voter.np.random.dirichlet") as mock_dir:
-            # Dirichlet would try to put mass on MSM if alpha>0 for zero arm
-            mock_dir.return_value = np.array([0.2, 0.5, 0.3])
+    # Force exploration path; _apply_exploration_noise resolves random/np
+    # from its owner module (post ENSEMBLE-VOTER-MIXINS split). Stub those
+    # module bindings so the process-global random module / numpy are
+    # never patched.
+    fake_random = MagicMock()
+    fake_random.random.return_value = 0.0
+    fake_np = MagicMock()
+    # Dirichlet would try to put mass on MSM if alpha>0 for zero arm
+    fake_np.random.dirichlet.return_value = np.array([0.2, 0.5, 0.3])
+    with patch("src.strategy.ensemble_voter_vote.random", fake_random):
+        with patch("src.strategy.ensemble_voter_vote.np", fake_np):
             out = voter._apply_exploration_noise(weights, Regime.NORMAL)
     assert float(out[SignalSource.MULTI_SPEED_MOM]) == 0.0
     assert abs(sum(out.values()) - 1.0) < 1e-9

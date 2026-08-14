@@ -242,6 +242,32 @@ class TestComputeCVaRMetrics:
 
 
 # ---------------------------------------------------------------------------
+# fetch_portfolio_returns SQLite degradation tests
+# ---------------------------------------------------------------------------
+
+class TestFetchPortfolioReturnsSQLiteDegradation:
+    """An existing DB without a prices table degrades to the synthetic tuple."""
+
+    def test_existing_empty_db_returns_synthetic_tuple(self, tmp_path):
+        import sqlite3
+
+        import src.monitor.cvar_metrics as mod
+
+        db_path = tmp_path / "market.db"
+        with sqlite3.connect(str(db_path)):
+            pass  # existing SQLite file with no prices table (pre-sync)
+        old = mod.DB_PATH
+        mod.DB_PATH = db_path
+        try:
+            returns, current_dd, max_dd = fetch_portfolio_returns(days=120)
+        finally:
+            mod.DB_PATH = old
+        assert len(returns) == 120
+        assert current_dd == 0.0
+        assert max_dd == -0.15
+
+
+# ---------------------------------------------------------------------------
 # History Save/Load Tests
 # ---------------------------------------------------------------------------
 

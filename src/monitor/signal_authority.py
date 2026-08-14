@@ -162,6 +162,17 @@ def is_production_ssot_path(path: Path | str | None) -> bool:
         f"{project}/public/data",
         "/var/www/portfolio-lab/data",
     )
+    # text is symlink-resolved (macOS /var -> /private/var), so match the
+    # resolved prefix forms too; identity on platforms without the symlink.
+    resolved_prefixes = []
+    for prefix in production_prefixes:
+        try:
+            resolved = str(Path(prefix).expanduser().resolve()).replace("\\", "/")
+        except OSError:
+            continue
+        if resolved not in production_prefixes and resolved not in resolved_prefixes:
+            resolved_prefixes.append(resolved)
+    production_prefixes = production_prefixes + tuple(resolved_prefixes)
     return any(
         text == prefix or text.startswith(prefix + "/")
         for prefix in production_prefixes

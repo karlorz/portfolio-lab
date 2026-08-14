@@ -691,6 +691,32 @@ class TestSignalSourceNormalize:
         assert result == -1.0
 
 
+class TestTechnicalSignalSQLiteDegradation:
+    """Existing SQLite without a prices table degrades like a missing DB."""
+
+    def _make_signal(self, tmp_path):
+        from src.signals.integrator import TechnicalSignal
+
+        with patch("src.signals.integrator.DB_PATH", tmp_path / "signals.db"):
+            with patch("src.signals.integrator.DATA_DIR", tmp_path):
+                sig = TechnicalSignal()
+        db_path = tmp_path / "market.db"
+        with sqlite3.connect(str(db_path)):
+            pass  # existing SQLite file with no prices table (pre-sync)
+        sig.market_db = db_path
+        return sig
+
+    def test_momentum_returns_none_with_warning(self, tmp_path):
+        sig = self._make_signal(tmp_path)
+        with pytest.warns(UserWarning, match="Momentum price query failed"):
+            assert sig._calculate_momentum("SPY") is None
+
+    def test_mean_reversion_returns_zero_with_warning(self, tmp_path):
+        sig = self._make_signal(tmp_path)
+        with pytest.warns(UserWarning, match="Mean-reversion price query failed"):
+            assert sig._calculate_mean_reversion("SPY") == 0.0
+
+
 class TestCalculateExpectedAccuracy:
     """Test SignalIntegrator._calculate_expected_accuracy."""
 

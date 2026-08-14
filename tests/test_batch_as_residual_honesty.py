@@ -85,6 +85,11 @@ def test_health_ops_publish_attaches_provenance(tmp_path, monkeypatch):
     monkeypatch.setattr(hc, "DATA_DIR", tmp_path)
     monkeypatch.setattr(hc, "HEALTH_PATH", tmp_path / "health.json")
     monkeypatch.setattr(hc, "PUBLIC_DATA_DIR", tmp_path / "public")
+    # health_ops_path() resolves PUBLIC_DATA_DIR in health_kill_surfaces
+    # (post HEALTH-CHECK-SPLIT), not the hub re-export binding.
+    monkeypatch.setattr(
+        "src.monitor.health_kill_surfaces.PUBLIC_DATA_DIR", tmp_path / "public"
+    )
     (tmp_path / "public").mkdir(parents=True)
 
     monkeypatch.setattr(
@@ -101,8 +106,13 @@ def test_health_ops_publish_attaches_provenance(tmp_path, monkeypatch):
         "generator_git_sha": "healthsha1234",
         "generator_git_sha_status": "full_generate",
     }
-    # Avoid signals kill refresh side effects
-    monkeypatch.setattr(hc, "refresh_signals_health_kill_fields", lambda report: None)
+    # Avoid signals kill refresh side effects; publish_ops_health_surfaces
+    # calls the hub binding with public_dir/data_dir kwargs.
+    monkeypatch.setattr(
+        hc,
+        "refresh_signals_health_kill_fields",
+        lambda report, *, public_dir=None, data_dir=None: None,
+    )
     hc.publish_ops_health_surfaces(report)
     ops = json.loads((tmp_path / "public" / "health_ops.json").read_text(encoding="utf-8"))
     assert "provenance_completeness" in ops

@@ -39,6 +39,10 @@ def test_is_production_ssot_path_detects_live_trees() -> None:
     assert is_production_ssot_path(project / "data" / "alerts.json")
     assert is_production_ssot_path(project / "public" / "data" / "alerts.json")
     assert is_production_ssot_path("/var/www/portfolio-lab/data/signals.json")
+    # Symlink-resolved live tree (macOS /var -> /private/var) must match too.
+    assert is_production_ssot_path(
+        str(Path("/var/www/portfolio-lab/data/signals.json").resolve())
+    )
     assert not is_production_ssot_path("/tmp/plab-pytest-public.x/data/alerts.json")
     assert not is_production_ssot_path("/tmp/pytest-of-root/pytest-1/alerts.json")
     assert not is_production_ssot_path(None)

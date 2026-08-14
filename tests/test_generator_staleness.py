@@ -350,9 +350,9 @@ class TestSignalStalenessNormalization:
     def test_future_naive_timestamp_is_bounded_to_fresh_age_and_decay(self, tmp_path):
         gen, _ = _make_generator(tmp_path)
         fresh = datetime.now(timezone.utc).isoformat()
-        future_naive = (
-            datetime.now(timezone.utc) + timedelta(hours=8)
-        ).replace(tzinfo=None).isoformat()
+        # Naive timestamps are host-local wall clock: a local future converts
+        # to a future UTC instant, so age stays bounded at 0 on any host TZ.
+        future_naive = (datetime.now() + timedelta(hours=8)).isoformat()
 
         result = gen._check_signal_staleness({
             "ensemble_voting": {"generated_at": fresh},
@@ -364,6 +364,28 @@ class TestSignalStalenessNormalization:
 
         assert result["signal_age_hours"]["rebalance_health"] == 0.0
         assert result["staleness_decay"]["rebalance_health"] == 1.0
+
+    def test_local_naive_timestamp_older_than_ttl_remains_stale(self, tmp_path):
+        """A locally-naive (host wall clock) timestamp past the 4h TTL stays stale.
+
+        Positive-offset hosts must not regress: old local wall-clock digits
+        must keep reading stale after the local-to-UTC conversion.
+        """
+        gen, _ = _make_generator(tmp_path)
+        fresh = datetime.now(timezone.utc).isoformat()
+        old_naive = (datetime.now() - timedelta(hours=5)).isoformat()
+
+        result = gen._check_signal_staleness({
+            "ensemble_voting": {"generated_at": fresh},
+            "alternative_data": {"timestamp": fresh},
+            "garch_cvar": {"timestamp": fresh},
+            "smart_rebalance": {"generated_at": fresh},
+            "rebalance_health": {"generated": old_naive},
+        })
+
+        assert result["signal_age_hours"]["rebalance_health"] > 4.0
+        assert result["staleness_decay"]["rebalance_health"] < 1.0
+        assert "rebalance_health" in result["stale_signals"]
 
     def test_future_aware_timestamp_cannot_publish_decay_above_one(self, tmp_path):
         gen, _ = _make_generator(tmp_path)

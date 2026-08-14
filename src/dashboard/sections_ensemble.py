@@ -15,6 +15,9 @@ import numpy as np
 
 from src.paths import DATA_DIR
 
+# Shared soft-delete disclosure suffix for shadow checklist hints.
+_NO_AUTO_REENABLE_WEIGHT = "do not auto-reenable weight."
+
 
 class _EnsembleSectionsMixin:
     @staticmethod
@@ -883,17 +886,20 @@ class _EnsembleSectionsMixin:
         if health_gates_pass and portfolio_ok:
             hint = (
                 "Health/IC + walk-forward ADR evidence pass — still requires "
-                "human REGIME_WEIGHTS promote; do not auto-reenable weight."
+                f"human REGIME_WEIGHTS promote; {_NO_AUTO_REENABLE_WEIGHT}"
             )
         elif health_gates_pass and not portfolio_ok:
             adr_hint = (adr or {}).get("hint") if isinstance(adr, dict) else None
-            hint = (
-                adr_hint
-                or (
+            if adr_hint:
+                # ADR hints (missing evidence / failed checks) may not mention
+                # the soft-delete state — always carry the no-auto-reenable
+                # disclosure so the operator-facing hint stays honest.
+                hint = f"{adr_hint} Still soft-deleted — {_NO_AUTO_REENABLE_WEIGHT}"
+            else:
+                hint = (
                     "Health/IC shadow gates pass — still soft-deleted until "
-                    "walk-forward net Sharpe ADR clears; do not auto-reenable weight."
+                    f"walk-forward net Sharpe ADR clears; {_NO_AUTO_REENABLE_WEIGHT}"
                 )
-            )
         elif multi_ok and not health_ok:
             hint = (
                 "Multi-horizon IC clear but health status/score weak — "

@@ -518,7 +518,10 @@ def test_restamp_on_disk_demotes_lag_only_warning(tmp_path, monkeypatch) -> None
 
     data = tmp_path / "data"
     data.mkdir()
-    monkeypatch.setattr("src.monitor.health_check.DATA_DIR", data)
+    # Restamp re-projects disk kill/open via health_kill_surfaces'
+    # _disk_kill_and_open_incidents() (post HEALTH-CHECK-SPLIT binding);
+    # the hub health_check.DATA_DIR binding is not read on this path.
+    monkeypatch.setattr("src.monitor.health_kill_surfaces.DATA_DIR", data)
 
     ops = tmp_path / "health_ops.json"
     sticky = {

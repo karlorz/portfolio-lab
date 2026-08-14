@@ -304,9 +304,12 @@ class TestModelValidationSection:
         assert benchmark.date_range == {"start": "2010-01-04", "end": "2020-12-31"}
         assert benchmark.observation_semantics == "frozen_benchmark_not_live_snapshot"
 
-    def test_default_model_validation_benchmark_documents_frozen_grid_search(self):
-        """The default manifest preserves the original 94-config base-grid tuple."""
-        benchmark = daily_brief.load_model_validation_benchmark()
+    def test_model_validation_benchmark_falls_back_to_frozen_grid_search_when_manifest_missing(
+        self, tmp_path
+    ):
+        """A missing manifest falls back to the frozen 94-config base-grid tuple."""
+        missing = tmp_path / "no_such_benchmark_manifest.json"
+        benchmark = daily_brief.load_model_validation_benchmark(missing)
 
         assert benchmark.benchmark_id == "base-grid-champion-94-config"
         assert benchmark.sharpe_ratio == 0.79

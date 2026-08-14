@@ -10,6 +10,7 @@ Usage:
 """
 
 import json
+import sqlite3
 from src.paths import sqlite_connect
 import logging
 import numpy as np
@@ -86,25 +87,33 @@ def fetch_portfolio_returns(days: int = 252) -> Tuple[np.ndarray, float, float]:
     if not DB_PATH.exists():
         # Return synthetic data for testing
         return np.random.normal(0.0003, 0.012, days), 0.0, -0.15
-    
-    with sqlite_connect(DB_PATH) as conn:
-        cursor = conn.cursor()
 
-        # Get portfolio assets - SPY, GLD, TLT (46/38/16 allocation)
-        allocation = BASE_ALLOCATION
+    prices = {}
+    try:
+        with sqlite_connect(DB_PATH) as conn:
+            cursor = conn.cursor()
 
+            # Get portfolio assets - SPY, GLD, TLT (46/38/16 allocation)
+            allocation = BASE_ALLOCATION
+
+            for symbol in allocation.keys():
+                cursor.execute("""
+                    SELECT date, close FROM prices
+                    WHERE symbol = ?
+                    ORDER BY date DESC
+                    LIMIT ?
+                """, (symbol, days))
+
+                rows = cursor.fetchall()
+                if rows:
+                    prices[symbol] = np.array([r[1] for r in reversed(rows)])
+    except sqlite3.Error:
+        # DB exists but is not usable yet (e.g. pre-sync: no prices table).
+        # Degrade to the same synthetic path as a missing DB.
+        logger.warning(
+            "market.db prices unavailable (%s) — using synthetic data", DB_PATH
+        )
         prices = {}
-        for symbol in allocation.keys():
-            cursor.execute("""
-                SELECT date, close FROM prices
-                WHERE symbol = ?
-                ORDER BY date DESC
-                LIMIT ?
-            """, (symbol, days))
-
-            rows = cursor.fetchall()
-            if rows:
-                prices[symbol] = np.array([r[1] for r in reversed(rows)])
 
     if len(prices) < 2:
         return np.random.normal(0.0003, 0.012, days), 0.0, -0.15
