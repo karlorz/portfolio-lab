@@ -159,3 +159,19 @@ enabled (probe mode `--exit-mode probe` preserves severity exit codes).
 Rollback restores the prior verified static release directory to the web root
 with the same `/data/**` exclusion, then runs the prior merged application commit
 to regenerate runtime data. Do not roll back by serving a dirty checkout.
+
+## Recovery (backup/restore)
+
+Deploy and rollback are not recovery. Recovery is operator-invoked and
+self-contained: it restores the source Git bundle, runtime data, and a
+verified static release from a plaintext archive stored on an
+operator-selected encrypted-at-rest destination — without redeploying and
+without touching DNS or Caddy. Production activation requires the static
+release manifest source SHA to equal the archived source bundle SHA exactly
+(public-data generator SHA may be an earlier but reachable bundle commit);
+mismatch blocks activation pending an attended rebuild. `make
+deploy-production` is not recovery. See `scripts/LAB_APP_BACKUP_RESTORE.md`
+for backup, archive verification and sidecar, dev vs prod restore,
+activation, rollback, and troubleshooting. Once the recovery tooling is installed,
+`--candidate-no-scheduler` is for a verified private restore or candidate API
+only; it is not a normal production deployment mode.

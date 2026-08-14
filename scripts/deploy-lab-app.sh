@@ -51,6 +51,7 @@ SKIP_UPDATE_COMMAND="0"
 SKIP_MIRROR="0"
 DRY_RUN="0"
 PRINT_CADDY="0"
+CANDIDATE_NO_SCHEDULER="0"
 
 usage() {
   cat <<USAGE
@@ -86,6 +87,7 @@ Options:
   --skip-caddy                 Do not write/reload Caddy config
   --skip-update-command        Do not install the in-container update command
   --skip-mirror                Do not mirror live public data → checkout public/data
+  --candidate-no-scheduler     Deploy the tasker unit with the scheduler disabled (candidate API only)
   --print-caddy                Print the managed Caddy site block and exit
   --dry-run                    Print actions without changing the host
   -h, --help                   Show help
@@ -156,6 +158,7 @@ while [ $# -gt 0 ]; do
     --skip-caddy) SKIP_CADDY="1"; shift ;;
     --skip-update-command) SKIP_UPDATE_COMMAND="1"; shift ;;
     --skip-mirror) SKIP_MIRROR="1"; shift ;;
+    --candidate-no-scheduler) CANDIDATE_NO_SCHEDULER="1"; shift ;;
     --print-caddy) PRINT_CADDY="1"; shift ;;
     --dry-run) DRY_RUN="1"; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -172,6 +175,16 @@ done
 [ -n "$SERVICE_NAME" ] || die "--service-name must not be empty"
 [ -n "$CADDY_CONFIG" ] || die "--caddy-config must not be empty"
 [ -n "$CADDY_SERVICE" ] || die "--caddy-service must not be empty"
+
+# --candidate-no-scheduler is documented only for private recovery/candidate
+# APIs: fail closed for obvious authoritative use. Ordinary deploys are
+# unaffected.
+if [ "$CANDIDATE_NO_SCHEDULER" = "1" ]; then
+  [ "$SKIP_CADDY" = "1" ] || die "--candidate-no-scheduler is for private recovery/candidate APIs only: requires --skip-caddy"
+  [ "$SERVICE_NAME" != "portfolio-lab-tasker" ] || die "--candidate-no-scheduler requires a non-production --service-name"
+  [ "$WEB_ROOT" != "/var/www/portfolio-lab" ] || die "--candidate-no-scheduler requires a non-production --web-root"
+  [ "$PUBLIC_ROOT" != "/var/www/portfolio-lab" ] || die "--candidate-no-scheduler requires a non-production --public-root"
+fi
 
 if [ "$PRINT_CADDY" != "1" ] && [ "$DRY_RUN" != "1" ] && { [ "$SKIP_SERVICE" != "1" ] || [ "$SKIP_CADDY" != "1" ] || [ "$SKIP_UPDATE_COMMAND" != "1" ]; }; then
   is_root || die "Run as root for systemd/Caddy/update-command setup, or use --skip-service --skip-caddy --skip-update-command."
@@ -371,6 +384,13 @@ install_tasker_service() {
     return 0
   fi
 
+  local scheduler_args=""
+  local scheduler_env_line=""
+  if [ "$CANDIDATE_NO_SCHEDULER" = "1" ]; then
+    scheduler_args="--no-scheduler"
+    scheduler_env_line="Environment=TASKER_DISABLE_SCHEDULER=1"
+  fi
+
   cat > "$unit_path" <<EOF
 [Unit]
 Description=Portfolio Lab tasker API and scheduler
@@ -390,7 +410,8 @@ Environment=LOG_LEVEL=INFO
 Environment=JSON_LOGS=1
 Environment=PATH=/root/.bun/bin:/root/.local/bin:/usr/local/bin:/usr/bin:/bin
 EnvironmentFile=-${APP_DIR}/.env.local
-ExecStart=${APP_DIR}/scripts/python_runtime.sh -m src.tasker.service --host ${TASKER_HOST} --port ${TASKER_PORT}
+${scheduler_env_line}
+ExecStart=${APP_DIR}/scripts/python_runtime.sh -m src.tasker.service --host ${TASKER_HOST} --port ${TASKER_PORT}${scheduler_args:+ ${scheduler_args}}
 Restart=always
 RestartSec=10
 TimeoutStopSec=30
