@@ -2617,3 +2617,125 @@ def test_activate_promotes_archived_unit_and_starts_service(hermetic, tmp_path: 
     assert not any("stop" in line for line in log)
     # activation never touches Caddy or DNS
     assert not any("caddy" in line or "dns" in line for line in log)
+
+
+# ── review round 0: allowed-dirty activation, unit re-bind/re-scan, % specifiers ─
+
+
+def test_activate_allows_only_the_two_allowed_dirty_data_files(hermetic, tmp_path: Path):
+    """Allowed-dirty data files archived at create may be dirty after restore;
+    activation must accept exactly those two ordinary modifications (after the
+    manifest-digest check proved them) and still reach the service start."""
+    set_systemctl_mode(hermetic, "inactive")
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    _write(repo / "data/ensemble_weights.json", '{"normal": {"spy": 0.42, "gld": 0.38}}\n')
+    _write(repo / "data/vix_term_structure.json", '{"_meta": {"schema": "vix_term_structure/v1", "dirty": true}}\n')
+    web = make_web_root(tmp_path / "web", source_sha, generator_sha=source_sha[:12])
+    archive, res = standard_create(hermetic, repo, web)
+    assert res.returncode == 0, res.stderr
+    app_dir, web_root, res = standard_restore(hermetic, archive, "prod", extra=["--allow-production-paths"])
+    assert res.returncode == 0, res.stderr
+    _write(app_dir / ".env.local", "PORTFOLIO_LAB_MODE=lab\n")
+    res = run_activate(hermetic, app_dir, web_root)
+    assert res.returncode == 0, res.stderr
+    report = report_of(res)
+    assert report["ok"] is True
+    assert report["service_started"] is True
+    assert f"start {TASKER}" in hermetic.systemctl_log.read_text(encoding="utf-8")
+
+
+def test_activate_rejects_other_tracked_changes_alongside_allowed_dirty_files(hermetic, tmp_path: Path):
+    """Allowing the two generated data files must not become a blanket:
+    any other tracked modification still blocks activation."""
+    set_systemctl_mode(hermetic, "inactive")
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    _write(repo / "data/ensemble_weights.json", '{"normal": {"spy": 0.42}}\n')
+    web = make_web_root(tmp_path / "web", source_sha, generator_sha=source_sha[:12])
+    archive, res = standard_create(hermetic, repo, web)
+    assert res.returncode == 0, res.stderr
+    app_dir, web_root, res = standard_restore(hermetic, archive, "prod", extra=["--allow-production-paths"])
+    assert res.returncode == 0, res.stderr
+    _write(app_dir / ".env.local", "PORTFOLIO_LAB_MODE=lab\n")
+    _write(app_dir / "README.md", "# modified after restore\n")
+    res = run_activate(hermetic, app_dir, web_root)
+    assert res.returncode != 0
+    assert "uncommitted" in res.stderr.lower()
+    assert_no_activation_systemctl(hermetic)
+
+
+def test_activate_rejects_tampered_restored_unit_before_systemd_mutation(hermetic, tmp_path: Path):
+    """Post-restore tampering of the staged tasker unit must block activation
+    before any systemd mutation."""
+    set_systemctl_mode(hermetic, "inactive")
+    archive, app_dir, web_root, _ = _create_and_restore(hermetic, tmp_path)
+    _write(app_dir / ".portfolio-lab-recovery/metadata/tasker-unit.txt", UNIT_TEXT + "ExecStart=/bin/evil\n")
+    res = run_activate(hermetic, app_dir, web_root)
+    assert res.returncode != 0
+    assert "unit" in res.stderr.lower()
+    assert_no_activation_systemctl(hermetic)
+    assert (hermetic.units / f"{TASKER}.service").read_text(encoding="utf-8") == UNIT_TEXT
+
+
+def test_activate_rescans_archived_unit_and_rejects_secret_unit(hermetic, tmp_path: Path):
+    """A verify-passing archive whose unit text carries a secret must be
+    refused at activation by the unit re-scan, before any systemd mutation."""
+    set_systemctl_mode(hermetic, "inactive")
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web", source_sha, generator_sha=source_sha[:12])
+    archive, res = standard_create(hermetic, repo, web)
+    assert res.returncode == 0, res.stderr
+
+    def mutate(work: Path) -> None:
+        _write(work / "metadata/tasker-unit.txt", UNIT_TEXT + "Environment=ACCESS_KEY=secret\n")
+
+    rebuilt = repackage(archive, hermetic.tmp / "unit-retar", mutate, recompute=True)
+    res = run_recovery(["verify", "--archive", str(rebuilt)], hermetic)
+    assert res.returncode == 0, res.stderr
+    app_dir, web_root, res = standard_restore(hermetic, rebuilt, "prod", extra=["--allow-production-paths"])
+    assert res.returncode == 0, res.stderr
+    _write(app_dir / ".env.local", "PORTFOLIO_LAB_MODE=lab\n")
+    res = run_activate(hermetic, app_dir, web_root)
+    assert res.returncode != 0
+    assert "secret" in res.stderr.lower()
+    assert_no_activation_systemctl(hermetic)
+    assert (hermetic.units / f"{TASKER}.service").read_text(encoding="utf-8") == UNIT_TEXT
+
+
+def test_restore_dev_api_rejects_percent_specifier_in_paths(hermetic, tmp_path: Path):
+    """'%' in dev API unit paths would be systemd-specifier interpolation;
+    restore --start-dev-api must reject it before any target mutation."""
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web", source_sha)
+    archive, res = standard_create(hermetic, repo, web)
+    assert res.returncode == 0, res.stderr
+    for label, flag in (("app", "--app-dir"), ("web", "--web-root")):
+        bad = hermetic.tmp / f"bad%h-{label}"
+        args = {
+            "--app-dir": str(hermetic.tmp / "app"),
+            "--web-root": str(hermetic.tmp / "www"),
+        }
+        args[flag] = str(bad)
+        res = run_recovery(
+            [
+                "restore",
+                "--archive",
+                str(archive),
+                "--app-dir",
+                args["--app-dir"],
+                "--web-root",
+                args["--web-root"],
+                "--target-mode",
+                "dev",
+                "--start-dev-api",
+            ],
+            hermetic,
+        )
+        assert res.returncode != 0, label
+        assert "%" in res.stderr, label
+        assert not bad.exists(), label
+        assert not (hermetic.tmp / "app").exists(), label
+        assert not (hermetic.tmp / "www").exists(), label

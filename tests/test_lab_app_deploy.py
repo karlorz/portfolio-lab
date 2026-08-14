@@ -426,6 +426,14 @@ def test_deploy_candidate_fails_closed_for_authoritative_use():
             "--service-name": "portfolio-lab-tasker-recovery-dev",
             "--web-root": "/srv/pl-candidate-www",
         },
+        # production app dir
+        {
+            "--skip-caddy": "",
+            "--service-name": "portfolio-lab-tasker-recovery-dev",
+            "--web-root": "/srv/pl-candidate-www",
+            "--public-root": "/srv/pl-candidate-www",
+            "--app-dir": "/root/projects/portfolio-lab",
+        },
     ]
     for combo in bad_combos:
         args = ["bash", script, "--app-dir", str(PROJECT_ROOT), "--candidate-no-scheduler", "--dry-run"]

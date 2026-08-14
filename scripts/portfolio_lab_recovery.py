@@ -52,8 +52,10 @@ stage the full tree in safe staging first (rejecting symlinks/gitlinks in the
 bundle checkout), and only replace targets after staging succeeds, keeping
 rollback dirs. Production activation re-verifies the original archive, binds
 the restore report to it, requires a prod report, matching service identity,
-a clean tracked checkout, an inactive target service, explicit confirmations,
-and never touches DNS or Caddy.
+a clean tracked checkout (only the two allowed-dirty generated data files
+may differ, after manifest-digest proof), a re-scanned archived unit bound
+to the manifest, an inactive target service, explicit confirmations, and
+never touches DNS or Caddy.
 
 Command overrides (tests use fakes; production defaults): PLR_GIT, PLR_TAR,
 PLR_SYSTEMCTL, PLR_SYSTEMD_UNIT_DIR, PLR_WIKI_DIR, PLR_CADDY_CONFIG,
@@ -274,6 +276,8 @@ def validate_service_name(name: str) -> None:
 def validate_unit_value(value: str, what: str) -> None:
     if any(ord(c) < 32 for c in value):
         die(f"{what} contains control characters; refusing unit interpolation: {value!r}")
+    if "%" in value:
+        die(f"{what} contains '%' (systemd specifier); refusing unit interpolation: {value!r}")
 
 
 # ── git + dirty-source policy ───────────────────────────────────────────────
@@ -1525,12 +1529,26 @@ def cmd_activate(args: argparse.Namespace) -> int:
             die(f"restored tree mismatch: {member} (missing or digest mismatch)")
 
     # The tracked source checkout must be clean (data/ is gitignored and the
-    # recovery state dir is untracked, so neither trips this gate).
+    # recovery state dir is untracked, so neither trips this gate). Ordinary
+    # modifications of the two allowed-dirty generated data files are
+    # expected here: create archives them as-is, restore overlays the
+    # archived runtime data, and the manifest-digest check above already
+    # proved they match the archive. Any other tracked change blocks.
     status_res = run([_cmd("git"), "-C", str(app_dir), "status", "--porcelain", "--untracked-files=no"])
-    if status_res.returncode != 0 or status_res.stdout.strip():
+    if status_res.returncode != 0:
+        die("git status failed in restored checkout: " + (status_res.stderr or status_res.stdout).strip())
+    offending = []
+    for line in status_res.stdout.splitlines():
+        if len(line) < 4:
+            offending.append(line)
+            continue
+        status, path = line[:2], line[3:]
+        if not (status == " M" and path in ALLOWED_DIRTY_FILES):
+            offending.append(line)
+    if offending:
         die(
-            "restored checkout has uncommitted tracked changes; refusing activation: "
-            + (status_res.stdout.strip() or "git status failed")
+            "restored checkout has uncommitted tracked changes beyond the allowed generated data files; "
+            "refusing activation: " + "; ".join(offending[:10])
         )
 
     if not (app_dir / ".env.local").is_file():
@@ -1548,6 +1566,19 @@ def cmd_activate(args: argparse.Namespace) -> int:
     unit_src = state_dir / "metadata" / "tasker-unit.txt"
     if not unit_src.is_file():
         die("restored state missing metadata/tasker-unit.txt; activation requires the archived unit")
+    # Re-bind the restored unit to the verified archive manifest and re-run
+    # the secret scan before any systemd mutation; the manifest itself was
+    # proven byte-identical to the verified archive above.
+    unit_sha: str | None = None
+    for entry in members:
+        if str(entry.get("path")) == UNIT_MEMBER:
+            candidate = entry.get("sha256")
+            if isinstance(candidate, str) and len(candidate) == 64:
+                unit_sha = candidate
+            break
+    if unit_sha is None or sha256_file(unit_src) != unit_sha:
+        die("restored tasker unit does not match the verified archive manifest; refusing activation")
+    check_text_secrets(unit_src.read_text(encoding="utf-8", errors="replace"), "tasker unit")
     unit_dir = Path(os.environ.get("PLR_SYSTEMD_UNIT_DIR", "/etc/systemd/system"))
     unit_dir.mkdir(parents=True, exist_ok=True)
     unit_path = unit_dir / f"{service_name}.service"
