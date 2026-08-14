@@ -387,6 +387,11 @@ class IncidentManager:
             "open_count": len(incidents),
             "incidents": [incident.to_dict() for incident in incidents],
             "metrics": self.metrics(),
+            "escalation": {
+                "enabled": self.escalation_enabled,
+                "cycles": self.escalation_cycles,
+                "deferred": not self.escalation_enabled,
+            },
             "open_set_ssot": "private_summary_path",
         }
         try:

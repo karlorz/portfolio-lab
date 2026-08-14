@@ -472,6 +472,53 @@ def test_disabled_incident_escalation_does_not_write_kill_switch(tmp_path):
     assert not (tmp_path / "kill_switch.json").exists()
 
 
+def _summary_escalation(manager):
+    manager.write_summary()
+    summary = json.loads(manager.summary_path.read_text())
+    return summary["escalation"]
+
+
+def test_write_summary_surfaces_escalation_default_enabled(tmp_path, monkeypatch):
+    """Default (no env) → enabled true, cycles 3, not deferred."""
+    monkeypatch.delenv("INCIDENT_KILL_SWITCH_ESCALATION_ENABLED", raising=False)
+    monkeypatch.delenv("INCIDENT_KILL_SWITCH_ESCALATION_CYCLES", raising=False)
+    manager = IncidentManager(
+        log_path=tmp_path / "incidents.jsonl",
+        summary_path=tmp_path / "incidents.json",
+    )
+    assert _summary_escalation(manager) == {
+        "enabled": True,
+        "cycles": 3,
+        "deferred": False,
+    }
+
+
+def test_write_summary_surfaces_escalation_env_deferred(tmp_path, monkeypatch):
+    """ENABLED=0 env (the live deferral) → deferred true."""
+    monkeypatch.setenv("INCIDENT_KILL_SWITCH_ESCALATION_ENABLED", "0")
+    manager = IncidentManager(
+        log_path=tmp_path / "incidents.jsonl",
+        summary_path=tmp_path / "incidents.json",
+    )
+    assert _summary_escalation(manager)["deferred"] is True
+    assert _summary_escalation(manager)["enabled"] is False
+
+
+def test_write_summary_surfaces_escalation_constructor_args(tmp_path):
+    """Constructor-arg path (incident_manager.py:201-204) → deferred true."""
+    manager = IncidentManager(
+        log_path=tmp_path / "incidents.jsonl",
+        summary_path=tmp_path / "incidents.json",
+        escalation_cycles=2,
+        escalation_enabled=False,
+    )
+    assert _summary_escalation(manager) == {
+        "enabled": False,
+        "cycles": 2,
+        "deferred": True,
+    }
+
+
 def test_write_summary_dual_writes_public_incidents(tmp_path, monkeypatch):
     """PASS resolve must dual-write PUBLIC_DATA_DIR so operators never see split-brain."""
     from src.monitor import incident_manager as im
@@ -497,6 +544,17 @@ def test_write_summary_dual_writes_public_incidents(tmp_path, monkeypatch):
     assert (private / "incidents.json").exists()
     assert (public / "incidents.json").exists()
     assert json.loads((public / "incidents.json").read_text())["open_count"] == 1
+    # Escalation block must survive the verbatim dual-write (no field drop).
+    assert json.loads((private / "incidents.json").read_text())["escalation"] == {
+        "enabled": False,
+        "cycles": 3,
+        "deferred": True,
+    }
+    assert json.loads((public / "incidents.json").read_text())["escalation"] == {
+        "enabled": False,
+        "cycles": 3,
+        "deferred": True,
+    }
 
     manager.record_alert(
         channel="signal_staleness",
