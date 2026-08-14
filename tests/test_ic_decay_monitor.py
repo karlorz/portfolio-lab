@@ -1122,3 +1122,61 @@ def test_behavioral_horizon_guard_keeps_short_resolutions_staged():
     )
     assert n == 0
     assert monitor.has_staged_predictions()
+
+
+def test_archive_pre_contract_rows_purges_stale_staged_entries():
+    """MAIN-ITEM-1 s4 residual (Item 15): staged entries stamped under an
+    older observed field are purged into the archive snapshot; correct-stamp
+    staged entries survive; re-run is idempotent."""
+    from src.monitor.ic_decay_monitor import ICMonitor
+
+    monitor = ICMonitor(window_size=30)
+    monitor.stage_predictions(
+        {"behavioral_sentiment": 0.4, "ensemble_gold": 0.2},
+        "2026-08-12",
+        prediction_metadata={
+            "behavioral_sentiment": {
+                "prediction_field": "behavioral_sentiment.composite_score",
+                "target_asset": "SPY",
+                "intended_horizon_sessions": 5,
+            },
+            "ensemble_gold": {
+                "prediction_field": "ensemble_voting.gold_bias",
+                "target_asset": "GLD",
+                "intended_horizon_sessions": 1,
+            },
+        },
+    )
+    # ensemble_gold staged under the contract's own observed field (correct).
+    monitor.stage_predictions(
+        {"ensemble_gold": 0.3}, "2026-08-13",
+        prediction_metadata={
+            "ensemble_gold": {
+                "prediction_field": "ensemble_voting.gold_bias",
+                "target_asset": "GLD",
+                "intended_horizon_sessions": 1,
+            }
+        },
+    )
+
+    archive_path = monitor.archive_pre_contract_rows()
+
+    staged_names = {
+        (e["signal"], e["prediction_date"]) for e in monitor._staged.values()
+    }
+    assert ("ensemble_gold", "2026-08-12") in staged_names
+    assert ("ensemble_gold", "2026-08-13") in staged_names
+    assert ("behavioral_sentiment", "2026-08-12") not in staged_names
+
+    archived = json.loads(archive_path.read_text())
+    assert len(archived["staged"]) == 1
+    assert archived["staged"][0]["signal"] == "behavioral_sentiment"
+    assert (
+        archived["staged"][0]["metadata"]["prediction_field"]
+        == "behavioral_sentiment.composite_score"
+    )
+
+    # Idempotent: nothing left to purge.
+    second_path = Path(archive_path).parent / "ic_pre_contract_archive_staged_second.json"
+    second = monitor.archive_pre_contract_rows(archive_path=second_path)
+    assert json.loads(second.read_text())["staged"] == []

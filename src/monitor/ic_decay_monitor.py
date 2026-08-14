@@ -687,6 +687,9 @@ class ICMonitor:
         factor_rotation, fred_macro) never participate in the dynamic
         alignment path, so their legacy rows are untouched. The ensemble trio
         (equity/gold/duration) stamps match their contracts — untouched.
+        Staged entries stamped under an older observed field are purged into
+        the snapshot ``staged`` list as well (they would otherwise resolve
+        into permanent misaligned rows).
         Idempotent: a re-run finds no matching rows and archives 0.
 
         Mirrors ``rebaseline()`` snapshot semantics ("nothing is lost"):
@@ -708,6 +711,7 @@ class ICMonitor:
 
         archived_observations: Dict[str, list] = {}
         archived_metadata: Dict[str, list] = {}
+        purged_staged: list = []
         for signal_name, contract in IC_EVALUATION_CONTRACTS.items():
             if contract.get("declared_alignment_status") not in {
                 "misaligned",
@@ -715,6 +719,19 @@ class ICMonitor:
             }:
                 continue
             intended_field = contract.get("prediction_field")
+            # Staged entries stamped under an older observed field would resolve
+            # into permanent misaligned rows (resolve_staged preserves entry
+            # metadata) — purge them into the archive snapshot too.
+            for identity, entry in list(self._staged.items()):
+                if entry.get("signal") != signal_name:
+                    continue
+                entry_metadata = entry.get("metadata")
+                cannot_align = not isinstance(entry_metadata, Mapping) or (
+                    entry_metadata.get("prediction_field") != intended_field
+                )
+                if cannot_align:
+                    purged_staged.append(entry)
+                    del self._staged[identity]
             metadata_rows = list(self._observation_metadata.get(signal_name, ()))
             if not metadata_rows:
                 continue
@@ -747,7 +764,7 @@ class ICMonitor:
             "archive_kind": "pre-contract-rows",
             "archived_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "incident_id": "8115a9c1-a167-4da7-9832-673617dc7de3",
-            "staged": [],
+            "staged": purged_staged,
             "observations": archived_observations,
             "observation_metadata": archived_metadata,
         }
