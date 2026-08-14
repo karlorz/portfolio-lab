@@ -634,6 +634,27 @@ def _isolate_generator_data_dir(request, tmp_path, monkeypatch):
     yield
 
 
+@pytest.fixture
+def _hermetic_health_db(tmp_path, monkeypatch):
+    """Point SignalHealthTracker at a fresh empty DB for every test.
+
+    compute_vote's health stage constructs ``SignalHealthTracker()`` with the
+    module default ``DB_PATH`` (= live MARKET_DB, ~60MB); the ROW_NUMBER() IC
+    queries then scan the live table — ~9.5s per compute_vote call. Redirecting
+    DB_PATH to a per-test empty file keeps the health code path fully exercised
+    (schema init + all SQL) but hermetic and O(empty-table) fast.
+
+    Not autouse: only modules that run the health/vote compute paths opt in
+    (test_ensemble_voter, test_regime_bandit_integration,
+    test_regime_conditional_weights) via module-level ``pytestmark``.
+    """
+    import src.signals.health_tracker as health_tracker_module
+
+    monkeypatch.setattr(
+        health_tracker_module, "DB_PATH", tmp_path / "health_signals.db"
+    )
+
+
 @pytest.fixture(scope="session")
 def _incidents_isolate_root(tmp_path_factory):
     """One hermetic incidents tree for the whole suite (inode-friendly).

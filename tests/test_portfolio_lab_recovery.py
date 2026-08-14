@@ -1855,6 +1855,41 @@ def test_verify_generator_reachable_in_bundle_when_different_from_source(hermeti
     assert checks["data_index_generator_reachable"] is True
 
 
+def test_verify_reachability_clone_uses_no_checkout(hermetic, tmp_path: Path):
+    """The reachability clone must skip the worktree checkout.
+
+    Captures the shipped verify_archive's real git argv through the PLR_GIT
+    wrapper seam: the reachability probe only needs the bundle object graph
+    for rev-list --all, so `git clone` must be invoked with --no-checkout
+    while still resolving the generator sha to exactly one reachable commit.
+    """
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo, "first")
+    _write(repo / "src/new.py", "x = 1\n")
+    source_sha = commit_all(repo, "second")
+    older_short = _git(repo, "rev-parse", "--short=12", "HEAD~1").stdout.strip()
+    web = make_web_root(tmp_path / "web", source_sha, generator_sha=older_short)
+    archive, res = standard_create(hermetic, repo, web)
+    assert res.returncode == 0, res.stderr
+    git_log = tmp_path / "git-argv.log"
+    wrapper = make_fake(
+        hermetic.bin / "git-wrapper",
+        '#!/bin/sh\nprintf \'%s\\n\' "$@" >> "$PLR_GIT_LOG"\nexec git "$@"\n',
+    )
+    res = run_recovery(
+        ["verify", "--archive", str(archive)],
+        hermetic,
+        extra_env={"PLR_GIT": str(wrapper), "PLR_GIT_LOG": str(git_log)},
+    )
+    assert res.returncode == 0, res.stderr
+    checks = json.loads(res.stdout)["checks"]
+    assert checks["data_index_generator_reachable"] is True
+    argv = git_log.read_text(encoding="utf-8").splitlines()
+    assert ["clone", "--no-checkout"] in [
+        argv[i : i + 2] for i in range(len(argv) - 1)
+    ], f"git clone argv missing --no-checkout: {argv}"
+
+
 def test_verify_generator_unreachable_reported_not_blocking(hermetic, tmp_path: Path):
     repo = make_repo(tmp_path / "repo")
     source_sha = commit_all(repo)

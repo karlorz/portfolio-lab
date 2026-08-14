@@ -300,18 +300,30 @@ def git_head(repo: Path) -> str:
     return res.stdout.strip()
 
 
-def check_clean_enough(repo: Path) -> None:
-    res = run([_cmd("git"), "status", "--porcelain"], cwd=repo)
-    if res.returncode != 0:
-        die(f"git status failed in {repo}: {(res.stderr or res.stdout).strip()}")
+def _porcelain_offending(stdout: str) -> list[str]:
+    """Classify `git status --porcelain` lines against ALLOWED_DIRTY_FILES.
+
+    Only ordinary (unstaged) modifications of the two allowed-dirty
+    generated data files pass; everything else (staged/untracked/renamed/
+    deleted entries and malformed lines) is returned as offending. Shared
+    by the create and activate-prod gates, which keep their own git
+    invocation flags and diagnostics."""
     offending = []
-    for line in res.stdout.splitlines():
+    for line in stdout.splitlines():
         if len(line) < 4:
             offending.append(line)
             continue
         status, path = line[:2], line[3:]
         if not (status == " M" and path in ALLOWED_DIRTY_FILES):
             offending.append(line)
+    return offending
+
+
+def check_clean_enough(repo: Path) -> None:
+    res = run([_cmd("git"), "status", "--porcelain"], cwd=repo)
+    if res.returncode != 0:
+        die(f"git status failed in {repo}: {(res.stderr or res.stdout).strip()}")
+    offending = _porcelain_offending(res.stdout)
     if offending:
         die(
             "dirty working tree: only ordinary modifications to data/ensemble_weights.json and "
@@ -539,14 +551,25 @@ def capture_live_tasker_status(config_file: Path) -> str:
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
-def data_index_generator_sha(web_root: Path) -> str | None:
-    index = web_root / "data" / "index.json"
+def _read_json_string_field(path: Path, field: str) -> str | None:
+    """Read a non-empty string field from a JSON file, or None.
+
+    Shared by the create/verify/activate paths: unreadable or malformed
+    JSON, non-object payloads, and non-string or empty values all yield
+    None; callers apply their own fail-closed validation with their own
+    error messages."""
     try:
-        payload = json.loads(index.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    value = payload.get("generator_git_sha")
-    return str(value) if isinstance(value, str) and value else None
+    if not isinstance(payload, dict):
+        return None
+    value = payload.get(field)
+    return value if isinstance(value, str) and value else None
+
+
+def data_index_generator_sha(web_root: Path) -> str | None:
+    return _read_json_string_field(web_root / "data" / "index.json", "generator_git_sha")
 
 
 # ── safe tar reading (stdlib tarfile; never extract* on untrusted archives) ─
@@ -864,13 +887,7 @@ def verify_archive(archive: Path, sidecar: Path) -> tuple[bool, dict[str, Any]]:
             checks["sqlite_ok"] = None
 
         release = tmp / "static" / "web" / "_release.json"
-        release_sha = None
-        try:
-            value = json.loads(release.read_text(encoding="utf-8")).get("source_git_sha")
-            if isinstance(value, str) and value:
-                release_sha = value
-        except (OSError, ValueError):
-            pass
+        release_sha = _read_json_string_field(release, "source_git_sha")
         coherent = bool(release_sha) and release_sha == source_sha
         checks["static_provenance_coherent"] = coherent
         checks["static_provenance_note"] = (
@@ -879,15 +896,9 @@ def verify_archive(archive: Path, sidecar: Path) -> tuple[bool, dict[str, Any]]:
             else f"_release source_git_sha {release_sha!r} != archived source {source_sha!r}"
         )
 
-        generator_sha = None
-        try:
-            value = json.loads((tmp / "static" / "web" / "data" / "index.json").read_text(encoding="utf-8")).get(
-                "generator_git_sha"
-            )
-            if isinstance(value, str) and value:
-                generator_sha = value
-        except (OSError, ValueError):
-            pass
+        generator_sha = _read_json_string_field(
+            tmp / "static" / "web" / "data" / "index.json", "generator_git_sha"
+        )
         checks["data_index_generator_sha"] = generator_sha
         if generator_sha is None:
             checks["data_index_generator_reachable"] = None
@@ -897,7 +908,9 @@ def verify_archive(archive: Path, sidecar: Path) -> tuple[bool, dict[str, Any]]:
             checks["data_index_generator_reachable"] = True
         else:
             clone_dir = tmp / "clone"
-            clone_res = run([_cmd("git"), "clone", str(bundle), str(clone_dir)])
+            # --no-checkout: only the object graph is needed for rev-list --all,
+            # so skip materializing a worktree.
+            clone_res = run([_cmd("git"), "clone", "--no-checkout", str(bundle), str(clone_dir)])
             if clone_res.returncode != 0:
                 checks["data_index_generator_reachable"] = False
             else:
@@ -1560,22 +1573,10 @@ def cmd_activate(args: argparse.Namespace) -> int:
     head_res = run([_cmd("git"), "-C", str(app_dir), "rev-parse", "--verify", "HEAD"])
     if head_res.returncode != 0 or head_res.stdout.strip() != source_sha:
         die(f"restored app HEAD does not match report source revision {source_sha}")
-    try:
-        value = json.loads((web_root / "_release.json").read_text(encoding="utf-8")).get("source_git_sha")
-        release_sha = value if isinstance(value, str) and value else None
-    except (OSError, ValueError):
-        release_sha = None
+    release_sha = _read_json_string_field(web_root / "_release.json", "source_git_sha")
     if release_sha != source_sha:
         die(f"static release provenance incoherent: _release.json source_git_sha {release_sha!r} != {source_sha!r}")
-    generator_sha = None
-    try:
-        value = json.loads((web_root / "data" / "index.json").read_text(encoding="utf-8")).get(
-            "generator_git_sha"
-        )
-        if isinstance(value, str) and value:
-            generator_sha = value
-    except (OSError, ValueError):
-        pass
+    generator_sha = _read_json_string_field(web_root / "data" / "index.json", "generator_git_sha")
     if generator_sha is None:
         die("public data index has no generator_git_sha; refusing activation")
     if not valid_sha_prefix(generator_sha):
@@ -1613,14 +1614,7 @@ def cmd_activate(args: argparse.Namespace) -> int:
     status_res = run([_cmd("git"), "-C", str(app_dir), "status", "--porcelain", "--untracked-files=no"])
     if status_res.returncode != 0:
         die("git status failed in restored checkout: " + (status_res.stderr or status_res.stdout).strip())
-    offending = []
-    for line in status_res.stdout.splitlines():
-        if len(line) < 4:
-            offending.append(line)
-            continue
-        status, path = line[:2], line[3:]
-        if not (status == " M" and path in ALLOWED_DIRTY_FILES):
-            offending.append(line)
+    offending = _porcelain_offending(status_res.stdout)
     if offending:
         die(
             "restored checkout has uncommitted tracked changes beyond the allowed generated data files; "
