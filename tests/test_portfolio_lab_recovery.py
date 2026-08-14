@@ -1890,6 +1890,77 @@ def test_verify_reachability_clone_uses_no_checkout(hermetic, tmp_path: Path):
     ], f"git clone argv missing --no-checkout: {argv}"
 
 
+def test_verify_non_object_index_json_fails_closed_with_attribute_error(hermetic, tmp_path: Path):
+    """Valid non-object data/index.json must keep the legacy AttributeError.
+
+    The pre-refactor parser called ``.get()`` on the parsed payload with only
+    OSError/ValueError caught, so valid non-object JSON raised an uncaught
+    AttributeError. The shared helper preserves that exact failure at the
+    verify call sites. Contrast: malformed (unparseable) JSON stays
+    non-fatal, yielding a None generator sha (same as missing).
+    """
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web", source_sha)
+    archive, res = standard_create(hermetic, repo, web)
+    assert res.returncode == 0, res.stderr
+
+    def mutate_index(payload: str):
+        def _mutate(work: Path) -> None:
+            _write(work / "static/web/data/index.json", payload)
+
+        return _mutate
+
+    non_object = repackage(
+        archive, hermetic.tmp / "retar-nonobject-index", mutate_index("[1, 2, 3]\n"), recompute=True
+    )
+    res = run_recovery(["verify", "--archive", str(non_object)], hermetic)
+    assert res.returncode != 0
+    assert "AttributeError" in res.stderr
+    assert "'list' object has no attribute 'get'" in res.stderr
+
+    malformed = repackage(
+        archive, hermetic.tmp / "retar-malformed-index", mutate_index("{not json\n"), recompute=True
+    )
+    res = run_recovery(["verify", "--archive", str(malformed)], hermetic)
+    assert res.returncode == 0, res.stderr
+    checks = json.loads(res.stdout)["checks"]
+    assert checks["data_index_generator_sha"] is None
+    assert checks["data_index_generator_reachable"] is None
+
+
+def test_verify_non_object_release_json_fails_closed_with_attribute_error(hermetic, tmp_path: Path):
+    """Valid non-object _release.json must keep the legacy AttributeError."""
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web", source_sha)
+    archive, res = standard_create(hermetic, repo, web)
+    assert res.returncode == 0, res.stderr
+
+    def mutate(work: Path) -> None:
+        _write(work / "static/web/_release.json", "42\n")
+
+    rebuilt = repackage(archive, hermetic.tmp / "retar-nonobject-release", mutate, recompute=True)
+    res = run_recovery(["verify", "--archive", str(rebuilt)], hermetic)
+    assert res.returncode != 0
+    assert "AttributeError" in res.stderr
+    assert "'int' object has no attribute 'get'" in res.stderr
+
+
+def test_create_non_object_index_json_fails_closed_with_attribute_error(hermetic, tmp_path: Path):
+    """create's manifest embedding reads data/index.json via the same helper;
+    a valid non-object payload keeps the legacy uncaught AttributeError."""
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    _write(web / "data/index.json", "[1, 2, 3]\n")
+    archive, res = standard_create(hermetic, repo, web)
+    assert res.returncode != 0
+    assert "AttributeError" in res.stderr
+    assert "'list' object has no attribute 'get'" in res.stderr
+    assert not archive.exists()
+
+
 def test_verify_generator_unreachable_reported_not_blocking(hermetic, tmp_path: Path):
     repo = make_repo(tmp_path / "repo")
     source_sha = commit_all(repo)

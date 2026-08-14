@@ -555,14 +555,13 @@ def _read_json_string_field(path: Path, field: str) -> str | None:
     """Read a non-empty string field from a JSON file, or None.
 
     Shared by the create/verify/activate paths: unreadable or malformed
-    JSON, non-object payloads, and non-string or empty values all yield
-    None; callers apply their own fail-closed validation with their own
-    error messages."""
+    JSON and non-string or empty values all yield None; callers apply
+    their own fail-closed validation with their own error messages.
+    Valid non-object JSON keeps the legacy behavior: the unguarded
+    ``.get()`` raises AttributeError (only OSError/ValueError are caught)."""
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
-    if not isinstance(payload, dict):
         return None
     value = payload.get(field)
     return value if isinstance(value, str) and value else None
