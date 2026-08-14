@@ -294,11 +294,15 @@ def test_health_check_exposes_publication_and_probe_exit_modes():
 def test_generation_publication_helpers_exist():
     """Committed mutable-data generation seams are present."""
     source = _read("src/monitor/health_check.py")
+    kill_surfaces = _read("src/monitor/health_kill_surfaces.py")
 
     assert "write_health_generation" in source
     assert "commit_public_index" in source
     assert "generation_id" in source
-    assert "producer_run_id" in source
+    # HEALTH-CHECK-SPLIT: implementations live in health_kill_surfaces.py;
+    # health_check.py re-exports the callables, so the run-id stamp seam is
+    # asserted at its owning module.
+    assert "producer_run_id" in kill_surfaces
 
 
 # ── Task 2: --candidate-no-scheduler (default service stays scheduler-enabled) ─
