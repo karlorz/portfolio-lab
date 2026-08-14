@@ -926,6 +926,59 @@ def test_create_excludes_secrets_identity_agents_and_env(hermetic, tmp_path: Pat
     assert "machine-id" not in names
 
 
+def test_create_fails_closed_on_symlinked_directory_in_runtime_data(hermetic, tmp_path: Path):
+    """A symlinked directory inside the archived data tree must abort
+    creation before the source service is stopped and before any archive is
+    written. Collection must never follow links out of the archived tree
+    (the external target holds a benignly named file with a token-like
+    payload that the name-based exclusion boundary would not stop), and a
+    refusal must never leave a silently incomplete recovery point."""
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    external = tmp_path / "external-notes"
+    _write(external / "notes.txt", "sk-test-super-secret-value-1234\n")
+    (repo / "data" / "linked").symlink_to(external, target_is_directory=True)
+    archive, res = standard_create(hermetic, repo, web)
+    assert res.returncode != 0
+    assert "symlink" in res.stderr.lower()
+    assert "runtime/data" in res.stderr
+    assert not hermetic.systemctl_log.exists()
+    assert not archive.exists()
+
+
+def test_create_fails_closed_on_symlinked_directory_in_web_tree(hermetic, tmp_path: Path):
+    """Same fail-closed guarantee for the static web source tree, whose
+    member collection is a distinct call path (static/web prefix)."""
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    external = tmp_path / "external-notes"
+    _write(external / "notes.txt", "sk-test-super-secret-value-1234\n")
+    (web / "assets" / "linked").symlink_to(external, target_is_directory=True)
+    archive, res = standard_create(hermetic, repo, web)
+    assert res.returncode != 0
+    assert "symlink" in res.stderr.lower()
+    assert "static/web" in res.stderr
+    assert not hermetic.systemctl_log.exists()
+    assert not archive.exists()
+
+
+def test_create_archives_regular_nested_directories(hermetic, tmp_path: Path):
+    """Regular nested directories (no symlinks) keep being archived after the
+    symlink fail-closed change."""
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    _write(repo / "data/nested/deep/payload.json", '{"x": 1}\n')
+    _write(web / "assets/css/main.css", "body {}\n")
+    archive, res = standard_create(hermetic, repo, web)
+    assert res.returncode == 0, res.stderr
+    members = set(read_tar_members(archive))
+    assert "runtime/data/nested/deep/payload.json" in members
+    assert "static/web/assets/css/main.css" in members
+
+
 def test_create_optional_runtime_logs_research_implement_only(hermetic, tmp_path: Path):
     repo = make_repo(tmp_path / "repo")
     commit_all(repo)

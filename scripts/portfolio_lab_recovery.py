@@ -34,10 +34,12 @@ Archive layout (member names)::
 
 The only sidecar is ``<archive>.sha256``; archive and sidecar are ``0600``.
 Creation validates the source and destination (source service state must be
-exactly ``active`` or exactly ``inactive``), drains the tasker service with
-``systemctl stop`` only when it is initially active (always attempting
-restart in finally; if inactive it is never started), preflights the bundle,
-and self-verifies the archive. Verify reads the uncompressed tar with Python
+exactly ``active`` or exactly ``inactive``), refuses symlinked directories
+under the archived trees (fail closed before the service is quiesced),
+drains the tasker service with ``systemctl stop`` only when it is initially
+active (always attempting restart in finally; if inactive it is never
+started), preflights the bundle, and self-verifies the archive. Verify
+reads the uncompressed tar with Python
 stdlib ``tarfile`` only: member index (names/types/duplicates/topology) is
 validated before any extraction, extraction is manual via ``extractfile()``
 into a fresh controlled temp dir, and sidecar/member/schema/digest/path/
@@ -348,11 +350,27 @@ def is_excluded(rel: str) -> bool:
     return False
 
 
+def _walk_tree_files(root: Path, prefix: str):
+    """Yield regular non-symlink files under ``root`` without ever descending
+    into symlinked directories; fail closed on any symlinked directory
+    encountered (collection must never follow links out of the archived tree,
+    and a linked subtree must never be silently omitted from a recovery
+    point)."""
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        for name in sorted(dirnames):
+            candidate = Path(dirpath) / name
+            if candidate.is_symlink():
+                die(f"refusing to archive: symlinked directory {candidate} under {prefix}")
+        for name in sorted(filenames):
+            path = Path(dirpath) / name
+            if not path.is_file() or path.is_symlink():
+                continue
+            yield path
+
+
 def iter_tree_files(root: Path, prefix: str) -> list[str]:
     members = []
-    for path in sorted(root.rglob("*")):
-        if not path.is_file() or path.is_symlink():
-            continue
+    for path in _walk_tree_files(root, prefix):
         rel = path.relative_to(root).as_posix()
         if is_excluded(rel):
             continue
@@ -361,7 +379,15 @@ def iter_tree_files(root: Path, prefix: str) -> list[str]:
         if not path_safe(rel):
             die(f"refusing to archive file with unsafe relative name: {path}")
         members.append(f"{prefix}/{rel}")
-    return members
+    return sorted(members)
+
+
+def check_no_symlinked_dirs(root: Path, prefix: str) -> None:
+    """Pre-quiesce preflight: refuse to proceed if any symlinked directory
+    sits under an archived tree. Runs before the source service is stopped so
+    a refusal never drains Tasker and never writes an archive."""
+    for _ in _walk_tree_files(root, prefix):
+        pass
 
 
 def copy_members_to_staging(members: list[str], src_root: Path, staging: Path, prefix: str) -> None:
@@ -923,6 +949,12 @@ def cmd_create(args: argparse.Namespace) -> int:
     # Source-side validation happens entirely before the tasker stop.
     check_clean_enough(source)
     check_config_secrets(config_file)
+    # Symlinked directories under an archived tree are refused before the
+    # source service is quiesced: member collection must never follow links
+    # out of the archived tree, and a refusal must never drain Tasker or
+    # write an archive.
+    check_no_symlinked_dirs(data_dir, "runtime/data")
+    check_no_symlinked_dirs(web_root, "static/web")
 
     service_name = args.tasker_service
     validate_service_name(service_name)
