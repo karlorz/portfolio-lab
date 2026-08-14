@@ -27,9 +27,7 @@ dependencies = [
     "python-dateutil>=2.9",
     # Web & API
     "flask>=3.0",
-    "soupsieve>=2.8.4",
     # Utilities
-    "tqdm>=4.67",
     "joblib>=1.4",
     "typing-extensions>=4.12",
     "arch>=7.0",
