@@ -14,6 +14,7 @@ individually exercised.
 """
 
 import json
+import math
 
 import pytest
 
@@ -100,6 +101,63 @@ class TestRegimeContract:
         assert isinstance(ENSEMBLE_WEIGHT_METADATA_KEYS, frozenset)
         assert "generated_at" in ENSEMBLE_WEIGHT_METADATA_KEYS
         assert "schema_version" in ENSEMBLE_WEIGHT_METADATA_KEYS
+
+
+class TestFallbackNormalization:
+    """Clean-checkout fallback (weights JSON absent) must be a valid 1.0 map.
+
+    fda0020 untracked data/ensemble_weights.json; every hardcoded regime
+    table then served as the fallback. VIX_TERM_STRUCTURE was appended at
+    83a56eb without scaling down the older entries, so each table summed to
+    1.05. These tests force the fallback through a missing weights file (never
+    the local data dir) and pin the normalization contract.
+    """
+
+    def test_fallback_regimes_sum_to_one_when_weights_json_absent(self, tmp_path):
+        """Every fallback regime map must sum to exactly 1.0."""
+        missing = str(tmp_path / "does_not_exist.json")
+        fallback = _load_regime_weights(weights_file=missing)
+        for regime in Regime:
+            total = sum(fallback[regime].values())
+            assert math.isclose(total, 1.0, rel_tol=0.0, abs_tol=1e-9), (
+                f"{regime.value} fallback weights sum to {total!r}"
+            )
+
+    def test_fallback_preserves_relative_ratios_of_nonzero_sources(self, tmp_path):
+        """Normalization must keep pairwise ratios of the legacy raw table.
+
+        Raw LOW_VOL table (legacy relative values): CROSS_ASSET_RV 0.1350,
+        ALTERNATIVE_DATA 0.2650, INTERNATIONAL_MOMENTUM 0.2520, UNIFIED_OVERLAY
+        0.1980, MULTI_TIMEFRAME_FUSION 0.1000, GOOGLE_TRENDS 0.0500,
+        VIX_TERM_STRUCTURE 0.0500 -> total 1.05. Each normalized weight must
+        equal raw / 1.05, so the VIX-term 0.05 contribution keeps its share
+        relative to the former values.
+        """
+        raw = {
+            SignalSource.CROSS_ASSET_RV: 0.1350,
+            SignalSource.ALTERNATIVE_DATA: 0.2650,
+            SignalSource.INTERNATIONAL_MOMENTUM: 0.2520,
+            SignalSource.UNIFIED_OVERLAY: 0.1980,
+            SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
+            SignalSource.GOOGLE_TRENDS: 0.0500,
+            SignalSource.VIX_TERM_STRUCTURE: 0.0500,
+        }
+        raw_total = sum(raw.values())
+        assert math.isclose(raw_total, 1.05, rel_tol=0.0, abs_tol=1e-12)
+
+        missing = str(tmp_path / "does_not_exist.json")
+        low_vol = _load_regime_weights(weights_file=missing)[Regime.LOW_VOL]
+        for source, raw_weight in raw.items():
+            assert low_vol[source] == pytest.approx(raw_weight / raw_total), (
+                f"{source.value} ratio to total not preserved"
+            )
+
+    def test_fallback_normalization_handles_all_zero_map(self, tmp_path):
+        """An all-zero map must be returned unchanged, not divided by zero."""
+        from src.signals.regime_spec import _normalize_weights
+
+        zero_map = {SignalSource.GOOGLE_TRENDS: 0.0}
+        assert _normalize_weights(zero_map) == zero_map
 
 
 class TestLoadRegimeWeights:

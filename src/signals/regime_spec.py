@@ -105,10 +105,33 @@ ENSEMBLE_WEIGHT_METADATA_KEYS = frozenset(
 )
 
 
+def _normalize_weights(
+    weights: Dict[SignalSource, float],
+) -> Dict[SignalSource, float]:
+    """Scale a regime map to a total of exactly 1.0, preserving pairwise ratios.
+
+    The hardcoded tables carry legacy relative values; appending
+    VIX_TERM_STRUCTURE (83a56eb) left each map summing to 1.05. Normalizing
+    at build time restores the sum-to-1.0 validity contract of the
+    JSON-loaded path without hand-rounding five tables, and stays correct
+    if future sources are added.
+    """
+    total = sum(weights.values())
+    if total <= 0.0:
+        return weights
+    return {source: weight / total for source, weight in weights.items()}
+
+
 def _build_hardcoded_weights() -> Dict[Regime, Dict[SignalSource, float]]:
-    """Return the hardcoded default regime weights (fallback)."""
+    """Return the hardcoded default regime weights (fallback).
+
+    Tables list the legacy relative values (pre-VIX-term maps summed to 1.0;
+    VIX_TERM_STRUCTURE 0.05 was appended without scaling down). Each map is
+    normalized to total 1.0 so the fallback satisfies the same validity
+    contract as the JSON-loaded path.
+    """
     return {
-        Regime.LOW_VOL: {
+        Regime.LOW_VOL: _normalize_weights({
             SignalSource.MULTI_SPEED_MOM: 0.0000,
             SignalSource.CROSS_ASSET_RV: 0.1350,
             SignalSource.ALTERNATIVE_DATA: 0.2650,
@@ -118,8 +141,8 @@ def _build_hardcoded_weights() -> Dict[Regime, Dict[SignalSource, float]]:
             SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
             SignalSource.GOOGLE_TRENDS: 0.0500,
             SignalSource.VIX_TERM_STRUCTURE: 0.0500,  # v3.23: intraday vol timing
-        },
-        Regime.NORMAL: {
+        }),
+        Regime.NORMAL: _normalize_weights({
             SignalSource.MULTI_SPEED_MOM: 0.0000,
             SignalSource.CROSS_ASSET_RV: 0.1170,
             SignalSource.ALTERNATIVE_DATA: 0.2245,
@@ -129,8 +152,8 @@ def _build_hardcoded_weights() -> Dict[Regime, Dict[SignalSource, float]]:
             SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
             SignalSource.GOOGLE_TRENDS: 0.0500,
             SignalSource.VIX_TERM_STRUCTURE: 0.0500,  # v3.23: intraday vol timing
-        },
-        Regime.HIGH_VOL: {
+        }),
+        Regime.HIGH_VOL: _normalize_weights({
             SignalSource.MULTI_SPEED_MOM: 0.0000,
             SignalSource.CROSS_ASSET_RV: 0.1170,
             SignalSource.INTERNATIONAL_MOMENTUM: 0.1890,
@@ -140,8 +163,8 @@ def _build_hardcoded_weights() -> Dict[Regime, Dict[SignalSource, float]]:
             SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
             SignalSource.GOOGLE_TRENDS: 0.0500,
             SignalSource.VIX_TERM_STRUCTURE: 0.0500,  # v3.23: intraday vol timing
-        },
-        Regime.CRISIS: {
+        }),
+        Regime.CRISIS: _normalize_weights({
             SignalSource.MULTI_SPEED_MOM: 0.0000,
             SignalSource.CROSS_ASSET_RV: 0.3285,
             SignalSource.CROSS_ASSET_REGIME_ARB: 0.1530,
@@ -151,8 +174,8 @@ def _build_hardcoded_weights() -> Dict[Regime, Dict[SignalSource, float]]:
             SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
             SignalSource.GOOGLE_TRENDS: 0.0500,
             SignalSource.VIX_TERM_STRUCTURE: 0.0500,  # v3.23: intraday vol timing
-        },
-        Regime.RECOVERY: {
+        }),
+        Regime.RECOVERY: _normalize_weights({
             SignalSource.MULTI_SPEED_MOM: 0.0000,
             SignalSource.ALTERNATIVE_DATA: 0.2245,
             SignalSource.CROSS_ASSET_RV: 0.1170,
@@ -162,7 +185,7 @@ def _build_hardcoded_weights() -> Dict[Regime, Dict[SignalSource, float]]:
             SignalSource.MULTI_TIMEFRAME_FUSION: 0.1000,
             SignalSource.GOOGLE_TRENDS: 0.0500,
             SignalSource.VIX_TERM_STRUCTURE: 0.0500,  # v3.23: intraday vol timing
-        }
+        }),
     }
 
 
