@@ -109,8 +109,12 @@ IC_EVALUATION_CONTRACTS: Dict[str, Dict[str, Any]] = {
         "prediction_transform": "identity",
         "observed_prediction_field": "ensemble_voting.gold_bias",
         "observed_prediction_transform": "identity",
-        "declared_alignment_status": "misaligned",
-        "alignment_reason": "actual_target_spy_expected_gld",
+        "declared_alignment_status": "provisional",
+        # Truthful reason: staging/resolution are per-asset (GLD) and rows are
+        # metadata-complete; alignment is computed dynamically from rows below
+        # (the stale "actual_target_spy_expected_gld" reason predates the
+        # per-asset resolution era — see MAIN-ITEM-1 s1).
+        "alignment_reason": "per_asset_resolution_active_awaiting_dynamic_alignment",
     },
     "ensemble_duration": {
         "contract_version": IC_EVALUATION_CONTRACT_VERSION,
@@ -123,8 +127,10 @@ IC_EVALUATION_CONTRACTS: Dict[str, Dict[str, Any]] = {
         "prediction_transform": "identity",
         "observed_prediction_field": "ensemble_voting.duration_bias",
         "observed_prediction_transform": "identity",
-        "declared_alignment_status": "misaligned",
-        "alignment_reason": "actual_target_spy_expected_tlt",
+        "declared_alignment_status": "provisional",
+        # Truthful reason: staging/resolution are per-asset (TLT) and rows are
+        # metadata-complete; alignment is computed dynamically from rows below.
+        "alignment_reason": "per_asset_resolution_active_awaiting_dynamic_alignment",
     },
     "ensemble_consensus": {
         "contract_version": IC_EVALUATION_CONTRACT_VERSION,
@@ -148,11 +154,14 @@ IC_EVALUATION_CONTRACTS: Dict[str, Dict[str, Any]] = {
         "target_basket": None,
         "intended_horizon_sessions": 1,
         "prediction_field": "alternative_data.spy_value",
-        "prediction_transform": "canonical_spy_polarity",
-        "observed_prediction_field": "alternative_data.composite_score",
+        # Aspirational canonical_spy_polarity transform is UNIMPLEMENTED
+        # (grep = 0 impls); the pipeline stages raw spy_value — identity is the
+        # truthful contract (MAIN-ITEM-1 s3).
+        "prediction_transform": "identity",
+        "observed_prediction_field": "alternative_data.spy_value",
         "observed_prediction_transform": "identity",
-        "declared_alignment_status": "misaligned",
-        "alignment_reason": "prediction_field_and_polarity_mismatch",
+        "declared_alignment_status": "provisional",
+        "alignment_reason": "legacy_rows_archived_reaccumulating_under_corrected_contract",
     },
     "behavioral_sentiment": {
         "contract_version": IC_EVALUATION_CONTRACT_VERSION,
@@ -162,11 +171,14 @@ IC_EVALUATION_CONTRACTS: Dict[str, Dict[str, Any]] = {
         "target_basket": None,
         "intended_horizon_sessions": 5,
         "prediction_field": "behavioral_sentiment.spy_value",
-        "prediction_transform": "canonical_spy_projection",
-        "observed_prediction_field": "behavioral_sentiment.composite_score",
+        # Aspirational canonical_spy_projection transform is UNIMPLEMENTED
+        # (grep = 0 impls); the pipeline stages the clamped equity_shift_pct/5
+        # value directly — identity is the truthful contract (MAIN-ITEM-1 s3).
+        "prediction_transform": "identity",
+        "observed_prediction_field": "behavioral_sentiment.spy_value",
         "observed_prediction_transform": "identity",
-        "declared_alignment_status": "misaligned",
-        "alignment_reason": "prediction_field_and_horizon_mismatch",
+        "declared_alignment_status": "provisional",
+        "alignment_reason": "legacy_rows_archived_reaccumulating_under_corrected_contract",
     },
     "factor_rotation": {
         "contract_version": IC_EVALUATION_CONTRACT_VERSION,
@@ -657,6 +669,100 @@ class ICMonitor:
         logger.info("IC monitor re-baselined: epoch archived to %s", archive_path)
         return archive_path
 
+    def archive_pre_contract_rows(
+        self, archive_path: Optional[Path] = None
+    ) -> Path:
+        """Archive rows that can never align under the corrected contracts.
+
+        One-shot maintenance for MAIN-ITEM-1 s4: rows in alignment-participating
+        cohorts (contract ``declared_alignment_status`` in
+        {"misaligned", "provisional"} — the fixable class) that can NEVER pass
+        the dynamic alignment check are snapshotted to a dated archive file in
+        the ic-rebaseline-archive/v1 format and removed from the live state:
+        (a) ``None`` rows (missing metadata entirely — never align), or
+        (b) rows whose stamped ``prediction_field`` differs from the contract's
+        intended ``prediction_field`` (stamped under an older observed field).
+
+        Cohorts declared "ambiguous"/"metric_mismatch" (ensemble_consensus,
+        factor_rotation, fred_macro) never participate in the dynamic
+        alignment path, so their legacy rows are untouched. The ensemble trio
+        (equity/gold/duration) stamps match their contracts — untouched.
+        Idempotent: a re-run finds no matching rows and archives 0.
+
+        Mirrors ``rebaseline()`` snapshot semantics ("nothing is lost"):
+        archived pairs + metadata rows are preserved on disk; only the
+        matching rows are dropped from the live monitor state.
+        """
+        if archive_path is None:
+            archive_dir = DATA_DIR / "ic_rebaseline_archives"
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            archive_path = archive_dir / (
+                "ic_pre_contract_archive_"
+                + datetime.now(timezone.utc)
+                .isoformat(timespec="seconds")
+                .replace(":", "-")
+                + ".json"
+            )
+        archive_path = Path(archive_path)
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+
+        archived_observations: Dict[str, list] = {}
+        archived_metadata: Dict[str, list] = {}
+        for signal_name, contract in IC_EVALUATION_CONTRACTS.items():
+            if contract.get("declared_alignment_status") not in {
+                "misaligned",
+                "provisional",
+            }:
+                continue
+            intended_field = contract.get("prediction_field")
+            metadata_rows = list(self._observation_metadata.get(signal_name, ()))
+            if not metadata_rows:
+                continue
+            data_rows = list(self._data.get(signal_name, ()))
+            keep_meta: list = []
+            keep_data: list = []
+            dropped_meta: list = []
+            dropped_data: list = []
+            for idx, row in enumerate(metadata_rows):
+                cannot_align = row is None or (
+                    isinstance(row, Mapping)
+                    and row.get("prediction_field") != intended_field
+                )
+                if cannot_align:
+                    dropped_meta.append(row)
+                    if idx < len(data_rows):
+                        dropped_data.append(data_rows[idx])
+                else:
+                    keep_meta.append(row)
+                    if idx < len(data_rows):
+                        keep_data.append(data_rows[idx])
+            if dropped_meta:
+                archived_metadata[signal_name] = dropped_meta
+                archived_observations[signal_name] = dropped_data
+                self._observation_metadata[signal_name] = deque(keep_meta)
+                self._data[signal_name] = deque(keep_data)
+
+        snapshot = {
+            "schema": "ic-rebaseline-archive/v1",
+            "archive_kind": "pre-contract-rows",
+            "archived_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "incident_id": "8115a9c1-a167-4da7-9832-673617dc7de3",
+            "staged": [],
+            "observations": archived_observations,
+            "observation_metadata": archived_metadata,
+        }
+        with open(archive_path, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f, indent=2)
+        logger.info(
+            "IC pre-contract rows archived to %s (%s)",
+            archive_path,
+            {
+                signal: len(rows)
+                for signal, rows in archived_metadata.items()
+            },
+        )
+        return archive_path
+
     def compute_ic(self, signal_name: str) -> Optional[float]:
         """Compute rolling IC for a specific signal.
 
@@ -766,7 +872,7 @@ class ICMonitor:
                 aligned = metadata_complete and all(
                     row.get("target_asset") == contract.get("target_asset")
                     and row.get("realized_horizon_sessions")
-                    == contract.get("intended_horizon_sessions")
+                    >= contract.get("intended_horizon_sessions")
                     and row.get("prediction_field")
                     == contract.get("prediction_field")
                     and row.get("prediction_transform")

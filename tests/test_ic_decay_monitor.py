@@ -695,7 +695,9 @@ def test_ic_summary_projects_bounded_signal_evidence() -> None:
     row = summary["signal_evidence"]["ensemble_gold"]
 
     assert row["metric_axis"] == "time_series_rank_correlation"
-    assert row["alignment_status"] == "misaligned"
+    # gold is declared provisional (MAIN-ITEM-1 s1): rows without metadata
+    # report the honest provisional status + legacy reason (same as equity).
+    assert row["alignment_status"] == "provisional"
     assert row["inference_status"] == "unavailable"
     assert row["evaluation_contract"]["target_asset"] == "GLD"
     assert "latest_observation_metadata" not in row
@@ -986,3 +988,137 @@ class TestRebaselineAndTrigger:
         assert summary["rebaseline_threshold"] == 20
         assert summary["max_staged_observations"] == 21
         assert summary["staged_observations_per_signal"] == {"ensemble_equity": 21}
+
+
+# ── MAIN-ITEM-1 (IC-CONTRACT-ALIGNMENT-FIX): s1/s2/s4 pins ─────────────
+
+def _complete_metadata(
+    signal_name: str,
+    *,
+    realized_horizon_sessions: int = 1,
+) -> dict:
+    """Full v2 observation metadata derived from the signal's contract."""
+    from src.monitor.ic_decay_monitor import (
+        IC_EVALUATION_CONTRACTS,
+        IC_OBSERVATION_METADATA_VERSION,
+    )
+
+    contract = IC_EVALUATION_CONTRACTS[signal_name]
+    return {
+        "prediction_date": "2026-08-01",
+        "realized_start_date": "2026-08-02",
+        "resolved_date": "2026-08-03",
+        "target_asset": contract["target_asset"],
+        "intended_horizon_sessions": contract["intended_horizon_sessions"],
+        "realized_horizon_sessions": realized_horizon_sessions,
+        "prediction_field": contract["prediction_field"],
+        "prediction_transform": contract["prediction_transform"],
+        "metric_axis": contract["intended_metric_axis"],
+        "metric_kind": contract["intended_metric_kind"],
+        "contract_version": IC_OBSERVATION_METADATA_VERSION,
+    }
+
+
+def test_gold_duration_provisional_contracts_run_dynamic_alignment():
+    """MAIN-ITEM-1 s1: gold/duration declared provisional -> dynamic check
+    runs on complete per-asset rows and computes aligned/eligible."""
+    monitor = ICMonitor(window_size=30, min_obs_for_status=5)
+    for i in range(10):
+        monitor.record("ensemble_gold", 0.1 + i * 0.01, 0.005,
+                       observation_metadata=_complete_metadata("ensemble_gold"))
+        monitor.record("ensemble_duration", -0.1 + i * 0.01, -0.005,
+                       observation_metadata=_complete_metadata("ensemble_duration"))
+    report = monitor.compute_decay_report()
+    for signal in ("ensemble_gold", "ensemble_duration"):
+        row = report[signal]
+        assert row["alignment_status"] == "aligned"
+        assert row["alignment_reason"] == "metadata_complete_and_contract_aligned"
+        assert row["control_eligible"] is True
+        assert row["control_status"] == "eligible"
+
+
+def test_alignment_predicate_accepts_resolved_over_intended_horizon():
+    """MAIN-ITEM-1 s2: >= predicate — a row resolved over its declared
+    horizon (realized=2 vs intended=1) is honestly aligned (was misaligned)."""
+    monitor = ICMonitor(window_size=30, min_obs_for_status=5)
+    for i in range(10):
+        monitor.record("ensemble_equity", 0.1 + i * 0.01, 0.005,
+                       observation_metadata=_complete_metadata(
+                           "ensemble_equity", realized_horizon_sessions=2))
+    row = monitor.compute_decay_report()["ensemble_equity"]
+    assert row["alignment_status"] == "aligned"
+    assert row["control_eligible"] is True
+
+
+def test_archive_pre_contract_rows_removes_only_never_alignable():
+    """MAIN-ITEM-1 s4: archive removes None rows + field-mismatched rows in
+    alignment-participating cohorts; matching cohorts stay intact."""
+    from src.monitor.ic_decay_monitor import ICMonitor
+
+    monitor = ICMonitor(window_size=30)
+    # alternative_data: legacy rows stamped under the old observed field.
+    alt_meta = _complete_metadata("alternative_data")
+    alt_meta = {**alt_meta, "prediction_field": "alternative_data.composite_score"}
+    for i in range(6):
+        monitor.record("alternative_data", 0.1 + i * 0.01, 0.005,
+                       observation_metadata=alt_meta)
+    # behavioral_sentiment: 2 None rows + 3 legacy-field rows.
+    for i in range(2):
+        monitor.record("behavioral_sentiment", 0.1, 0.005,
+                       observation_metadata=None)
+    beh_meta = _complete_metadata("behavioral_sentiment")
+    beh_meta = {**beh_meta, "prediction_field": "behavioral_sentiment.composite_score"}
+    for i in range(3):
+        monitor.record("behavioral_sentiment", 0.1 + i * 0.01, 0.005,
+                       observation_metadata=beh_meta)
+    # ensemble trio: matching rows — must stay untouched.
+    for i in range(5):
+        monitor.record("ensemble_equity", 0.1 + i * 0.01, 0.005,
+                       observation_metadata=_complete_metadata("ensemble_equity"))
+
+    archive_path = monitor.archive_pre_contract_rows()
+    assert archive_path.exists()
+
+    assert len(monitor._observation_metadata.get("alternative_data", ())) == 0
+    assert len(monitor._observation_metadata.get("behavioral_sentiment", ())) == 0
+    assert len(monitor._data.get("alternative_data", ())) == 0
+    assert len(monitor._data.get("behavioral_sentiment", ())) == 0
+    assert len(monitor._observation_metadata["ensemble_equity"]) == 5
+
+    # Idempotent: a second run archives nothing new.
+    second_path = Path(archive_path).parent / "ic_pre_contract_archive_second_run.json"
+    second = monitor.archive_pre_contract_rows(archive_path=second_path)
+    second_archived = json.loads(second.read_text())
+    assert second_archived["observation_metadata"] == {}
+    assert second_archived["observations"] == {}
+
+    archived = json.loads(archive_path.read_text())
+    assert archived["schema"] == "ic-rebaseline-archive/v1"
+    assert archived["archive_kind"] == "pre-contract-rows"
+    assert len(archived["observation_metadata"]["alternative_data"]) == 6
+    assert len(archived["observation_metadata"]["behavioral_sentiment"]) == 5
+    # None rows are preserved verbatim in the archive (nothing is lost).
+    assert archived["observation_metadata"]["behavioral_sentiment"][0] is None
+
+
+def test_behavioral_horizon_guard_keeps_short_resolutions_staged():
+    """MAIN-ITEM-1 s4 note: intended_horizon_sessions=5 stays strict — a
+    realization shorter than 5 sessions never resolves (stays staged)."""
+    monitor = ICMonitor(window_size=30)
+    monitor.stage_predictions(
+        {"behavioral_sentiment": 0.4}, "2026-08-01",
+        prediction_metadata={
+            "behavioral_sentiment": {
+                "target_asset": "SPY",
+                "intended_horizon_sessions": 5,
+            }
+        },
+    )
+    n = monitor.resolve_staged(
+        0.02, resolved_date="2026-08-03",
+        realized_start_date="2026-08-01",
+        target_asset="SPY",
+        realized_horizon_sessions=2,
+    )
+    assert n == 0
+    assert monitor.has_staged_predictions()
