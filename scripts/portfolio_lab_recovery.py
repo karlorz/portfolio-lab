@@ -123,6 +123,7 @@ EXCLUDED_FILE_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".crt")
 EXCLUDED_FILE_NAMES = frozenset(
     {
         ".env",
+        ".envrc",
         ".netrc",
         ".npmrc",
         "id_rsa",
@@ -271,6 +272,12 @@ def check_archive_destination(path: str, extra: list[Path]) -> Path:
 def validate_service_name(name: str) -> None:
     if not name or name in (".", "..") or "/" in name or any(ord(c) < 32 for c in name):
         die(f"invalid systemd service name: {name!r}")
+    # systemd unit names allow only [A-Za-z0-9:_.-] (plus C-style escapes);
+    # '%' is outside that charset and would make every systemctl call fail.
+    # No expected unit name (portfolio-lab-tasker, *-recovery-dev) contains
+    # '%', so fail closed early instead of at the first systemctl call.
+    if "%" in name:
+        die(f"invalid systemd service name (unit names cannot contain '%'): {name!r}")
 
 
 def validate_unit_value(value: str, what: str) -> None:
@@ -423,13 +430,18 @@ def check_text_secrets(text: str, what: str) -> None:
         key = key.strip()
         value = value.strip()
         candidate_keys = [key]
+        candidate_values = [value]
         if key.casefold() == "environment":
-            nested_key, nested_eq, _nested_value = value.strip("\"'").partition("=")
+            nested_key, nested_eq, nested_value = value.strip("\"'").partition("=")
             if nested_eq:
                 candidate_keys.append(nested_key.strip())
+                candidate_values.append(nested_value.strip())
         if any(SECRET_KEY_PATTERN.search(candidate) for candidate in candidate_keys):
             bad.append(f"key {candidate_keys[-1]!r}")
-        elif value and any(pattern.search(value) for pattern in SECRET_VALUE_PATTERNS):
+        elif any(
+            v and any(pattern.search(v) for pattern in SECRET_VALUE_PATTERNS)
+            for v in candidate_values
+        ):
             bad.append(f"value of {key!r}")
     if bad:
         die(f"{what} contains secret-like key(s)/value(s): {', '.join(bad[:5])}; refusing to archive secrets")
@@ -1237,7 +1249,17 @@ def cmd_restore(args: argparse.Namespace) -> int:
             extract_validated_members(archive, infos, extracted)
         except ValueError as exc:
             die(str(exc))
-        manifest = json.loads((extracted / MANIFEST_MEMBER).read_text(encoding="utf-8"))
+        # Contained fail-closed guard: the archive was verified above; if its
+        # bytes changed between verification and this staging pass, refuse
+        # rather than trust the re-read data. A residual race window remains
+        # between this re-check and the reads below (recorded in the task
+        # report; no broader refactor in this fix wave).
+        if sha256_file(archive) != report.get("archive_sha256"):
+            die("archive changed between verification and staging; refusing restore")
+        try:
+            manifest = json.loads((extracted / MANIFEST_MEMBER).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            die("embedded manifest is not valid JSON; refusing restore")
         source_info = manifest.get("source") or {}
         source_sha = source_info.get("sha")
         if not isinstance(source_sha, str) or not valid_full_sha(source_sha):

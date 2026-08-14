@@ -2739,3 +2739,183 @@ def test_restore_dev_api_rejects_percent_specifier_in_paths(hermetic, tmp_path: 
         assert not bad.exists(), label
         assert not (hermetic.tmp / "app").exists(), label
         assert not (hermetic.tmp / "www").exists(), label
+
+
+# ── final review wave: nested env secret values, archive-change guard, ──────
+# ── .envrc exclusion, service-name '%' ──────────────────────────────────────
+
+
+def test_create_rejects_nested_env_secret_value_in_tasker_unit_before_service_stop(hermetic, tmp_path):
+    """Anchored secret-looking values inside Environment=KEY=value lines
+    (benign key, secret-looking nested value) must be refused by the value
+    scan before the source Tasker stop."""
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    _write(
+        hermetic.units / f"{TASKER}.service",
+        UNIT_TEXT
+        + "Environment=WEIRD=sk-abc123def456\n"
+        + "Environment=OTHER=-----BEGIN PRIVATE KEY-----\n",
+    )
+    _write(repo / "data/tasker_status.json", json.dumps({"state": "idle"}) + "\n")
+    archive = hermetic.tmp / "backups" / ("nested-secret" + ARCHIVE_SUFFIX)
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    res = run_recovery(
+        [
+            "create",
+            "--app-dir",
+            str(repo),
+            "--web-root",
+            str(web),
+            "--tasker-service",
+            TASKER,
+            "--archive",
+            str(archive),
+            "--storage-encryption-attested",
+        ],
+        hermetic,
+    )
+    assert res.returncode != 0
+    assert "secret" in res.stderr.lower()
+    # refused before the source Tasker stop: no systemctl calls, no archive
+    assert not hermetic.systemctl_log.exists()
+    assert not archive.exists()
+
+
+def test_activate_rejects_nested_env_secret_unit_before_systemd_mutation(hermetic, tmp_path):
+    """A verify-passing archive whose unit carries a nested Environment= value
+    with an anchored secret-looking value must be refused by the activation
+    unit re-scan, before any systemd mutation."""
+    set_systemctl_mode(hermetic, "inactive")
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web", source_sha, generator_sha=source_sha[:12])
+    archive, res = standard_create(hermetic, repo, web)
+    assert res.returncode == 0, res.stderr
+
+    def mutate(work: Path) -> None:
+        _write(work / "metadata/tasker-unit.txt", UNIT_TEXT + "Environment=WEIRD=sk-abc123def456\n")
+
+    rebuilt = repackage(archive, hermetic.tmp / "nested-unit-retar", mutate, recompute=True)
+    res = run_recovery(["verify", "--archive", str(rebuilt)], hermetic)
+    assert res.returncode == 0, res.stderr
+    app_dir, web_root, res = standard_restore(hermetic, rebuilt, "prod", extra=["--allow-production-paths"])
+    assert res.returncode == 0, res.stderr
+    _write(app_dir / ".env.local", "PORTFOLIO_LAB_MODE=lab\n")
+    res = run_activate(hermetic, app_dir, web_root)
+    assert res.returncode != 0
+    assert "secret" in res.stderr.lower()
+    assert_no_activation_systemctl(hermetic)
+    assert (hermetic.units / f"{TASKER}.service").read_text(encoding="utf-8") == UNIT_TEXT
+
+
+def test_restore_rejects_archive_changed_between_verify_and_staging(hermetic, tmp_path):
+    """If the archive bytes change between verification and the staging pass
+    (second read), restore must fail closed before any target mutation."""
+    fake_git = hermetic.bin / "git-wrapper"
+    make_fake(
+        fake_git,
+        '#!/bin/sh\n'
+        'if [ "$1" = "bundle" ] && [ "$2" = "list-heads" ] && [ -f "$PLR_MUTATE_ARCHIVE" ]; then\n'
+        '  printf "x" >> "$PLR_MUTATE_ARCHIVE"\n'
+        'fi\n'
+        'exec git "$@"\n',
+    )
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    # generator == source sha keeps verify on the fast path (no clone there)
+    web = make_web_root(tmp_path / "web", source_sha, generator_sha=source_sha)
+    archive, res = standard_create(hermetic, repo, web)
+    assert res.returncode == 0, res.stderr
+    app_dir, web_root, res = standard_restore(
+        hermetic,
+        archive,
+        "dev",
+        extra_env={"PLR_GIT": str(fake_git), "PLR_MUTATE_ARCHIVE": str(archive)},
+    )
+    assert res.returncode != 0
+    assert "changed" in res.stderr.lower()
+    assert not app_dir.exists()
+    assert not web_root.exists()
+    assert not list(hermetic.tmp.glob("*.rollback-*"))
+
+
+def test_create_excludes_envrc_files(hermetic, tmp_path):
+    """.envrc may carry environment secrets and is never recovery payload:
+    it must be excluded at every depth."""
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    _write(repo / ".envrc", 'export SECRET_STUFF="x"\n')
+    _write(repo / "data/.envrc", 'export SECRET_STUFF="x"\n')
+    _write(web / ".envrc", 'export SECRET_STUFF="x"\n')
+    commit_all(repo)
+    archive, res = standard_create(hermetic, repo, web)
+    assert res.returncode == 0, res.stderr
+    members = set(read_tar_members(archive))
+    assert not any(m.endswith("/.envrc") or m == ".envrc" for m in members)
+
+
+def test_create_rejects_percent_in_service_name_before_service_stop(hermetic, tmp_path):
+    """'%' is outside the systemd unit-name charset; create must fail closed
+    before any systemctl call."""
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    _write(hermetic.units / f"{TASKER}.service", UNIT_TEXT)
+    _write(repo / "data/tasker_status.json", json.dumps({"state": "idle"}) + "\n")
+    archive = hermetic.tmp / "backups" / ("pct-name" + ARCHIVE_SUFFIX)
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    res = run_recovery(
+        [
+            "create",
+            "--app-dir",
+            str(repo),
+            "--web-root",
+            str(web),
+            "--tasker-service",
+            "bad%name",
+            "--archive",
+            str(archive),
+            "--storage-encryption-attested",
+        ],
+        hermetic,
+    )
+    assert res.returncode != 0
+    assert "%" in res.stderr
+    assert not hermetic.systemctl_log.exists()
+    assert not archive.exists()
+
+
+def test_restore_dev_api_rejects_percent_in_service_name(hermetic, tmp_path):
+    """A dev API unit name containing '%' must be rejected before any target
+    mutation."""
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web", source_sha)
+    archive, res = standard_create(hermetic, repo, web)
+    assert res.returncode == 0, res.stderr
+    app_dir = hermetic.tmp / "app"
+    web_root = hermetic.tmp / "www"
+    res = run_recovery(
+        [
+            "restore",
+            "--archive",
+            str(archive),
+            "--app-dir",
+            str(app_dir),
+            "--web-root",
+            str(web_root),
+            "--target-mode",
+            "dev",
+            "--start-dev-api",
+            "--tasker-service",
+            "bad%name",
+        ],
+        hermetic,
+    )
+    assert res.returncode != 0
+    assert "%" in res.stderr
+    assert not app_dir.exists()
+    assert not web_root.exists()
