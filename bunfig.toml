@@ -1,0 +1,5 @@
+# Bare `bun test` must not discover Playwright-runner specs (tests/browser/**).
+# Playwright has its own runner/config (playwright.config.ts testDir) and is
+# unaffected. See 05-tech-debt.md C11 (BUN-TEST-DISCOVERY-FIX, Item 7).
+[test]
+pathIgnorePatterns = ["tests/browser/**"]
