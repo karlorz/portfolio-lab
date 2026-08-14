@@ -11,12 +11,34 @@ inside EnsembleVoter.compute_vote, covering:
 """
 
 import numpy as np
+import pytest
 
 from src.strategy.ensemble_voter import (
     BanditWeighter, EnsembleVoter, Regime, SignalSource,
     SignalReading, REGIME_WEIGHTS,
 )
 from src.signals.regime_gate import RegimeGate
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_health_db(tmp_path, monkeypatch):
+    """Point SignalHealthTracker at a fresh empty DB for every test.
+
+    compute_vote's health stage constructs ``SignalHealthTracker()`` with the
+    module default ``DB_PATH`` (= live MARKET_DB, ~60MB with years of
+    signal_predictions rows). The ROW_NUMBER() IC queries then scan the live
+    table — ~9.5s per compute_vote call, ~44s for the 5-regime loop. Redirecting
+    DB_PATH to a per-test empty file keeps the health code path fully exercised
+    (schema init + all SQL) but hermetic and O(empty-table) fast; with no rows,
+    calculate_all_health_scores returns {} and _apply_health_weights passes
+    weights through unchanged.
+    """
+    import src.signals.health_tracker as health_tracker_module
+
+    monkeypatch.setattr(
+        health_tracker_module, "DB_PATH", tmp_path / "health_signals.db"
+    )
+
 
 
 # ---------------------------------------------------------------------------
@@ -293,10 +315,14 @@ class TestCombinedPipeline:
         voter = _make_voter(tmp_path)
         rng = np.random.RandomState(42)
 
-        # Feed 300 observations to reach max blend
-        for _ in range(300):
+        # Reduced warmup: 20 update rounds keep update_bandit exercised; the
+        # observation count is then seeded to the same final state as the
+        # former 300-round loop (1800 obs -> 300 day-steps -> max blend 0.7),
+        # so the blend assertions below are unchanged.
+        for _ in range(20):
             for sig in [s.value for s in SignalSource]:
                 voter.update_bandit(sig, "NORMAL", rng.normal(0.001, 0.01))
+        voter.bandit_observations = 300 * 6
 
         # Verify blend is at max
         blend = min(0.7, voter.bandit_observations / 252 * 0.7)

@@ -20,6 +20,23 @@ from src.strategy.ensemble_voter import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_health_db(tmp_path, monkeypatch):
+    """Point SignalHealthTracker at a fresh empty DB for every test.
+
+    compute_vote's health stage constructs ``SignalHealthTracker()`` with the
+    module default ``DB_PATH`` (= live MARKET_DB, ~60MB); the ROW_NUMBER() IC
+    queries then scan the live table — ~9.5s per compute_vote call. Redirecting
+    DB_PATH to a per-test empty file keeps the health code path fully exercised
+    (schema init + all SQL) but hermetic and O(empty-table) fast.
+    """
+    import src.signals.health_tracker as health_tracker_module
+
+    monkeypatch.setattr(
+        health_tracker_module, "DB_PATH", tmp_path / "health_signals.db"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
