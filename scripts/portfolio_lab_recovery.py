@@ -62,7 +62,9 @@ never touches DNS or Caddy.
 
 Command overrides (tests use fakes; production defaults): PLR_GIT, PLR_TAR,
 PLR_SYSTEMCTL, PLR_SYSTEMD_UNIT_DIR, PLR_WIKI_DIR, PLR_CADDY_CONFIG,
-PLR_DEV_SERVICE_NAME.
+PLR_DEV_SERVICE_NAME. PLR_ALLOW_TMP_DEST (default unset): test-only escape
+hatch permitting archive destinations under pytest tmp trees
+(/tmp/pytest-of-*); every other /tmp destination stays forbidden.
 """
 
 from __future__ import annotations
@@ -254,6 +256,12 @@ def check_not_forbidden(path: Path, role: str, extra: list[Path]) -> Path:
     dest = path.resolve()
     for root in forbidden_roots(extra):
         if dest == root or dest.is_relative_to(root):
+            if (
+                root == Path("/tmp").resolve()
+                and os.environ.get("PLR_ALLOW_TMP_DEST") == "1"
+                and str(dest).startswith(f"{root}/pytest-of-")
+            ):
+                continue
             die(f"{role} is forbidden (under {root}); choose an explicit absolute path outside repo/app/web/vault/tmp")
     return dest
 

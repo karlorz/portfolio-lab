@@ -164,6 +164,11 @@ def hermetic(tmp_path: Path):
         "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
         "PLR_GIT": "git",
         "PLR_TAR": "tar",
+        # Test escape hatch: pytest's tmp_path lives under /tmp/pytest-of-*,
+        # which the production guard refuses. The hatch only permits exactly
+        # those trees (script check_not_forbidden); every other /tmp
+        # destination stays forbidden (guard-expectation tests unchanged).
+        "PLR_ALLOW_TMP_DEST": "1",
         "PLR_SYSTEMCTL": str(bin_dir / "systemctl"),
         "PLR_SYSTEMD_UNIT_DIR": str(units),
         "PLR_WIKI_DIR": str(tmp_path / "vault"),
@@ -1725,11 +1730,17 @@ def test_verify_rejects_unsafe_recorded_mode(hermetic, tmp_path: Path):
 def test_verify_rejects_unsafe_member_paths(hermetic, tmp_path: Path):
     staging = tmp_path / "staging"
     _write(staging / "ok.txt", "x\n")
-    evil = tmp_path / "evil.txt"
-    _write(evil, "x\n")
     archive = hermetic.tmp / "backups" / ("unsafe" + ARCHIVE_SUFFIX)
     archive.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["tar", "-cf", str(archive), "-C", str(staging), "../evil.txt"], check=True)
+    # Build the archive with Python's tarfile so the member name is stored
+    # verbatim: GNU tar strips a leading ``../`` (``tar: Removing leading
+    # '../' from member names``), which would silently turn this into a safe
+    # archive and defeat the check on Linux hosts.
+    payload = b"x\n"
+    info = tarfile.TarInfo("../evil.txt")
+    info.size = len(payload)
+    with tarfile.open(archive, "w") as tf:
+        tf.addfile(info, io.BytesIO(payload))
     write_sidecar(archive)
     res = run_recovery(["verify", "--archive", str(archive)], hermetic)
     assert res.returncode != 0
@@ -2325,9 +2336,11 @@ def test_restore_placement_failure_rolls_back_moved_target(hermetic, tmp_path: P
     app_dir = hermetic.tmp / "app"
     _write(app_dir / "existing.txt", "keep me\n")
     ro = hermetic.tmp / "ro"
-    ro.mkdir()
+    # A regular FILE where the web-root directory is required: shutil.move
+    # fails with NotADirectoryError even when running as root (a chmod-based
+    # read-only parent is bypassed by root, so it cannot drive this path).
+    _write(ro, "x\n")
     web_root = ro / "www"
-    ro.chmod(0o555)
     try:
         res = run_recovery(
             [
@@ -2351,7 +2364,7 @@ def test_restore_placement_failure_rolls_back_moved_target(hermetic, tmp_path: P
         assert not web_root.exists()
         assert not list(hermetic.tmp.glob("*.rollback-*"))
     finally:
-        ro.chmod(0o755)
+        ro.unlink(missing_ok=True)
 
 
 def test_restore_clone_failure_preserves_existing_target_content(hermetic, tmp_path: Path):
