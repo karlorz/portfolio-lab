@@ -460,6 +460,17 @@ def repackage(archive: Path, work: Path, mutate, recompute: bool = False) -> Pat
     return rebuilt
 
 
+def _load_recovery_module():
+    """Import the recovery script in-process (module level is constants and
+    functions only, so this is side-effect free)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("portfolio_lab_recovery", RECOVERY_SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 # ── create: CLI guards ──────────────────────────────────────────────────────
 
 
@@ -977,6 +988,130 @@ def test_create_archives_regular_nested_directories(hermetic, tmp_path: Path):
     members = set(read_tar_members(archive))
     assert "runtime/data/nested/deep/payload.json" in members
     assert "static/web/assets/css/main.css" in members
+
+
+def test_create_rejects_symlinked_web_root_before_service_stop(hermetic, tmp_path: Path):
+    """A --web-root that is itself a symlink must be rejected before resolve()
+    (which would silently follow it) and before any systemctl call or
+    archive write."""
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    real_web = make_web_root(tmp_path / "real-web", "x" * 40)
+    web_link = tmp_path / "web-link"
+    web_link.symlink_to(real_web, target_is_directory=True)
+    archive = hermetic.tmp / "backups" / ("web-link" + ARCHIVE_SUFFIX)
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    _write(hermetic.units / f"{TASKER}.service", UNIT_TEXT)
+    _write(repo / "data/tasker_status.json", json.dumps({"state": "idle", "version": 1}) + "\n")
+    res = run_recovery(
+        [
+            "create",
+            "--app-dir",
+            str(repo),
+            "--web-root",
+            str(web_link),
+            "--tasker-service",
+            TASKER,
+            "--archive",
+            str(archive),
+            "--storage-encryption-attested",
+        ],
+        hermetic,
+    )
+    assert res.returncode != 0
+    assert "symlink" in res.stderr.lower()
+    assert "web root" in res.stderr.lower()
+    assert not hermetic.systemctl_log.exists()
+    assert not archive.exists()
+
+
+def test_create_rejects_symlinked_data_dir_before_service_stop(hermetic, tmp_path: Path):
+    """The app data directory itself being a symlink must be rejected before
+    resolve() (which would silently follow it) and before any systemctl call
+    or archive write."""
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    external_data = tmp_path / "external-data"
+    # Mirror the tracked/generated data files so a pre-fix create would
+    # succeed through the followed link (the tracked files pass the
+    # allowed-dirty policy; tasker_status.json is the required mirror).
+    _write(external_data / "ensemble_weights.json", '{"normal": {"spy": 0.46}}\n')
+    _write(external_data / "vix_term_structure.json", '{"_meta": {"schema": "vix_term_structure/v1"}}\n')
+    _write(external_data / "tasker_status.json", json.dumps({"state": "idle", "version": 1}) + "\n")
+    os.rename(repo / "data", tmp_path / "real-data")
+    (repo / "data").symlink_to(external_data, target_is_directory=True)
+    archive = hermetic.tmp / "backups" / ("data-link" + ARCHIVE_SUFFIX)
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    _write(hermetic.units / f"{TASKER}.service", UNIT_TEXT)
+    res = run_recovery(
+        [
+            "create",
+            "--app-dir",
+            str(repo),
+            "--web-root",
+            str(web),
+            "--tasker-service",
+            TASKER,
+            "--archive",
+            str(archive),
+            "--storage-encryption-attested",
+        ],
+        hermetic,
+    )
+    assert res.returncode != 0
+    assert "symlink" in res.stderr.lower()
+    assert "data directory" in res.stderr.lower()
+    assert not hermetic.systemctl_log.exists()
+    assert not archive.exists()
+
+
+def test_create_fails_closed_on_unreadable_directory_in_data_tree(hermetic, tmp_path: Path):
+    """An unreadable subdirectory under an archived tree must fail closed
+    before the source service is stopped instead of being silently omitted
+    from the recovery point. chmod-based; not reproducible as root."""
+    if getattr(os, "geteuid", lambda: 0)() == 0:
+        pytest.skip("permission-denied traversal is not reproducible as root")
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    locked = repo / "data" / "locked"
+    locked.mkdir()
+    _write(locked / "notes.txt", "sk-test-super-secret-value-1234\n")
+    locked.chmod(0o000)
+    try:
+        archive, res = standard_create(hermetic, repo, web)
+    finally:
+        locked.chmod(0o755)
+    assert res.returncode != 0
+    assert "cannot traverse" in res.stderr.lower()
+    assert not hermetic.systemctl_log.exists()
+    assert not archive.exists()
+
+
+def test_collection_fails_closed_on_directory_traversal_error(monkeypatch, capsys, tmp_path: Path):
+    """os.walk traversal errors (unreadable/deleted/I/O-error directories)
+    must surface through the controlled die() path instead of silently
+    omitting directories from the member list. Portable via os.scandir
+    injection (chmod behavior is platform-dependent)."""
+    mod = _load_recovery_module()
+    tree = tmp_path / "data"
+    (tree / "ok").mkdir(parents=True)
+    _write(tree / "ok" / "a.txt", "x")
+    (tree / "bad").mkdir()
+    real_scandir = os.scandir
+
+    def guarded_scandir(path):
+        if os.fspath(path).endswith("bad"):
+            raise PermissionError(13, "Permission denied", os.fspath(path))
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", guarded_scandir)
+    with pytest.raises(SystemExit):
+        list(mod._walk_tree_files(tree, "runtime/data"))
+    err = capsys.readouterr().err
+    assert "cannot traverse" in err
+    assert "runtime/data" in err
 
 
 def test_create_optional_runtime_logs_research_implement_only(hermetic, tmp_path: Path):

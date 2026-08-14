@@ -34,8 +34,9 @@ Archive layout (member names)::
 
 The only sidecar is ``<archive>.sha256``; archive and sidecar are ``0600``.
 Creation validates the source and destination (source service state must be
-exactly ``active`` or exactly ``inactive``), refuses symlinked directories
-under the archived trees (fail closed before the service is quiesced),
+exactly ``active`` or exactly ``inactive``), refuses symlinked roots (app
+data dir and web root), symlinked directories, and unreadable subtrees under
+the archived trees (fail closed before the service is quiesced),
 drains the tasker service with ``systemctl stop`` only when it is initially
 active (always attempting restart in finally; if inactive it is never
 started), preflights the bundle, and self-verifies the archive. Verify
@@ -352,20 +353,33 @@ def is_excluded(rel: str) -> bool:
 
 def _walk_tree_files(root: Path, prefix: str):
     """Yield regular non-symlink files under ``root`` without ever descending
-    into symlinked directories; fail closed on any symlinked directory
-    encountered (collection must never follow links out of the archived tree,
-    and a linked subtree must never be silently omitted from a recovery
-    point)."""
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-        for name in sorted(dirnames):
-            candidate = Path(dirpath) / name
-            if candidate.is_symlink():
-                die(f"refusing to archive: symlinked directory {candidate} under {prefix}")
-        for name in sorted(filenames):
-            path = Path(dirpath) / name
-            if not path.is_file() or path.is_symlink():
-                continue
-            yield path
+    into symlinked directories; fail closed on any symlinked directory or
+    traversal error (unreadable/deleted/I/O-error directory) encountered —
+    collection must never follow links out of the archived tree, and a
+    linked or unreadable subtree must never be silently omitted from a
+    recovery point."""
+
+    def _onerror(error: OSError) -> None:
+        die(f"refusing to archive: cannot traverse {prefix}: {error}")
+
+    try:
+        for dirpath, dirnames, filenames in os.walk(
+            root, followlinks=False, onerror=_onerror
+        ):
+            for name in sorted(dirnames):
+                candidate = Path(dirpath) / name
+                if candidate.is_symlink():
+                    die(f"refusing to archive: symlinked directory {candidate} under {prefix}")
+            for name in sorted(filenames):
+                path = Path(dirpath) / name
+                if not path.is_file() or path.is_symlink():
+                    continue
+                yield path
+    except OSError as error:
+        # os.walk only routes scandir() open failures through onerror;
+        # iteration errors (e.g. a directory deleted mid-walk) propagate,
+        # so fail closed on those too.
+        die(f"refusing to archive: cannot traverse {prefix}: {error}")
 
 
 def iter_tree_files(root: Path, prefix: str) -> list[str]:
@@ -926,8 +940,16 @@ def cmd_create(args: argparse.Namespace) -> int:
     require_attestation(args)
     if not str(args.archive).endswith(".portfolio-lab-recovery.tar"):
         die("archive path must end with .portfolio-lab-recovery.tar")
-    source = Path(args.app_dir).resolve()
-    web_root = Path(args.web_root).resolve()
+    raw_app_dir = Path(args.app_dir)
+    raw_web_root = Path(args.web_root)
+    # Reject raw root symlinks before resolve(): resolve() would silently
+    # follow a symlinked root and collect outside the intended tree.
+    if (raw_app_dir / "data").is_symlink():
+        die(f"refusing to archive: app data directory is a symlink: {raw_app_dir / 'data'}")
+    if raw_web_root.is_symlink():
+        die(f"refusing to archive: web root is a symlink: {raw_web_root}")
+    source = raw_app_dir.resolve()
+    web_root = raw_web_root.resolve()
     data_dir = (source / "data").resolve()
     config_file = (source / "config" / "lab-app.env").resolve()
     archive = check_archive_destination(args.archive, [source, web_root])
