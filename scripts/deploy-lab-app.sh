@@ -184,7 +184,7 @@ if [ "$CANDIDATE_NO_SCHEDULER" = "1" ]; then
   [ "$SERVICE_NAME" != "portfolio-lab-tasker" ] || die "--candidate-no-scheduler requires a non-production --service-name"
   [ "$WEB_ROOT" != "/var/www/portfolio-lab" ] || die "--candidate-no-scheduler requires a non-production --web-root"
   [ "$PUBLIC_ROOT" != "/var/www/portfolio-lab" ] || die "--candidate-no-scheduler requires a non-production --public-root"
-  [ "$APP_DIR" != "/root/projects/portfolio-lab" ] || die "--candidate-no-scheduler requires a non-production --app-dir"
+  [ "$APP_DIR" != "/root/projects/portfolio-lab" ] || die "--candidate-no-scheduler requires a non-production --app-dir"  # portability-scan allowlist: intentional production-path guard
 fi
 
 if [ "$PRINT_CADDY" != "1" ] && [ "$DRY_RUN" != "1" ] && { [ "$SKIP_SERVICE" != "1" ] || [ "$SKIP_CADDY" != "1" ] || [ "$SKIP_UPDATE_COMMAND" != "1" ]; }; then

@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from src.signals import integrator
 from src.strategy import ensemble_voter
 
@@ -27,6 +29,8 @@ def test_integrator_regime_weights_keep_legacy_public_contract():
 
 
 def test_integrator_bull_weights_project_from_canonical_low_vol_weights():
+    """Bull weights are canonical low-vol weights under the integrator's
+    ten-decimal projection contract (_project_canonical_source_weights)."""
     canonical_low_vol = {
         source.value: weight
         for source, weight in ensemble_voter.REGIME_WEIGHTS[
@@ -36,11 +40,18 @@ def test_integrator_bull_weights_project_from_canonical_low_vol_weights():
 
     bull_weights = integrator.REGIME_WEIGHTS["bull"]
 
-    assert bull_weights["multi_speed"] == canonical_low_vol["multi_speed_momentum"]
-    assert bull_weights["value"] == canonical_low_vol["cross_asset_rv"]
-    assert bull_weights["momentum"] == canonical_low_vol["international_momentum"]
-    assert bull_weights["sentiment"] == (
-        canonical_low_vol["alternative_data"] + canonical_low_vol["google_trends"]
+    assert bull_weights["multi_speed"] == pytest.approx(
+        canonical_low_vol["multi_speed_momentum"], abs=1e-10
+    )
+    assert bull_weights["value"] == pytest.approx(
+        canonical_low_vol["cross_asset_rv"], abs=1e-10
+    )
+    assert bull_weights["momentum"] == pytest.approx(
+        canonical_low_vol["international_momentum"], abs=1e-10
+    )
+    assert bull_weights["sentiment"] == pytest.approx(
+        canonical_low_vol["alternative_data"] + canonical_low_vol["google_trends"],
+        abs=1e-10,
     )
 
 
