@@ -172,3 +172,8 @@ raw/market/
 # Playwright CLI runtime output (machine-local config + output)
 .playwright/
 .chrome-debug-profile/
+
+# Portfolio Lab recovery archives (scripts/portfolio_lab_recovery.py)
+# Operator-chosen absolute destinations; never commit archive or sidecar.
+*.portfolio-lab-recovery.tar
+*.portfolio-lab-recovery.tar.sha256

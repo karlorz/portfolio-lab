@@ -1,6 +1,7 @@
 import importlib.util
 import hashlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -234,11 +235,17 @@ def test_makefile_exposes_offline_data_quality_target():
 
 # ── Task 1B/3B: deploy unit semantics — safe systemd kill/timeout + drain ─
 
+def _tasker_unit_block(source: str) -> str:
+    marker = 'cat > "$unit_path" <<EOF'
+    assert marker in source
+    return source.split(marker, 1)[1].split("EOF", 1)[0]
+
+
 def test_tasker_unit_keeps_safe_kill_semantics():
     """The deployed systemd unit keeps control-group containment and bounded
     shutdown: never KillMode=process/none, SIGTERM first, TimeoutStopSec bounded."""
     source = _read("scripts/deploy-lab-app.sh")
-    unit_block = source.split("cat > /etc/systemd/system/", 1)[1].split("EOF", 1)[0] if "cat > /etc/systemd/system/" in source else source
+    unit_block = _tasker_unit_block(source)
 
     assert "KillMode=process" not in source
     assert "KillMode=none" not in source
@@ -292,3 +299,172 @@ def test_generation_publication_helpers_exist():
     assert "commit_public_index" in source
     assert "generation_id" in source
     assert "producer_run_id" in source
+
+
+# ── Task 2: --candidate-no-scheduler (default service stays scheduler-enabled) ─
+
+def test_deploy_candidate_no_scheduler_flag_keeps_default_service_scheduler_enabled():
+    """The flag exists; without it the deployed unit stays scheduler-enabled.
+
+    The scheduler-disable strings may only appear inside the candidate branch;
+    the default unit template must not contain them."""
+    source = _read("scripts/deploy-lab-app.sh")
+
+    assert "--candidate-no-scheduler" in source
+    assert '--candidate-no-scheduler) CANDIDATE_NO_SCHEDULER="1"; shift ;;' in source
+    assert 'CANDIDATE_NO_SCHEDULER="0"' in source
+    assert 'local scheduler_args=""' in source
+    assert 'local scheduler_env_line=""' in source
+    # candidate branch assignments (both --no-scheduler and env disable)
+    assert 'scheduler_args="--no-scheduler"' in source
+    assert 'scheduler_env_line="Environment=TASKER_DISABLE_SCHEDULER=1"' in source
+    # ExecStart appends scheduler args only when non-empty; env line injected
+    assert '${scheduler_args:+ ${scheduler_args}}' in source
+    assert '${scheduler_env_line}' in source
+    # default (unflagged) unit content must stay scheduler-enabled
+    unit_block = _tasker_unit_block(source)
+    assert "--no-scheduler" not in unit_block
+    assert "TASKER_DISABLE_SCHEDULER=1" not in unit_block
+    assert "src.tasker.service" in unit_block
+
+
+def test_deploy_unit_template_default_vs_candidate(tmp_path: Path):
+    """Bash-evaluate the unit heredoc template with both variable branches."""
+    source = _read("scripts/deploy-lab-app.sh")
+    block = _tasker_unit_block(source)
+
+    for label, args, envline, wants_scheduler in (
+        ("default", "", "", False),
+        ("candidate", "--no-scheduler", "Environment=TASKER_DISABLE_SCHEDULER=1", True),
+    ):
+        script = (
+            f'scheduler_args="{args}"\n'
+            f'scheduler_env_line="{envline}"\n'
+            "cat <<EOF\n"
+            f"{block}\n"
+            "EOF\n"
+        )
+        res = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
+        assert res.returncode == 0, res.stderr
+        if wants_scheduler:
+            assert "--no-scheduler" in res.stdout, label
+            assert "TASKER_DISABLE_SCHEDULER=1" in res.stdout, label
+            assert res.stdout.index("src.tasker.service") < res.stdout.index("--no-scheduler"), label
+            # EnvironmentFile must precede the scheduler-disable env line so
+            # .env.local cannot override it
+            assert (
+                res.stdout.index("EnvironmentFile=-") < res.stdout.index("Environment=TASKER_DISABLE_SCHEDULER=1")
+            ), label
+        else:
+            assert "--no-scheduler" not in res.stdout, label
+            assert "TASKER_DISABLE_SCHEDULER=1" not in res.stdout, label
+        assert "KillSignal=SIGTERM" in res.stdout, label
+        assert "TimeoutStopSec=30" in res.stdout, label
+
+
+def test_deploy_candidate_no_scheduler_flag_parses_in_dry_run():
+    """The new flag parses and the script still reaches the dry-run exit."""
+    script = str(PROJECT_ROOT / "scripts" / "deploy-lab-app.sh")
+    for extra_flag in (["--candidate-no-scheduler"], []):
+        res = subprocess.run(
+            [
+                "bash",
+                script,
+                "--app-dir",
+                str(PROJECT_ROOT),
+                "--service-name",
+                "portfolio-lab-tasker-recovery-dev",
+                "--web-root",
+                "/srv/pl-candidate-www",
+                "--public-root",
+                "/srv/pl-candidate-www",
+                *extra_flag,
+                "--dry-run",
+                "--skip-git",
+                "--skip-deps",
+                "--skip-data",
+                "--skip-build",
+                "--skip-service",
+                "--skip-caddy",
+                "--skip-update-command",
+                "--skip-mirror",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert res.returncode == 0, res.stderr
+        assert "[dry-run]" in res.stdout
+
+
+def test_deploy_candidate_fails_closed_for_authoritative_use():
+    """--candidate-no-scheduler is for private recovery/candidate APIs only:
+    it must fail closed without --skip-caddy or with production identity."""
+    script = str(PROJECT_ROOT / "scripts" / "deploy-lab-app.sh")
+    bad_combos = [
+        # no --skip-caddy
+        {
+            "--service-name": "portfolio-lab-tasker-recovery-dev",
+            "--web-root": "/srv/pl-candidate-www",
+            "--public-root": "/srv/pl-candidate-www",
+        },
+        # production service name
+        {
+            "--skip-caddy": "",
+            "--web-root": "/srv/pl-candidate-www",
+            "--public-root": "/srv/pl-candidate-www",
+        },
+        # production web root
+        {
+            "--skip-caddy": "",
+            "--service-name": "portfolio-lab-tasker-recovery-dev",
+            "--public-root": "/srv/pl-candidate-www",
+        },
+        # production public root
+        {
+            "--skip-caddy": "",
+            "--service-name": "portfolio-lab-tasker-recovery-dev",
+            "--web-root": "/srv/pl-candidate-www",
+        },
+        # production app dir
+        {
+            "--skip-caddy": "",
+            "--service-name": "portfolio-lab-tasker-recovery-dev",
+            "--web-root": "/srv/pl-candidate-www",
+            "--public-root": "/srv/pl-candidate-www",
+            "--app-dir": "/root/projects/portfolio-lab",
+        },
+    ]
+    for combo in bad_combos:
+        args = ["bash", script, "--app-dir", str(PROJECT_ROOT), "--candidate-no-scheduler", "--dry-run"]
+        for key, value in combo.items():
+            args.append(key)
+            if value:
+                args.append(value)
+        res = subprocess.run(args, capture_output=True, text=True, timeout=120)
+        assert res.returncode != 0, combo
+    # the isolated candidate combination is accepted
+    good = [
+        "bash",
+        script,
+        "--app-dir",
+        str(PROJECT_ROOT),
+        "--candidate-no-scheduler",
+        "--service-name",
+        "portfolio-lab-tasker-recovery-dev",
+        "--web-root",
+        "/srv/pl-candidate-www",
+        "--public-root",
+        "/srv/pl-candidate-www",
+        "--dry-run",
+        "--skip-git",
+        "--skip-deps",
+        "--skip-data",
+        "--skip-build",
+        "--skip-service",
+        "--skip-caddy",
+        "--skip-update-command",
+        "--skip-mirror",
+    ]
+    res = subprocess.run(good, capture_output=True, text=True, timeout=120)
+    assert res.returncode == 0, res.stderr

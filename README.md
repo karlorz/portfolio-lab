@@ -22,6 +22,7 @@ Start here in the vault: `projects/portfolio-lab/knowledge.md`.
 - **Daily brief:** `make daily-brief` (also tasker `portfolio-lab-daily-brief` at `:25` hourly) → `data/daily_brief.json`.
 - **Ensemble inactivity:** do not force-wake or lower IC gates; classify first (B5 evidence in vault). Polarity follow-on is low priority / post-C1e.
 - **Deploy lab host:** `make deploy-lab-app` (see `scripts/deploy-lab-app.sh`).
+- **Backup/restore:** operator-invoked self-contained source/runtime/static recovery; secrets stay separate. See `scripts/LAB_APP_BACKUP_RESTORE.md` (`make deploy-production` is not recovery).
 - **Agent test gate:** `make test-gate` mid-session; full `make test` merge-only.
 
 ## Frontend
