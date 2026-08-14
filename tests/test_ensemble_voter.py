@@ -1094,8 +1094,8 @@ class TestPersistVote:
         mock_alert.source = "MULTI_SPEED_MOM"
         mock_tracker.detect_ic_alerts.return_value = [mock_alert]
 
-        with patch('src.strategy.ensemble_voter._get_health_tracker', return_value=mock_tracker):
-            with patch('src.strategy.ensemble_voter.logger') as mock_logger:
+        with patch('src.strategy.ensemble_voter_weights._get_health_tracker', return_value=mock_tracker):
+            with patch('src.strategy.ensemble_voter_weights.logger') as mock_logger:
                 voter._persist_vote(vote, weighted_consensus=0.3)
                 mock_tracker.detect_ic_alerts.assert_called_once()
                 mock_logger.warning.assert_any_call(
@@ -1114,7 +1114,7 @@ class TestPersistVote:
         mock_tracker = MagicMock()
         mock_tracker.detect_ic_alerts.return_value = []
 
-        with patch('src.strategy.ensemble_voter._get_health_tracker', return_value=mock_tracker):
+        with patch('src.strategy.ensemble_voter_weights._get_health_tracker', return_value=mock_tracker):
             voter._persist_vote(vote, weighted_consensus=0.3)
             mock_tracker.detect_ic_alerts.assert_called_once()
 
@@ -1127,7 +1127,7 @@ class TestPersistVote:
             equity_bias=0.3, duration_bias=-0.1, gold_bias=0.05,
             action='increase_equity', confidence=0.6, reasoning='test', source_votes=[],
         )
-        with patch('src.strategy.ensemble_voter._get_health_tracker', return_value=None):
+        with patch('src.strategy.ensemble_voter_weights._get_health_tracker', return_value=None):
             voter._persist_vote(vote, weighted_consensus=0.3)  # Should not raise
 
 
@@ -1173,7 +1173,7 @@ class TestGetBLViews:
     @pytest.fixture(autouse=True)
     def _isolate_bl_health(self):
         with patch(
-            "src.strategy.ensemble_voter._get_health_tracker",
+            "src.strategy.ensemble_voter_weights._get_health_tracker",
             return_value=None,
         ):
             yield
@@ -1944,7 +1944,7 @@ class TestGetBLViewsAdditional:
         voter = EnsembleVoter()
         mock_tracker = MagicMock()
         mock_tracker.get_health_report.side_effect = ValueError("Tracker crashed")
-        with patch('src.strategy.ensemble_voter._get_health_tracker',
+        with patch('src.strategy.ensemble_voter_weights._get_health_tracker',
                    return_value=mock_tracker):
             result = voter.get_bl_views(vote=_make_bl_vote())
             assert 'views' in result
@@ -1953,7 +1953,7 @@ class TestGetBLViewsAdditional:
     def test_get_bl_views_default_prior_equal(self, tmp_path):
         """Default prior should be 'equal'."""
         voter = EnsembleVoter(data_path=tmp_path)
-        with patch("src.strategy.ensemble_voter._get_health_tracker", return_value=None):
+        with patch("src.strategy.ensemble_voter_weights._get_health_tracker", return_value=None):
             result = voter.get_bl_views(vote=_make_bl_vote())
         assert result['prior'] == 'equal'
 
@@ -3215,7 +3215,7 @@ class TestSaveVoteEdgeCases:
             source_votes=[bad_reading],
         )
         # Should log warning but not crash
-        with patch('src.strategy.ensemble_voter.logger') as mock_logger:
+        with patch('src.strategy.ensemble_voter_weights.logger') as mock_logger:
             voter._save_vote(vote)
             assert mock_logger.warning.call_count >= 1
 
@@ -3616,14 +3616,14 @@ class TestGetBLViewsEdgeCases:
 
     def test_get_bl_views_zero_tau(self):
         voter = EnsembleVoter()
-        with patch("src.strategy.ensemble_voter._get_health_tracker", return_value=None):
+        with patch("src.strategy.ensemble_voter_weights._get_health_tracker", return_value=None):
             result = voter.get_bl_views(vote=_make_bl_vote(), tau=0.0)
         assert result['tau'] == 0.0
         assert result['views'].tau == 0.0
 
     def test_get_bl_views_negative_tau(self):
         voter = EnsembleVoter()
-        with patch("src.strategy.ensemble_voter._get_health_tracker", return_value=None):
+        with patch("src.strategy.ensemble_voter_weights._get_health_tracker", return_value=None):
             result = voter.get_bl_views(vote=_make_bl_vote(), tau=-0.1)
         assert result['tau'] == -0.1
         assert result['views'].tau == -0.1
@@ -3638,7 +3638,7 @@ class TestGetBLViewsEdgeCases:
                 'cross_asset_rv': {'health_score': 0.72},
             }
         }
-        with patch('src.strategy.ensemble_voter._get_health_tracker',
+        with patch('src.strategy.ensemble_voter_weights._get_health_tracker',
                    return_value=mock_tracker):
             result = voter.get_bl_views(vote=_make_bl_vote())
         assert 'multi_speed_momentum' in result['health_scores_used']
@@ -3661,14 +3661,14 @@ class TestGetBLViewsEdgeCases:
             reasoning='',
         )
         voter = EnsembleVoter()
-        with patch("src.strategy.ensemble_voter._get_health_tracker", return_value=None):
+        with patch("src.strategy.ensemble_voter_weights._get_health_tracker", return_value=None):
             result = voter.get_bl_views(vote=vote)
         assert result['views'] is not None
         assert result['equity_bias'] == 0.0
 
     def test_get_bl_views_with_prior_market(self):
         voter = EnsembleVoter()
-        with patch("src.strategy.ensemble_voter._get_health_tracker", return_value=None):
+        with patch("src.strategy.ensemble_voter_weights._get_health_tracker", return_value=None):
             result = voter.get_bl_views(vote=_make_bl_vote(), prior='market')
         assert result['prior'] == 'market'
 
@@ -3991,7 +3991,7 @@ class TestUtilityReweighting:
         """Without attribution files, weights should pass through unchanged."""
         voter = _make_voter(tmp_path)
         weights = {SignalSource.MULTI_SPEED_MOM: 0.2, SignalSource.ALTERNATIVE_DATA: 0.8}
-        with patch("src.strategy.ensemble_voter.ATTRIBUTION_DIR", tmp_path / "nonexistent"):
+        with patch("src.strategy.ensemble_voter_vote.ATTRIBUTION_DIR", tmp_path / "nonexistent"):
             result = voter._apply_utility_reweighting(weights, Regime.NORMAL)
         assert result == weights
 
@@ -4002,7 +4002,7 @@ class TestUtilityReweighting:
         }
         voter, attr_dir = self._make_voter_with_attribution(tmp_path, sources)
         weights = {SignalSource.MULTI_SPEED_MOM: 1.0}
-        with patch("src.strategy.ensemble_voter.ATTRIBUTION_DIR", attr_dir):
+        with patch("src.strategy.ensemble_voter_vote.ATTRIBUTION_DIR", attr_dir):
             result = voter._apply_utility_reweighting(weights, Regime.NORMAL)
         assert abs(result[SignalSource.MULTI_SPEED_MOM] - 1.0) < 1e-6
 
@@ -4022,7 +4022,7 @@ class TestUtilityReweighting:
         }
         voter, attr_dir = self._make_voter_with_attribution(tmp_path, sources)
         weights = {SignalSource.ALTERNATIVE_DATA: 0.5, SignalSource.CROSS_ASSET_RV: 0.5}
-        with patch("src.strategy.ensemble_voter.ATTRIBUTION_DIR", attr_dir):
+        with patch("src.strategy.ensemble_voter_vote.ATTRIBUTION_DIR", attr_dir):
             result = voter._apply_utility_reweighting(weights, Regime.NORMAL)
         assert result[SignalSource.ALTERNATIVE_DATA] > result[SignalSource.CROSS_ASSET_RV]
         assert abs(sum(result.values()) - 1.0) < 0.01
@@ -4043,7 +4043,7 @@ class TestUtilityReweighting:
         }
         voter, attr_dir = self._make_voter_with_attribution(tmp_path, sources)
         weights = {SignalSource.MULTI_SPEED_MOM: 0.5, SignalSource.ALTERNATIVE_DATA: 0.5}
-        with patch("src.strategy.ensemble_voter.ATTRIBUTION_DIR", attr_dir):
+        with patch("src.strategy.ensemble_voter_vote.ATTRIBUTION_DIR", attr_dir):
             result = voter._apply_utility_reweighting(weights, Regime.NORMAL)
         assert result[SignalSource.MULTI_SPEED_MOM] < result[SignalSource.ALTERNATIVE_DATA]
 
@@ -4063,7 +4063,7 @@ class TestUtilityReweighting:
         }
         voter, attr_dir = self._make_voter_with_attribution(tmp_path, sources)
         weights = {SignalSource.ALTERNATIVE_DATA: 0.5, SignalSource.CROSS_ASSET_RV: 0.5}
-        with patch("src.strategy.ensemble_voter.ATTRIBUTION_DIR", attr_dir):
+        with patch("src.strategy.ensemble_voter_vote.ATTRIBUTION_DIR", attr_dir):
             result = voter._apply_utility_reweighting(weights, Regime.NORMAL)
         alt_weight = result[SignalSource.ALTERNATIVE_DATA]
         rv_weight = result[SignalSource.CROSS_ASSET_RV]
@@ -4089,7 +4089,7 @@ class TestUtilityReweighting:
 
         voter = _make_voter(tmp_path)
         weights = {SignalSource.ALTERNATIVE_DATA: 1.0}
-        with patch("src.strategy.ensemble_voter.ATTRIBUTION_DIR", attr_dir):
+        with patch("src.strategy.ensemble_voter_vote.ATTRIBUTION_DIR", attr_dir):
             result = voter._apply_utility_reweighting(weights, Regime.NORMAL)
         assert abs(result[SignalSource.ALTERNATIVE_DATA] - 1.0) < 1e-6
 
@@ -4104,7 +4104,7 @@ class TestUtilityReweighting:
             }
         voter, attr_dir = self._make_voter_with_attribution(tmp_path, sources)
         weights = {SignalSource.MULTI_SPEED_MOM: 0.3, SignalSource.CROSS_ASSET_RV: 0.3, SignalSource.ALTERNATIVE_DATA: 0.4}
-        with patch("src.strategy.ensemble_voter.ATTRIBUTION_DIR", attr_dir):
+        with patch("src.strategy.ensemble_voter_vote.ATTRIBUTION_DIR", attr_dir):
             result = voter._apply_utility_reweighting(weights, Regime.NORMAL)
         assert abs(sum(result.values()) - 1.0) < 0.01
 
@@ -4264,7 +4264,7 @@ class TestApplyCorrelationPenalty:
         voter = self._make_voter_corr(tmp_path)
         weights = {SignalSource.MULTI_SPEED_MOM: 0.3, SignalSource.CROSS_ASSET_RV: 0.7}
         mock_data = {"correlation_penalties": {}, "redundant_pairs": []}
-        with patch("src.strategy.ensemble_voter.compute_signal_correlation_matrix", return_value=mock_data):
+        with patch("src.strategy.ensemble_voter_vote.compute_signal_correlation_matrix", return_value=mock_data):
             result = voter._apply_correlation_penalty(weights)
         assert result == weights
 
@@ -4282,7 +4282,7 @@ class TestApplyCorrelationPenalty:
             },
             "redundant_pairs": [],
         }
-        with patch("src.strategy.ensemble_voter.compute_signal_correlation_matrix", return_value=mock_data):
+        with patch("src.strategy.ensemble_voter_vote.compute_signal_correlation_matrix", return_value=mock_data):
             result = voter._apply_correlation_penalty(weights)
         # MSM: 0.5 * 0.5 = 0.25, RV: 0.5 * 1.0 = 0.5 → total = 0.75
         # Renormalized: MSM = 0.25/0.75 = 0.333, RV = 0.5/0.75 = 0.667
@@ -4298,7 +4298,7 @@ class TestApplyCorrelationPenalty:
             "correlation_penalties": {"multi_speed_momentum": 0.1},  # extreme penalty
             "redundant_pairs": [],
         }
-        with patch("src.strategy.ensemble_voter.compute_signal_correlation_matrix", return_value=mock_data):
+        with patch("src.strategy.ensemble_voter_vote.compute_signal_correlation_matrix", return_value=mock_data):
             result = voter._apply_correlation_penalty(weights)
         # Penalty clipped to 0.5, weight = 1.0 * 0.5 = 0.5, renorm = 1.0
         assert abs(result[SignalSource.MULTI_SPEED_MOM] - 1.0) < 0.001
@@ -4307,7 +4307,7 @@ class TestApplyCorrelationPenalty:
         """On exception, returns original weights unchanged."""
         voter = self._make_voter_corr(tmp_path)
         weights = {SignalSource.MULTI_SPEED_MOM: 0.5}
-        with patch("src.strategy.ensemble_voter.compute_signal_correlation_matrix", side_effect=ValueError("test")):
+        with patch("src.strategy.ensemble_voter_vote.compute_signal_correlation_matrix", side_effect=ValueError("test")):
             result = voter._apply_correlation_penalty(weights)
         assert result == weights
 
@@ -4319,6 +4319,6 @@ class TestApplyCorrelationPenalty:
             "correlation_penalties": {"multi_speed_momentum": 0.8},
             "redundant_pairs": [],
         }
-        with patch("src.strategy.ensemble_voter.compute_signal_correlation_matrix", return_value=mock_data):
+        with patch("src.strategy.ensemble_voter_vote.compute_signal_correlation_matrix", return_value=mock_data):
             voter._apply_correlation_penalty(weights)
         assert "Redundant signal pairs detected" not in caplog.text

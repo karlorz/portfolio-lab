@@ -72,7 +72,7 @@ def test_apply_weights_logs_metadata() -> None:
     )
     mock_tracker = MagicMock()
     with patch(
-        "src.strategy.ensemble_voter._get_health_tracker", return_value=mock_tracker
+        "src.strategy.ensemble_voter_vote._get_health_tracker", return_value=mock_tracker
     ):
         out = voter._apply_weights_to_readings(
             {SignalSource.CROSS_ASSET_REGIME_ARB: reading},
