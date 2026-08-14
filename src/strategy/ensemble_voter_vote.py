@@ -63,8 +63,6 @@ class VoteMixin:
         weights = self._apply_correlation_penalty(weights)
         if os.environ.get("ENSEMBLE_DISABLE_REGIME_WEIGHTS", "").lower() not in ("1", "true"):
             weights = self._apply_regime_weights(weights, regime)
-        if os.environ.get("ENSEMBLE_USE_MDP_CONSTRAINT", "").lower() in ("1", "true"):
-            weights = self._apply_mdp_constraint(weights)
         weights = self._apply_utility_reweighting(weights, regime)
         weights = self._apply_exploration_noise(weights, regime)
         weights = self._pin_zero_baseline_weights(weights, regime.name)
