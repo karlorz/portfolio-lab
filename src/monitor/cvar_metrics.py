@@ -79,6 +79,15 @@ def get_tail_severity(cvar_ratio: float) -> str:
         return "severe"
 
 
+def _synthetic_portfolio_returns(days: int = 252) -> Tuple[np.ndarray, float, float]:
+    """Synthetic returns shared by every unavailable-market-data path.
+
+    Missing DB, SQLite query failure, and fewer than two assets all return
+    the same contract: (normal sample, 0.0 current drawdown, -0.15 max DD).
+    """
+    return np.random.normal(0.0003, 0.012, days), 0.0, -0.15
+
+
 def fetch_portfolio_returns(days: int = 252) -> Tuple[np.ndarray, float, float]:
     """
     Fetch portfolio returns from market data.
@@ -86,7 +95,7 @@ def fetch_portfolio_returns(days: int = 252) -> Tuple[np.ndarray, float, float]:
     """
     if not DB_PATH.exists():
         # Return synthetic data for testing
-        return np.random.normal(0.0003, 0.012, days), 0.0, -0.15
+        return _synthetic_portfolio_returns(days)
 
     prices = {}
     try:
@@ -113,10 +122,10 @@ def fetch_portfolio_returns(days: int = 252) -> Tuple[np.ndarray, float, float]:
         logger.warning(
             "market.db prices unavailable (%s) — using synthetic data", DB_PATH
         )
-        prices = {}
+        return _synthetic_portfolio_returns(days)
 
     if len(prices) < 2:
-        return np.random.normal(0.0003, 0.012, days), 0.0, -0.15
+        return _synthetic_portfolio_returns(days)
     
     # Calculate portfolio returns
     min_len = min(len(p) for p in prices.values())
