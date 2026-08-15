@@ -109,7 +109,15 @@ def test_reconcile_arms_kill_when_disk_enabled_after_clear_stamp(
 def test_run_health_check_rereads_disk_kill_before_persist(
     tmp_path, monkeypatch
 ) -> None:
-    """DE4 end-of-run: mid-check kill arm appears on persisted report."""
+    """DE4 end-of-run: mid-check kill arm appears on persisted report.
+
+    Hermeticity: run_health_check's end-of-run re-read calls
+    _check_kill_switch/_check_open_incidents with data_dir=None, which falls
+    back to the stale module-level DATA_DIR binding in health_rollup (and
+    the disk-SSOT projections read health_kill_surfaces.DATA_DIR) — those
+    must be pinned to the tmp arm dir or the re-read sees the live repo's
+    clear switch and overrides the mid-run arm.
+    """
     from src.monitor import health_check as hc
 
     data = tmp_path / "data"
@@ -137,6 +145,13 @@ def test_run_health_check_rereads_disk_kill_before_persist(
     monkeypatch.setattr(hc, "DATA_DIR", data, raising=False)
     monkeypatch.setattr(hc, "PUBLIC_DATA_DIR", public, raising=False)
     monkeypatch.setattr(hc, "HEALTH_PATH", data / "health.json", raising=False)
+    from src.monitor import health_kill_surfaces, health_rollup
+
+    # Stale module bindings: _check_kill_switch(data_dir=None) reads
+    # health_rollup.DATA_DIR; disk-SSOT projections read
+    # health_kill_surfaces.DATA_DIR. Pin both to the tmp arm dir.
+    monkeypatch.setattr(health_rollup, "DATA_DIR", data, raising=False)
+    monkeypatch.setattr(health_kill_surfaces, "DATA_DIR", data, raising=False)
 
     # First read sees clear; before persist, arm kill on disk
     real_check_kill = hc._check_kill_switch

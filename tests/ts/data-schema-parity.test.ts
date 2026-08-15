@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import {
@@ -41,7 +41,14 @@ import { DecisionRegistrySchema } from '../../src/schemas/decision_registry';
 // price snapshots without a frontend schema). File inventory source:
 // src/dashboard/public_data_index.py — extend this table when new published
 // files gain schemas.
+//
+// CI-vs-live contract: public/data/ seeds are generated payloads, untracked
+// by design since fda0020 — a fresh CI clone has zero seed files, so the
+// parse gate cannot run there. Skip the whole test when the seed SET is
+// absent; on hosts WITH seeds the gate stays strict — any file missing
+// mid-set is still a drift failure, never a silent per-file skip.
 const SEED_DIR = new URL('../../public/data/', import.meta.url).pathname;
+const SEED_SET_PRESENT = existsSync(SEED_DIR) && readdirSync(SEED_DIR).length > 0;
 
 const checks: [string, z.ZodType][] = [
   ['signals.json', SignalsDataSchema],
@@ -71,6 +78,17 @@ const checks: [string, z.ZodType][] = [
 
 describe('published data seed ↔ frontend schema parity', () => {
   it(`parses all ${checks.length} seeded payloads with their exact frontend schemas`, () => {
+    if (!SEED_SET_PRESENT) {
+      // Fresh CI clone: public/data/ seeds are generated payloads,
+      // untracked by design since fda0020. Skip cleanly — the live-parity
+      // gate activates on hosts where payloads are published (dev host,
+      // production). Do NOT convert to per-file `if exists` parsing, which
+      // would let partial seed sets drift silently on hosts WITH seeds.
+      console.warn(
+        `[data-schema-parity] skip: no public/data/ seeds at ${SEED_DIR} — live-parity gate activates where payloads are published`,
+      );
+      return;
+    }
     const failures: string[] = [];
     for (const [file, schema] of checks) {
       const raw = JSON.parse(readFileSync(join(SEED_DIR, file), 'utf8')) as unknown;

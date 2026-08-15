@@ -248,7 +248,7 @@ test-fast:
 	echo "  Full merge gate: make test (~30-45m). Wait helper: scripts/wait-test-exit.sh"; \
 	START=$$(date +%s); \
 	bash -c 'ulimit -n 65536 2>/dev/null || true; \
-	PORTFOLIO_LAB_ENABLE_ML=0 uv run pytest tests/test_adaptive_sizing.py tests/test_adaptive_consensus.py tests/test_adaptive_ensemble_weights.py tests/test_regime_conditional_weights.py tests/test_ensemble_voter.py tests/test_regime_spec.py tests/test_regime_gate.py tests/test_ensemble_diversity_floor.py tests/test_ensemble_correlation.py tests/test_ensemble_n_eff.py tests/test_regime_bandit_integration.py -q --tb=short -p no:cacheprovider; \
+	PORTFOLIO_LAB_ENABLE_ML=0 uv run pytest tests/test_adaptive_sizing.py tests/test_adaptive_consensus.py tests/test_adaptive_ensemble_weights.py tests/test_regime_conditional_weights.py tests/test_ensemble_voter.py tests/test_regime_spec.py tests/test_regime_gate.py tests/test_ensemble_diversity_floor.py tests/test_ensemble_correlation.py tests/test_ensemble_n_eff.py tests/test_regime_bandit_integration.py tests/test_batch_ho_lag_dashboard_and_signals_restamp.py tests/test_batch_ih_health_ops_reconcile_timeout.py -q --tb=short -p no:cacheprovider; \
 	exit $$?'; \
 	EXIT=$$?; \
 	END=$$(date +%s); \

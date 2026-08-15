@@ -3,12 +3,14 @@ import { join, resolve } from 'path';
 import {
   chmodSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   writeFileSync,
   rmSync,
   existsSync,
   statSync,
 } from 'fs';
+import { tmpdir } from 'os';
 import {
   resolvePublicDataDir,
   softMirrorMarketArtifactsToPrivate,
@@ -30,14 +32,21 @@ describe('fetch-data PUBLIC_DATA_DIR resolution', () => {
   });
 
   it('prefers live WWW when PUBLIC_DATA_DIR is unset and live tree exists', () => {
-    // Use a real existing directory as live SSOT for the test
-    const live = join(PROJECT_ROOT, 'data');
-    const dir = resolvePublicDataDir({
-      env: {},
-      projectRoot: PROJECT_ROOT,
-      livePublicDataDir: live,
-    });
-    expect(dir).toBe(resolve(PROJECT_ROOT, live));
+    // Throwaway tmp live tree: the resolver only requires
+    // existsSync(liveRoot) (fetch-data.ts:95-97). A fresh CI clone has no
+    // repo data/ (untracked since fda0020), so the fixture must not depend
+    // on the checkout.
+    const live = mkdtempSync(join(tmpdir(), 'plab-live-'));
+    try {
+      const dir = resolvePublicDataDir({
+        env: {},
+        projectRoot: PROJECT_ROOT,
+        livePublicDataDir: live,
+      });
+      expect(dir).toBe(resolve(PROJECT_ROOT, live));
+    } finally {
+      rmSync(live, { recursive: true, force: true });
+    }
   });
 
   it('honors absolute PUBLIC_DATA_DIR from the environment', () => {

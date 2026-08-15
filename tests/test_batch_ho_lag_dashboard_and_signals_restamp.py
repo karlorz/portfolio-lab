@@ -197,7 +197,9 @@ def test_restamp_signals_json_nested_health_lag(tmp_path) -> None:
     assert mode == 0o644 or (mode & 0o004), oct(mode)
 
 
-def test_restamp_monitor_health_advances_embedded_timestamp(tmp_path) -> None:
+def test_restamp_monitor_health_advances_embedded_timestamp(
+    tmp_path, monkeypatch
+) -> None:
     """NG4 (2026-08-11 session B): mirror-lag restamp rewrites of the
     monitor-schema report must advance the embedded timestamp.
 
@@ -207,8 +209,56 @@ def test_restamp_monitor_health_advances_embedded_timestamp(tmp_path) -> None:
     freshness overstated content by up to 30 min. Any SSOT re-projection
     write must advance timestamp; the fix lives at the shared patch seam
     (_patch_monitor_report_kill_open).
+
+    DN3 disk-SSOT projection contract (Batch IN): before write, the restamp
+    re-projects kill/open from the disk SSOT via
+    _disk_kill_and_open_incidents() (repo_public_mirror_lag.py), so a lag
+    restamp cannot freeze sticky kill.enabled while kill_switch.json is
+    clear (or the reverse arm lag). That reader defaults to the module-level
+    DATA_DIR binding in health_kill_surfaces — NOT monkeypatched by default
+    — so this test pins it to an ARMED fixture dir: the projection must
+    follow the patched disk SSOT (enabled stays True), never the live
+    repo's clear switch.
     """
     from src.monitor.repo_public_mirror_lag import restamp_mirror_lag_on_health_documents
+
+    # ARMED disk SSOT fixture: the DN3 re-projection reads kill/open here.
+    (tmp_path / "kill_switch.json").write_text(
+        json.dumps(
+            {
+                "enabled": True,
+                "level": "warning",
+                "reason": "unresolved_incident:ic_decay",
+                "source": "incident_lifecycle",
+                "message": "fixture arm",
+                "timestamp": "2026-08-11T07:00:00+00:00",
+                "incident_id": "8115a9c1-0000-0000-0000-000000000000",
+                "mode": "paper",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "incidents.json").write_text(
+        json.dumps(
+            {
+                "open_count": 1,
+                "incidents": [
+                    {
+                        "incident_id": "8115a9c1-0000-0000-0000-000000000000",
+                        "channel": "ic_decay",
+                        "severity": "p0",
+                        "state": "firing",
+                        "message": "fixture open",
+                        "kill_switch_level": "warning",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    import src.monitor.health_kill_surfaces as hks
+
+    monkeypatch.setattr(hks, "DATA_DIR", tmp_path, raising=False)
 
     health_path = tmp_path / "health.json"
     old_ts = "2026-08-11T07:00:05+00:00"

@@ -1289,6 +1289,14 @@ def cmd_restore(args: argparse.Namespace) -> int:
     raw_web_root = Path(args.web_root)
     if not raw_app_dir.is_absolute() or not raw_web_root.is_absolute():
         die("restore --app-dir and --web-root must be absolute paths")
+    if args.target_mode == "dev":
+        # Dev-mode production-path guard runs BEFORE resolve(): resolve() can
+        # raise PermissionError traversing unreadable parents (CI runner home
+        # dirs), while this check is pure string containment — no fs access.
+        # Resolved forms are re-checked after resolve() so symlink aliases
+        # (/var -> /private/var on macOS) still match.
+        if "/root/projects/portfolio-lab" in str(raw_app_dir) or "/var/www/portfolio-lab" in str(raw_web_root):  # portability-scan allowlist: intentional production-path guard
+            die("dev mode rejects production paths (/root/projects/portfolio-lab, /var/www/portfolio-lab)")  # portability-scan allowlist: intentional production-path guard
     app_dir = raw_app_dir.resolve()
     web_root = raw_web_root.resolve()
     if app_dir == web_root or app_dir.is_relative_to(web_root) or web_root.is_relative_to(app_dir):
@@ -1305,11 +1313,10 @@ def cmd_restore(args: argparse.Namespace) -> int:
         print_failed_verify(report, "restore")
 
     if args.target_mode == "dev":
-        # Match both the raw and resolved forms: /var resolves to /private/var
-        # on macOS, and the operator-facing contract names the prod paths
-        # literally.
-        app_forbidden = "/root/projects/portfolio-lab" in (str(app_dir), str(raw_app_dir))  # portability-scan allowlist: intentional production-path guard
-        web_forbidden = "/var/www/portfolio-lab" in (str(web_root), str(raw_web_root))
+        # Resolved-form half of the guard (raw strings were checked before
+        # resolve(); this catches symlink aliases of the prod paths).
+        app_forbidden = "/root/projects/portfolio-lab" in str(app_dir)  # portability-scan allowlist: intentional production-path guard
+        web_forbidden = "/var/www/portfolio-lab" in str(web_root)
         if app_forbidden or web_forbidden:
             die("dev mode rejects production paths (/root/projects/portfolio-lab, /var/www/portfolio-lab)")  # portability-scan allowlist: intentional production-path guard
     elif not args.allow_production_paths:
