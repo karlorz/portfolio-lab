@@ -1313,10 +1313,14 @@ def cmd_restore(args: argparse.Namespace) -> int:
         print_failed_verify(report, "restore")
 
     if args.target_mode == "dev":
-        # Resolved-form half of the guard (raw strings were checked before
-        # resolve(); this catches symlink aliases of the prod paths).
-        app_forbidden = "/root/projects/portfolio-lab" in str(app_dir)  # portability-scan allowlist: intentional production-path guard
-        web_forbidden = "/var/www/portfolio-lab" in str(web_root)
+        # Match both the raw and resolved forms: /var resolves to /private/var
+        # on macOS, and the operator-facing contract names the prod paths
+        # literally. Raw strings were already rejected pre-resolve() above;
+        # this second pass keeps the guard's dual-form match for symlink
+        # aliases (and the exact literal is pinned by
+        # tests/test_cron_python_runtime.py).
+        app_forbidden = "/root/projects/portfolio-lab" in (str(app_dir), str(raw_app_dir))  # portability-scan allowlist: intentional production-path guard
+        web_forbidden = "/var/www/portfolio-lab" in (str(web_root), str(raw_web_root))
         if app_forbidden or web_forbidden:
             die("dev mode rejects production paths (/root/projects/portfolio-lab, /var/www/portfolio-lab)")  # portability-scan allowlist: intentional production-path guard
     elif not args.allow_production_paths:
