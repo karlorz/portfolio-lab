@@ -17,6 +17,7 @@ from src.tasker.registry import TaskRegistry, load_task_registry
 from src.tasker.runner import TaskRunner
 from src.tasker.store import TaskerStore
 from src.utils.log_config import configure_logging
+import waitress
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +220,7 @@ def build_service() -> tuple[TaskerService, object]:
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the Portfolio Lab tasker service.")
-    parser.add_argument("--once", action="store_true", help="Write status mirrors and exit without starting Flask.")
+    parser.add_argument("--once", action="store_true", help="Write status mirrors and exit without starting the API server.")
     parser.add_argument("--host", default=os.environ.get("TASKER_HOST", "0.0.0.0"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("TASKER_PORT", "8000")))
     parser.add_argument("--no-scheduler", action="store_true", help="Start the API server without the scheduler loop.")
@@ -258,15 +259,29 @@ def main(argv: list[str] | None = None) -> int:
     previous_term = signal.signal(signal.SIGTERM, _handle_signal)
     previous_int = signal.signal(signal.SIGINT, _handle_signal)
     try:
+        # Waitress (ops follow-up decision #5): one process, four request
+        # threads, bounded limits; explicit server so SIGTERM can stop
+        # accepting requests before the bounded drain finalizes runs.
+        server = waitress.create_server(
+            app,
+            host=args.host,
+            port=args.port,
+            threads=4,
+            connection_limit=50,
+            channel_timeout=120,
+            max_request_header_size=16384,
+            max_request_body_size=1048576,
+            expose_tracebacks=False,
+        )
         server_thread = threading.Thread(
-            target=app.run,
-            kwargs={"host": args.host, "port": args.port, "use_reloader": False},
+            target=server.run,
             name="portfolio-lab-tasker-api",
             daemon=True,
         )
         server_thread.start()
         shutdown.wait()
-        logger.info("Tasker shutdown requested: draining before exit")
+        logger.info("Tasker shutdown requested: stopping API and draining before exit")
+        server.close()
         service.drain(termination_cause="service_restart", termination_detail="service shutdown signal")
         try:
             service.store.write_status_mirrors(service.registry)

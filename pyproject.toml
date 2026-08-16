@@ -27,6 +27,7 @@ dependencies = [
     "python-dateutil>=2.9",
     # Web & API
     "flask>=3.0",
+    "waitress>=3.0",
     # Utilities
     "joblib>=1.4",
     "typing-extensions>=4.12",
