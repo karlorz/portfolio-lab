@@ -403,6 +403,33 @@ function readFredCacheRecords(cachePath: string): Record<string, FredCacheRecord
   }
 }
 
+// Evict stale daily keys from the FRED fetch-dedup cache (Item 21): per
+// seriesId only the 2 newest distinct end_dates survive (today + yesterday =
+// TTL-overlap buffer). Past-day keys are never read — get is today-keyed
+// (:410/:50) — so they are pure dead weight (~1.1MB/day, 24.5MB measured).
+// Records without series_id/end_date stamps are left untouched.
+function pruneFredCacheRecords(
+  records: Record<string, FredCacheRecord & { series_id?: string; end_date?: string }>,
+): void {
+  const endDateByKey = new Map<string, string>();
+  const keysBySeries = new Map<string, string[]>();
+  for (const [key, record] of Object.entries(records)) {
+    if (typeof record.series_id !== 'string' || typeof record.end_date !== 'string') continue;
+    endDateByKey.set(key, record.end_date);
+    const keys = keysBySeries.get(record.series_id) ?? [];
+    keys.push(key);
+    keysBySeries.set(record.series_id, keys);
+  }
+  for (const keys of keysBySeries.values()) {
+    const keep = new Set(
+      [...new Set(keys.map((key) => endDateByKey.get(key)!))].sort().slice(-2),
+    );
+    for (const key of keys) {
+      if (!keep.has(endDateByKey.get(key)!)) delete records[key];
+    }
+  }
+}
+
 export function createFredDiskCache(cachePath: string = FRED_CACHE_PATH): FredSeriesCache {
   let writeQueue: Promise<void> = Promise.resolve();
   return {
@@ -427,6 +454,9 @@ export function createFredDiskCache(cachePath: string = FRED_CACHE_PATH): FredSe
           fetched_at: record.fetched_at,
           observations: record.observations,
         };
+        // Prune after the fresh-key write (serialized on the same writeQueue
+        // step) so today's record is never evicted.
+        pruneFredCacheRecords(records);
         await writeJsonAtomic(cachePath, records);
       };
       writeQueue = writeQueue.then(writeRecord, writeRecord);
