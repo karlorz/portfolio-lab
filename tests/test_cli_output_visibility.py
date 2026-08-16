@@ -272,3 +272,82 @@ def test_deploy_remote_unknown_option_dies() -> None:
     res = _run_deploy_remote("--host", "dry-fake", "--bogus-option")
     assert res.returncode == 1
     assert "Unknown option" in res.stderr
+
+
+# RELEASE-VERIFY-SMOKE (Item Q4, 2026-08-17): subprocess smoke for the
+# static-release verifier CLI (scripts/verify_lab_release.py). The happy
+# path builds a hermetic tmp release tree + manifest via build_lab_release
+# (same helpers as test_lab_release_artifact), so the verifier never touches
+# the real dist or public data.
+VERIFY_RELEASE = os.path.join("scripts", "verify_lab_release.py")
+
+
+def _run_verify_release(*args: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    return subprocess.run(
+        [sys.executable, VERIFY_RELEASE, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _write_release_tree(root: Path) -> None:
+    (root / "assets").mkdir(parents=True)
+    (root / "data").mkdir()
+    (root / "index.html").write_text("<main>Portfolio Lab</main>", encoding="utf-8")
+    (root / "assets/app.js").write_text("console.log('ok')\n", encoding="utf-8")
+    (root / "data/signals.json").write_text('{"mutable":true}\n', encoding="utf-8")
+
+
+def _write_valid_manifest(root: Path) -> None:
+    import importlib.util
+
+    sys.path.insert(0, str(Path("scripts").resolve()))
+    builder_path = Path("scripts/build_lab_release.py").resolve()
+    spec = importlib.util.spec_from_file_location("build_lab_release_q4", builder_path)
+    assert spec is not None and spec.loader is not None
+    builder = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = builder
+    spec.loader.exec_module(builder)
+    manifest = builder.build_manifest(
+        root,
+        source_git_sha="a" * 40,
+        build_command="bun run build",
+        bun_version_value="1.2.3",
+        lockfile_path="bun.lock",
+        lockfile_sha256="b" * 64,
+        build_time_utc="2026-07-31T00:00:00Z",
+    )
+    builder.write_manifest(root, manifest)
+
+
+def test_verify_lab_release_valid_tree_exits_0(tmp_path) -> None:
+    """RELEASE-VERIFY-SMOKE: valid release tree → exit 0 with the ok marker."""
+    _write_release_tree(tmp_path)
+    _write_valid_manifest(tmp_path)
+    res = _run_verify_release("--release-dir", str(tmp_path))
+    assert res.returncode == 0, res.stderr
+    assert "release verification ok" in res.stdout
+
+
+def test_verify_lab_release_missing_manifest_exits_1(tmp_path) -> None:
+    """RELEASE-VERIFY-SMOKE: missing _release.json → exit 1 + "missing manifest"."""
+    _write_release_tree(tmp_path)
+    res = _run_verify_release("--release-dir", str(tmp_path))
+    assert res.returncode == 1
+    assert "missing manifest" in res.stderr
+
+
+def test_verify_lab_release_help_and_missing_args() -> None:
+    """RELEASE-VERIFY-SMOKE: --help exits 0 with usage; missing release-dir
+    arg → argparse usage error (exit 2)."""
+    help_res = _run_verify_release("--help")
+    assert help_res.returncode == 0
+    assert "--release-dir" in help_res.stdout
+    bad_res = _run_verify_release()
+    assert bad_res.returncode == 2
+    assert "usage" in (bad_res.stdout + bad_res.stderr)
