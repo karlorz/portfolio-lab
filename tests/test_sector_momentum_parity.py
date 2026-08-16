@@ -3,8 +3,7 @@
 TS<->Python sector-momentum parity contract (SECTOR-PARITY, 2026-08-12).
 
 Twin implementations live: TS ``src/strategy/sector_momentum.ts`` (consumers:
-sector_positions.ts:10, sector_rebalancer.ts:21, types/sector.ts:6,
-sector_overlay.ts:15) vs Python ``src/strategy/sector_momentum_calc.py``
+types/sector.ts:6, sector_overlay.ts:15) vs Python ``src/strategy/sector_momentum_calc.py``
 (consumers: generator.py, strategy/__init__). No parity pin existed — this
 test pins the shared constants/definitions and the composite formula.
 
