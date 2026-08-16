@@ -23,8 +23,9 @@ export default defineConfig({
     // Local-only suite (playwright is absent from .github/workflows/ci.yml):
     // always launch a fresh server. Reusing a leftover PORT listener caused
     // a zero-output 120s timeout flake; a stale listener now fails fast with
-    // EADDRINUSE (kill the stray process and re-run). 300s covers the cold
-    // first-in-session `bunx --bun vite` start (bun cache resolution).
+    // EADDRINUSE (kill the stray process and re-run). 300s is the fail-fast
+    // ceiling — a cold first-in-session start can exceed it under load
+    // (prewarm per the Makefile test-browser comment).
     reuseExistingServer: false,
     timeout: 300_000,
   },
