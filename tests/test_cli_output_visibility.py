@@ -1087,3 +1087,79 @@ def test_cron_update_records_job_in_mock_root(tmp_path) -> None:
     assert job["status"] == "success"
     assert job["duration_seconds"] == 5.0
     assert job["backend"] == "tasker"
+
+
+# PRUNE-LOGS-SMOKE (Item Q14, 2026-08-17): subprocess smoke for the run-log
+# pruner (scripts/prune_logs.py). The script derives PROJECT_ROOT from
+# __file__ and binds DATA_DIR / the tasker store from it (no env override),
+# and its cron-status mirror writes the live data/cron_status.json; a bare
+# invocation would touch live state. Every case therefore runs a byte-identical
+# copy under a mock root whose minimal src package points DATA_DIR +
+# TaskerStore at the mock tree (Q13 copy pattern) — nothing outside tmp_path
+# is read or written, and run-log pruning stays strictly in --dry-run.
+PRUNE_LOGS = os.path.join("scripts", "prune_logs.py")
+
+
+def _run_prune_logs(script: str, *args: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, script, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _copy_prune_logs(tmp_path: Path) -> Path:
+    """Byte-identical copy under a mock root plus a minimal mock src package:
+    src/paths.py (DATA_DIR inside the mock tree) and src/tasker/store.py
+    (TaskerStore returning an empty prune summary). The script's best-effort
+    cron-status mirror points at the missing mock scripts/cron_update.py and
+    silently no-ops (prune_logs.py:200-205)."""
+    import shutil
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    shutil.copyfile(PRUNE_LOGS, scripts_dir / "prune_logs.py")
+    src_dir = tmp_path / "src"
+    (src_dir / "tasker").mkdir(parents=True)
+    (src_dir / "__init__.py").write_text("", encoding="utf-8")
+    (src_dir / "tasker" / "__init__.py").write_text("", encoding="utf-8")
+    (src_dir / "paths.py").write_text(
+        "from pathlib import Path\n"
+        "DATA_DIR = Path(__file__).resolve().parent.parent.parent / 'data'\n",
+        encoding="utf-8",
+    )
+    (src_dir / "tasker" / "store.py").write_text(
+        "class TaskerStore:\n"
+        "    def __init__(self, db_path=None, log_dir=None):\n"
+        "        pass\n"
+        "    def prune_runs(self, keep_per_task=20, dry_run=False):\n"
+        "        return {'deleted_files': 0, 'deleted_rows': 0, 'kept_files': 0,\n"
+        "                'bytes_freed': 0, 'errors': [], 'plan': []}\n",
+        encoding="utf-8",
+    )
+    return scripts_dir / "prune_logs.py"
+
+
+def test_prune_logs_help_exits_0(tmp_path) -> None:
+    """PRUNE-LOGS-SMOKE: --help → exit 0 with the description marker."""
+    copy = _copy_prune_logs(tmp_path)
+    res = _run_prune_logs(str(copy), "--help")
+    assert res.returncode == 0
+    assert "Prune per-run tasker logs" in res.stdout
+
+
+def test_prune_logs_dry_run_mock_tree(tmp_path) -> None:
+    """PRUNE-LOGS-SMOKE: --dry-run in the mock tree → exit 0 with the DRY RUN
+    header and the per-task retention marker (nothing outside tmp_path read
+    or written)."""
+    copy = _copy_prune_logs(tmp_path)
+    res = _run_prune_logs(str(copy), "--dry-run")
+    assert res.returncode == 0, res.stderr
+    assert "Prune Logs (DRY RUN):" in res.stdout
+    assert "tasker_logs: keep_per_task=20" in res.stdout
