@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -124,14 +125,13 @@ def test_cli_deletes_dead_health_log(tmp_path, capsys):
     health = tmp_path / "health.log"
     health.write_bytes(b"x" * 2048)
     old_mtime = datetime(2026, 6, 5, tzinfo=timezone.utc).timestamp()
-    import os
     os.utime(health, (old_mtime, old_mtime))
 
-    with patch.object(prune_logs, "HEALTH_LOG", health), \
-         patch.object(prune_logs, "_record_cron_status"):
+    with patch.object(prune_logs, "DATA_DIR", tmp_path), \
+         patch.object(prune_logs, "_record_cron_status"), \
+         patch.object(prune_logs, "TaskerStore", lambda: _no_op_store()):
         with patch.object(sys, "argv", ["prune_logs", "--delete-dead-health-log"]):
-            with patch.object(prune_logs, "TaskerStore", lambda: _no_op_store()):
-                prune_logs.main()
+            prune_logs.main()
 
     out = capsys.readouterr().out
     assert "deleted" in out
@@ -143,22 +143,137 @@ def test_cli_refuses_live_health_log(tmp_path, capsys):
     health = tmp_path / "health.log"
     health.write_bytes(b"x" * 2048)
     recent_mtime = (datetime.now(timezone.utc) - timedelta(days=prune_logs.STALE_DAYS - 1)).timestamp()
-    import os
     os.utime(health, (recent_mtime, recent_mtime))
 
-    with patch.object(prune_logs, "HEALTH_LOG", health), \
-         patch.object(prune_logs, "_record_cron_status"):
+    with patch.object(prune_logs, "DATA_DIR", tmp_path), \
+         patch.object(prune_logs, "_record_cron_status"), \
+         patch.object(prune_logs, "TaskerStore", lambda: _no_op_store()):
         with patch.object(sys, "argv", ["prune_logs", "--delete-dead-health-log"]):
-            with patch.object(prune_logs, "TaskerStore", lambda: _no_op_store()):
-                prune_logs.main()
+            prune_logs.main()
 
     out = capsys.readouterr().out
     assert "skip" in out
     assert health.exists()  # not deleted
 
 
+def test_rotation_truncates_oversized_log(tmp_path, capsys):
+    # oversized tee-appended log -> original truncated in place, .1 carries content
+    log = tmp_path / "cron.log"
+    log.write_bytes(b"x" * 2000)
+
+    with patch.object(prune_logs, "DATA_DIR", tmp_path), \
+         patch.object(prune_logs, "ROTATE_THRESHOLD_BYTES", 1000), \
+         patch.object(prune_logs, "TaskerStore", lambda: _no_op_store()), \
+         patch.object(prune_logs, "_record_cron_status"):
+        with patch.object(sys, "argv", ["prune_logs"]):
+            prune_logs.main()
+
+    out = capsys.readouterr().out
+    assert "rotation cron.log: rotated" in out
+    assert log.read_bytes() == b""  # truncated, not renamed (copytruncate)
+    assert (tmp_path / "cron.log.1").read_bytes() == b"x" * 2000
+
+
+def test_rotation_keep_chain_capped(tmp_path, capsys):
+    # keep=3 chain: .1/.2 shift down, oldest .3 content dropped
+    log = tmp_path / "cron.log"
+    log.write_bytes(b"A" * 2000)
+    (tmp_path / "cron.log.1").write_bytes(b"B" * 100)
+    (tmp_path / "cron.log.2").write_bytes(b"C" * 50)
+    (tmp_path / "cron.log.3").write_bytes(b"D" * 20)
+
+    with patch.object(prune_logs, "DATA_DIR", tmp_path), \
+         patch.object(prune_logs, "ROTATE_THRESHOLD_BYTES", 1000), \
+         patch.object(prune_logs, "TaskerStore", lambda: _no_op_store()), \
+         patch.object(prune_logs, "_record_cron_status"):
+        with patch.object(sys, "argv", ["prune_logs"]):
+            prune_logs.main()
+
+    assert (tmp_path / "cron.log.1").read_bytes() == b"A" * 2000
+    assert (tmp_path / "cron.log.2").read_bytes() == b"B" * 100
+    assert (tmp_path / "cron.log.3").read_bytes() == b"C" * 50  # old .3 dropped
+    assert log.read_bytes() == b""
+
+
+def test_rotation_skips_sub_threshold(tmp_path, capsys):
+    # sub-threshold files are untouched and never listed
+    log = tmp_path / "dashboard.log"
+    payload = b"y" * 500
+    log.write_bytes(payload)
+
+    with patch.object(prune_logs, "DATA_DIR", tmp_path), \
+         patch.object(prune_logs, "ROTATE_THRESHOLD_BYTES", 1000), \
+         patch.object(prune_logs, "TaskerStore", lambda: _no_op_store()), \
+         patch.object(prune_logs, "_record_cron_status"):
+        with patch.object(sys, "argv", ["prune_logs"]):
+            prune_logs.main()
+
+    out = capsys.readouterr().out
+    assert "rotation" not in out
+    assert log.read_bytes() == payload
+    assert not (tmp_path / "dashboard.log.1").exists()
+
+
+def test_rotation_dry_run_plans_without_mutating(tmp_path, capsys):
+    log = tmp_path / "cron.log"
+    payload = b"x" * 2000
+    log.write_bytes(payload)
+
+    with patch.object(prune_logs, "DATA_DIR", tmp_path), \
+         patch.object(prune_logs, "ROTATE_THRESHOLD_BYTES", 1000), \
+         patch.object(prune_logs, "TaskerStore", lambda: _no_op_store()), \
+         patch.object(prune_logs, "_record_cron_status"):
+        with patch.object(sys, "argv", ["prune_logs", "--dry-run"]):
+            prune_logs.main()
+
+    out = capsys.readouterr().out
+    assert "rotation cron.log: would_rotate" in out
+    assert log.read_bytes() == payload  # untouched
+    assert not (tmp_path / "cron.log.1").exists()
+
+
+def test_dead_log_list_stale_deleted_fresh_kept(tmp_path, capsys):
+    # dead-log list: stale frozen file deleted, fresh file skipped
+    stale = tmp_path / "unified_dashboard.log"
+    stale.write_bytes(b"u" * 1024)
+    os.utime(stale, (datetime(2026, 7, 18, tzinfo=timezone.utc).timestamp(),) * 2)
+    fresh = tmp_path / "daily_pnl.log"
+    fresh.write_bytes(b"p" * 1024)
+    os.utime(fresh, (datetime.now(timezone.utc).timestamp(),) * 2)
+
+    with patch.object(prune_logs, "DATA_DIR", tmp_path), \
+         patch.object(prune_logs, "_record_cron_status"), \
+         patch.object(prune_logs, "TaskerStore", lambda: _no_op_store()):
+        with patch.object(sys, "argv", ["prune_logs", "--delete-dead-health-log"]):
+            prune_logs.main()
+
+    out = capsys.readouterr().out
+    assert "unified_dashboard.log: deleted" in out
+    assert "daily_pnl.log: skip" in out
+    assert not stale.exists()
+    assert fresh.exists()
+
+
+def test_dead_log_dry_run_lists_present_only(tmp_path, capsys):
+    # absent dead logs (e.g. health.log on prod) must not appear in the plan
+    frozen = tmp_path / "overlay_signals.log"
+    frozen.write_bytes(b"s" * 1024)
+    os.utime(frozen, (datetime(2026, 7, 18, tzinfo=timezone.utc).timestamp(),) * 2)
+
+    with patch.object(prune_logs, "DATA_DIR", tmp_path), \
+         patch.object(prune_logs, "_record_cron_status"), \
+         patch.object(prune_logs, "TaskerStore", lambda: _no_op_store()):
+        with patch.object(sys, "argv", ["prune_logs", "--delete-dead-health-log", "--dry-run"]):
+            prune_logs.main()
+
+    out = capsys.readouterr().out
+    assert "overlay_signals.log: would_delete" in out
+    assert "health.log" not in out
+    assert frozen.exists()  # dry run never deletes
+
+
 def _no_op_store():
-    """A TaskerStore stand-in whose prune_runs is a no-op (for health-log-only tests)."""
+    """A TaskerStore stand-in whose prune_runs is a no-op (for log-only tests)."""
     class _Stub:
         log_dir = Path("/nonexistent")
         def prune_runs(self, keep_per_task=20, dry_run=False):

@@ -3,8 +3,11 @@
 
 Bounds run-log growth by keeping the newest ``--keep`` runs per task and
 deleting older run-log files + their ``task_runs`` DB rows in lockstep.
-Also optionally removes the dead Hermes-era ``data/health.log`` (1.5 GB
-artifact that stopped growing at the 2026-06-10 tasker cutover).
+
+Also bounds the tee-appended ``data/*.log`` files (cron/dashboard/eval/...)
+via copytruncate rotation once they exceed a size threshold, and removes
+dead frozen logs (Hermes-era ``health.log`` + pre-tasker
+``unified_dashboard/overlay_*/daily_pnl`` artifacts) when they are stale.
 
 Hygiene, not a release gate: pruning never raises on a missing file.
 
@@ -19,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -30,17 +34,84 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from src.paths import DATA_DIR  # noqa: E402
 from src.tasker.store import TaskerStore  # noqa: E402
 
-HEALTH_LOG = DATA_DIR / "health.log"
-# health.log is the dead Hermes-era artifact (written by
-# scripts/cron/portfolio-lab-health-monitor.sh via tee -a). The tasker
-# backend calls `make health` directly, whose Makefile target does NOT tee,
-# so the file stopped growing at the ~2026-06-10 cutover. Treat it as dead
-# only if it has not been modified in STALE_DAYS — robust to the exact
-# cutover minute and to any future re-enablement of the .sh wrapper.
+# Tee-appended logs (Makefile `tee -a $(DATA_DIR)/*.log` sites): the only
+# writers are per-run tee processes. Rotation is size-based only — files that
+# never cross the threshold (eval/research/build/wiki_sync/position_sync/
+# daily_brief.log) are covered automatically when they do; no special-casing.
+ROTATE_LOG_NAMES = (
+    "cron.log",
+    "dashboard.log",
+    "eval.log",
+    "research.log",
+    "wiki_sync.log",
+    "build.log",
+    "position_sync.log",
+    "attribution.log",
+    "adaptive_weights.log",
+    "daily_brief.log",
+)
+ROTATE_THRESHOLD_BYTES = 50 * 1024 * 1024  # 50MB; first run halves cron/dashboard.log
+ROTATE_KEEP = 3  # .1 newest ... .3 oldest; oldest copy dropped each rotation
+
+# Dead frozen logs: writers stopped (Hermes-era health.log at the 2026-06-10
+# tasker cutover; unified_dashboard/overlay_*/daily_pnl frozen since
+# 2026-07-18, output now captured to tasker_logs). The guard stays
+# mtime-based (STALE_DAYS) — never delete by name alone: the underlying jobs
+# still run cf=0, and a future Makefile change that re-tees to these files
+# must be skipped until the file goes stale again.
 STALE_DAYS = 7
+DEAD_LOG_NAMES = (
+    "health.log",
+    "unified_dashboard.log",
+    "overlay_dashboard.log",
+    "overlay_signals.log",
+    "daily_pnl.log",
+)
 
 
-def _should_delete_health_log(path: Path) -> tuple[bool, str]:
+def _rotate_oversized_log(path: Path, dry_run: bool) -> dict:
+    """Rotate one tee-appended log once it exceeds ROTATE_THRESHOLD_BYTES.
+
+    Copytruncate, not rename: tee -a writers hold per-run open fds and a
+    long-running job (eval up to 600s) can overlap the 03:03Z prune run —
+    renaming would orphan the open fd and lose that run's tail. Copying the
+    current file to ``.1`` and truncating in place is fd-agnostic; worst case
+    is ms-level loss between copy and truncate (~1x/50 days/file at ~1MB/day).
+    """
+    if not path.exists():
+        return {"path": str(path), "action": "skip", "bytes": 0, "reason": "absent"}
+    size = path.stat().st_size
+    if size <= ROTATE_THRESHOLD_BYTES:
+        return {
+            "path": str(path),
+            "action": "skip",
+            "bytes": size,
+            "reason": f"{size}B <= {ROTATE_THRESHOLD_BYTES}B threshold",
+        }
+    if dry_run:
+        return {
+            "path": str(path),
+            "action": "would_rotate",
+            "bytes": size,
+            "reason": f">{ROTATE_THRESHOLD_BYTES}B -> copy to .1, truncate in place (keep {ROTATE_KEEP})",
+        }
+    # Cap the chain at ROTATE_KEEP copies: drop the oldest, shift the rest.
+    path.with_name(f"{path.name}.{ROTATE_KEEP}").unlink(missing_ok=True)
+    for i in range(ROTATE_KEEP - 1, 0, -1):
+        src = path.with_name(f"{path.name}.{i}")
+        if src.exists():
+            src.replace(path.with_name(f"{path.name}.{i + 1}"))
+    shutil.copyfile(path, path.with_name(f"{path.name}.1"))
+    path.write_bytes(b"")  # truncate in place (copytruncate)
+    return {
+        "path": str(path),
+        "action": "rotated",
+        "bytes": size,
+        "reason": f"copytruncate -> {path.name}.1, original truncated (keep {ROTATE_KEEP})",
+    }
+
+
+def _should_delete_dead_log(path: Path) -> tuple[bool, str]:
     """Return (should_delete, reason). Only delete if confirmed stale/dead."""
     if not path.exists():
         return False, "absent"
@@ -48,18 +119,19 @@ def _should_delete_health_log(path: Path) -> tuple[bool, str]:
     age = datetime.now(timezone.utc) - mtime
     if age < timedelta(days=STALE_DAYS):
         return False, f"mtime {mtime.isoformat()} is {age.days}d old (< {STALE_DAYS}d) — may be live"
-    return True, f"mtime {mtime.isoformat()} is {age.days}d old (>= {STALE_DAYS}d stale, dead Hermes-era artifact)"
+    return True, f"mtime {mtime.isoformat()} is {age.days}d old (>= {STALE_DAYS}d stale, dead frozen log)"
 
 
-def _delete_health_log(path: Path, dry_run: bool) -> dict:
-    should, reason = _should_delete_health_log(path)
-    size = path.stat().st_size if path.exists() else 0
+def _delete_dead_log(path: Path, dry_run: bool) -> dict:
+    should, reason = _should_delete_dead_log(path)
+    present = path.exists()
+    size = path.stat().st_size if present else 0
     if not should:
-        return {"path": str(path), "action": "skip", "bytes": 0, "reason": reason}
+        return {"path": str(path), "action": "skip", "bytes": 0, "reason": reason, "present": present}
     if dry_run:
-        return {"path": str(path), "action": "would_delete", "bytes": size, "reason": reason}
+        return {"path": str(path), "action": "would_delete", "bytes": size, "reason": reason, "present": present}
     path.unlink(missing_ok=True)
-    return {"path": str(path), "action": "deleted", "bytes": size, "reason": reason}
+    return {"path": str(path), "action": "deleted", "bytes": size, "reason": reason, "present": present}
 
 
 def main() -> int:
@@ -69,7 +141,7 @@ def main() -> int:
     parser.add_argument(
         "--delete-dead-health-log",
         action="store_true",
-        help="also remove data/health.log if it predates the 2026-06-10 tasker cutover",
+        help="also remove stale dead logs (health.log, unified_dashboard/overlay_*/daily_pnl)",
     )
     args = parser.parse_args()
 
@@ -93,17 +165,26 @@ def main() -> int:
         if len(summary["plan"]) > 10:
             print(f"    ... and {len(summary['plan']) - 10} more")
 
-    health = None
+    # tee-appended log rotation — separate concern from tasker_logs/ +
+    # task_runs rows (TaskerStore.prune_runs stays the sole owner of those).
+    for entry in (_rotate_oversized_log(DATA_DIR / name, args.dry_run) for name in ROTATE_LOG_NAMES):
+        if entry["action"] != "skip":
+            print(f"rotation {Path(entry['path']).name}: {entry['action']} ({entry['bytes']} bytes) — {entry['reason']}")
+
+    dead_entries = []
     if args.delete_dead_health_log:
-        health = _delete_health_log(HEALTH_LOG, args.dry_run)
-        print(f"health.log: {health['action']} ({health['bytes']} bytes) — {health['reason']}")
+        for name in DEAD_LOG_NAMES:
+            entry = _delete_dead_log(DATA_DIR / name, args.dry_run)
+            if entry["present"]:
+                print(f"{Path(entry['path']).name}: {entry['action']} ({entry['bytes']} bytes) — {entry['reason']}")
+            dead_entries.append(entry)
 
     # mirror status into cron_status.json so the job is observable
-    _record_cron_status(args, summary, health, started)
+    _record_cron_status(args, summary, dead_entries, started)
     return 0
 
 
-def _record_cron_status(args, summary, health, started) -> None:
+def _record_cron_status(args, summary, dead, started) -> None:
     duration = (datetime.now(timezone.utc) - started).total_seconds()
     backend = os.environ.get("CRON_BACKEND", "tasker")
     # errors are non-fatal — pruning is hygiene. Only a crash makes this "error".
