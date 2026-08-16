@@ -241,6 +241,10 @@ test-ts:
 # (Ctrl-C once it serves) and re-run. The config never reuses an existing
 # PORT listener: a leftover `vite` process surfaces as an immediate
 # EADDRINUSE — kill the stray process and re-run.
+# Backtests-workspace smoke (Item 16): the playwright suite does NOT cover the
+# backtests tab. Run `bun backtests-smoke.mjs` against a running dev server
+# (SMOKE_BASE defaults to http://127.0.0.1:4173) for a 10-point render/run/
+# chart smoke; no test-discovery markers, so bare `bun test` ignores it.
 test-browser:
 	@load=$$(awk '{print $$1}' /proc/loadavg); \
 	awk -v l="$$load" 'BEGIN { if (l+0 > 3.0) { print "E2E: 1-min loadavg " l " > 3.0 — refusing to run browser suite (panel hydration is load-sensitive: reds >=4.4, greens <3, Items 14/15). Retry when load <= 3.0." > "/dev/stderr"; exit 1 } }' || exit 1; \
