@@ -633,3 +633,76 @@ def test_check_public_data_consistency_missing_required_exits_1(tmp_path) -> Non
     assert res.returncode == 1
     assert "ERROR:" in res.stderr
     assert "source_manifest.json is missing" in res.stderr
+
+
+# CRON-VERIFY-SMOKE (Item Q8, 2026-08-17): subprocess smoke for the cron
+# contract verifier (scripts/cron_verify.py). The --crontab case audits the
+# checked-in repo crontab (same target set as `make verify-cron-sync`); the
+# --status-file cases use hermetic tmp fixtures (script resolves its own
+# PROJECT_ROOT on sys.path), so no live cron_status state is read.
+CRON_VERIFY = os.path.join("scripts", "cron_verify.py")
+
+
+def _run_cron_verify(*args: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    return subprocess.run(
+        [sys.executable, CRON_VERIFY, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _write_tasker_status_fixture(tmp_path: Path, *, drop: str | None = None) -> Path:
+    """Hermetic tasker cron_status fixture; ``drop`` removes one registry job
+    to simulate a diverged/corrupted status contract."""
+    from src.tasker.registry import load_task_registry
+
+    names = [task.id for task in load_task_registry().tasks]
+    if drop is not None:
+        names = [name for name in names if name != drop]
+    path = tmp_path / "cron_status.json"
+    path.write_text(
+        json.dumps({"backend": "tasker", "jobs": [{"name": name} for name in names]}),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_cron_verify_repo_crontab_exits_0() -> None:
+    """CRON-VERIFY-SMOKE: checked-in repo crontab → exit 0 with the OK marker
+    (full CRON_TARGETS coverage — same contract as `make verify-cron-sync`)."""
+    res = _run_cron_verify("--crontab", "crontab")
+    assert res.returncode == 0, res.stderr
+    assert "OK:" in res.stdout
+    assert "crontab targets present" in res.stdout
+
+
+def test_cron_verify_valid_status_fixture_exits_0(tmp_path) -> None:
+    """CRON-VERIFY-SMOKE: hermetic tasker status fixture matching the full
+    tasker registry → exit 0 with the OK marker."""
+    status = _write_tasker_status_fixture(tmp_path)
+    res = _run_cron_verify("--status-file", str(status))
+    assert res.returncode == 0, res.stderr
+    assert "OK:" in res.stdout
+    assert "tasker targets present" in res.stdout
+
+
+def test_cron_verify_missing_and_divergent_status_exits_1(tmp_path) -> None:
+    """CRON-VERIFY-SMOKE: absent status file → exit 1 with MISSING:; a status
+    fixture missing one registry job → exit 1 with FAIL:."""
+    res_missing = _run_cron_verify("--status-file", str(tmp_path / "nope.json"))
+    assert res_missing.returncode == 1
+    assert "MISSING:" in res_missing.stdout
+
+    from src.tasker.registry import load_task_registry
+
+    first_job = sorted(task.id for task in load_task_registry().tasks)[0]
+    status = _write_tasker_status_fixture(tmp_path, drop=first_job)
+    res_fail = _run_cron_verify("--status-file", str(status))
+    assert res_fail.returncode == 1
+    assert "FAIL:" in res_fail.stdout
+    assert first_job in res_fail.stdout
