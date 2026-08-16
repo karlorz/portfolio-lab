@@ -1329,3 +1329,119 @@ def test_build_lab_release_mock_repo_writes_manifest(tmp_path) -> None:
     asset_paths = [asset["path"] for asset in payload["assets"]]
     assert "index.html" in asset_paths
     assert (release_dir / "index.html").read_text(encoding="utf-8") == "<main>mock</main>\n"
+
+
+# MARK-TO-MARKET-SMOKE (Item Q17, 2026-08-17): subprocess smoke for the
+# portfolio mark-to-market CLI (scripts/mark_to_market.py). The script loads
+# and saves via DATA_DIR (repo data/) with no env override, so every data-
+# touching case runs a byte-identical copy under a mock root whose minimal
+# src/paths.py points DATA_DIR at the mock tree (Q13 copy pattern) — repo
+# data/portfolio_paper.json and data/portfolio_live.json are never touched.
+MARK_TO_MARKET = os.path.join("scripts", "mark_to_market.py")
+
+
+def _run_mark_to_market(script: str, *args: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, script, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _copy_mark_to_market(tmp_path: Path) -> Path:
+    """Byte-identical copy under a mock root plus a mock src/paths.py: DATA_DIR
+    resolves inside the mock tree and resolve_runtime_public_data_dir returns a
+    never-used constant (all cases pass explicit --prices)."""
+    import shutil
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    shutil.copyfile(MARK_TO_MARKET, scripts_dir / "mark_to_market.py")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "src" / "paths.py").write_text(
+        "from pathlib import Path\n"
+        "DATA_DIR = Path(__file__).resolve().parent.parent / 'data'\n"
+        "def resolve_runtime_public_data_dir(*args, **kwargs):\n"
+        "    return Path('/tmp/q17-nonexistent-public-data')\n",
+        encoding="utf-8",
+    )
+    return scripts_dir / "mark_to_market.py"
+
+
+def _write_mtm_prices(tmp_path: Path) -> Path:
+    path = tmp_path / "prices.json"
+    path.write_text(
+        json.dumps(
+            {
+                "SPY": [{"d": "2026-08-14", "p": 450.5}],
+                "GLD": [{"d": "2026-08-14", "p": 210.0}],
+                "TLT": [{"d": "2026-08-14", "p": 95.0}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _write_mtm_paper_portfolio(tmp_path: Path) -> Path:
+    """Mock portfolio in the mock tree's data dir (the copy's DATA_DIR)."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    portfolio = data_dir / "portfolio_paper.json"
+    portfolio.write_text(
+        json.dumps(
+            {
+                "mode": "paper",
+                "cash": 10000.0,
+                "positions": {
+                    "SPY": {"shares": 10, "avg_price": 440.0, "value": 4400.0}
+                },
+                "history": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return portfolio
+
+
+def test_mark_to_market_help_exits_0(tmp_path) -> None:
+    """MARK-TO-MARKET-SMOKE: --help → exit 0 with the description marker."""
+    copy = _copy_mark_to_market(tmp_path)
+    res = _run_mark_to_market(str(copy), "--help")
+    assert res.returncode == 0
+    assert "Mark portfolio to market" in res.stdout
+
+
+def test_mark_to_market_missing_portfolio_exits_1(tmp_path) -> None:
+    """MARK-TO-MARKET-SMOKE: explicit prices but no mock data/portfolio
+    → exit 1 with the missing-portfolio marker (nothing written)."""
+    copy = _copy_mark_to_market(tmp_path)
+    prices = _write_mtm_prices(tmp_path)
+    res = _run_mark_to_market(str(copy), "--prices", str(prices))
+    assert res.returncode == 1
+    assert "ERROR: No portfolio_paper.json found" in (res.stdout + res.stderr)
+    assert not (tmp_path / "data" / "portfolio_paper.json").exists()
+
+
+def test_mark_to_market_mock_fixture_updates_portfolio(tmp_path) -> None:
+    """MARK-TO-MARKET-SMOKE: mock portfolio + prices in the mock tree → exit 0
+    with the after-value marker and the updated portfolio JSON written."""
+    copy = _copy_mark_to_market(tmp_path)
+    prices = _write_mtm_prices(tmp_path)
+    _ = _write_mtm_paper_portfolio(tmp_path)
+    res = _run_mark_to_market(str(copy), "--prices", str(prices))
+    assert res.returncode == 0, res.stderr
+    assert "Portfolio value (after):" in res.stdout
+    updated = tmp_path / "data" / "portfolio_paper.json"
+    assert updated.exists()
+    payload = json.loads(updated.read_text(encoding="utf-8"))
+    assert payload["positions"]["SPY"]["current_price"] == 450.5
+    assert payload["positions"]["SPY"]["value"] == 4505.0
+    assert len(payload["history"]) == 1
