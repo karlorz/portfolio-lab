@@ -8,7 +8,7 @@ export default defineConfig({
   outputDir: '.playwright/output',
   timeout: 45_000,
   expect: {
-    timeout: 25_000,
+    timeout: 10_000,
   },
   fullyParallel: false,
   workers: 1,
