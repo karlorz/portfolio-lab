@@ -706,3 +706,67 @@ def test_cron_verify_missing_and_divergent_status_exits_1(tmp_path) -> None:
     assert res_fail.returncode == 1
     assert "FAIL:" in res_fail.stdout
     assert first_job in res_fail.stdout
+
+
+# ARTIFACT-RETENTION-SMOKE (Item Q9, 2026-08-17): subprocess smoke for the
+# Labs artifact retention reporter (scripts/report_artifact_retention.py).
+# Every case passes explicit hermetic tmp --data-dir/--public-data-dir so no
+# live data or public tree is scanned; the reporter is report-only
+# (--execute-move is explicitly refused with exit 2).
+RETENTION_REPORT = os.path.join("scripts", "report_artifact_retention.py")
+
+
+def _run_retention_report(*args: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, RETENTION_REPORT, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _empty_retention_dirs(tmp_path: Path) -> tuple[Path, Path]:
+    data_dir = tmp_path / "data"
+    public_data_dir = tmp_path / "public-data"
+    data_dir.mkdir()
+    public_data_dir.mkdir()
+    return data_dir, public_data_dir
+
+
+def test_report_artifact_retention_empty_dirs_json_counts(tmp_path) -> None:
+    """ARTIFACT-RETENTION-SMOKE: empty tmp dirs → exit 0 + JSON with counts."""
+    data_dir, public_data_dir = _empty_retention_dirs(tmp_path)
+    res = _run_retention_report("--data-dir", str(data_dir), "--public-data-dir", str(public_data_dir))
+    assert res.returncode == 0, res.stderr
+    payload = json.loads(res.stdout)
+    assert "counts" in payload
+    assert payload["dry_run"] is True
+
+
+def test_report_artifact_retention_archive_plan_json(tmp_path) -> None:
+    """ARTIFACT-RETENTION-SMOKE: --archive-plan → exit 0 + JSON archive plan."""
+    data_dir, public_data_dir = _empty_retention_dirs(tmp_path)
+    res = _run_retention_report(
+        "--data-dir", str(data_dir), "--public-data-dir", str(public_data_dir), "--archive-plan"
+    )
+    assert res.returncode == 0, res.stderr
+    payload = json.loads(res.stdout)
+    assert "plan" in res.stdout
+    assert payload["dry_run"] is True
+    assert payload["move_enabled"] is False
+
+
+def test_report_artifact_retention_refuses_execute_move(tmp_path) -> None:
+    """ARTIFACT-RETENTION-SMOKE: --execute-move is not implemented → exit 2
+    with the refusal marker on stderr."""
+    data_dir, public_data_dir = _empty_retention_dirs(tmp_path)
+    res = _run_retention_report(
+        "--data-dir", str(data_dir), "--public-data-dir", str(public_data_dir), "--execute-move"
+    )
+    assert res.returncode == 2
+    assert "Move execution is not implemented" in res.stderr
