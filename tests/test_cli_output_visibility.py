@@ -516,3 +516,120 @@ def test_check_public_data_quality_json_report_written(tmp_path) -> None:
     assert payload["schema_version"] == "public-price-data-quality-cli/v1"
     assert payload["status"] in ("ok", "warn", "fail")
     assert payload["symbols_checked"] == 1
+
+
+# DATA-CONSISTENCY-SMOKE (Item Q7, 2026-08-17): subprocess smoke for the
+# deploy-time public data consistency auditor
+# (scripts/check_public_data_consistency.py). Every case audits a hermetic
+# tmp mock app tree via --app-dir + --allow-repo-public-data +
+# --skip-dist-data-match, so live PUBLIC_DATA_DIR / dist / market.db state
+# is never read (fixture mirrors the coherent set builder in
+# tests/test_generated_public_data_consistency_smoke.py).
+DATA_CONSISTENCY = os.path.join("scripts", "check_public_data_consistency.py")
+
+
+def _run_data_consistency(*args: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # conftest exports PUBLIC_DATA_DIR for the pytest session; the ops
+    # resolver prefers it over --app-dir (src/paths.py:183-185), so drop it
+    # (and the live-tree override) to keep --app-dir authoritative + hermetic.
+    env.pop("PUBLIC_DATA_DIR", None)
+    env.pop("PORTFOLIO_LAB_LIVE_PUBLIC_DATA_DIR", None)
+    return subprocess.run(
+        [sys.executable, DATA_CONSISTENCY, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _write_consistent_app_fixture(tmp_path: Path) -> None:
+    """Coherent mock app tree: source_manifest/index/health with matching
+    identity and timestamp ordering (same shape as
+    test_generated_public_data_consistency_smoke fixtures)."""
+    import hashlib
+
+    public_data = tmp_path / "public" / "data"
+    public_data.mkdir(parents=True)
+    source_generated_at = "2026-06-12T09:05:25.028Z"
+    index_generated_at = "2026-06-12T09:06:00+00:00"
+    source_manifest = {
+        "schema_version": "market-data-source-manifest/v1",
+        "generated_at": source_generated_at,
+        "artifacts": [
+            {"artifact": "prices.json", "provider": "Yahoo Finance", "status": "success"}
+        ],
+    }
+    (public_data / "source_manifest.json").write_text(
+        json.dumps(source_manifest, sort_keys=True), encoding="utf-8"
+    )
+    source_sha256 = hashlib.sha256(
+        (public_data / "source_manifest.json").read_bytes()
+    ).hexdigest()
+    (public_data / "index.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "public-data-index/v1",
+                "generated_at": index_generated_at,
+                "source_manifest": {
+                    "path": "source_manifest.json",
+                    "schema_version": "market-data-source-manifest/v1",
+                    "generated_at": source_generated_at,
+                    "sha256": source_sha256,
+                },
+                "entries": [
+                    {
+                        "filename": "source_manifest.json",
+                        "path": "source_manifest.json",
+                        "status": "present",
+                        "generated_at": source_generated_at,
+                        "sha256": source_sha256,
+                    }
+                ],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (public_data / "health.json").write_text(
+        json.dumps(
+            {"status": "ok", "generated_at": index_generated_at},
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_check_public_data_consistency_clean_app_exits_0(tmp_path) -> None:
+    """DATA-CONSISTENCY-SMOKE: coherent mock app tree → exit 0 with the pass
+    marker (provenance warnings on stderr are non-blocking)."""
+    _write_consistent_app_fixture(tmp_path)
+    res = _run_data_consistency(
+        "--app-dir",
+        str(tmp_path),
+        "--allow-repo-public-data",
+        "--skip-dist-data-match",
+    )
+    assert res.returncode == 0, res.stderr
+    assert "public data consistency check passed" in res.stdout
+    assert "WARN:" in res.stderr  # missing generator_git_sha is advisory only
+
+
+def test_check_public_data_consistency_missing_required_exits_1(tmp_path) -> None:
+    """DATA-CONSISTENCY-SMOKE: missing required data file (source_manifest.json)
+    → exit 1 with ERROR: markers on stderr."""
+    _write_consistent_app_fixture(tmp_path)
+    (tmp_path / "public" / "data" / "source_manifest.json").unlink()
+    res = _run_data_consistency(
+        "--app-dir",
+        str(tmp_path),
+        "--allow-repo-public-data",
+        "--skip-dist-data-match",
+    )
+    assert res.returncode == 1
+    assert "ERROR:" in res.stderr
+    assert "source_manifest.json is missing" in res.stderr
