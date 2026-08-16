@@ -831,3 +831,75 @@ def test_validate_test_segmentation_save_results_mock_tree(tmp_path) -> None:
     assert "analysis" in payload
     assert "test_fast" in payload
     assert payload["analysis"]["total_test_files"] == 1
+
+
+# PUBLIC-INDEX-REFRESH-SMOKE (Item Q11, 2026-08-17): subprocess smoke for the
+# public/index.json rebuild CLI (scripts/refresh_public_data_index.py). Every
+# case passes an explicit --public-dir tmp fixture (never a bare invocation),
+# so the repo public/data/index.json is never touched. Failure mode uses a
+# file positioned where the public dir should be: dir creation then fails
+# (FileExistsError) and the rebuild returns {"ok": false, ...}.
+PUBLIC_INDEX_REFRESH = os.path.join("scripts", "refresh_public_data_index.py")
+
+
+def _run_public_index_refresh(*args: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, PUBLIC_INDEX_REFRESH, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _write_index_source_fixture(tmp_path: Path) -> Path:
+    """Hermetic public-data dir with the partial-write core inputs."""
+    public_dir = tmp_path / "public-data"
+    public_dir.mkdir()
+    (public_dir / "source_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "market-data-source-manifest/v1",
+                "generated_at": "2026-06-12T09:05:25.028Z",
+                "artifacts": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (public_dir / "prices.json").write_text(
+        json.dumps({"SPY": [{"d": "2026-08-14", "p": 100.0}]}), encoding="utf-8"
+    )
+    return public_dir
+
+
+def test_refresh_public_data_index_help_exits_0() -> None:
+    """PUBLIC-INDEX-REFRESH-SMOKE: --help → exit 0 with the description marker."""
+    res = _run_public_index_refresh("--help")
+    assert res.returncode == 0
+    assert "Rebuild public/data/index.json" in res.stdout
+
+
+def test_refresh_public_data_index_rebuild_and_failure_json(tmp_path) -> None:
+    """PUBLIC-INDEX-REFRESH-SMOKE: source_manifest+prices fixture → exit 0
+    with {"ok": true} and content_patch_source carrying --reason; a file in
+    the public-dir slot (unwriteable) → exit 1 with {"ok": false}."""
+    public_dir = _write_index_source_fixture(tmp_path)
+    res = _run_public_index_refresh(
+        "--public-dir", str(public_dir), "--reason", "smoke-q11"
+    )
+    assert res.returncode == 0, res.stderr
+    payload = json.loads(res.stdout)
+    assert payload["ok"] is True
+    assert payload["content_patch_source"] == "index_refresh:smoke-q11"
+    assert (public_dir / "index.json").exists()
+
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("i am a file", encoding="utf-8")
+    res_fail = _run_public_index_refresh("--public-dir", str(blocker))
+    assert res_fail.returncode == 1
+    fail_payload = json.loads(res_fail.stdout)
+    assert fail_payload["ok"] is False
