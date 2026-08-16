@@ -1242,3 +1242,90 @@ def test_mirror_repo_public_data_lag_only_exits_1(tmp_path) -> None:
     assert lag_row, payload
     assert lag_row[0]["lagging"] is True
     assert lag_row[0]["source_sha"] != lag_row[0]["dest_sha"]
+
+
+# BUILD-LAB-RELEASE-SMOKE (Item Q16, 2026-08-17): subprocess smoke for the
+# static release builder (scripts/build_lab_release.py). The happy path runs
+# the full pipeline (clean-check → detached git worktree → mock build/install
+# commands → manifest → self-verify) against a hermetic mock git repo with a
+# single commit + bun.lock, so no live dist/ or release directories are ever
+# touched. Missing --release-dir exercises argparse's required-arg exit 2.
+BUILD_RELEASE = os.path.join("scripts", "build_lab_release.py")
+
+
+def _run_build_release(*args: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, BUILD_RELEASE, *args],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _write_mock_release_repo(tmp_path: Path) -> Path:
+    """Hermetic git repo: one clean commit + a bun.lock (the builder requires
+    both — full_git_sha on HEAD and select_lockfile fail closed otherwise)."""
+    repo = tmp_path / "mock-repo"
+    repo.mkdir()
+    (repo / "bun.lock").write_text("mock-lockfile\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.email", "smoke@example.com"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.name", "Q16 smoke"],
+        check=True,
+    )
+    subprocess.run(["git", "-C", str(repo), "add", "bun.lock"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-q", "-m", "mock release source"],
+        check=True,
+    )
+    return repo
+
+
+def test_build_lab_release_help_exits_0() -> None:
+    """BUILD-LAB-RELEASE-SMOKE: --help → exit 0 with the description marker."""
+    res = _run_build_release("--help")
+    assert res.returncode == 0
+    assert "Build a verified Portfolio Lab static release" in res.stdout
+
+
+def test_build_lab_release_missing_release_dir_exits_2() -> None:
+    """BUILD-LAB-RELEASE-SMOKE: --release-dir is required → argparse exit 2
+    with the required-arg marker on stderr."""
+    res = _run_build_release("--repo-dir", "irrelevant")
+    assert res.returncode == 2
+    assert "required" in res.stderr
+
+
+def test_build_lab_release_mock_repo_writes_manifest(tmp_path) -> None:
+    """BUILD-LAB-RELEASE-SMOKE: mock git repo + mock build/install commands
+    → exit 0, release-manifest.json written in the release dir with the mock
+    dist artifact under assets (live dist/ untouched)."""
+    repo = _write_mock_release_repo(tmp_path)
+    release_dir = tmp_path / "release"
+    res = _run_build_release(
+        "--repo-dir",
+        str(repo),
+        "--release-dir",
+        str(release_dir),
+        "--build-command",
+        "mkdir -p dist && printf '<main>mock</main>\\n' > dist/index.html",
+        "--install-command",
+        "true",
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    manifest_file = release_dir / "_release.json"
+    assert manifest_file.exists()
+    payload = json.loads(manifest_file.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "portfolio-lab-static-release/v1"
+    asset_paths = [asset["path"] for asset in payload["assets"]]
+    assert "index.html" in asset_paths
+    assert (release_dir / "index.html").read_text(encoding="utf-8") == "<main>mock</main>\n"
