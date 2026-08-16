@@ -436,6 +436,26 @@ class TestRegimeConditionalWeights:
 # ---------------------------------------------------------------------------
 
 class TestEnsembleVoter:
+    @pytest.fixture(autouse=True)
+    def _isolate_live_db(self):
+        """Close the sqlite-lock flake mode (Item 13): compute_vote paths open
+        the LIVE MARKET_DB via _get_health_tracker (constructor runs CREATE
+        TABLE — a write) when the module-global is unset, which flakes under
+        concurrent cron data-run writes. Mirrors TestGetBLViews._isolate_bl_health
+        (C18 precedent). Both import sites are patched: the function is
+        imported from ensemble_support into ensemble_voter_weights AND
+        ensemble_voter_vote. Tests that explicitly patch _get_health_tracker
+        with a mock (inner with-patch) still win.
+        """
+        with patch(
+            "src.strategy.ensemble_voter_weights._get_health_tracker",
+            return_value=None,
+        ), patch(
+            "src.strategy.ensemble_voter_vote._get_health_tracker",
+            return_value=None,
+        ):
+            yield
+
     def test_init_creates_db(self, tmp_path):
         voter = _make_voter(tmp_path)
         assert voter.db_path.exists()
