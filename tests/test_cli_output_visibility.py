@@ -1445,3 +1445,100 @@ def test_mark_to_market_mock_fixture_updates_portfolio(tmp_path) -> None:
     assert payload["positions"]["SPY"]["current_price"] == 450.5
     assert payload["positions"]["SPY"]["value"] == 4505.0
     assert len(payload["history"]) == 1
+
+
+# CAPTURE-DAILY-PNL-SMOKE (Item Q18, 2026-08-17): subprocess smoke for the
+# daily P&L capture CLI (scripts/capture_daily_pnl.py). The script reads and
+# writes daily_pnl.jsonl / daily_pnl_latest.json under DATA_DIR with no env
+# override, so every case runs a byte-identical copy under a mock root whose
+# minimal src package points DATA_DIR at the mock tree AND stubs the real
+# src.strategy.evaluator module (the copy imports PAPER_CONFIG at module load
+# — Q13/Q17 copy pattern + evaluator stub keeps the subprocess hermetic).
+# Repo data/daily_pnl.jsonl and daily_pnl_latest.json are never touched.
+CAPTURE_DAILY_PNL = os.path.join("scripts", "capture_daily_pnl.py")
+
+
+def _run_capture_daily_pnl(script: str, *args: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, script, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _copy_capture_daily_pnl(tmp_path: Path) -> Path:
+    """Byte-identical copy under a mock root plus a minimal mock src package:
+    paths.DATA_DIR inside the mock tree, strategy.evaluator.PAPER_CONFIG stub,
+    and utils.log_config.configure_logging stub (avoids importing the real
+    heavy evaluator/log-config modules in the subprocess)."""
+    import shutil
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    shutil.copyfile(CAPTURE_DAILY_PNL, scripts_dir / "capture_daily_pnl.py")
+    (tmp_path / "src" / "strategy").mkdir(parents=True)
+    (tmp_path / "src" / "utils").mkdir()
+    (tmp_path / "src" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "src" / "strategy" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "src" / "utils" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "src" / "utils" / "log_config.py").write_text(
+        "import logging\n"
+        "def configure_logging(level=None):\n"
+        "    logging.basicConfig(level=logging.INFO)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "src" / "paths.py").write_text(
+        "from pathlib import Path\n"
+        "DATA_DIR = Path(__file__).resolve().parent.parent / 'data'\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "src" / "strategy" / "evaluator.py").write_text(
+        "PAPER_CONFIG = {'initial_capital': 100000}\n",
+        encoding="utf-8",
+    )
+    return scripts_dir / "capture_daily_pnl.py"
+
+
+def test_capture_daily_pnl_help_exits_0(tmp_path) -> None:
+    """CAPTURE-DAILY-PNL-SMOKE: --help → exit 0 with the description marker."""
+    copy = _copy_capture_daily_pnl(tmp_path)
+    res = _run_capture_daily_pnl(str(copy), "--help")
+    assert res.returncode == 0
+    assert "Capture daily P&L snapshot" in res.stdout
+
+
+def test_capture_daily_pnl_missing_portfolio_exits_1(tmp_path) -> None:
+    """CAPTURE-DAILY-PNL-SMOKE: no mock data/portfolio_*.json → exit 1 with
+    the missing-portfolio marker (no snapshot written)."""
+    copy = _copy_capture_daily_pnl(tmp_path)
+    res = _run_capture_daily_pnl(str(copy))
+    assert res.returncode == 1
+    assert "No portfolio_paper.json found" in (res.stdout + res.stderr)
+    assert not (tmp_path / "data" / "daily_pnl.jsonl").exists()
+
+
+def test_capture_daily_pnl_backfill_dry_run(tmp_path) -> None:
+    """CAPTURE-DAILY-PNL-SMOKE: --backfill-returns --dry-run on a mock
+    daily_pnl.jsonl → exit 0 with the backfill summary marker, and the mock
+    fixture stays byte-unchanged (dry-run never writes)."""
+    copy = _copy_capture_daily_pnl(tmp_path)
+    daily_pnl = tmp_path / "data" / "daily_pnl.jsonl"
+    daily_pnl.parent.mkdir(parents=True)
+    rows = [
+        {"date": "2026-08-13", "total_value": 100000.0, "daily_return": 0.0},
+        {"date": "2026-08-14", "total_value": 101000.0, "daily_return": 0.0},
+    ]
+    daily_pnl.write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8"
+    )
+    before = daily_pnl.read_bytes()
+    res = _run_capture_daily_pnl(str(copy), "--backfill-returns", "--dry-run")
+    assert res.returncode == 0, res.stderr
+    assert "backfill_daily_returns" in (res.stdout + res.stderr)
+    assert daily_pnl.read_bytes() == before, "dry-run rewrote daily_pnl.jsonl"
