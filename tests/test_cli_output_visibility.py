@@ -1163,3 +1163,82 @@ def test_prune_logs_dry_run_mock_tree(tmp_path) -> None:
     assert res.returncode == 0, res.stderr
     assert "Prune Logs (DRY RUN):" in res.stdout
     assert "tasker_logs: keep_per_task=20" in res.stdout
+
+
+# MIRROR-REPO-PUBLIC-DATA-SMOKE (Item Q15, 2026-08-17): subprocess smoke for
+# the repo public/data mirror CLI (scripts/mirror_repo_public_data.py). All
+# cases pass explicit hermetic tmp --source/--dest fixtures (never a bare
+# invocation) so live PUBLIC_DATA_DIR and repo public/data are never read or
+# written; the --dry-run case also skips the health-lag restamp branch
+# (mirror_repo_public_data.py:292), so no live monitor stores are touched.
+MIRROR_REPO_PUBLIC = os.path.join("scripts", "mirror_repo_public_data.py")
+
+
+def _run_mirror_repo_public(*args: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, MIRROR_REPO_PUBLIC, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _write_mirror_source_fixture(tmp_path: Path, *, sha: str) -> Path:
+    """Hermetic source tree: two governed artifacts with distinct payloads."""
+    source = tmp_path / "source"
+    source.mkdir(parents=True)
+    (source / "signals.json").write_text(
+        json.dumps({"generator_git_sha": sha, "probe": "q15"}), encoding="utf-8"
+    )
+    (source / "health.json").write_text(
+        json.dumps({"generator_git_sha": sha, "status": "ok"}), encoding="utf-8"
+    )
+    return source
+
+
+def test_mirror_repo_public_data_help_exits_0() -> None:
+    """MIRROR-REPO-SMOKE: --help → exit 0 with the description marker."""
+    res = _run_mirror_repo_public("--help")
+    assert res.returncode == 0
+    assert "Mirror live operator public/data" in res.stdout
+
+
+def test_mirror_repo_public_data_dry_run_writes_nothing(tmp_path) -> None:
+    """MIRROR-REPO-SMOKE: explicit tmp source/dest with --dry-run → exit 0
+    with JSON dry_run true + the copied list, and dest stays empty."""
+    source = _write_mirror_source_fixture(tmp_path, sha="a" * 40)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    res = _run_mirror_repo_public(
+        "--source", str(source), "--dest", str(dest), "--dry-run"
+    )
+    assert res.returncode == 0, res.stderr
+    payload = json.loads(res.stdout)
+    assert payload["dry_run"] is True
+    assert "signals.json" in payload["copied"]
+    assert payload["copied_count"] >= 1
+    assert list(dest.iterdir()) == [], "dry-run wrote into dest"
+
+
+def test_mirror_repo_public_data_lag_only_exits_1(tmp_path) -> None:
+    """MIRROR-REPO-SMOKE: differing source/dest generator_git_sha with
+    --lag-only → exit 1 and stdout JSON carrying the signals.json lag row."""
+    source = _write_mirror_source_fixture(tmp_path, sha="a" * 40)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    (dest / "signals.json").write_text(
+        json.dumps({"generator_git_sha": "b" * 40, "probe": "q15"}), encoding="utf-8"
+    )
+    res = _run_mirror_repo_public("--source", str(source), "--dest", str(dest), "--lag-only")
+    assert res.returncode == 1
+    payload = json.loads(res.stdout)
+    assert "lagging" in payload
+    lag_row = [row for row in payload["lagging"] if row["path"] == "signals.json"]
+    assert lag_row, payload
+    assert lag_row[0]["lagging"] is True
+    assert lag_row[0]["source_sha"] != lag_row[0]["dest_sha"]
