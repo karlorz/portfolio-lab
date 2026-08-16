@@ -24,6 +24,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch, MagicMock
+from typing import Dict
 
 import pytest
 import pandas as pd
@@ -112,11 +113,15 @@ class TestDataclassFieldValidation:
             "signal_type": (str, ...),
             "confidence": (float, ...),
             "data_fresh": (bool, ...),
+            "options_provenance": (Dict[str, str], ...),  # Item 12 s1
         }
         assert set(fields) == set(expected)
         for name, (typ, _) in expected.items():
             assert fields[name].type is typ, f"{name} expected {typ}, got {fields[name].type}"
-            assert fields[name].default is dataclasses.MISSING
+            if name == "options_provenance":
+                assert fields[name].default_factory is dict
+            else:
+                assert fields[name].default is dataclasses.MISSING
 
 
 # =========================================================================
@@ -1665,3 +1670,113 @@ class TestRedditIntegration:
                 fetcher._estimate_social_intensity()
                 # No warning about Reddit should be logged
                 assert "HTTP 403" not in caplog.text
+
+# =========================================================================
+# 10. Options provenance flags (Item 12 s1)
+# =========================================================================
+
+class TestOptionsProvenanceFlags:
+    """Per-source provenance flags for the options block (Item 12 s1).
+
+    Acceptance: live fetch -> "live"; failure -> "fallback:<reason>" with the
+    0.65 fallback value unchanged; SKEW estimate -> fallback flag; cache
+    round-trip preserves flags; pre-Item-12 rows default to {}.
+    """
+
+    def test_pcr_live_fetch_flags_live(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        page = "<td>EQUITY PUT/CALL RATIO</td><td>0.52</td>"
+        with patch("src.data.behavioral_sentiment_fetcher.requests.get", _page_fetch(page)):
+            ratio = fetcher._fetch_put_call_ratio()
+        assert ratio == pytest.approx(0.52)
+        assert fetcher._source_provenance["^CPCE"] == "live"
+
+    def test_pcr_network_failure_flags_fallback_network(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        with patch("src.data.behavioral_sentiment_fetcher.requests.get", side_effect=TimeoutError("timeout")):
+            ratio = fetcher._fetch_put_call_ratio()
+        assert ratio == 0.65  # final fallback value unchanged
+        assert fetcher._source_provenance["^CPCE"] == "fallback:network"
+
+    def test_pcr_page_format_failure_flags_fallback_page_format(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        page = "<td>EQUITY PUT/CALL RATIO</td><td>N/A</td>"
+        with patch("src.data.behavioral_sentiment_fetcher.requests.get", _page_fetch(page)):
+            ratio = fetcher._fetch_put_call_ratio()
+        assert ratio == 0.65
+        assert fetcher._source_provenance["^CPCE"] == "fallback:page_format"
+
+    def test_yf_live_fetch_flags_live(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        mock_ticker = MagicMock()
+        mock_ticker.history.return_value = pd.DataFrame({"Close": [15.5]})
+        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", return_value=mock_ticker):
+            vix, vix9d = fetcher._fetch_vix_data()
+        assert (vix, vix9d) == (15.5, 15.5)
+        assert fetcher._source_provenance["^VIX"] == "live"
+        assert fetcher._source_provenance["^VIX9D"] == "live"
+
+    def test_yf_failure_flags_fallback_yfinance(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=RuntimeError("network error")):
+            vix, vix9d = fetcher._fetch_vix_data()
+        assert (vix, vix9d) == (16.0, 14.4)
+        assert fetcher._source_provenance["^VIX"] == "fallback:yfinance"
+        assert fetcher._source_provenance["^VIX9D"] == "fallback:yfinance"
+
+    def test_skew_estimate_flags_fallback(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        with patch.object(fetcher, "_fetch_vix_data", return_value=(20.0, 18.0)):
+            with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=RuntimeError("err")):
+                skew = fetcher._fetch_skew_index()
+        assert skew == 110.0  # 100 + (20-15)*2
+        assert fetcher._source_provenance["^SKEW"] == "fallback:estimated_from_vix"
+
+    def test_fetch_snapshot_carries_provenance_and_cache_roundtrip(self, tmp_path):
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        page = "<td>EQUITY PUT/CALL RATIO</td><td>0.52</td>"
+        mock_ticker = MagicMock()
+        mock_ticker.history.return_value = pd.DataFrame({"Close": [15.5]})
+        with patch("src.data.behavioral_sentiment_fetcher.requests.get", _page_fetch(page)):
+            with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", return_value=mock_ticker):
+                snapshot = fetcher.fetch_snapshot(use_cache=False)
+        assert snapshot.options_provenance == {
+            "^CPCE": "live", "^VIX": "live", "^VIX9D": "live", "^SKEW": "live",
+        }
+        # SQLite cache round-trip preserves flags
+        cached = fetcher.fetch_snapshot(use_cache=True)
+        assert cached.options_provenance == snapshot.options_provenance
+
+    def test_old_cached_row_defaults_provenance(self, tmp_path):
+        """Pre-Item-12 rows (no options_provenance key) default to {}."""
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        now = datetime.now().isoformat()
+        data = {
+            "timestamp": now,
+            "options": OptionsSentiment(
+                timestamp=now, skew_index=120.0, vix=15.0, vix9d=13.5,
+                vix9d_ratio=0.9, put_call_ratio=0.52, fear_greed_score=0.0,
+            ).to_dict(),
+            "retail": RetailFlow(
+                timestamp=now, retail_call_put_ratio=1.2, retail_buy_sell_imbalance=0.1,
+                retail_top_100_correlation=-0.2, small_lot_premium_ratio=0.8,
+            ).to_dict(),
+            "social": SocialIntensity(
+                timestamp=now, mention_velocity_7d=1.0, sentiment_divergence=0.0,
+                bot_activity_flag=False, influencer_concentration=0.15,
+            ).to_dict(),
+            "composite_score": 0.5,
+            "signal_type": "neutral",
+            "confidence": 0.8,
+            "data_fresh": True,
+        }
+        restored = fetcher._dict_to_snapshot(data)
+        assert restored.options_provenance == {}

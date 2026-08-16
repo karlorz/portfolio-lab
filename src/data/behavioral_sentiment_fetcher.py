@@ -16,7 +16,7 @@ import re
 import requests
 import yfinance as yf
 from src.utils.rate_limiter import rate_limited
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Dict, Optional, List, Tuple
 from pathlib import Path
 import logging
@@ -125,6 +125,10 @@ class BehavioralSentimentSnapshot:
     signal_type: str  # 'extreme_fear', 'fear', 'neutral', 'greed', 'extreme_greed'
     confidence: float  # 0-1 based on data quality
     data_fresh: bool
+    # Per-source provenance for the options block (Item 12 s1): "live" or
+    # "fallback:<reason>" per source key ("^CPCE", "^VIX", "^VIX9D", "^SKEW").
+    # Additive; absent on pre-Item-12 cached rows (defaults to {}).
+    options_provenance: Dict[str, str] = field(default_factory=dict)
     
     def to_dict(self) -> Dict:
         return {
@@ -135,7 +139,8 @@ class BehavioralSentimentSnapshot:
             'composite_score': self.composite_score,
             'signal_type': self.signal_type,
             'confidence': self.confidence,
-            'data_fresh': self.data_fresh
+            'data_fresh': self.data_fresh,
+            'options_provenance': self.options_provenance
         }
 
 
@@ -153,6 +158,9 @@ class BehavioralSentimentFetcher:
         self.cache_db = cache_db
         # Unified yfinance cache: {ticker: (value, fetch_time)}
         self._yf_cache: Dict[str, Tuple[float, datetime]] = {}
+        # Per-source provenance for the current fetch cycle (Item 12 s1):
+        # {source_key: "live" | "fallback:<reason>"}; reset per fresh snapshot.
+        self._source_provenance: Dict[str, str] = {}
         self._init_cache()
     
     def _init_cache(self):
@@ -225,7 +233,8 @@ class BehavioralSentimentFetcher:
             composite_score=data['composite_score'],
             signal_type=data['signal_type'],
             confidence=data['confidence'],
-            data_fresh=data['data_fresh']
+            data_fresh=data['data_fresh'],
+            options_provenance=data.get('options_provenance', {})
         )
     
     @rate_limited("yahoo")
@@ -259,11 +268,13 @@ class BehavioralSentimentFetcher:
                     raw = float(closes.iloc[-1])
                     if not math.isnan(raw):
                         self._yf_cache[ticker] = (raw, now)
+                        self._source_provenance[ticker] = "live"
                         return raw
         except (KeyError, ValueError, TypeError, OSError, RuntimeError, IndexError) as e:
             logger.warning("yfinance fetch failed for %s: %s", ticker, e)
 
         self._yf_cache[ticker] = (default, now)
+        self._source_provenance[ticker] = "fallback:yfinance"
         return default
 
     def _fetch_vix_data(self) -> Tuple[float, float]:
@@ -279,6 +290,7 @@ class BehavioralSentimentFetcher:
             return raw
         # Estimate SKEW from VIX if unavailable
         vix, _ = self._fetch_vix_data()
+        self._source_provenance["^SKEW"] = "fallback:estimated_from_vix"
         return 100 + max(0, (vix - 15)) * 2
 
     def _fetch_put_call_ratio(self) -> float:
@@ -307,10 +319,13 @@ class BehavioralSentimentFetcher:
             ratio = self._parse_cboe_pcr_ratio(resp.text)
             if ratio is not None:
                 self._yf_cache["^CPCE"] = (ratio, now)
+                self._source_provenance["^CPCE"] = "live"
                 return ratio
             logger.warning("CBOE P/C page parsed but EQUITY PUT/CALL RATIO row not found")
+            self._source_provenance["^CPCE"] = "fallback:page_format"
         except (requests.RequestException, TimeoutError, ValueError, TypeError) as e:
             logger.warning("CBOE P/C page fetch failed: %s", e)
+            self._source_provenance["^CPCE"] = "fallback:network"
 
         self._yf_cache["^CPCE"] = (0.65, now)
         return 0.65  # Historical average (final fallback)
@@ -514,6 +529,7 @@ class BehavioralSentimentFetcher:
                 return cached
         
         logger.info("Fetching fresh behavioral sentiment data...")
+        self._source_provenance = {}
         
         # Fetch all components
         options = self._calculate_options_sentiment()
@@ -533,7 +549,8 @@ class BehavioralSentimentFetcher:
             composite_score=composite,
             signal_type=signal_type,
             confidence=confidence,
-            data_fresh=True
+            data_fresh=True,
+            options_provenance=self._source_provenance.copy()
         )
         
         # Save to cache

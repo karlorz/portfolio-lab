@@ -13,6 +13,22 @@ from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
+# Fetch-aware stall-watchdog threshold (Item 12 s3): Item 10's live CBOE page
+# fetch (GET + parse of a ~444KB server-rendered page) takes ~4.2s on a fresh
+# fetch (dashboard.log 04:15:54Z), so the pre-Item-10 2.0s threshold tripped on
+# every fresh fetch (~every 4h TTL) and masked real stalls. 6.0s absorbs the
+# legitimate fresh-fetch cost while keeping real stalls visible (7s+ warns).
+_BS_STALL_WATCHDOG_SECONDS = 6.0
+
+
+def _warn_bs_section_if_slow(started: datetime) -> None:
+    """Stall-watchdog for the behavioral_sentiment section (see threshold above)."""
+    elapsed = (datetime.now() - started).total_seconds()
+    if elapsed >= _BS_STALL_WATCHDOG_SECONDS:
+        logger.warning(
+            "behavioral_sentiment section took %.1fs (stall watchdog)", elapsed
+        )
+
 __all__ = ["SignalSectionBuilder"]
 
 @dataclass(slots=True)
@@ -467,6 +483,14 @@ class SignalSectionBuilder:
                     "put_call_ratio": round(snapshot.options.put_call_ratio, 2),
                     "fear_greed_score": round(snapshot.options.fear_greed_score, 1),
                 },
+                # Per-source provenance (Item 12 s1): "live" | "fallback:<reason>".
+                # Additive; "unknown" only for pre-Item-12 cached rows.
+                "provenance": {
+                    "put_call_ratio": snapshot.options_provenance.get("^CPCE", "unknown"),
+                    "vix": snapshot.options_provenance.get("^VIX", "unknown"),
+                    "vix9d": snapshot.options_provenance.get("^VIX9D", "unknown"),
+                    "skew_index": snapshot.options_provenance.get("^SKEW", "unknown"),
+                },
                 "retail": {
                     "retail_call_put_ratio": round(snapshot.retail.retail_call_put_ratio, 2),
                     "retail_buy_sell_imbalance": round(snapshot.retail.retail_buy_sell_imbalance, 2),
@@ -474,6 +498,7 @@ class SignalSectionBuilder:
                 "social": {
                     "mention_velocity_7d": round(snapshot.social.mention_velocity_7d, 2),
                     "sentiment_divergence": round(snapshot.social.sentiment_divergence, 3),
+                    "reddit_data_source": snapshot.social.reddit_data_source,
                 },
                 # Research caveat is non-actionable metadata — not a live alpha narrative
                 "research_caveats": [
@@ -491,11 +516,7 @@ class SignalSectionBuilder:
             }
         except SIGNAL_EXCEPTIONS as e:
             _log_signal_error("behavioral_sentiment", e)
-        _bs_elapsed = (datetime.now() - _bs_started).total_seconds()
-        if _bs_elapsed >= 2.0:
-            logger.warning(
-                "behavioral_sentiment section took %.1fs (stall watchdog)", _bs_elapsed
-            )
+        _warn_bs_section_if_slow(_bs_started)
 
         # Stacking ensemble dashboard data (v3.10)
         stacking_ensemble_dashboard = None
