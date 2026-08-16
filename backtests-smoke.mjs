@@ -80,6 +80,25 @@ await page.waitForTimeout(200);
 const sliderLabel = await playground.innerText();
 check('playground SPY weight slider updates percentage label', sliderLabel.includes('SPY Weight: 70%'));
 
+// 4b. GLD + TLT sliders each update their percentage label
+const gldSlider = playground.locator('input[type="range"]').nth(1);
+await gldSlider.fill('20');
+await page.waitForTimeout(200);
+const gldLabel = await playground.innerText();
+check('playground GLD weight slider updates percentage label', gldLabel.includes('GLD Weight: 20%'));
+const tltSlider = playground.locator('input[type="range"]').nth(2);
+await tltSlider.fill('10');
+await page.waitForTimeout(200);
+const tltLabel = await playground.innerText();
+check('playground TLT weight slider updates percentage label', tltLabel.includes('TLT Weight: 10%'));
+
+// 4c. Regime select drives the AllocationSpine regime output
+const spineBefore = await playground.locator('.allocation-spine').first().innerText();
+await regimeSelect.selectOption('risk_on');
+await page.waitForTimeout(300);
+const spineAfter = await playground.locator('.allocation-spine').first().innerText();
+check('playground regime select changes allocation spine output', spineBefore !== spineAfter);
+
 // 5. Test Command Palette interactive modal
 const paletteBtn = playground.locator('button:has-text("Open Command Palette")');
 await paletteBtn.click();
