@@ -903,3 +903,131 @@ def test_refresh_public_data_index_rebuild_and_failure_json(tmp_path) -> None:
     assert res_fail.returncode == 1
     fail_payload = json.loads(res_fail.stdout)
     assert fail_payload["ok"] is False
+
+
+# ROUTING-CONTRACT-SMOKE (Item Q12, 2026-08-17): subprocess smoke for the
+# SkillWiki/Hermes routing invariant auditor
+# (scripts/audit_routing_contract.py). All fixture-backed cases pass explicit
+# --hermes-home/--skillwiki-env tmp mocks (bare invocation would inspect the
+# live host /root/.hermes and /root/.skillwiki), mirroring the fixture shape
+# in tests/test_audit_routing_contract.py.
+AUDIT_ROUTING = os.path.join("scripts", "audit_routing_contract.py")
+
+
+def _run_audit_routing(*args: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    return subprocess.run(
+        [sys.executable, AUDIT_ROUTING, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _write_routing_fixture(tmp_path: Path, *, divergent: bool = False) -> tuple[Path, Path]:
+    """Hermetic SkillWiki dotenv + Hermes home mock; ``divergent`` breaks the
+    global WIKI_PATH invariant so exactly one violation is reported."""
+    skillwiki_env = tmp_path / ".skillwiki" / ".env"
+    skillwiki_env.parent.mkdir(parents=True)
+    with_global = "/root/other" if divergent else "/root/wiki"
+    skillwiki_env.write_text(
+        "\n".join(
+            [
+                f"WIKI_PATH={with_global}",
+                "WIKI_LANG=en",
+                "WIKI_DEFAULT=portfolio",
+                "WIKI_PORTFOLIO_PATH=/root/wiki",
+                "WIKI_FINANCE_PATH=/root/wiki-fin",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    hermes_home = tmp_path / ".hermes"
+    (hermes_home / "cron").mkdir(parents=True)
+    (hermes_home / ".env").write_text("WIKI_PATH=/root/wiki\n", encoding="utf-8")
+    (hermes_home / "cron" / "jobs.json").write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "id": "finance-1",
+                        "name": "finance-digest",
+                        "enabled": True,
+                        "state": "scheduled",
+                        "profile": "finance",
+                        "workdir": "/root/wiki-fin",
+                        "script": "finance-digest-wrapper.sh",
+                    },
+                    {
+                        "id": "portfolio-default-paused",
+                        "name": "portfolio-lab-dashboard",
+                        "enabled": False,
+                        "state": "paused",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    finance_home = hermes_home / "profiles" / "finance"
+    (finance_home / "scripts").mkdir(parents=True)
+    (finance_home / ".env").write_text("WIKI_PATH=/root/wiki-fin\n", encoding="utf-8")
+    for name in ("finance-digest-wrapper.sh", "finance-news-collector.py"):
+        script = finance_home / "scripts" / name
+        script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        script.chmod(script.stat().st_mode | 0o111)
+
+    coder_home = hermes_home / "profiles" / "coder" / "cron"
+    coder_home.mkdir(parents=True)
+    coder_home.joinpath("jobs.json").write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "id": "coder-paused",
+                        "name": "portfolio-lab-dashboard",
+                        "enabled": False,
+                        "state": "paused",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    return skillwiki_env, hermes_home
+
+
+def test_audit_routing_contract_help_exits_0() -> None:
+    """ROUTING-CONTRACT-SMOKE: --help → exit 0 with the description marker."""
+    res = _run_audit_routing("--help")
+    assert res.returncode == 0
+    assert "Audit SkillWiki and Hermes routing invariants" in res.stdout
+
+
+def test_audit_routing_contract_valid_fixture_exits_0(tmp_path) -> None:
+    """ROUTING-CONTRACT-SMOKE: coherent mock hermes/skillwiki → exit 0 with
+    the contract-holds marker."""
+    skillwiki_env, hermes_home = _write_routing_fixture(tmp_path)
+    res = _run_audit_routing(
+        "--hermes-home", str(hermes_home), "--skillwiki-env", str(skillwiki_env)
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "OK: routing contract holds" in res.stdout
+
+
+def test_audit_routing_contract_divergent_fixture_exits_1(tmp_path) -> None:
+    """ROUTING-CONTRACT-SMOKE: broken global WIKI_PATH → exit 1 with the
+    violation marker."""
+    skillwiki_env, hermes_home = _write_routing_fixture(tmp_path, divergent=True)
+    res = _run_audit_routing(
+        "--hermes-home", str(hermes_home), "--skillwiki-env", str(skillwiki_env)
+    )
+    assert res.returncode == 1
+    assert "routing contract violation" in res.stdout
+    assert "ERROR:" in res.stdout
