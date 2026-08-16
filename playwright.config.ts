@@ -8,7 +8,7 @@ export default defineConfig({
   outputDir: '.playwright/output',
   timeout: 45_000,
   expect: {
-    timeout: 10_000,
+    timeout: 25_000,
   },
   fullyParallel: false,
   workers: 1,
@@ -18,14 +18,13 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: `bunx --bun vite --host 127.0.0.1 --port ${PORT}`,
+    command: `node node_modules/vite/bin/vite.js --host 127.0.0.1 --port ${PORT}`,
     url: baseURL,
     // Local-only suite (playwright is absent from .github/workflows/ci.yml):
-    // always launch a fresh server. Reusing a leftover PORT listener caused
-    // a zero-output 120s timeout flake; a stale listener now fails fast with
-    // EADDRINUSE (kill the stray process and re-run). 300s is the fail-fast
-    // ceiling — a cold first-in-session start can exceed it under load
-    // (prewarm per the Makefile test-browser comment).
+    // always launch a fresh server. Running vite via plain `node` (not
+    // `bunx --bun`, which stalled ~67% of spawned cold starts — Items
+    // 14/15) binds in <1s. A stale PORT listener fails fast with EADDRINUSE
+    // (kill the stray process and re-run).
     reuseExistingServer: false,
     timeout: 300_000,
   },

@@ -234,16 +234,17 @@ test-ts:
 # If the suite hits tab-loading timeouts (analytics/risk panels not visible),
 # the backend has degraded — restart it and re-run before debugging anything
 # else (evidence: fresh backend 20/20 vs degraded 16-19/20, all timeout-flakes).
-# webServer cold start: the first in-session `bunx --bun vite` can exceed
-# the 300s playwright timeout under concurrent load (measured 2026-08-16:
-# 3/4 cold starts >300s with zero server output). If a run times out,
-# prewarm once with
-#   bunx --bun vite --host 127.0.0.1 --port 4173
+# webServer cold start: vite runs under plain `node` (node_modules/vite/bin/
+# vite.js; `bunx --bun` stalled ~67% of playwright-spawned starts — Items
+# 14/15). If a run still times out with zero server output, prewarm once with
+#   node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 4173
 # (Ctrl-C once it serves) and re-run. The config never reuses an existing
-# PORT listener: a leftover `vite` process (e.g. from a killed run) surfaces
-# as an immediate EADDRINUSE — kill the stray process and re-run.
+# PORT listener: a leftover `vite` process surfaces as an immediate
+# EADDRINUSE — kill the stray process and re-run.
 test-browser:
-	@echo "=== Test Suite (browser): $$(date) ==="; \
+	@load=$$(awk '{print $$1}' /proc/loadavg); \
+	awk -v l="$$load" 'BEGIN { if (l+0 > 3.0) { print "E2E: 1-min loadavg " l " > 3.0 — refusing to run browser suite (panel hydration is load-sensitive: reds >=4.4, greens <3, Items 14/15). Retry when load <= 3.0." > "/dev/stderr"; exit 1 } }' || exit 1; \
+	echo "=== Test Suite (browser): $$(date) ==="; \
 	bun run test:dashboard-browser; \
 	exit $$?
 
