@@ -1,0 +1,184 @@
+import { useState, useMemo, useEffect, lazy, Suspense } from 'react';
+import { BacktestEngine, PORTFOLIOS } from '../../backtest/engine';
+import type { BacktestResult, PerformanceMetrics, PriceData } from '../../backtest/engine';
+import { fetchCompactPriceData, symbolsForPortfolios, toBacktestData } from '../../backtest/price-loader';
+import type { CompactPriceData } from '../../backtest/price-loader';
+import { PortfolioSelector } from '../PortfolioSelector';
+import { MetricsCards } from '../MetricsCards';
+import { EquityCurve } from '../EquityCurve';
+
+const RiskReturnChart = lazy(() => import('../RiskReturnChart').then(m => ({ default: m.RiskReturnChart })));
+const DrawdownChart = lazy(() => import('../DrawdownChart').then(m => ({ default: m.DrawdownChart })));
+const ComparisonTable = lazy(() => import('../ComparisonTable').then(m => ({ default: m.ComparisonTable })));
+const CrisisAnalysis = lazy(() => import('../CrisisAnalysis').then(m => ({ default: m.CrisisAnalysis })));
+const RollingWindow = lazy(() => import('../RollingWindow').then(m => ({ default: m.RollingWindow })));
+const CorrelationMatrix = lazy(() => import('../CorrelationMatrix').then(m => ({ default: m.CorrelationMatrix })));
+const FIRECalculator = lazy(() => import('../FIRECalculator').then(m => ({ default: m.FIRECalculator })));
+
+interface ResultItem {
+  name: string;
+  result: BacktestResult;
+  metrics: PerformanceMetrics;
+  color: string;
+}
+
+const COLORS: string[] = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#a855f7'];
+
+function BacktestsWorkspace() {
+  const [selected, setSelected] = useState<string[]>(['SPY (S&P 500)', 'SPY/GLD/TLT 46/38/16 ★★', 'SPY/GLD 55/45']);
+  const [rawPrices, setRawPrices] = useState<CompactPriceData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Load real price data
+  useEffect(() => {
+    if (rawPrices || error) return;
+    fetchCompactPriceData()
+      .then(prices => {
+        setRawPrices(prices);
+        setLoading(false);
+      })
+      .catch(err => {
+        setError(`Failed to load data: ${err.message}`);
+        setLoading(false);
+      });
+  }, [rawPrices, error]);
+
+  const selectedPortfolios = useMemo(
+    () => PORTFOLIOS.filter(portfolio => selected.includes(portfolio.name)),
+    [selected],
+  );
+
+  const priceData = useMemo<PriceData[] | null>(() => {
+    if (!rawPrices) return null;
+    return toBacktestData(rawPrices, symbolsForPortfolios(selectedPortfolios));
+  }, [rawPrices, selectedPortfolios]);
+
+  // Run backtests
+  const results = useMemo<ResultItem[]>(() => {
+    if (!priceData || selectedPortfolios.length === 0) return [];
+
+    const engine = new BacktestEngine();
+    engine.loadData(priceData);
+
+    // Find date range from data
+    const dates = priceData.map(p => p.date).sort();
+    const startDate = dates[0];
+    const endDate = dates[dates.length - 1];
+    if (!startDate || !endDate) return [];
+
+    return selectedPortfolios.map((portfolio, i) => {
+      const result = engine.runBacktest(portfolio, startDate, endDate, 10000);
+      const metrics = engine.calculateMetrics(result);
+      return {
+        name: portfolio.name,
+        result,
+        metrics,
+        color: COLORS[i % COLORS.length]!,
+      };
+    });
+  }, [priceData, selectedPortfolios]);
+
+  const filteredResults = results;
+
+  const handleToggle = (name: string) => {
+    setSelected(prev =>
+      prev.includes(name)
+        ? prev.filter(n => n !== name)
+        : [...prev, name]
+    );
+  };
+
+  // Find best portfolio by Sharpe ratio
+  const bestPortfolio = useMemo(() => {
+    if (results.length === 0) return null;
+    return results.reduce((best, current) =>
+      current.metrics.sharpeRatio > best.metrics.sharpeRatio ? current : best
+    );
+  }, [results]);
+
+  // Find portfolio with SPY-like returns but lower volatility
+  const spyResult = results.find(r => r.name === 'SPY (S&P 500)');
+  const efficientAlternative = useMemo(() => {
+    if (!spyResult) return null;
+    const spyVol = spyResult.metrics.volatility;
+    return results.filter(r => r.name !== 'SPY (S&P 500)')
+      .find(r => r.metrics.cagr >= spyResult.metrics.cagr * 0.9 && r.metrics.volatility <= spyVol * 0.7);
+  }, [results, spyResult]);
+
+  return (
+    <div className="backtests-workspace">
+      <p className="workspace-intro">
+        Historical portfolio comparison is a research workspace. It does not change live order authority.
+      </p>
+      {loading ? (
+        <div className="control-loading" role="status" aria-live="polite">
+          Loading historical data…
+        </div>
+      ) : error ? (
+        <div className="control-error" role="alert">
+          <strong>Historical data unavailable</strong>
+          <p>{error}. Refresh the page or run the data refresh before reopening Backtests.</p>
+        </div>
+      ) : (
+        <>
+          <PortfolioSelector
+            portfolios={PORTFOLIOS}
+            selected={selected}
+            onToggle={handleToggle}
+            colors={COLORS}
+          />
+
+          {filteredResults.length > 0 && (
+            <>
+              <MetricsCards results={filteredResults} />
+              <div className="charts">
+                <EquityCurve results={filteredResults} />
+                <Suspense fallback={<div className="chart-loading" role="status">Loading chart…</div>}>
+                  <div className="chart-row">
+                    <RiskReturnChart results={filteredResults} />
+                    <DrawdownChart results={filteredResults} />
+                  </div>
+                  <ComparisonTable results={filteredResults} />
+                  <CrisisAnalysis results={filteredResults} />
+                  <RollingWindow
+                    portfolios={selectedPortfolios}
+                    priceData={priceData!}
+                    colors={COLORS}
+                  />
+                  <CorrelationMatrix priceData={priceData!} />
+                  <FIRECalculator results={filteredResults} />
+                </Suspense>
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      <footer className="backtests-footer">
+        {bestPortfolio && (
+          <p>
+            <strong>Highest Sharpe ratio:</strong>{' '}
+            <span style={{ color: bestPortfolio.color }}>{bestPortfolio.name}</span>
+            {' '}({bestPortfolio.metrics.sharpeRatio.toFixed(2)})
+          </p>
+        )}
+        {efficientAlternative && spyResult && (
+          <p>
+            <strong>≥90% SPY return with ≤70% volatility:</strong>{' '}
+            <span style={{ color: efficientAlternative.color }}>{efficientAlternative.name}</span>
+            {' '}(CAGR: {(efficientAlternative.metrics.cagr * 100).toFixed(1)}%,
+            {' '}Vol: {(efficientAlternative.metrics.volatility * 100).toFixed(1)}%)
+          </p>
+        )}
+        <p>
+          Data: Yahoo Finance historical daily prices 2005–2026.
+          <br />
+          Run <code>bun run fetch-data</code> to refresh.
+        </p>
+      </footer>
+    </div>
+  );
+}
+
+export default BacktestsWorkspace;

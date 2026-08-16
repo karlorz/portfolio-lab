@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ActionCenter } from './ActionCenter';
 import { AllocationSpine } from './AllocationSpine';
 import { AppErrorBoundary } from './AppErrorBoundary';
@@ -45,6 +45,24 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export function DesignGuidePage() {
+  // Interactive UAT Playground State
+  const [routed, setRouted] = useState<boolean | undefined>(true);
+  const [killEnabled, setKillEnabled] = useState(false);
+  const [killLevel, setKillLevel] = useState<'clear' | 'warning' | 'halt'>('clear');
+  const [regime, setRegime] = useState<string>('neutral');
+  const [spyAlloc, setSpyAlloc] = useState(46);
+  const [gldAlloc, setGldAlloc] = useState(38);
+  const [tltAlloc, setTltAlloc] = useState(16);
+  const [badgeTone, setBadgeTone] = useState<'success' | 'warning' | 'critical' | 'info' | 'stale' | 'neutral'>('success');
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  const totalAlloc = spyAlloc + gldAlloc + tltAlloc;
+  const normalizedAlloc = totalAlloc > 0 ? {
+    SPY: spyAlloc / totalAlloc,
+    GLD: gldAlloc / totalAlloc,
+    TLT: tltAlloc / totalAlloc,
+  } : null;
+
   return (
     <main className="design-guide-page">
       <header className="design-guide-hero">
@@ -56,6 +74,205 @@ export function DesignGuidePage() {
           These production components define the cockpit vocabulary.
         </p>
       </header>
+
+      <Section title="Interactive Operator UAT Playground">
+        <div style={{
+          padding: '16px',
+          background: 'var(--surface-panel)',
+          border: '1px solid var(--border-strong)',
+          borderRadius: 'var(--radius-lg)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '16px',
+        }}>
+          <p className="control-eyebrow">Interactive Controls &amp; Real-time Component Reactions</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
+                Routing Authority
+              </label>
+              <select
+                value={routed === undefined ? 'undefined' : String(routed)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setRouted(val === 'undefined' ? undefined : val === 'true');
+                }}
+                style={{
+                  width: '100%',
+                  padding: '6px 8px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-subtle)',
+                  background: 'var(--surface-canvas)',
+                  color: 'inherit',
+                }}
+              >
+                <option value="true">Live Routed (Active)</option>
+                <option value="false">Unrouted (Advisory)</option>
+                <option value="undefined">Unavailable / Undefined</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
+                Kill Switch Policy
+              </label>
+              <select
+                value={killEnabled ? killLevel : 'clear'}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === 'clear') {
+                    setKillEnabled(false);
+                    setKillLevel('clear');
+                  } else {
+                    setKillEnabled(true);
+                    setKillLevel(val as 'warning' | 'halt');
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  padding: '6px 8px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-subtle)',
+                  background: 'var(--surface-canvas)',
+                  color: 'inherit',
+                }}
+              >
+                <option value="clear">Disarmed / Clear</option>
+                <option value="warning">Armed (Warning level)</option>
+                <option value="halt">Armed (Halt level - Hard stop)</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
+                Market Regime
+              </label>
+              <select
+                value={regime}
+                onChange={(e) => setRegime(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '6px 8px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-subtle)',
+                  background: 'var(--surface-canvas)',
+                  color: 'inherit',
+                }}
+              >
+                <option value="neutral">Neutral / Normal</option>
+                <option value="risk_on">Risk On</option>
+                <option value="risk_off">Risk Off</option>
+                <option value="high_vol">High Volatility</option>
+                <option value="stagflation">Stagflation</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
+                Status Badge Tone
+              </label>
+              <select
+                value={badgeTone}
+                onChange={(e) => setBadgeTone(e.target.value as any)}
+                style={{
+                  width: '100%',
+                  padding: '6px 8px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-subtle)',
+                  background: 'var(--surface-canvas)',
+                  color: 'inherit',
+                }}
+              >
+                <option value="success">Success / Healthy</option>
+                <option value="warning">Warning / Advisory</option>
+                <option value="critical">Critical / Halting</option>
+                <option value="info">Info</option>
+                <option value="stale">Stale</option>
+                <option value="neutral">Neutral</option>
+              </select>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px' }}>SPY Weight: {spyAlloc}%</label>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={spyAlloc}
+                onChange={(e) => setSpyAlloc(Number(e.target.value))}
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px' }}>GLD Weight: {gldAlloc}%</label>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={gldAlloc}
+                onChange={(e) => setGldAlloc(Number(e.target.value))}
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px' }}>TLT Weight: {tltAlloc}%</label>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={tltAlloc}
+                onChange={(e) => setTltAlloc(Number(e.target.value))}
+                style={{ width: '100%' }}
+              />
+            </div>
+          </div>
+
+          <div style={{
+            marginTop: '8px',
+            paddingTop: '16px',
+            borderTop: '1px solid var(--border-subtle)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+          }}>
+            <p className="control-eyebrow">Playground Live Preview</p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
+              <StatusBadge label={`Status: ${badgeTone.toUpperCase()}`} tone={badgeTone} detail="Interactive tone probe" />
+              <AuthorityBadge
+                routed={routed}
+                blocked={killEnabled && killLevel === 'halt'}
+                source="signals.json.target_allocations"
+              />
+              <button
+                type="button"
+                onClick={() => setPaletteOpen(true)}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-strong)',
+                  background: 'var(--surface-panel)',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                }}
+              >
+                Open Command Palette (Interactive)
+              </button>
+            </div>
+
+            <AllocationSpine
+              allocations={normalizedAlloc}
+              regime={regime}
+              updatedAt="Just now (UAT)"
+              routed={routed}
+              killEnabled={killEnabled}
+              killLevel={killLevel}
+            />
+          </div>
+        </div>
+        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onNavigate={() => setPaletteOpen(false)} />
+      </Section>
 
       <Section title="Semantic palette">
         <div className="design-guide-swatches">
@@ -83,24 +300,52 @@ export function DesignGuidePage() {
           <code>Data · SPY 46.0% · 2026-07-28T03:40Z</code>
         </div>
         <div className="design-guide-row">
-          <StatusBadge label="Healthy" tone="success" />
-          <StatusBadge label="Warning" tone="warning" />
-          <StatusBadge label="Critical" tone="critical" />
-          <StatusBadge label="Stale" tone="stale" />
-          <AuthorityBadge routed />
-          <AuthorityBadge routed={false} />
+          <StatusBadge label="Healthy" tone="success" detail="All subsystems operational" />
+          <StatusBadge label="Warning" tone="warning" detail="Advisory degraded state" />
+          <StatusBadge label="Critical" tone="critical" detail="Requires immediate action" />
+          <StatusBadge label="Info" tone="info" detail="Informational status" />
+          <StatusBadge label="Stale" tone="stale" detail="Data freshness overdue" />
+          <StatusBadge label="Neutral" tone="neutral" detail="Default neutral tone" />
+        </div>
+        <div className="design-guide-row" style={{ marginTop: '12px' }}>
+          <AuthorityBadge routed source="signals.json.target_allocations" />
+          <AuthorityBadge routed={false} source="signals.json.target_allocations" />
+          <AuthorityBadge blocked source="kill_switch: active halt" />
+          <AuthorityBadge routed={undefined} source="signals.json.target_allocations" />
         </div>
       </Section>
 
       <Section title="Allocation Spine">
-        <AllocationSpine
-          allocations={{ SPY: 0.46, GLD: 0.38, TLT: 0.16 }}
-          regime="neutral"
-          updatedAt="11:40 CST"
-          killEnabled
-          killLevel="warning"
-        />
-        <AllocationSpine allocations={null} routed={false} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div>
+            <p className="control-eyebrow" style={{ marginBottom: '8px' }}>Active routed allocation (Champion 46/38/16)</p>
+            <AllocationSpine
+              allocations={{ SPY: 0.46, GLD: 0.38, TLT: 0.16 }}
+              regime="neutral"
+              updatedAt="11:40 CST"
+              routed
+            />
+          </div>
+          <div>
+            <p className="control-eyebrow" style={{ marginBottom: '8px' }}>Kill switch active (level = halt)</p>
+            <AllocationSpine
+              allocations={{ SPY: 0.46, GLD: 0.38, TLT: 0.16 }}
+              regime="high_vol"
+              updatedAt="11:40 CST"
+              killEnabled
+              killLevel="halt"
+              routed
+            />
+          </div>
+          <div>
+            <p className="control-eyebrow" style={{ marginBottom: '8px' }}>Advisory unrouted allocation</p>
+            <AllocationSpine allocations={{ SPY: 0.50, GLD: 0.30, TLT: 0.20 }} routed={false} />
+          </div>
+          <div>
+            <p className="control-eyebrow" style={{ marginBottom: '8px' }}>Unavailable / Loading state</p>
+            <AllocationSpine allocations={null} routed={false} />
+          </div>
+        </div>
       </Section>
 
       <Section title="Metrics and actions">
@@ -108,42 +353,78 @@ export function DesignGuidePage() {
           <MetricCard label="Portfolio value" value="$100,482" detail="+0.48% since inception" />
           <MetricCard label="Open incidents" value="1" detail="Highest severity P2" tone="attention" />
           <MetricCard label="Fresh signals" value="22 / 23" detail="1 advisory feed stale" />
+          <MetricCard label="System status" value="Warning" detail="1 degraded source" tone="attention" />
         </div>
         <ActionCenter incidents={exampleActions} />
         <ActionCenter incidents={[]} />
       </Section>
 
       <Section title="Quality evidence brief">
-        <section className="operator-brief operator-brief-critical" aria-labelledby="guide-operator-brief-title">
-          <div className="operator-brief-header">
-            <div>
-              <p className="control-eyebrow">Current control state</p>
-              <h2 id="guide-operator-brief-title">Operator brief</h2>
-            </div>
-            <span className="operator-brief-status operator-brief-status-critical">Signal quality: Critical</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div>
+            <p className="control-eyebrow" style={{ marginBottom: '8px' }}>Critical signal quality (IC decay active)</p>
+            <section className="operator-brief operator-brief-critical" aria-labelledby="guide-operator-brief-title-crit">
+              <div className="operator-brief-header">
+                <div>
+                  <p className="control-eyebrow">Current control state</p>
+                  <h2 id="guide-operator-brief-title-crit">Operator brief</h2>
+                </div>
+                <span className="operator-brief-status operator-brief-status-critical">Signal quality: Critical</span>
+              </div>
+              <div className="operator-brief-grid">
+                <div className="operator-brief-item">
+                  <span>Market regime</span>
+                  <strong>Normal</strong>
+                </div>
+                <div className="operator-brief-item">
+                  <span>Signal quality</span>
+                  <strong>2 critical signals</strong>
+                  <small>ensemble_duration · ensemble_gold · n=60/20</small>
+                </div>
+                <div className="operator-brief-item">
+                  <span>Execution control</span>
+                  <strong>Routing available</strong>
+                  <small>Routing authority: advisory_only</small>
+                </div>
+              </div>
+              <div className="operator-brief-evidence">
+                <p><strong>Affected signals</strong> ensemble_duration IC -0.0563 (60/20) · ensemble_gold IC -0.1197 (60/20)</p>
+                <p>2 staged pending labels · 0 historical unlabeled rows</p>
+                <p>Captured runtime snapshot · paper_warning control effect</p>
+                <button type="button" className="operator-brief-action">Review IC evidence</button>
+              </div>
+            </section>
           </div>
-          <div className="operator-brief-grid">
-            <div className="operator-brief-item">
-              <span>Market regime</span>
-              <strong>Normal</strong>
-            </div>
-            <div className="operator-brief-item">
-              <span>Signal quality</span>
-              <strong>2 critical signals</strong>
-              <small>ensemble_duration · ensemble_consensus · n=20/20</small>
-            </div>
-            <div className="operator-brief-item">
-              <span>Execution control</span>
-              <strong>Routing blocked · kill halt</strong>
-              <small>Routing authority: advisory_only</small>
-            </div>
+
+          <div>
+            <p className="control-eyebrow" style={{ marginBottom: '8px' }}>Healthy signal quality</p>
+            <section className="operator-brief operator-brief-healthy" aria-labelledby="guide-operator-brief-title-ok">
+              <div className="operator-brief-header">
+                <div>
+                  <p className="control-eyebrow">Current control state</p>
+                  <h2 id="guide-operator-brief-title-ok">Operator brief</h2>
+                </div>
+                <span className="operator-brief-status operator-brief-status-healthy">Signal quality: Healthy</span>
+              </div>
+              <div className="operator-brief-grid">
+                <div className="operator-brief-item">
+                  <span>Market regime</span>
+                  <strong>Normal</strong>
+                </div>
+                <div className="operator-brief-item">
+                  <span>Signal quality</span>
+                  <strong>All signals qualified</strong>
+                  <small>0 affected signals · 6 qualified</small>
+                </div>
+                <div className="operator-brief-item">
+                  <span>Execution control</span>
+                  <strong>Routing available</strong>
+                  <small>Routing authority: signals.json.target_allocations</small>
+                </div>
+              </div>
+            </section>
           </div>
-          <div className="operator-brief-evidence">
-            <p><strong>Evidence</strong> 7 staged pending labels · 1,663 historical unlabeled rows</p>
-            <p>Captured runtime snapshot · paper_warning control effect</p>
-            <button type="button" className="operator-brief-action">Review IC evidence</button>
-          </div>
-        </section>
+        </div>
       </Section>
 
       <Section title="Overflow and advisory regions">
