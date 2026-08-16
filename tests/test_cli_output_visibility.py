@@ -8,6 +8,7 @@ subprocess with safe args from the item's sub-task table.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -351,3 +352,88 @@ def test_verify_lab_release_help_and_missing_args() -> None:
     bad_res = _run_verify_release()
     assert bad_res.returncode == 2
     assert "usage" in (bad_res.stdout + bad_res.stderr)
+
+
+# CRON-OVERLAP-SMOKE (Item Q5, 2026-08-17): subprocess smoke for the
+# multi-backend cron overlap detector (scripts/detect_cron_overlap.py).
+# The detector shells out to `crontab -l` and `hermes cron list`, so the
+# tests install fake shims for both on PATH (same pattern as the
+# deploy-remote fake ssh canary above) and feed --cron-status a hermetic
+# tmp fixture. No live crontab/hermes state is ever read.
+DETECT_OVERLAP = os.path.join("scripts", "detect_cron_overlap.py")
+
+
+def _fake_cron_bins(tmp_path: Path, crontab_text: str, hermes_text: str) -> Path:
+    """Install `crontab` and `hermes` shims that echo fixed fixture text."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, text in (("crontab", crontab_text), ("hermes", hermes_text)):
+        shim = bin_dir / name
+        shim.write_text(
+            "#!/usr/bin/env bash\n"
+            f'cat <<\'EOF\'\n{text}\nEOF\n',
+            encoding="utf-8",
+        )
+        shim.chmod(0o755)
+    return bin_dir
+
+
+def _run_detect_overlap(
+    cron_status: Path, bins: Path
+) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PATH"] = f"{bins}{os.pathsep}{env['PATH']}"
+    return subprocess.run(
+        [sys.executable, DETECT_OVERLAP, "--cron-status", str(cron_status)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _write_cron_status(tmp_path: Path, *, names: list[str]) -> Path:
+    path = tmp_path / "cron_status.json"
+    path.write_text(
+        json.dumps(
+            {
+                "backend": "tasker",
+                "jobs": [
+                    {
+                        "name": name,
+                        "enabled": True,
+                        "manual_only": False,
+                        "backend": "tasker",
+                    }
+                    for name in names
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_detect_cron_overlap_clean_exits_0(tmp_path) -> None:
+    """CRON-OVERLAP-SMOKE: tasker-only fixture, empty crontab/hermes → exit
+    0 with the no-overlap marker."""
+    status = _write_cron_status(tmp_path, names=["portfolio-lab-data"])
+    bins = _fake_cron_bins(tmp_path, crontab_text="", hermes_text="")
+    res = _run_detect_overlap(status, bins)
+    assert res.returncode == 0, res.stderr
+    assert "No multi-backend overlap" in res.stdout
+
+
+def test_detect_cron_overlap_overlapping_exits_1(tmp_path) -> None:
+    """CRON-OVERLAP-SMOKE: job owned by crontab and tasker → exit 1 with the
+    overlapping marker."""
+    status = _write_cron_status(tmp_path, names=["portfolio-lab-data"])
+    crontab_text = (
+        "5 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab data\n"
+    )
+    bins = _fake_cron_bins(tmp_path, crontab_text=crontab_text, hermes_text="")
+    res = _run_detect_overlap(status, bins)
+    assert res.returncode == 1
+    assert "Overlapping cron jobs" in (res.stdout + res.stderr)
