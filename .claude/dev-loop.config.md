@@ -88,7 +88,7 @@ cli_entry_override:
 `src/` is sprawling — major subsystems include:
 
 - `src/backtest/` — TypeScript + Python backtest harnesses
-  (grid-search, rolling-window, monte-carlo-fire, walk-forward, factor-tilt)
+  (grid-search, walk-forward)
 - `src/agents/` — MARL controller + 5 specialist agents (Python, v2.51)
 - `src/signals/`, `src/risk/`, `src/execution/` — signal integration,
   VaR/CVaR monitoring, execution timing
