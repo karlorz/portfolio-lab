@@ -366,16 +366,21 @@ def test_deploy_unit_template_default_vs_candidate(tmp_path: Path):
         assert "TimeoutStopSec=30" in res.stdout, label
 
 
-def test_deploy_candidate_no_scheduler_flag_parses_in_dry_run():
-    """The new flag parses and the script still reaches the dry-run exit."""
+def test_deploy_candidate_no_scheduler_flag_parses_in_dry_run(tmp_path):
+    """The new flag parses and the script still reaches the dry-run exit.
+
+    The candidate path is fail-closed against the production --app-dir, so
+    the candidate variant must point --app-dir at a non-production path.
+    """
     script = str(PROJECT_ROOT / "scripts" / "deploy-lab-app.sh")
     for extra_flag in (["--candidate-no-scheduler"], []):
+        app_dir = str(tmp_path) if extra_flag else str(PROJECT_ROOT)
         res = subprocess.run(
             [
                 "bash",
                 script,
                 "--app-dir",
-                str(PROJECT_ROOT),
+                app_dir,
                 "--service-name",
                 "portfolio-lab-tasker-recovery-dev",
                 "--web-root",
@@ -401,7 +406,7 @@ def test_deploy_candidate_no_scheduler_flag_parses_in_dry_run():
         assert "[dry-run]" in res.stdout
 
 
-def test_deploy_candidate_fails_closed_for_authoritative_use():
+def test_deploy_candidate_fails_closed_for_authoritative_use(tmp_path):
     """--candidate-no-scheduler is for private recovery/candidate APIs only:
     it must fail closed without --skip-caddy or with production identity."""
     script = str(PROJECT_ROOT / "scripts" / "deploy-lab-app.sh")
@@ -447,12 +452,12 @@ def test_deploy_candidate_fails_closed_for_authoritative_use():
                 args.append(value)
         res = subprocess.run(args, capture_output=True, text=True, timeout=120)
         assert res.returncode != 0, combo
-    # the isolated candidate combination is accepted
+    # the isolated candidate combination is accepted (non-production app-dir)
     good = [
         "bash",
         script,
         "--app-dir",
-        str(PROJECT_ROOT),
+        str(tmp_path),
         "--candidate-no-scheduler",
         "--service-name",
         "portfolio-lab-tasker-recovery-dev",
