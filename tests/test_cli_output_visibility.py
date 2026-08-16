@@ -171,3 +171,104 @@ def test_resolve_incident_already_resolved_exits_0(tmp_path) -> None:
     )
     assert res.returncode == 0
     assert "already resolved" in res.stdout
+
+
+# DEPLOY-REMOTE-SMOKE (Item 20, 2026-08-16): subprocess smoke for the remote
+# deploy CLI (scripts/deploy-remote.sh). Stays strictly inside the --dry-run
+# contract — ssh_exec prints "[dry-run] ssh ..." and returns 0 without
+# connecting (deploy-remote.sh:210-213), and main() returns before the remote
+# lifecycle pipe (deploy-remote.sh:352-355). Happy-path cases prepend a fake
+# `ssh` to PATH that records any real invocation: a dry-run must never reach
+# it. --allow-dirty keeps the dirty-tree guard (deploy-remote.sh:170-177)
+# hermetic regardless of working-tree state.
+DEPLOY_REMOTE = os.path.join("scripts", "deploy-remote.sh")
+
+
+def _fake_ssh_bin(tmp_path: Path) -> tuple[Path, Path]:
+    """Fake `ssh` that logs any real invocation, replacing the real binary on
+    PATH (also satisfies the script's own require_cmd ssh probe)."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "ssh-called.log"
+    ssh = bin_dir / "ssh"
+    ssh.write_text(
+        "#!/usr/bin/env bash\n"
+        'echo "REAL SSH INVOKED: $*" >> "$DEPLOY_REMOTE_SSH_LOG"\n'
+        "exit 99\n",
+        encoding="utf-8",
+    )
+    ssh.chmod(0o755)
+    return bin_dir, log
+
+
+def _run_deploy_remote(
+    *args: str, fake_ssh: tuple[Path, Path] | None = None
+) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    if fake_ssh is not None:
+        bin_dir, ssh_log = fake_ssh
+        env["DEPLOY_REMOTE_SSH_LOG"] = str(ssh_log)
+        env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    return subprocess.run(
+        ["bash", DEPLOY_REMOTE, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,  # acceptance (a): dry-run must exit in <60s
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def test_deploy_remote_dry_run_preview_never_connects(tmp_path) -> None:
+    """DEPLOY-REMOTE-SMOKE: preview dry-run exits 0, prints only [dry-run]
+    markers, and never invokes ssh (fake-ssh canary untouched)."""
+    res = _run_deploy_remote(
+        "--host",
+        "dry-fake",
+        "--mode",
+        "preview",
+        "--dry-run",
+        "--allow-dirty",
+        fake_ssh=_fake_ssh_bin(tmp_path),
+    )
+    assert res.returncode == 0
+    assert "[dry-run] ssh dry-fake " in res.stderr
+    combined = res.stdout + res.stderr
+    assert "[dry-run] rsync project ->" in combined or "[dry-run] tar stream" in combined
+    assert "Deploy completed" not in combined  # client lifecycle tail never runs
+    for line in combined.splitlines():
+        if "ssh" in line:
+            assert "[dry-run]" in line, f"non-dry-run ssh line: {line}"
+    assert not (tmp_path / "ssh-called.log").exists(), "dry-run invoked real ssh"
+
+
+def test_deploy_remote_dry_run_production_variant(tmp_path) -> None:
+    """DEPLOY-REMOTE-SMOKE: production dry-run variant exits 0 with markers."""
+    res = _run_deploy_remote(
+        "--host",
+        "dry-fake",
+        "--mode",
+        "production",
+        "--dry-run",
+        "--allow-dirty",
+        fake_ssh=_fake_ssh_bin(tmp_path),
+    )
+    assert res.returncode == 0
+    assert "Deploy mode: production" in res.stdout
+    assert "[dry-run] ssh dry-fake " in res.stderr
+    assert not (tmp_path / "ssh-called.log").exists(), "dry-run invoked real ssh"
+
+
+def test_deploy_remote_missing_host_dies() -> None:
+    """DEPLOY-REMOTE-SMOKE: missing --host → usage + die (exit 1)."""
+    res = _run_deploy_remote("--mode", "preview", "--dry-run")
+    assert res.returncode == 1
+    assert "--host is required" in res.stderr
+
+
+def test_deploy_remote_unknown_option_dies() -> None:
+    """DEPLOY-REMOTE-SMOKE: unknown option → die (exit 1)."""
+    res = _run_deploy_remote("--host", "dry-fake", "--bogus-option")
+    assert res.returncode == 1
+    assert "Unknown option" in res.stderr
