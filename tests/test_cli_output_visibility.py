@@ -1031,3 +1031,59 @@ def test_audit_routing_contract_divergent_fixture_exits_1(tmp_path) -> None:
     assert res.returncode == 1
     assert "routing contract violation" in res.stdout
     assert "ERROR:" in res.stdout
+
+
+# CRON-UPDATE-SMOKE (Item Q13, 2026-08-17): subprocess smoke for the cron
+# status writer (scripts/cron_update.py). The script resolves PROJECT_ROOT
+# from __file__ (no env override), so the update case runs a byte-identical
+# copy under a mock root — data/cron_status.json in the repo is never
+# touched. Status vocabulary is mapped at the write boundary (ok → success).
+CRON_UPDATE = os.path.join("scripts", "cron_update.py")
+
+
+def _run_cron_update(script: str, *args: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, script, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _copy_cron_update(tmp_path: Path) -> Path:
+    """Byte-identical copy placed so __file__.parents[1] is the mock root."""
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    import shutil
+
+    shutil.copyfile(CRON_UPDATE, scripts_dir / "cron_update.py")
+    return scripts_dir / "cron_update.py"
+
+
+def test_cron_update_insufficient_args_exits_1() -> None:
+    """CRON-UPDATE-SMOKE: fewer than 4 positional args → exit 1 with the
+    Usage marker on stderr (no status write happens)."""
+    res = _run_cron_update(CRON_UPDATE, "only-one-arg")
+    assert res.returncode == 1
+    assert "Usage:" in res.stderr
+
+
+def test_cron_update_records_job_in_mock_root(tmp_path) -> None:
+    """CRON-UPDATE-SMOKE: valid args under a copied mock script → exit 0 and
+    the job row (ok → success) lands in the mock data/cron_status.json."""
+    copy = _copy_cron_update(tmp_path)
+    res = _run_cron_update(str(copy), "portfolio-lab-smoke", "ok", "5", "tasker")
+    assert res.returncode == 0, res.stderr
+    status_file = tmp_path / "data" / "cron_status.json"
+    assert status_file.exists()
+    data = json.loads(status_file.read_text(encoding="utf-8"))
+    job = data["jobs"][0]
+    assert job["name"] == "portfolio-lab-smoke"
+    assert job["status"] == "success"
+    assert job["duration_seconds"] == 5.0
+    assert job["backend"] == "tasker"
