@@ -48,6 +48,49 @@ check('design guide lazy route renders', true);
 await page.waitForSelector('.allocation-spine', { timeout: 15000 });
 check('interactive playground and allocation spine render', true);
 
+// Item 19: Design Guide Interactive Playground User Interaction Smoke
+const playground = page.locator('.design-guide-section').first();
+const routingSelect = playground.locator('select').nth(0);
+const killSelect = playground.locator('select').nth(1);
+const regimeSelect = playground.locator('select').nth(2);
+const toneSelect = playground.locator('select').nth(3);
+
+// 1. Test Authority selection (Advisory)
+await routingSelect.selectOption('false');
+await page.waitForTimeout(200);
+const authBadgeAdvisory = await playground.locator('.authority-badge').first().innerText();
+check('playground routing select updates authority badge (advisory)', authBadgeAdvisory.toLowerCase().includes('not routed') || authBadgeAdvisory.toLowerCase().includes('advisory'));
+
+// 2. Test Kill Switch selection (Halt)
+await killSelect.selectOption('halt');
+await page.waitForTimeout(200);
+const authBadgeBlocked = await playground.locator('.authority-badge').first().innerText();
+check('playground kill switch select triggers blocked authority badge', authBadgeBlocked.toLowerCase().includes('routing blocked') || authBadgeBlocked.toLowerCase().includes('blocked'));
+
+// 3. Test Tone selection
+await toneSelect.selectOption('critical');
+await page.waitForTimeout(200);
+const statusBadgeText = await playground.locator('.control-status').first().innerText();
+check('playground status tone select updates badge to critical', statusBadgeText.includes('CRITICAL'));
+
+// 4. Test Sliders
+const spySlider = playground.locator('input[type="range"]').nth(0);
+await spySlider.fill('70');
+await page.waitForTimeout(200);
+const sliderLabel = await playground.innerText();
+check('playground SPY weight slider updates percentage label', sliderLabel.includes('SPY Weight: 70%'));
+
+// 5. Test Command Palette interactive modal
+const paletteBtn = playground.locator('button:has-text("Open Command Palette")');
+await paletteBtn.click();
+await page.waitForSelector('.command-palette, [role="dialog"], input[placeholder*="Search"]', { timeout: 5000 });
+check('playground opens command palette modal', true);
+// Close palette via Escape key
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+const paletteCount = await page.locator('.command-palette, [role="dialog"]').count();
+check('playground closes command palette on escape', paletteCount === 0);
+
 console.log(results.join('\n'));
 console.log('pageerrors:', errors.length ? errors.join(' | ') : 'none');
 await browser.close();
