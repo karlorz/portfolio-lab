@@ -770,3 +770,64 @@ def test_report_artifact_retention_refuses_execute_move(tmp_path) -> None:
     )
     assert res.returncode == 2
     assert "Move execution is not implemented" in res.stderr
+
+
+# TEST-SEGMENTATION-SMOKE (Item Q10, 2026-08-17): subprocess smoke for the
+# test segmentation validator (scripts/validate_test_segmentation.py). The
+# --save-results case runs inside a hermetic mock lab tree via
+# PORTFOLIO_LAB_PROJECT_DIR (mock tests/ + a trivial Makefile test-fast
+# target), so live test suites are never invoked and results JSON lands in
+# the mock tree.
+TEST_SEGMENTATION = os.path.join("scripts", "validate_test_segmentation.py")
+
+
+def _run_test_segmentation(
+    *args: str, project_dir: Path | None = None
+) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    if project_dir is not None:
+        env["PORTFOLIO_LAB_PROJECT_DIR"] = str(project_dir)
+    return subprocess.run(
+        [sys.executable, TEST_SEGMENTATION, *args],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _write_mock_lab_tree(tmp_path: Path) -> None:
+    """Small mock lab: one test file plus a trivially-green test-fast target
+    (the script runs `make test-fast` inside PORTFOLIO_LAB_PROJECT_DIR)."""
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_demo.py").write_text(
+        "def test_demo():\n    assert True\n", encoding="utf-8"
+    )
+    (tmp_path / "Makefile").write_text(
+        "test-fast:\n\t@echo mock-test-fast-ok\n", encoding="utf-8"
+    )
+
+
+def test_validate_test_segmentation_help_exits_0() -> None:
+    """TEST-SEGMENTATION-SMOKE: --help → exit 0 with the description marker."""
+    res = _run_test_segmentation("--help")
+    assert res.returncode == 0
+    assert "Validate test segmentation" in res.stdout
+
+
+def test_validate_test_segmentation_save_results_mock_tree(tmp_path) -> None:
+    """TEST-SEGMENTATION-SMOKE: --save-results in a mock lab tree → exit 0
+    with the header on stdout and results JSON written under the mock tree."""
+    _write_mock_lab_tree(tmp_path)
+    res = _run_test_segmentation("--save-results", project_dir=tmp_path)
+    assert res.returncode == 0, res.stderr
+    assert "Test Segmentation Validation" in res.stdout
+    results_file = tmp_path / "data" / "test_segmentation_results.json"
+    assert results_file.exists()
+    payload = json.loads(results_file.read_text(encoding="utf-8"))
+    assert "analysis" in payload
+    assert "test_fast" in payload
+    assert payload["analysis"]["total_test_files"] == 1
