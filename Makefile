@@ -234,6 +234,13 @@ test-ts:
 # If the suite hits tab-loading timeouts (analytics/risk panels not visible),
 # the backend has degraded — restart it and re-run before debugging anything
 # else (evidence: fresh backend 20/20 vs degraded 16-19/20, all timeout-flakes).
+# webServer cold start: the first in-session `bunx --bun vite` can take >2m
+# (bun cache resolution; playwright.config.ts timeout is 300s). If a run
+# times out with zero server output, prewarm once with
+#   bunx --bun vite --host 127.0.0.1 --port 4173
+# (Ctrl-C once it serves) and re-run. The config never reuses an existing
+# PORT listener: a leftover `vite` process (e.g. from a killed run) surfaces
+# as an immediate EADDRINUSE — kill the stray process and re-run.
 test-browser:
 	@echo "=== Test Suite (browser): $$(date) ==="; \
 	bun run test:dashboard-browser; \

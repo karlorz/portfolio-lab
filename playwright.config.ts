@@ -20,7 +20,12 @@ export default defineConfig({
   webServer: {
     command: `bunx --bun vite --host 127.0.0.1 --port ${PORT}`,
     url: baseURL,
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    // Local-only suite (playwright is absent from .github/workflows/ci.yml):
+    // always launch a fresh server. Reusing a leftover PORT listener caused
+    // a zero-output 120s timeout flake; a stale listener now fails fast with
+    // EADDRINUSE (kill the stray process and re-run). 300s covers the cold
+    // first-in-session `bunx --bun vite` start (bun cache resolution).
+    reuseExistingServer: false,
+    timeout: 300_000,
   },
 });
