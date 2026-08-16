@@ -437,3 +437,82 @@ def test_detect_cron_overlap_overlapping_exits_1(tmp_path) -> None:
     res = _run_detect_overlap(status, bins)
     assert res.returncode == 1
     assert "Overlapping cron jobs" in (res.stdout + res.stderr)
+
+
+# DATA-QUALITY-SMOKE (Item Q6, 2026-08-17): subprocess smoke for the offline
+# public price quality auditor (scripts/check_public_data_quality.py). All
+# cases pass an explicit --prices tmp fixture and --json-report tmp path so
+# live PUBLIC_DATA_DIR state is never read.
+DATA_QUALITY = os.path.join("scripts", "check_public_data_quality.py")
+
+
+def _run_data_quality(*args: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, DATA_QUALITY, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _clean_prices(tmp_path: Path) -> Path:
+    path = tmp_path / "prices.json"
+    path.write_text(
+        json.dumps(
+            {
+                "SPY": [
+                    {"d": "2026-08-13", "p": 100.0},
+                    {"d": "2026-08-14", "p": 101.0},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_check_public_data_quality_clean_payload_exits_0(tmp_path) -> None:
+    """DATA-QUALITY-SMOKE: clean synthetic payload → exit 0 with the pass
+    marker."""
+    prices = _clean_prices(tmp_path)
+    res = _run_data_quality("--prices", str(prices))
+    assert res.returncode == 0, res.stderr
+    assert "price data quality check passed" in res.stdout
+
+
+def test_check_public_data_quality_corrupted_payload_exits_1(tmp_path) -> None:
+    """DATA-QUALITY-SMOKE: duplicate-date payload → exit 1 with stderr
+    ERROR: markers."""
+    prices = _clean_prices(tmp_path)
+    prices.write_text(
+        json.dumps(
+            {
+                "SPY": [
+                    {"d": "2026-08-14", "p": 100.0},
+                    {"d": "2026-08-14", "p": 101.0},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    res = _run_data_quality("--prices", str(prices))
+    assert res.returncode == 1
+    assert "ERROR:" in res.stderr
+
+
+def test_check_public_data_quality_json_report_written(tmp_path) -> None:
+    """DATA-QUALITY-SMOKE: --json-report writes the full audit report."""
+    prices = _clean_prices(tmp_path)
+    report = tmp_path / "report.json"
+    res = _run_data_quality("--prices", str(prices), "--json-report", str(report))
+    assert res.returncode == 0, res.stderr
+    assert report.exists()
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "public-price-data-quality-cli/v1"
+    assert payload["status"] in ("ok", "warn", "fail")
+    assert payload["symbols_checked"] == 1
