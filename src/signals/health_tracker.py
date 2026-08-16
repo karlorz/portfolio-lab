@@ -7,7 +7,6 @@ Tracks rolling accuracy of signal sources to enable dynamic weight adjustment
 when signals show degradation (health < 0.5 triggers weight reduction).
 
 References:
-- v3.12 spec: wiki/projects/portfolio-lab/work/2026-05-14-v312-signal-health-decay-tracking/
 - trending-quant-strategies-2026-mid-may-update: Quality over quantity pivot
 """
 
