@@ -96,7 +96,7 @@ cli_entry_override:
   construction, optimizer, research notebooks
 - `src/llm/`, `src/nlp/` — sentiment client + earnings/FOMC analyzers
 - `src/dashboard/`, `src/components/`, `src/monitor/` — React UI
-- `src/crypto/`, `src/options/`, `src/broker/`, `src/trading/` — asset
+- `src/crypto/`, `src/options/`, `src/broker/` — asset
   class specific + broker abstraction + live trading prep
 
 Python tests run through `make test` with ML disabled and a 3GB cap; use the
