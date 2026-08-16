@@ -22,6 +22,7 @@ import logging
 import math
 import sqlite3
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -378,108 +379,97 @@ class TestFetchSkewIndexEdgeCases:
 
 
 # =========================================================================
-# 5. Computation edge cases — Put/Call ratio
+# 5. Computation edge cases — Put/Call ratio (CBOE daily page source)
 # =========================================================================
 
+# Recorded snapshot of https://www.cboe.com/us/options/market_statistics/daily/
+# (2026-08-16; server-rendered; EQUITY PUT/CALL RATIO row = 0.52).
+CBOE_FIXTURE = Path(__file__).parent / "fixtures" / "cboe_daily_market_stats.html"
+
+
+def _page_fetch(text: str):
+    """Return a requests.get stand-in returning a page with the given HTML."""
+
+    def _fake_get(_url, **kwargs):
+        resp = MagicMock()
+        resp.text = text
+        return resp
+
+    return _fake_get
+
+
 class TestFetchPutCallRatioEdgeCases:
-    """Edge cases for _fetch_put_call_ratio."""
+    """Edge cases for _fetch_put_call_ratio (CBOE daily page, Item 10)."""
 
-    def test_empty_closes_list(self, tmp_path):
-        """Empty Close column after dropna -> fallback default."""
+    def test_live_fixture_parses_equity_row(self, tmp_path):
+        """Recorded CBOE daily page parses to the EQUITY PUT/CALL RATIO value."""
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        mock_ticker = MagicMock()
-        mock_ticker.history.return_value = pd.DataFrame({"Close": []})
-        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", return_value=mock_ticker):
+        page = CBOE_FIXTURE.read_text(encoding="utf-8")
+        with patch("src.data.behavioral_sentiment_fetcher.requests.get", _page_fetch(page)):
             ratio = fetcher._fetch_put_call_ratio()
-            assert ratio == 0.65
+        assert ratio == pytest.approx(0.52)  # frozen 2026-08-16 snapshot
 
-    def test_single_close_value(self, tmp_path):
-        """Single-element Close array averages to that value."""
+    def test_single_ratio_value(self, tmp_path):
+        """EQUITY row with one value parses directly."""
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        mock_ticker = MagicMock()
-        mock_ticker.history.return_value = pd.DataFrame({"Close": [0.72]})
-        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", return_value=mock_ticker):
+        page = "<td>EQUITY PUT/CALL RATIO</td><td>0.72</td>"
+        with patch("src.data.behavioral_sentiment_fetcher.requests.get", _page_fetch(page)):
             ratio = fetcher._fetch_put_call_ratio()
-            assert abs(ratio - 0.72) < 0.01
+        assert abs(ratio - 0.72) < 0.01
 
-    def test_nan_in_closes(self, tmp_path):
-        """NaN in Close values should be dropped."""
+    def test_row_label_case_and_whitespace_tolerant(self, tmp_path):
+        """Lowercase label + extra whitespace still parse (defensive match)."""
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        mock_ticker = MagicMock()
-        mock_ticker.history.return_value = pd.DataFrame({"Close": [0.7, float("nan"), 0.8]})
-        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", return_value=mock_ticker):
+        page = "<td>  equity put/call ratio  </td>  <td class='x'>0.81</td>"
+        with patch("src.data.behavioral_sentiment_fetcher.requests.get", _page_fetch(page)):
             ratio = fetcher._fetch_put_call_ratio()
-            assert abs(ratio - 0.75) < 0.01  # (0.7 + 0.8) / 2
+        assert abs(ratio - 0.81) < 0.01
 
-    def test_all_nan_closes(self, tmp_path):
-        """All NaN Closes -> empty after dropna -> fallback default."""
+    def test_first_day_row_wins(self, tmp_path):
+        """Multiple day rows: the first (latest) published day is used."""
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        mock_ticker = MagicMock()
-        mock_ticker.history.return_value = pd.DataFrame({"Close": [float("nan"), float("nan")]})
-        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", return_value=mock_ticker):
-            ratio = fetcher._fetch_put_call_ratio()
-            assert ratio == 0.65
-
-    def test_missing_close_column(self, tmp_path):
-        """DataFrame with no 'Close' column -> fallback default."""
-        db = tmp_path / "test.db"
-        fetcher = BehavioralSentimentFetcher(cache_db=db)
-        mock_ticker = MagicMock()
-        mock_ticker.history.return_value = pd.DataFrame({"Open": [100.0]})
-        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", return_value=mock_ticker):
-            ratio = fetcher._fetch_put_call_ratio()
-            assert ratio == 0.65
-
-    def test_put_call_bulk_values(self, tmp_path):
-        """Multiple Close values compute correct average."""
-        db = tmp_path / "test.db"
-        fetcher = BehavioralSentimentFetcher(cache_db=db)
-        mock_ticker = MagicMock()
-        mock_ticker.history.return_value = pd.DataFrame({"Close": [0.5, 0.6, 0.7, 0.8, 0.9]})
-        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", return_value=mock_ticker):
-            ratio = fetcher._fetch_put_call_ratio()
-            assert abs(ratio - 0.7) < 0.01  # (0.5+0.6+0.7+0.8+0.9)/5
-
-    def test_cpce_yfinance_error_scoped_suppressed(self, tmp_path, caplog):
-        """Dead-symbol ^CPCE yfinance ERROR records are scoped-suppressed.
-
-        yfinance logs ERROR via its own logger for dead symbols (cron.log
-        "logger": "yfinance"; 322-line baseline, both variants contain
-        "CPCE"). The fetcher installs a content filter around the ^CPCE
-        fetch only: ERROR records mentioning CPCE are dropped, the filter
-        must be removed in finally (global yfinance logger left clean), and
-        the 0.65 fallback contract is untouched.
-        """
-        db = tmp_path / "test.db"
-        fetcher = BehavioralSentimentFetcher(cache_db=db)
-
-        def _failing_history(*args, **kwargs):
-            # Mimic real yfinance behavior for the dead symbol: log ERROR,
-            # then fail the fetch like the live 404 path.
-            logging.getLogger("yfinance").error(
-                "HTTP Error 404: Quote not found for symbol: ^CPCE"
-            )
-            raise OSError("simulated 404")
-
-        mock_ticker = MagicMock()
-        mock_ticker.history.side_effect = _failing_history
-        with caplog.at_level(logging.ERROR, logger="yfinance"):
-            with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", return_value=mock_ticker):
-                ratio = fetcher._fetch_put_call_ratio()
-
-        assert ratio == 0.65
-        # No ERROR-level record mentioning CPCE may reach handlers; the
-        # fetcher's own WARNING fallback line may remain (warning, not error).
-        assert not any(
-            r.levelno >= logging.ERROR and "CPCE" in r.getMessage()
-            for r in caplog.records
+        page = (
+            "<td>EQUITY PUT/CALL RATIO</td><td>0.66</td></tr>"
+            "<tr><td>EQUITY PUT/CALL RATIO</td><td>0.70</td>"
         )
-        # Scoped filter must not leak onto the shared yfinance logger.
-        assert logging.getLogger("yfinance").filters == []
+        with patch("src.data.behavioral_sentiment_fetcher.requests.get", _page_fetch(page)):
+            ratio = fetcher._fetch_put_call_ratio()
+        assert abs(ratio - 0.66) < 0.01
+
+    def test_missing_equity_row_degrades_to_065(self, tmp_path):
+        """Page without the EQUITY row -> fallback default."""
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        page = "<td>INDEX PUT/CALL RATIO</td><td>0.90</td>"
+        with patch("src.data.behavioral_sentiment_fetcher.requests.get", _page_fetch(page)):
+            ratio = fetcher._fetch_put_call_ratio()
+        assert ratio == 0.65
+
+    def test_malformed_value_degrades_to_065(self, tmp_path):
+        """Non-numeric row value -> fallback default."""
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+        page = "<td>EQUITY PUT/CALL RATIO</td><td>n/a</td>"
+        with patch("src.data.behavioral_sentiment_fetcher.requests.get", _page_fetch(page)):
+            ratio = fetcher._fetch_put_call_ratio()
+        assert ratio == 0.65
+
+    def test_fetch_error_degrades_to_065(self, tmp_path):
+        """Page fetch exception -> fallback default (G6 degrade contract)."""
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+
+        def _fail(_url, **kwargs):
+            raise TimeoutError("stalled")
+
+        with patch("src.data.behavioral_sentiment_fetcher.requests.get", _fail):
+            ratio = fetcher._fetch_put_call_ratio()
+        assert ratio == 0.65
+        assert fetcher._yf_cache["^CPCE"][0] == 0.65
 
 
 # =========================================================================

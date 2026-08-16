@@ -391,16 +391,19 @@ class TestFetchPutCallRatio:
     def test_returns_default_on_failure(self, tmp_path):
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", side_effect=RuntimeError("error")):
+        with patch(
+            "src.data.behavioral_sentiment_fetcher.requests.get",
+            side_effect=TimeoutError("stalled"),
+        ):
             ratio = fetcher._fetch_put_call_ratio()
             assert ratio == 0.65
 
     def test_parses_closes(self, tmp_path):
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        mock_ticker = MagicMock()
-        mock_ticker.history.return_value = pd.DataFrame({"Close": [0.7, 0.8, 0.75]})
-        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", return_value=mock_ticker):
+        resp = MagicMock()
+        resp.text = "<td>EQUITY PUT/CALL RATIO</td><td>0.75</td>"
+        with patch("src.data.behavioral_sentiment_fetcher.requests.get", return_value=resp):
             ratio = fetcher._fetch_put_call_ratio()
             assert abs(ratio - 0.75) < 0.01
 
@@ -1019,25 +1022,37 @@ class TestSkewInstanceCaching:
 class TestCpceInstanceCaching:
     """Test that _fetch_put_call_ratio uses instance-level 60s cache."""
 
+    @staticmethod
+    def _page(text: str):
+        resp = MagicMock()
+        resp.text = text
+        return resp
+
     def test_cpce_cache_returns_within_ttl(self, tmp_path):
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        mock_ticker = MagicMock()
-        mock_ticker.history.return_value = pd.DataFrame({"Close": [0.7, 0.8, 0.75]})
-        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", return_value=mock_ticker):
+        calls = []
+
+        def _fake_get(_url, **kwargs):
+            calls.append(1)
+            return self._page("<td>EQUITY PUT/CALL RATIO</td><td>0.75</td>")
+
+        with patch("src.data.behavioral_sentiment_fetcher.requests.get", _fake_get):
             r1 = fetcher._fetch_put_call_ratio()
         assert abs(r1 - 0.75) < 0.01
         # Second call uses cache
         r2 = fetcher._fetch_put_call_ratio()
         assert r2 == r1
+        assert len(calls) == 1
 
     def test_cpce_cache_resets_after_expiry(self, tmp_path):
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
         fetcher._yf_cache["^CPCE"] = (0.75, datetime.now() - timedelta(seconds=120))
-        mock_ticker = MagicMock()
-        mock_ticker.history.return_value = pd.DataFrame({"Close": [0.55]})
-        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", return_value=mock_ticker):
+        with patch(
+            "src.data.behavioral_sentiment_fetcher.requests.get",
+            lambda _url, **kwargs: self._page("<td>EQUITY PUT/CALL RATIO</td><td>0.55</td>"),
+        ):
             r = fetcher._fetch_put_call_ratio()
         assert abs(r - 0.55) < 0.01
 
@@ -1088,33 +1103,43 @@ class TestSkewNaNHandling:
         assert skew == 110.0
 
 
-class TestCpceNaNHandling:
-    def test_cpce_nan_returns_default(self, tmp_path):
+class TestCpceFallbackHandling:
+    def test_cpce_missing_row_returns_default(self, tmp_path):
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        mock_ticker = MagicMock()
-        mock_ticker.history.return_value = pd.DataFrame({"Close": [float("nan")]})
-        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", return_value=mock_ticker):
+        with patch(
+            "src.data.behavioral_sentiment_fetcher.requests.get",
+            lambda _url, **kwargs: TestCpceFallbackHandling._page("<td>INDEX PUT/CALL RATIO</td><td>0.9</td>"),
+        ):
             ratio = fetcher._fetch_put_call_ratio()
         assert ratio == 0.65
 
-    def test_cpce_no_close_column(self, tmp_path):
+    def test_cpce_malformed_value_returns_default(self, tmp_path):
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        mock_ticker = MagicMock()
-        mock_ticker.history.return_value = pd.DataFrame({"Open": [0.7]})  # No Close
-        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", return_value=mock_ticker):
+        with patch(
+            "src.data.behavioral_sentiment_fetcher.requests.get",
+            lambda _url, **kwargs: TestCpceFallbackHandling._page("<td>EQUITY PUT/CALL RATIO</td><td>n/a</td>"),
+        ):
             ratio = fetcher._fetch_put_call_ratio()
         assert ratio == 0.65
 
-    def test_cpce_empty_closes(self, tmp_path):
+    def test_cpce_fetch_error_returns_default(self, tmp_path):
         db = tmp_path / "test.db"
         fetcher = BehavioralSentimentFetcher(cache_db=db)
-        mock_ticker = MagicMock()
-        mock_ticker.history.return_value = pd.DataFrame({"Close": pd.Series(dtype=float)})
-        with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", return_value=mock_ticker):
+
+        def _fail(_url, **kwargs):
+            raise TimeoutError("stalled")
+
+        with patch("src.data.behavioral_sentiment_fetcher.requests.get", _fail):
             ratio = fetcher._fetch_put_call_ratio()
         assert ratio == 0.65
+
+    @staticmethod
+    def _page(text: str):
+        resp = MagicMock()
+        resp.text = text
+        return resp
 
 
 # ---------------------------------------------------------------------------

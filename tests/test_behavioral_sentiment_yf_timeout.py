@@ -10,6 +10,7 @@ instead of hanging or propagating.
 from __future__ import annotations
 
 from datetime import datetime
+from unittest.mock import Mock
 
 import pandas as pd
 import pytest
@@ -83,21 +84,37 @@ def test_fetch_yf_other_failures_degrade_to_default(fetcher):
     assert f._fetch_yf("^SKEW", default=0.0) == 0.0
 
 
-def test_fetch_put_call_ratio_passes_timeout(fetcher):
-    fake = FakeTicker(closes=[0.6, 0.7])
-    f = fetcher(fake)
+def test_fetch_put_call_ratio_passes_timeout(fetcher, monkeypatch):
+    """The CBOE P/C page fetch must pass an explicit timeout= (G6 contract)."""
+    calls = []
+
+    def _fake_get(url, **kwargs):
+        calls.append(kwargs)
+        resp = Mock()
+        resp.text = "<td>EQUITY PUT/CALL RATIO</td><td>0.72</td>"
+        return resp
+
+    monkeypatch.setattr(
+        "src.data.behavioral_sentiment_fetcher.requests.get", _fake_get
+    )
+    f = fetcher(FakeTicker())
 
     value = f._fetch_put_call_ratio()
 
-    assert value == pytest.approx(0.65)
-    assert fake.calls[0]["period"] == "5d"
-    assert TIMEOUT_KWARG in fake.calls[0], "history() must pass an explicit timeout="
+    assert value == pytest.approx(0.72)
+    assert calls and TIMEOUT_KWARG in calls[0], "CBOE page fetch must pass an explicit timeout="
+    assert calls[0][TIMEOUT_KWARG] > 0
 
 
-def test_fetch_put_call_ratio_stall_degrades_to_065(fetcher):
+def test_fetch_put_call_ratio_stall_degrades_to_065(fetcher, monkeypatch):
     """P/C fallback is the documented 0.65 historical average."""
-    fake = FakeTicker(fail=TimeoutError("stalled"))
-    f = fetcher(fake)
+    def _fail(_url, **kwargs):
+        raise TimeoutError("stalled")
+
+    monkeypatch.setattr(
+        "src.data.behavioral_sentiment_fetcher.requests.get", _fail
+    )
+    f = fetcher(FakeTicker())
 
     assert f._fetch_put_call_ratio() == 0.65
     assert f._yf_cache["^CPCE"][0] == 0.65

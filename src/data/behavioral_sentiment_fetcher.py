@@ -11,7 +11,9 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import math
+import re
 
+import requests
 import yfinance as yf
 from src.utils.rate_limiter import rate_limited
 from dataclasses import dataclass, asdict
@@ -45,6 +47,12 @@ CACHE_TTL_HOURS = 4
 # CBOE Data URLs
 CBOE_SKEW_URL = "https://www.cboe.com/us/indices/dashboard/skew/"
 CBOE_VIX_URL = "https://www.cboe.com/tradable_products/vix/"
+CBOE_PCR_URL = "https://www.cboe.com/us/options/market_statistics/daily/"
+
+# Defensive row-label match for the CBOE daily page's "EQUITY PUT/CALL RATIO"
+# table row (case/whitespace tolerant; no HTML-parser dependency). The page is
+# fully server-rendered (verified 2026-08-16); historical CBOE CSVs ended 2019.
+_PCR_ROW_RE = re.compile(r"EQUITY PUT/CALL RATIO\s*</td>\s*<td[^>]*>\s*([0-9.]+)", re.IGNORECASE)
 
 # Explicit network bound for every yfinance history() call (G6): a stalled
 # provider must surface TimeoutError (→ documented fallback) instead of
@@ -274,7 +282,17 @@ class BehavioralSentimentFetcher:
         return 100 + max(0, (vix - 15)) * 2
 
     def _fetch_put_call_ratio(self) -> float:
-        """Fetch CBOE equity put/call ratio (5-day average, cached via _fetch_yf)."""
+        """Fetch CBOE equity put/call ratio from the official daily page.
+
+        ^CPCE is a proprietary CBOE-computed aggregate, not an exchange-listed
+        instrument — yfinance can never resolve it (dead-symbol 404 noise, see
+        I12/I19). Since Item 10 (2026-08-16) the primary source is the
+        official CBOE Daily Market Statistics page (server-rendered; CBOE
+        historical CSVs ended 2019). Semantics: latest published day's value
+        (the yfinance 5-day average never resolved — the constant was the
+        de-facto input, so the live value is strictly more accurate). 0.65
+        remains only as the final fallback (network/page-format failure).
+        """
         now = datetime.now()
         cached = self._yf_cache.get("^CPCE")
         if cached is not None:
@@ -283,32 +301,35 @@ class BehavioralSentimentFetcher:
             if age < 60:
                 return value
 
-        # ^CPCE is a dead symbol: yfinance logs ERROR-level noise via its own
-        # logger on every data run (cron.log "logger": "yfinance"; 322-line
-        # baseline). Scoped filter drops ONLY those records around the fetch
-        # (installed/removed via try/finally); other symbols' real errors
-        # stay visible, and the fetch attempt + fallback below are unchanged.
-        yf_logger = logging.getLogger("yfinance")
-
-        def _drop_cpce_noise(record: logging.LogRecord) -> bool:
-            return "CPCE" not in record.getMessage()
-
-        yf_logger.addFilter(_drop_cpce_noise)
         try:
-            hist = yf.Ticker("^CPCE").history(period="5d", timeout=YF_FETCH_TIMEOUT_SECONDS)
-            if not hist.empty and "Close" in hist.columns:
-                closes = hist["Close"].dropna().tolist()
-                if closes:
-                    avg = sum(closes) / len(closes)
-                    self._yf_cache["^CPCE"] = (avg, now)
-                    return avg
-        except (KeyError, ValueError, TypeError, OSError, RuntimeError, IndexError) as e:
-            logger.warning("yfinance fetch failed for ^CPCE: %s", e)
-        finally:
-            yf_logger.removeFilter(_drop_cpce_noise)
+            resp = requests.get(CBOE_PCR_URL, timeout=YF_FETCH_TIMEOUT_SECONDS)
+            resp.raise_for_status()
+            ratio = self._parse_cboe_pcr_ratio(resp.text)
+            if ratio is not None:
+                self._yf_cache["^CPCE"] = (ratio, now)
+                return ratio
+            logger.warning("CBOE P/C page parsed but EQUITY PUT/CALL RATIO row not found")
+        except (requests.RequestException, TimeoutError, ValueError, TypeError) as e:
+            logger.warning("CBOE P/C page fetch failed: %s", e)
 
         self._yf_cache["^CPCE"] = (0.65, now)
-        return 0.65  # Historical average
+        return 0.65  # Historical average (final fallback)
+
+    @staticmethod
+    def _parse_cboe_pcr_ratio(page_html: str) -> Optional[float]:
+        """Extract the latest equity put/call ratio from the CBOE daily page.
+
+        Defensive row-label match only; returns the first published day's
+        value, or None when the row is absent/malformed.
+        """
+        match = _PCR_ROW_RE.search(page_html)
+        if match is None:
+            return None
+        try:
+            value = float(match.group(1))
+        except ValueError:
+            return None
+        return value if value > 0 else None
     
     def _estimate_retail_flow(self) -> RetailFlow:
         """Estimate retail positioning from available data"""
