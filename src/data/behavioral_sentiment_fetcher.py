@@ -283,6 +283,17 @@ class BehavioralSentimentFetcher:
             if age < 60:
                 return value
 
+        # ^CPCE is a dead symbol: yfinance logs ERROR-level noise via its own
+        # logger on every data run (cron.log "logger": "yfinance"; 322-line
+        # baseline). Scoped filter drops ONLY those records around the fetch
+        # (installed/removed via try/finally); other symbols' real errors
+        # stay visible, and the fetch attempt + fallback below are unchanged.
+        yf_logger = logging.getLogger("yfinance")
+
+        def _drop_cpce_noise(record: logging.LogRecord) -> bool:
+            return "CPCE" not in record.getMessage()
+
+        yf_logger.addFilter(_drop_cpce_noise)
         try:
             hist = yf.Ticker("^CPCE").history(period="5d", timeout=YF_FETCH_TIMEOUT_SECONDS)
             if not hist.empty and "Close" in hist.columns:
@@ -293,6 +304,8 @@ class BehavioralSentimentFetcher:
                     return avg
         except (KeyError, ValueError, TypeError, OSError, RuntimeError, IndexError) as e:
             logger.warning("yfinance fetch failed for ^CPCE: %s", e)
+        finally:
+            yf_logger.removeFilter(_drop_cpce_noise)
 
         self._yf_cache["^CPCE"] = (0.65, now)
         return 0.65  # Historical average

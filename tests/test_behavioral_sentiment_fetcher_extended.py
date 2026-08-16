@@ -444,6 +444,43 @@ class TestFetchPutCallRatioEdgeCases:
             ratio = fetcher._fetch_put_call_ratio()
             assert abs(ratio - 0.7) < 0.01  # (0.5+0.6+0.7+0.8+0.9)/5
 
+    def test_cpce_yfinance_error_scoped_suppressed(self, tmp_path, caplog):
+        """Dead-symbol ^CPCE yfinance ERROR records are scoped-suppressed.
+
+        yfinance logs ERROR via its own logger for dead symbols (cron.log
+        "logger": "yfinance"; 322-line baseline, both variants contain
+        "CPCE"). The fetcher installs a content filter around the ^CPCE
+        fetch only: ERROR records mentioning CPCE are dropped, the filter
+        must be removed in finally (global yfinance logger left clean), and
+        the 0.65 fallback contract is untouched.
+        """
+        db = tmp_path / "test.db"
+        fetcher = BehavioralSentimentFetcher(cache_db=db)
+
+        def _failing_history(*args, **kwargs):
+            # Mimic real yfinance behavior for the dead symbol: log ERROR,
+            # then fail the fetch like the live 404 path.
+            logging.getLogger("yfinance").error(
+                "HTTP Error 404: Quote not found for symbol: ^CPCE"
+            )
+            raise OSError("simulated 404")
+
+        mock_ticker = MagicMock()
+        mock_ticker.history.side_effect = _failing_history
+        with caplog.at_level(logging.ERROR, logger="yfinance"):
+            with patch("src.data.behavioral_sentiment_fetcher.yf.Ticker", return_value=mock_ticker):
+                ratio = fetcher._fetch_put_call_ratio()
+
+        assert ratio == 0.65
+        # No ERROR-level record mentioning CPCE may reach handlers; the
+        # fetcher's own WARNING fallback line may remain (warning, not error).
+        assert not any(
+            r.levelno >= logging.ERROR and "CPCE" in r.getMessage()
+            for r in caplog.records
+        )
+        # Scoped filter must not leak onto the shared yfinance logger.
+        assert logging.getLogger("yfinance").filters == []
+
 
 # =========================================================================
 # 6. Computation edge cases — Options sentiment calculation
