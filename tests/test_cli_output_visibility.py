@@ -3206,6 +3206,50 @@ def test_bocd_vs_kmeans_comparison_fixture_run_exits_0(tmp_path) -> None:
     assert (tmp_path / "data" / "bocd_comparison" / "kmeans_labels.npy").exists()
 
 
+# PYTEST-WATCHDOG-SMOKE (Item Q36, 2026-08-17): subprocess smoke for the
+# pytest process and temporary-directory watchdog (scripts/pytest_watchdog.py).
+# The smoke runs with --dry-run and points PYTEST_WATCHDOG_LOG and
+# PYTEST_WATCHDOG_TMP_DIR at tmp_path so live logs and filesystem are untouched.
+PYTEST_WATCHDOG = os.path.join("scripts", "pytest_watchdog.py")
+
+
+def _run_pytest_watchdog(
+    *args: str, extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    if extra_env:
+        env.update(extra_env)
+    return subprocess.run(
+        [sys.executable, PYTEST_WATCHDOG, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def test_pytest_watchdog_dry_run_exits_0(tmp_path) -> None:
+    """PYTEST-WATCHDOG-SMOKE: --dry-run with hermetic tmp log/dir -> exit 0
+    and process snapshot written to log file."""
+    log_file = tmp_path / "watchdog.log"
+    tmp_watch_dir = tmp_path / "pytest_tmp"
+    tmp_watch_dir.mkdir()
+    res = _run_pytest_watchdog(
+        "--dry-run",
+        extra_env={
+            "PYTEST_WATCHDOG_LOG": str(log_file),
+            "PYTEST_WATCHDOG_TMP_DIR": str(tmp_watch_dir),
+        },
+    )
+    assert res.returncode == 0, res.stderr
+    assert log_file.exists()
+    content = log_file.read_text(encoding="utf-8")
+    assert "=== 202" in content
+
+
+
 
 
 
