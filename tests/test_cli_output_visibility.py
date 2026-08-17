@@ -2546,6 +2546,101 @@ def test_pbo_cscv_diagnostic_runs_exits_0() -> None:
     assert "Pure noise PBO:" in res.stdout
 
 
+# REGIME-GATING-GAP-ANALYSIS-SMOKE (Item Q30, 2026-08-17): subprocess smoke for
+# the regime gating gap analysis CLI (scripts/regime_gating_gap_analysis.py).
+# The script derives SRC_DIR from __file__.parents[1] and accesses
+# public/data/prices.json and data/regime_gating_analysis.json. A byte-identical
+# copy under a mock root keeps live public/data/prices.json and data/ untouched.
+REGIME_GATING_GAP_ANALYSIS = os.path.join(
+    "scripts", "regime_gating_gap_analysis.py"
+)
+
+
+def _run_regime_gating_analysis(
+    script: str, *args: str
+) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, script, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _copy_regime_gating_analysis(tmp_path: Path) -> Path:
+    """Byte-identical copy under a mock root."""
+    import shutil
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    shutil.copyfile(
+        REGIME_GATING_GAP_ANALYSIS,
+        scripts_dir / "regime_gating_gap_analysis.py",
+    )
+    return scripts_dir / "regime_gating_gap_analysis.py"
+
+
+def _write_regime_gating_prices(public_dir: Path, n_days: int = 120) -> None:
+    """Deterministic synthetic business-day prices for SPY, TLT, GLD."""
+    import datetime
+    import math
+
+    public_dir.mkdir(parents=True, exist_ok=True)
+    day = datetime.date(2025, 1, 2)
+    dates: list[str] = []
+    while len(dates) < n_days:
+        if day.weekday() < 5:
+            dates.append(day.isoformat())
+        day += datetime.timedelta(days=1)
+    payload = {}
+    for i, sym in enumerate(["SPY", "TLT", "GLD"]):
+        base = 100.0 + i * 20.0
+        payload[sym] = [
+            {
+                "d": date,
+                "p": round(
+                    base * (1 + 0.0005 * idx + 0.015 * math.sin(idx / 13.0 + i)), 4
+                ),
+            }
+            for idx, date in enumerate(dates)
+        ]
+    (public_dir / "prices.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_regime_gating_gap_analysis_missing_prices_exits_1(tmp_path) -> None:
+    """REGIME-GATING-GAP-ANALYSIS-SMOKE: mock root without prices.json -> exit 1
+    with FileNotFoundError on stderr."""
+    copy = _copy_regime_gating_analysis(tmp_path)
+    res = _run_regime_gating_analysis(str(copy))
+    assert res.returncode == 1
+    assert "FileNotFoundError" in res.stderr
+    assert "prices.json" in res.stderr
+
+
+def test_regime_gating_gap_analysis_fixture_run_exits_0(tmp_path) -> None:
+    """REGIME-GATING-GAP-ANALYSIS-SMOKE: hermetic mock SPY/TLT/GLD prices fixture
+    -> exit 0 with summary headers and mock data/regime_gating_analysis.json written."""
+    copy = _copy_regime_gating_analysis(tmp_path)
+    _write_regime_gating_prices(tmp_path / "public" / "data")
+    (tmp_path / "data").mkdir(parents=True, exist_ok=True)
+    res = _run_regime_gating_analysis(str(copy))
+    assert res.returncode == 0, res.stderr
+    assert "Regime Gating Gap Analysis" in (res.stdout + res.stderr)
+    assert "GATE RULE RECOMMENDATIONS" in (res.stdout + res.stderr)
+    out_file = tmp_path / "data" / "regime_gating_analysis.json"
+    assert out_file.exists()
+    payload = json.loads(out_file.read_text(encoding="utf-8"))
+    assert "regime_distribution" in payload
+    assert "signals" in payload
+    assert "gate_recommendations" in payload
+
+
+
 
 
 
