@@ -2257,3 +2257,142 @@ def test_vol_adjusted_momentum_fixture_run_exits_0(tmp_path) -> None:
     assert "Sharpe delta" in res.stdout
 
 
+# GOLD-ALLOCATION-SWEEP-SMOKE (Item Q27, 2026-08-17): subprocess smoke for the
+# gold allocation sensitivity sweep CLI (scripts/gold_allocation_sweep.py). The
+# script imports from src.paths (PRICES_PATH = PRICES_JSON, OUTPUT_PATH =
+# DATA_DIR / ...), src.backtest.metrics, and src.utils.log_config, resolving
+# PROJECT_ROOT via __file__.parents[1]. A byte-identical copy under a mock root
+# whose mock src package points DATA_DIR/PRICES_JSON into tmp and exposes the
+# required backtest metric helpers isolates the run completely: live
+# data/gold_allocation_sweep_2026.json and public/data/prices.json are never
+# touched.
+GOLD_ALLOCATION_SWEEP = os.path.join("scripts", "gold_allocation_sweep.py")
+
+
+def _run_gold_allocation_sweep(
+    script: str, *args: str
+) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, script, *args],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _copy_gold_allocation_sweep(tmp_path: Path) -> Path:
+    """Byte-identical copy under a mock root plus a mock src package:
+    src/paths.py (DATA_DIR + PRICES_JSON in tmp_path),
+    src/utils/log_config.py (configure_logging stub),
+    and src/backtest/metrics.py (delegating compute_metrics, compute_crisis_returns,
+    save_results_json, BacktestMetrics dataclass, TRADING_DAYS_PER_YEAR)."""
+    import shutil
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    shutil.copyfile(
+        GOLD_ALLOCATION_SWEEP, scripts_dir / "gold_allocation_sweep.py"
+    )
+
+    src_dir = tmp_path / "src"
+    (src_dir / "backtest").mkdir(parents=True)
+    (src_dir / "utils").mkdir(parents=True)
+    (src_dir / "__init__.py").write_text("", encoding="utf-8")
+    (src_dir / "backtest" / "__init__.py").write_text("", encoding="utf-8")
+    (src_dir / "utils" / "__init__.py").write_text("", encoding="utf-8")
+
+    (src_dir / "paths.py").write_text(
+        "from pathlib import Path\n"
+        "DATA_DIR = Path(__file__).resolve().parent.parent / 'data'\n"
+        "DATA_DIR.mkdir(parents=True, exist_ok=True)\n"
+        "PRICES_JSON = Path(__file__).resolve().parent.parent / 'public' / 'data' / 'prices.json'\n",
+        encoding="utf-8",
+    )
+    (src_dir / "utils" / "log_config.py").write_text(
+        "import logging\n"
+        "def configure_logging(*args, **kwargs):\n"
+        "    logging.basicConfig(level=logging.INFO)\n",
+        encoding="utf-8",
+    )
+    (src_dir / "backtest" / "metrics.py").write_text(
+        "from dataclasses import dataclass\n"
+        "import json\n"
+        "TRADING_DAYS_PER_YEAR = 252\n"
+        "@dataclass\n"
+        "class BacktestMetrics:\n"
+        "    cagr: float = 0.08\n"
+        "    sharpe_ratio: float = 0.79\n"
+        "    volatility: float = 0.10\n"
+        "    max_drawdown: float = 0.12\n"
+        "def compute_metrics(equity_curve, initial_capital=1.0):\n"
+        "    return BacktestMetrics()\n"
+        "def compute_crisis_returns(prices, trading_days, crisis_years, equity_curve=None):\n"
+        "    return {'2008': -5.0, '2020': 2.0, '2022': -10.0}\n"
+        "def save_results_json(data, output_path):\n"
+        "    with open(output_path, 'w') as f:\n"
+        "        json.dump(data, f, indent=2)\n",
+        encoding="utf-8",
+    )
+    return scripts_dir / "gold_allocation_sweep.py"
+
+
+def _write_gold_sweep_prices(public_dir: Path, n_days: int = 260) -> None:
+    """Deterministic synthetic business-day prices for SPY, GLD, TLT, IEF."""
+    import datetime
+    import math
+
+    public_dir.mkdir(parents=True, exist_ok=True)
+    day = datetime.date(2025, 1, 2)
+    dates: list[str] = []
+    while len(dates) < n_days:
+        if day.weekday() < 5:
+            dates.append(day.isoformat())
+        day += datetime.timedelta(days=1)
+    payload = {}
+    for i, sym in enumerate(["SPY", "GLD", "TLT", "IEF"]):
+        base = 100.0 + i * 20.0
+        payload[sym] = [
+            {
+                "d": date,
+                "p": round(
+                    base * (1 + 0.0006 * idx + 0.01 * math.sin(idx / 19.0)), 4
+                ),
+            }
+            for idx, date in enumerate(dates)
+        ]
+    (public_dir / "prices.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_gold_allocation_sweep_missing_prices_exits_1(tmp_path) -> None:
+    """GOLD-ALLOCATION-SWEEP-SMOKE: mock root without prices.json -> exit 1
+    with FileNotFoundError on stderr."""
+    copy = _copy_gold_allocation_sweep(tmp_path)
+    res = _run_gold_allocation_sweep(str(copy))
+    assert res.returncode == 1
+    assert "FileNotFoundError" in res.stderr
+    assert "prices.json" in res.stderr
+
+
+def test_gold_allocation_sweep_fixture_run_exits_0(tmp_path) -> None:
+    """GOLD-ALLOCATION-SWEEP-SMOKE: hermetic mock SPY/GLD/TLT/IEF prices fixture
+    -> exit 0 with summary headers and results JSON written to the mock output."""
+    copy = _copy_gold_allocation_sweep(tmp_path)
+    _write_gold_sweep_prices(tmp_path / "public" / "data")
+    res = _run_gold_allocation_sweep(str(copy))
+    assert res.returncode == 0, res.stderr
+    assert "GOLD ALLOCATION SENSITIVITY SWEEP" in (res.stdout + res.stderr)
+    assert "TOP 20 CONFIGURATIONS" in res.stdout
+    out_file = tmp_path / "data" / "gold_allocation_sweep_2026.json"
+    assert out_file.exists()
+    payload = json.loads(out_file.read_text(encoding="utf-8"))
+    assert "metadata" in payload
+    assert "all_results" in payload
+    assert payload["metadata"]["total_configs"] > 0
+
+
+
