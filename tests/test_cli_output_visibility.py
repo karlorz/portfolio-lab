@@ -1707,3 +1707,117 @@ def test_recovery_cli_verify_missing_archive_exits_1(tmp_path) -> None:
     payload = json.loads(res.stdout)
     assert payload["ok"] is False
     assert "archive file missing" in payload["error"]
+
+
+# VIX-TERM-STRUCTURE-SMOKE (Item Q21, 2026-08-17): subprocess smoke for the
+# VIX term-structure updater CLI (scripts/update_vix_term_structure.py). The
+# script has no CLI args and writes via DATA_DIR / PUBLIC_DATA_DIR (no env
+# override), so every case runs a byte-identical copy under a mock root whose
+# minimal src package points both dirs inside the mock tree and stubs
+# src.data.vix_futures.VIXTermStructure (Q13/Q18 copy pattern; the mock src
+# shadows repo src, so the stub is required). Repo data/vix_term_structure
+# .json and public/data/vix_term_structure.json are never touched.
+UPDATE_VIX_TS = os.path.join("scripts", "update_vix_term_structure.py")
+
+
+def _run_update_vix_term_structure(script: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _copy_update_vix_ts(tmp_path: Path) -> Path:
+    """Byte-identical copy under a mock root plus a minimal mock src package:
+    paths.DATA_DIR / PUBLIC_DATA_DIR inside the mock tree and a
+    VIXTermStructure stub (the copy imports pandas and calls
+    src.data.vix_futures.VIXTermStructure at runtime)."""
+    import shutil
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    shutil.copyfile(UPDATE_VIX_TS, scripts_dir / "update_vix_term_structure.py")
+    (tmp_path / "src" / "data").mkdir(parents=True)
+    (tmp_path / "src" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "src" / "data" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "src" / "paths.py").write_text(
+        "from pathlib import Path\n"
+        "DATA_DIR = Path(__file__).resolve().parent.parent / 'data'\n"
+        "PUBLIC_DATA_DIR = Path(__file__).resolve().parent.parent / 'public' / 'data'\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "src" / "data" / "vix_futures.py").write_text(
+        "class VIXTermStructure:\n"
+        "    def __init__(self, **kwargs):\n"
+        "        self._data = kwargs\n"
+        "    @classmethod\n"
+        "    def from_dict(cls, raw):\n"
+        "        return cls(**raw)\n"
+        "    def to_dict(self):\n"
+        "        return dict(self._data)\n",
+        encoding="utf-8",
+    )
+    return scripts_dir / "update_vix_term_structure.py"
+
+
+def _write_vix_market_db(data_dir: Path) -> None:
+    """Hermetic market.db with ^VIX + ^VIX3M rows on the same dates."""
+    import sqlite3
+
+    data_dir.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(data_dir / "market.db"))
+    conn.execute("CREATE TABLE prices (date TEXT, close REAL, symbol TEXT)")
+    conn.executemany(
+        "INSERT INTO prices (date, close, symbol) VALUES (?, ?, ?)",
+        [
+            ("2026-08-12", 15.0, "^VIX"),
+            ("2026-08-13", 15.5, "^VIX"),
+            ("2026-08-14", 16.0, "^VIX"),
+            ("2026-08-12", 17.0, "^VIX3M"),
+            ("2026-08-13", 17.2, "^VIX3M"),
+            ("2026-08-14", 17.5, "^VIX3M"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_update_vix_term_structure_missing_db_exits_1(tmp_path) -> None:
+    """VIX-TERM-STRUCTURE-SMOKE: mock root without market.db → exit 1 with
+    the missing-db and failed markers on stderr (nothing written)."""
+    copy = _copy_update_vix_ts(tmp_path)
+    res = _run_update_vix_term_structure(str(copy))
+    assert res.returncode == 1
+    assert "market.db not found" in res.stderr
+    assert "Failed to update vix_term_structure.json" in res.stderr
+    assert not (tmp_path / "data" / "vix_term_structure.json").exists()
+
+
+def test_update_vix_term_structure_mock_db_writes_json(tmp_path) -> None:
+    """VIX-TERM-STRUCTURE-SMOKE: hermetic market.db with ^VIX/^VIX3M rows
+    → exit 0 with the success marker and vix_term_structure.json written in
+    both mock data and public/data dirs."""
+    copy = _copy_update_vix_ts(tmp_path)
+    data_dir = tmp_path / "data"
+    _write_vix_market_db(data_dir)
+    res = _run_update_vix_term_structure(str(copy))
+    assert res.returncode == 0, res.stderr
+    assert "Successfully updated vix_term_structure.json" in res.stderr
+    payload = json.loads(
+        (data_dir / "vix_term_structure.json").read_text(encoding="utf-8")
+    )
+    assert payload["_meta"]["schema"] == "vix_term_structure/v1"
+    assert payload["_meta"]["n_dates"] == 3
+    assert payload["_meta"]["spot_source"] == "^VIX"
+    assert payload["_meta"]["spot_is_proxy"] is False
+    entry = payload["2026-08-14"]
+    assert entry["vix_spot"] == 16.0
+    assert entry["source"] == "market.db"
+    assert (tmp_path / "public" / "data" / "vix_term_structure.json").exists()
