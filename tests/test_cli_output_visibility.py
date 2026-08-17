@@ -3110,6 +3110,103 @@ def test_fetch_google_trends_mock_pytrends_writes_json(tmp_path) -> None:
     assert "inflation" in payload
 
 
+# BOCD-VS-KMEANS-COMPARISON-SMOKE (Item Q35, 2026-08-17): subprocess smoke for
+# the BOCD vs two-stage k-means comparison script (scripts/bocd_vs_kmeans_comparison.py).
+# The script imports src.regime.bocd_detector, src.regime.fred_md_two_stage_kmeans,
+# and src.data.price_cache, and writes reports/numpy arrays to data/bocd_comparison.
+# A byte-identical copy under a mock root with mock src modules keeps the run
+# completely hermetic: repo data/bocd_comparison and live prices are untouched.
+BOCD_VS_KMEANS = os.path.join("scripts", "bocd_vs_kmeans_comparison.py")
+
+
+def _run_bocd_vs_kmeans_comparison(
+    script: str, *args: str
+) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, script, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _copy_bocd_vs_kmeans(tmp_path: Path) -> Path:
+    """Byte-identical copy under a mock root with mock src modules."""
+    import shutil
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    shutil.copyfile(BOCD_VS_KMEANS, scripts_dir / "bocd_vs_kmeans_comparison.py")
+
+    (tmp_path / "data").mkdir(parents=True, exist_ok=True)
+
+    src_dir = tmp_path / "src"
+    (src_dir / "regime").mkdir(parents=True)
+    (src_dir / "data").mkdir(parents=True)
+    (src_dir / "__init__.py").write_text("", encoding="utf-8")
+    (src_dir / "regime" / "__init__.py").write_text("", encoding="utf-8")
+    (src_dir / "data" / "__init__.py").write_text("", encoding="utf-8")
+
+    (src_dir / "data" / "price_cache.py").write_text(
+        "import pandas as pd\n"
+        "import numpy as np\n"
+        "def get_prices_df():\n"
+        "    dates = pd.date_range('2020-01-01', '2022-12-31', freq='B')\n"
+        "    prices = 100.0 * np.exp(np.cumsum(np.random.normal(0.0005, 0.01, size=len(dates))))\n"
+        "    return pd.DataFrame({'SPY': prices}, index=dates)\n",
+        encoding="utf-8",
+    )
+    (src_dir / "regime" / "bocd_detector.py").write_text(
+        "import numpy as np\n"
+        "class BOCDDetector:\n"
+        "    def __init__(self, hazard_rate=1/252, threshold=10.0):\n"
+        "        self._regime_labels = None\n"
+        "    def fit(self, data, monitor_stat='volatility', vol_window=21):\n"
+        "        self._regime_labels = np.zeros(len(data), dtype=int)\n"
+        "        if len(data) > 30:\n"
+        "            self._regime_labels[30] = 1\n"
+        "    def get_signal(self):\n"
+        "        return {'signal': 'test'}\n",
+        encoding="utf-8",
+    )
+    (src_dir / "regime" / "fred_md_two_stage_kmeans.py").write_text(
+        "import numpy as np\n"
+        "class TwoStageKMeansRegime:\n"
+        "    def __init__(self):\n"
+        "        self.n_samples = 0\n"
+        "    def fit(self, X):\n"
+        "        self.n_samples = len(X)\n"
+        "    def predict(self):\n"
+        "        return np.zeros(self.n_samples, dtype=int)\n"
+        "    def get_signal(self):\n"
+        "        return {'signal': 'test_kmeans'}\n",
+        encoding="utf-8",
+    )
+    return scripts_dir / "bocd_vs_kmeans_comparison.py"
+
+
+def test_bocd_vs_kmeans_comparison_fixture_run_exits_0(tmp_path) -> None:
+    """BOCD-VS-KMEANS-COMPARISON-SMOKE: hermetic mock run in mock root -> exit 0
+    with 'Comparison complete!' marker and markdown report written in data/bocd_comparison."""
+    copy = _copy_bocd_vs_kmeans(tmp_path)
+    res = _run_bocd_vs_kmeans_comparison(str(copy))
+    assert res.returncode == 0, res.stderr
+    assert "Comparison complete!" in (res.stdout + res.stderr)
+    report = tmp_path / "data" / "bocd_comparison" / "bocd_vs_kmeans_comparison.md"
+    assert report.exists()
+    content = report.read_text(encoding="utf-8")
+    assert "BOCD vs Two-Stage K-Means Comparison Report" in content
+    assert "Crisis Detection Timing" in content
+    assert (tmp_path / "data" / "bocd_comparison" / "bocd_labels.npy").exists()
+    assert (tmp_path / "data" / "bocd_comparison" / "kmeans_labels.npy").exists()
+
+
+
 
 
 
