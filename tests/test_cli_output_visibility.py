@@ -3249,6 +3249,42 @@ def test_pytest_watchdog_dry_run_exits_0(tmp_path) -> None:
     assert "=== 202" in content
 
 
+# WALK-FORWARD-VALIDATE-WRAPPER-SMOKE (Item Q37, 2026-08-17): subprocess smoke
+# for the deprecated walk-forward validation wrapper (scripts/walk_forward_validate.py).
+# Tests delegation and deprecation warning output via --help.
+WALK_FORWARD_VALIDATE_WRAPPER = os.path.join(
+    "scripts", "walk_forward_validate.py"
+)
+
+
+def _run_walk_forward_validate_wrapper(
+    *args: str,
+) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, WALK_FORWARD_VALIDATE_WRAPPER, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def test_walk_forward_validate_wrapper_help_exits_0() -> None:
+    """WALK-FORWARD-VALIDATE-WRAPPER-SMOKE: --help -> exit 0 with deprecation
+    log and delegated help description."""
+    res = _run_walk_forward_validate_wrapper("--help")
+    assert res.returncode == 0
+    assert "scripts/walk_forward_validate.py is deprecated" in (
+        res.stderr + res.stdout
+    )
+    assert "Walk-forward validation for portfolio-lab grid search" in res.stdout
+
+
+
 
 
 
