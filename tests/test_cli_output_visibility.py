@@ -2886,6 +2886,143 @@ def test_walk_forward_validation_fixture_run_with_save_exits_0(tmp_path) -> None
     assert "walk_forward_efficiency" in payload
 
 
+# COMPUTE-GARCH-RISK-SMOKE (Item Q33, 2026-08-17): subprocess smoke for the
+# GARCH-CVaR risk computation CLI (scripts/compute_garch_risk.py). The script
+# loads market.db and writes data/.health_report.json, data/risk_metrics.json,
+# data/risk_metrics_history.json, and public/data/garch_cvar.json. A byte-identical
+# copy under a mock root whose mock src package points MARKET_DB/DATA_DIR/PUBLIC_DATA_DIR
+# into tmp keeps the run completely hermetic: repo market.db, health reports,
+# risk metrics, and public data are never modified or read directly.
+COMPUTE_GARCH_RISK = os.path.join("scripts", "compute_garch_risk.py")
+
+
+def _run_compute_garch_risk(
+    script: str, *args: str
+) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, script, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _copy_compute_garch_risk(tmp_path: Path) -> Path:
+    """Byte-identical copy under a mock root with a mock src package:
+    src/paths.py (MARKET_DB, DATA_DIR, PUBLIC_DATA_DIR in tmp_path),
+    src/monitor/garch_cvar.py, and src/monitor/signal_authority.py stubs."""
+    import shutil
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    shutil.copyfile(
+        COMPUTE_GARCH_RISK,
+        scripts_dir / "compute_garch_risk.py",
+    )
+    src_dir = tmp_path / "src"
+    (src_dir / "monitor").mkdir(parents=True)
+    (src_dir / "__init__.py").write_text("", encoding="utf-8")
+    (src_dir / "monitor" / "__init__.py").write_text("", encoding="utf-8")
+
+    (src_dir / "paths.py").write_text(
+        "from pathlib import Path\n"
+        "DATA_DIR = Path(__file__).resolve().parent.parent / 'data'\n"
+        "PUBLIC_DATA_DIR = Path(__file__).resolve().parent.parent / 'public' / 'data'\n"
+        "MARKET_DB = DATA_DIR / 'market.db'\n"
+        "BASE_ALLOCATION = {'SPY': 0.46, 'GLD': 0.38, 'TLT': 0.16}\n",
+        encoding="utf-8",
+    )
+    (src_dir / "monitor" / "garch_cvar.py").write_text(
+        "from dataclasses import dataclass\n"
+        "ARCH_AVAILABLE = False\n"
+        "@dataclass\n"
+        "class DummyMetrics:\n"
+        "    var_95: float = 1.5\n"
+        "    cvar_95: float = 2.0\n"
+        "    cvar_ratio: float = 1.33\n"
+        "    tail_severity: str = 'normal'\n"
+        "    filter_active: bool = False\n"
+        "    garch_persistence: float = 0.85\n"
+        "    conditional_volatility_current: float = 1.2\n"
+        "    volatility_annual: float = 0.15\n"
+        "def calculate_garch_cvar(returns, current_drawdown=0.0, max_drawdown=-0.15, window=252):\n"
+        "    return DummyMetrics()\n",
+        encoding="utf-8",
+    )
+    (src_dir / "monitor" / "signal_authority.py").write_text(
+        "import json\n"
+        "def is_ephemeral_write_path(p):\n"
+        "    return False\n"
+        "def serialize_json_payload(data, output_path=None, public=True):\n"
+        "    return json.dumps(data, indent=2, default=str)\n",
+        encoding="utf-8",
+    )
+    return scripts_dir / "compute_garch_risk.py"
+
+
+def _write_garch_market_db(data_dir: Path, n_days: int = 80) -> None:
+    """Hermetic market.db with SPY/GLD/TLT rows across n_days."""
+    import sqlite3
+    import datetime
+
+    data_dir.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(data_dir / "market.db"))
+    conn.execute("CREATE TABLE prices (date TEXT, close REAL, symbol TEXT)")
+    day = datetime.date(2025, 1, 2)
+    rows = []
+    for i in range(n_days):
+        d = day.isoformat()
+        rows.append((d, 100.0 + i * 0.1, "SPY"))
+        rows.append((d, 50.0 + i * 0.05, "GLD"))
+        rows.append((d, 80.0 - i * 0.02, "TLT"))
+        day += datetime.timedelta(days=1)
+    conn.executemany("INSERT INTO prices VALUES (?, ?, ?)", rows)
+    conn.commit()
+    conn.close()
+
+
+def test_compute_garch_risk_help_exits_0(tmp_path) -> None:
+    """COMPUTE-GARCH-RISK-SMOKE: --help -> exit 0 with description marker."""
+    copy = _copy_compute_garch_risk(tmp_path)
+    res = _run_compute_garch_risk(str(copy), "--help")
+    assert res.returncode == 0
+    assert "Compute GARCH-CVaR risk metrics" in res.stdout
+
+
+def test_compute_garch_risk_insufficient_data_exits_1(tmp_path) -> None:
+    """COMPUTE-GARCH-RISK-SMOKE: mock root without market.db -> exit 1
+    with 'ERROR: Insufficient data' logged on stdout."""
+    copy = _copy_compute_garch_risk(tmp_path)
+    res = _run_compute_garch_risk(str(copy))
+    assert res.returncode == 1
+    assert "ERROR: Insufficient data" in res.stdout
+
+
+def test_compute_garch_risk_fixture_run_exits_0(tmp_path) -> None:
+    """COMPUTE-GARCH-RISK-SMOKE: hermetic mock market.db with 80 days of prices
+    -> exit 0 with risk summary markers and mock data/.health_report.json written."""
+    copy = _copy_compute_garch_risk(tmp_path)
+    data_dir = tmp_path / "data"
+    _write_garch_market_db(data_dir, n_days=80)
+    res = _run_compute_garch_risk(str(copy))
+    assert res.returncode == 0, res.stderr
+    assert "GARCH-CVaR Risk Computation" in res.stdout
+    assert "Report saved:" in res.stdout
+    report_file = data_dir / ".health_report.json"
+    assert report_file.exists()
+    payload = json.loads(report_file.read_text(encoding="utf-8"))
+    assert payload["status"] == "healthy"
+    assert payload["schema_version"] == "garch-health-report/v1"
+    assert (data_dir / "risk_metrics.json").exists()
+    assert (tmp_path / "public" / "data" / "garch_cvar.json").exists()
+
+
+
 
 
 
