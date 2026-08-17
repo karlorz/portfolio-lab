@@ -2090,3 +2090,84 @@ def test_faber_sma_gate_fixture_run_exits_0(tmp_path) -> None:
     assert res.returncode == 0, res.stderr
     assert "FABER 10-MONTH SMA GATE" in res.stdout
     assert "Sharpe delta" in res.stdout
+
+
+# DONCHIAN-BREAKOUT-SMOKE (Item Q25, 2026-08-17): subprocess smoke for the
+# Donchian channel breakout ensemble PoC CLI (scripts/donchian_breakout.py).
+# The script reads prices from parents[1] / public/data/prices.json with no
+# env override and no src imports (pandas + numpy only), so a byte-identical
+# copy under a mock root points it at the mock tree (Q13/Q24 copy pattern).
+# Live repo public/data/prices.json is never read.
+DONCHIAN_BREAKOUT = os.path.join("scripts", "donchian_breakout.py")
+
+
+def _run_donchian_breakout(script: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _copy_donchian_breakout(tmp_path: Path) -> Path:
+    """Byte-identical copy under a mock root; DATA_FILE resolves to the mock
+    tree's public/data/prices.json."""
+    import shutil
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    shutil.copyfile(DONCHIAN_BREAKOUT, scripts_dir / "donchian_breakout.py")
+    return scripts_dir / "donchian_breakout.py"
+
+
+def _write_donchian_prices(public_dir: Path, n_days: int = 260) -> None:
+    """Deterministic synthetic business-day prices for SPY (>= 252d channel
+    and 200d SMA window)."""
+    import datetime
+    import math
+
+    public_dir.mkdir(parents=True, exist_ok=True)
+    day = datetime.date(2025, 1, 2)
+    dates: list[str] = []
+    while len(dates) < n_days:
+        if day.weekday() < 5:
+            dates.append(day.isoformat())
+        day += datetime.timedelta(days=1)
+    payload = {
+        "SPY": [
+            {
+                "d": date,
+                "p": round(100.0 * (1 + 0.0008 * idx + 0.02 * math.sin(idx / 15.0)), 4),
+            }
+            for idx, date in enumerate(dates)
+        ]
+    }
+    (public_dir / "prices.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_donchian_breakout_missing_prices_exits_1(tmp_path) -> None:
+    """DONCHIAN-BREAKOUT-SMOKE: mock root without prices.json -> exit 1 with
+    FileNotFoundError on stderr."""
+    copy = _copy_donchian_breakout(tmp_path)
+    res = _run_donchian_breakout(str(copy))
+    assert res.returncode == 1
+    assert "FileNotFoundError" in res.stderr
+    assert "prices.json" in res.stderr
+
+
+def test_donchian_breakout_fixture_run_exits_0(tmp_path) -> None:
+    """DONCHIAN-BREAKOUT-SMOKE: hermetic mock SPY prices fixture -> exit 0 with
+    breakout header and ensemble markers in stdout."""
+    copy = _copy_donchian_breakout(tmp_path)
+    _write_donchian_prices(tmp_path / "public" / "data")
+    res = _run_donchian_breakout(str(copy))
+    assert res.returncode == 0, res.stderr
+    assert "DONCHIAN CHANNEL BREAKOUT ENSEMBLE" in res.stdout
+    assert "Ensemble (20/55/252d)" in res.stdout
+
