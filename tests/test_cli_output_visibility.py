@@ -3529,6 +3529,103 @@ def test_uv_update_check_mock_project_check_exits_0(tmp_path) -> None:
     assert "All checks passed. Environment is clean." in res.stdout
 
 
+# BACKFILL-ACTUAL-DIRECTIONS-SMOKE (Item Q42, 2026-08-17): subprocess smoke for
+# the signal predictions direction backfill script (scripts/backfill_actual_directions.py).
+# The script connects to DATA_DIR / "market.db" with DATA_DIR = Path("~/projects/portfolio-lab/data").expanduser().
+# Setting HOME in the subprocess env points DATA_DIR at a hermetic tmp fixture
+# so repo data/market.db is never read or written.
+BACKFILL_ACTUAL_DIRECTIONS = os.path.join(
+    "scripts", "backfill_actual_directions.py"
+)
+
+
+def _run_backfill_actual_directions(
+    *args: str, extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    if extra_env:
+        env.update(extra_env)
+    return subprocess.run(
+        [sys.executable, BACKFILL_ACTUAL_DIRECTIONS, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _write_mock_market_db(db_path: Path) -> None:
+    """Create a minimal market.db with signal_predictions and prices tables."""
+    import sqlite3
+
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE signal_predictions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            source TEXT NOT NULL,
+            predicted_direction INTEGER,
+            actual_direction INTEGER,
+            accuracy_calculated INTEGER DEFAULT 0
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE prices (
+            symbol TEXT NOT NULL,
+            date TEXT NOT NULL,
+            close REAL NOT NULL,
+            PRIMARY KEY (symbol, date)
+        )
+    """)
+    # Insert SPY prices for 2 consecutive trading days
+    cur.executemany(
+        "INSERT INTO prices (symbol, date, close) VALUES (?, ?, ?)",
+        [
+            ("SPY", "2026-01-02", 500.0),
+            ("SPY", "2026-01-05", 505.0),
+        ],
+    )
+    # Insert prediction on first day without actual_direction
+    cur.execute(
+        "INSERT INTO signal_predictions (timestamp, source, predicted_direction, actual_direction) "
+        "VALUES (?, ?, ?, NULL)",
+        ("2026-01-02 10:00:00", "test_signal", 1),
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_backfill_actual_directions_fixture_run_exits_0(tmp_path) -> None:
+    """BACKFILL-ACTUAL-DIRECTIONS-SMOKE: hermetic mock market.db in mock HOME
+    -> exit 0, updates predictions with actual_direction based on SPY returns."""
+    import sqlite3
+
+    mock_home = tmp_path / "mock_home"
+    db_path = mock_home / "projects" / "portfolio-lab" / "data" / "market.db"
+    _write_mock_market_db(db_path)
+
+    res = _run_backfill_actual_directions(extra_env={"HOME": str(mock_home)})
+    assert res.returncode == 0, res.stderr
+    assert "Found 1 predictions without actual_direction" in res.stdout
+    assert "Have 2 price points" in res.stdout
+    assert "Updated 1 predictions with actual_direction" in res.stdout
+
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute("SELECT actual_direction, accuracy_calculated FROM signal_predictions WHERE id = 1")
+    row = cur.fetchone()
+    conn.close()
+
+    assert row is not None
+    assert row[0] == 1  # 505 > 500 -> positive return -> actual = 1
+    assert row[1] == 1
+
+
+
 
 
 
