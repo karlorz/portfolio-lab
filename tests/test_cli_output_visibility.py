@@ -2395,4 +2395,126 @@ def test_gold_allocation_sweep_fixture_run_exits_0(tmp_path) -> None:
     assert payload["metadata"]["total_configs"] > 0
 
 
+# OPTIMIZE-PORTFOLIO-SMOKE (Item Q28, 2026-08-17): subprocess smoke for the
+# PyPortfolioOpt optimizer CLI (scripts/optimize_portfolio.py). The script
+# loads PRICES_JSON and writes DATA_DIR / optimized_weights.json via src.paths.
+# A byte-identical copy under a mock root whose mock src package points
+# DATA_DIR/PRICES_JSON into tmp and stubs save_optimizer_labs_output keeps the
+# run completely hermetic: repo data/optimized_weights.json and public/data/prices.json
+# are never touched.
+OPTIMIZE_PORTFOLIO = os.path.join("scripts", "optimize_portfolio.py")
+
+
+def _run_optimize_portfolio(
+    script: str, *args: str
+) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, script, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _copy_optimize_portfolio(tmp_path: Path) -> Path:
+    """Byte-identical copy under a mock root plus a mock src package:
+    src/paths.py (DATA_DIR + PRICES_JSON in tmp_path) and
+    src/research/optimizer_labs_contract.py (save_optimizer_labs_output stub)."""
+    import shutil
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    shutil.copyfile(
+        OPTIMIZE_PORTFOLIO, scripts_dir / "optimize_portfolio.py"
+    )
+
+    src_dir = tmp_path / "src"
+    (src_dir / "research").mkdir(parents=True)
+    (src_dir / "__init__.py").write_text("", encoding="utf-8")
+    (src_dir / "research" / "__init__.py").write_text("", encoding="utf-8")
+
+    (src_dir / "paths.py").write_text(
+        "from pathlib import Path\n"
+        "DATA_DIR = Path(__file__).resolve().parent.parent / 'data'\n"
+        "DATA_DIR.mkdir(parents=True, exist_ok=True)\n"
+        "PRICES_JSON = Path(__file__).resolve().parent.parent / 'public' / 'data' / 'prices.json'\n",
+        encoding="utf-8",
+    )
+    (src_dir / "research" / "optimizer_labs_contract.py").write_text(
+        "import json\n"
+        "def save_optimizer_labs_output(results, output_path, symbols, target_vol=0.10):\n"
+        "    with open(output_path, 'w') as f:\n"
+        "        json.dump({'results': results, 'symbols': symbols, 'target_vol': target_vol}, f, indent=2)\n",
+        encoding="utf-8",
+    )
+    return scripts_dir / "optimize_portfolio.py"
+
+
+def _write_optimizer_prices(public_dir: Path, n_days: int = 120) -> None:
+    """Deterministic synthetic business-day prices for SPY, GLD, TLT."""
+    import datetime
+    import math
+
+    public_dir.mkdir(parents=True, exist_ok=True)
+    day = datetime.date(2025, 1, 2)
+    dates: list[str] = []
+    while len(dates) < n_days:
+        if day.weekday() < 5:
+            dates.append(day.isoformat())
+        day += datetime.timedelta(days=1)
+    payload = {}
+    for i, sym in enumerate(["SPY", "GLD", "TLT"]):
+        base = 100.0 + i * 20.0
+        payload[sym] = [
+            {
+                "d": date,
+                "p": round(
+                    base * (1 + 0.0005 * idx + 0.01 * math.sin(idx / 11.0 + i)), 4
+                ),
+            }
+            for idx, date in enumerate(dates)
+        ]
+    (public_dir / "prices.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_optimize_portfolio_help_exits_0(tmp_path) -> None:
+    """OPTIMIZE-PORTFOLIO-SMOKE: --help -> exit 0 with description marker."""
+    copy = _copy_optimize_portfolio(tmp_path)
+    res = _run_optimize_portfolio(str(copy), "--help")
+    assert res.returncode == 0
+    assert "Portfolio optimization via PyPortfolioOpt" in res.stdout
+
+
+def test_optimize_portfolio_missing_prices_exits_0_with_error_marker(tmp_path) -> None:
+    """OPTIMIZE-PORTFOLIO-SMOKE: mock root without prices.json -> exit 0
+    with 'Prices file not found' logged (fail-closed, no exception raised)."""
+    copy = _copy_optimize_portfolio(tmp_path)
+    res = _run_optimize_portfolio(str(copy))
+    assert res.returncode == 0
+    assert "Prices file not found" in (res.stdout + res.stderr)
+
+
+def test_optimize_portfolio_fixture_run_with_save_exits_0(tmp_path) -> None:
+    """OPTIMIZE-PORTFOLIO-SMOKE: hermetic mock SPY/GLD/TLT prices fixture with --save
+    -> exit 0 with optimization headers and mock data/optimized_weights.json written."""
+    copy = _copy_optimize_portfolio(tmp_path)
+    _write_optimizer_prices(tmp_path / "public" / "data")
+    res = _run_optimize_portfolio(str(copy), "--save")
+    assert res.returncode == 0, res.stderr
+    assert "Portfolio Optimization Results" in res.stdout
+    assert "MAX_SHARPE" in res.stdout
+    out_file = tmp_path / "data" / "optimized_weights.json"
+    assert out_file.exists()
+    payload = json.loads(out_file.read_text(encoding="utf-8"))
+    assert "results" in payload
+    assert "symbols" in payload
+    assert "max_sharpe" in payload["results"]
+
+
+
 
