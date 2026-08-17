@@ -2516,5 +2516,36 @@ def test_optimize_portfolio_fixture_run_with_save_exits_0(tmp_path) -> None:
     assert "max_sharpe" in payload["results"]
 
 
+# PBO-CSCV-DIAGNOSTIC-SMOKE (Item Q29, 2026-08-17): subprocess smoke for the
+# CSCV/PBO diagnostic PoC CLI (scripts/pbo_cscv_diagnostic.py). The script
+# operates purely on numpy synthetic matrices with no filesystem side-effects,
+# no external data inputs, and no mock root required.
+PBO_CSCV_DIAGNOSTIC = os.path.join("scripts", "pbo_cscv_diagnostic.py")
+
+
+def _run_pbo_cscv_diagnostic(*args: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    return subprocess.run(
+        [sys.executable, PBO_CSCV_DIAGNOSTIC, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def test_pbo_cscv_diagnostic_runs_exits_0() -> None:
+    """PBO-CSCV-DIAGNOSTIC-SMOKE: direct subprocess run -> exit 0 with summary
+    headers, interpretation section, and diagnostic metrics on stdout."""
+    res = _run_pbo_cscv_diagnostic()
+    assert res.returncode == 0, res.stderr
+    assert "PBO/CSCV DIAGNOSTIC" in res.stdout
+    assert "INTERPRETATION" in res.stdout
+    assert "Pure noise PBO:" in res.stdout
+
+
+
 
 
