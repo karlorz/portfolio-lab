@@ -191,8 +191,8 @@ class OrderRouter:
         self.paper = paper
         self.min_order_value = min_order_value
         self.client = AlpacaClient(paper=paper)
-        self.manager = PaperTradingManager(data_dir=data_dir)
-        self.orders_log = os.path.join(data_dir, "broker_orders.jsonl")
+        self.manager = PaperTradingManager(data_dir=self.data_dir)
+        self.orders_log = os.path.join(self.data_dir, "broker_orders.jsonl")
         
     def is_ready(self) -> bool:
         """Check if router can operate."""
@@ -250,21 +250,38 @@ class OrderRouter:
         """Load signals from signals.json."""
         if not os.path.exists(self.signals_file):
             return []
-        
+
         try:
             with open(self.signals_file, "r") as f:
                 data = json.load(f)
-            
+
+            if not isinstance(data, dict):
+                logger.warning("Error loading signals: payload is not a mapping")
+                return []
+
+            # Live authority gate: only signals.json.target_allocations routes.
+            # Fail closed (empty signal list) rather than routing invalid weights.
+            from src.monitor.signal_authority import (
+                AuthorityValidationError,
+                validate_authority_payload,
+            )
+
+            try:
+                validate_authority_payload(data)
+            except AuthorityValidationError as exc:
+                logger.warning("Refusing signals load (authority gate): %s", exc)
+                return []
+
             signals = []
             allocations = data.get("target_allocations", {})
-            
+
             for symbol, allocation in allocations.items():
                 signals.append(Signal(
                     symbol=symbol,
-                    target_allocation=allocation,
+                    target_allocation=float(allocation),
                     signal_type="rebalance"
                 ))
-            
+
             return signals
         except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.warning("Error loading signals: %s", e)

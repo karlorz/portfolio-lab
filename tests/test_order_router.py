@@ -610,7 +610,8 @@ class TestLoadSignalsExtended:
                 }, f)
             router = OrderRouter(signals_file=signals_file, data_dir=d)
             signals = router.load_signals()
-            assert len(signals) == 2
+            # Authority gate: missing champion symbol (TLT) + sum != 1 fails closed
+            assert signals == []
 
     def test_load_signals_ignores_advisory_allocation_artifacts_without_target_allocations(self):
         with tempfile.TemporaryDirectory() as d:
@@ -888,3 +889,81 @@ class TestKillSwitchGate:
             result = router.execute_orders(orders, dry_run=False, kill_switch_check=False)
             # Should NOT be blocked (gate is bypassed)
             assert result["status"] != "blocked"
+
+
+class TestAuthorityGate:
+    """Fail-closed authority validation in OrderRouter load_signals (Item Q55)."""
+
+    def _router_for_payload(self, tmpdir, payload):
+        signals_file = os.path.join(tmpdir, "signals.json")
+        if payload is not None:
+            with open(signals_file, "w") as f:
+                json.dump(payload, f)
+        return OrderRouter(signals_file=signals_file, data_dir=tmpdir)
+
+    def test_default_construction_uses_self_data_dir(self):
+        """Default OrderRouter() constructs without TypeError and binds self.data_dir."""
+        with tempfile.TemporaryDirectory() as d:
+            router = OrderRouter(data_dir=d, paper=True)
+            assert router.orders_log == os.path.join(d, "broker_orders.jsonl")
+            assert router.manager.data_dir == d
+
+    def test_champion_allocations_load_three_signals(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = self._router_for_payload(
+                d,
+                {"target_allocations": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}},
+            )
+            signals = router.load_signals()
+            assert len(signals) == 3
+            assert {s.symbol for s in signals} == {"SPY", "GLD", "TLT"}
+
+    def test_missing_target_allocations_fails_closed(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = self._router_for_payload(d, {"health": {"status": "ok"}})
+            assert router.load_signals() == []
+
+    def test_non_mapping_target_allocations_fails_closed(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = self._router_for_payload(d, {"target_allocations": "SPY=0.5"})
+            assert router.load_signals() == []
+
+    def test_negative_weight_fails_closed(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = self._router_for_payload(
+                d,
+                {"target_allocations": {"SPY": -0.5, "GLD": 1.5, "TLT": 0.0}},
+            )
+            assert router.load_signals() == []
+
+    def test_oversized_weight_fails_closed(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = self._router_for_payload(
+                d,
+                {"target_allocations": {"SPY": 1.5, "GLD": 0.0, "TLT": 0.0}},
+            )
+            assert router.load_signals() == []
+
+    def test_nan_weight_fails_closed(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = self._router_for_payload(
+                d,
+                {"target_allocations": {"SPY": float("nan"), "GLD": 0.5, "TLT": 0.5}},
+            )
+            assert router.load_signals() == []
+
+    def test_missing_champion_symbols_fails_closed(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = self._router_for_payload(
+                d,
+                {"target_allocations": {"SPY": 0.5, "QQQ": 0.5}},
+            )
+            assert router.load_signals() == []
+
+    def test_sum_not_one_fails_closed(self):
+        with tempfile.TemporaryDirectory() as d:
+            router = self._router_for_payload(
+                d,
+                {"target_allocations": {"SPY": 0.4, "GLD": 0.4, "TLT": 0.1}},
+            )
+            assert router.load_signals() == []
