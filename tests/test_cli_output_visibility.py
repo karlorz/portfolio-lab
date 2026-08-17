@@ -2640,6 +2640,115 @@ def test_regime_gating_gap_analysis_fixture_run_exits_0(tmp_path) -> None:
     assert "gate_recommendations" in payload
 
 
+# COMPARE-REGIME-WEIGHTS-SMOKE (Item Q31, 2026-08-17): subprocess smoke for the
+# regime-conditional ensemble weights comparison CLI (scripts/compare_regime_weights.py).
+# The script imports EnsembleVoter and runs direction validation checks. To keep
+# the test hermetic, reproducible, and isolated from live signal health/adaptive
+# state (which zero out gated/decaying sleeves), tests use a byte-identical copy
+# under a mock root with a mock src/strategy/ensemble_voter.py implementing the
+# voter and regime multiplier contract.
+COMPARE_REGIME_WEIGHTS = os.path.join("scripts", "compare_regime_weights.py")
+
+
+def _run_compare_regime_weights(
+    script: str, extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if extra_env:
+        env.update(extra_env)
+    return subprocess.run(
+        [sys.executable, script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _copy_compare_regime_weights(tmp_path: Path) -> Path:
+    """Byte-identical copy under a mock root with a minimal mock
+    src/strategy/ensemble_voter.py supplying deterministic base weights
+    and standard multiplier reweighting."""
+    import shutil
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    shutil.copyfile(
+        COMPARE_REGIME_WEIGHTS,
+        scripts_dir / "compare_regime_weights.py",
+    )
+    src_dir = tmp_path / "src"
+    (src_dir / "strategy").mkdir(parents=True)
+    (src_dir / "__init__.py").write_text("", encoding="utf-8")
+    (src_dir / "strategy" / "__init__.py").write_text("", encoding="utf-8")
+
+    (src_dir / "strategy" / "ensemble_voter.py").write_text(
+        "from enum import Enum\n"
+        "class Regime(str, Enum):\n"
+        "    CRISIS = 'CRISIS'\n"
+        "    HIGH_VOL = 'HIGH_VOL'\n"
+        "    NORMAL = 'NORMAL'\n"
+        "    LOW_VOL = 'LOW_VOL'\n"
+        "    RECOVERY = 'RECOVERY'\n\n"
+        "class SignalSource(str, Enum):\n"
+        "    ALTERNATIVE_DATA = 'alternative_data'\n"
+        "    INTERNATIONAL_MOMENTUM = 'international_momentum'\n"
+        "    CROSS_ASSET_RV = 'cross_asset_rv'\n"
+        "    CROSS_ASSET_REGIME_ARB = 'cross_asset_regime_arb'\n"
+        "    UNIFIED_OVERLAY = 'unified_overlay'\n\n"
+        "REGIME_CONDITIONAL_WEIGHTS = {\n"
+        "    'CRISIS': {SignalSource.ALTERNATIVE_DATA: 1.4, SignalSource.UNIFIED_OVERLAY: 0.5},\n"
+        "    'HIGH_VOL': {SignalSource.INTERNATIONAL_MOMENTUM: 0.7},\n"
+        "    'LOW_VOL': {SignalSource.INTERNATIONAL_MOMENTUM: 1.4, SignalSource.CROSS_ASSET_REGIME_ARB: 0.6},\n"
+        "    'RECOVERY': {SignalSource.INTERNATIONAL_MOMENTUM: 1.4},\n"
+        "}\n\n"
+        "class EnsembleVoter:\n"
+        "    def get_blended_weights(self, regime_name):\n"
+        "        return {s: 0.2 for s in SignalSource}\n"
+        "    def _apply_regime_gating(self, w, regime_name):\n"
+        "        return dict(w)\n"
+        "    def _apply_adaptive_weights(self, w, regime):\n"
+        "        return dict(w)\n"
+        "    def _apply_health_weights(self, w):\n"
+        "        return dict(w)\n"
+        "    def _apply_correlation_penalty(self, w):\n"
+        "        return dict(w)\n"
+        "    def _apply_regime_weights(self, w, regime):\n"
+        "        mults = REGIME_CONDITIONAL_WEIGHTS.get(regime.name, {})\n"
+        "        scaled = {s: w[s] * mults.get(s, 1.0) for s in SignalSource}\n"
+        "        tot = sum(scaled.values())\n"
+        "        return {s: v / tot for s, v in scaled.items()}\n",
+        encoding="utf-8",
+    )
+    return scripts_dir / "compare_regime_weights.py"
+
+
+def test_compare_regime_weights_default_exits_0(tmp_path) -> None:
+    """COMPARE-REGIME-WEIGHTS-SMOKE: default run -> exit 0 with table headers
+    and direction validation success marker on stdout."""
+    copy = _copy_compare_regime_weights(tmp_path)
+    res = _run_compare_regime_weights(str(copy))
+    assert res.returncode == 0, res.stderr
+    assert "Regime-Conditional Ensemble Weight Comparison" in res.stdout
+    assert "ALL DIRECTIONS VALIDATED" in res.stdout
+
+
+def test_compare_regime_weights_toggle_disabled_exits_0(tmp_path) -> None:
+    """COMPARE-REGIME-WEIGHTS-SMOKE: ENSEMBLE_DISABLE_REGIME_WEIGHTS=1 -> exit 0
+    with toggle-disabled markers on stdout."""
+    copy = _copy_compare_regime_weights(tmp_path)
+    res = _run_compare_regime_weights(
+        str(copy), extra_env={"ENSEMBLE_DISABLE_REGIME_WEIGHTS": "1"}
+    )
+    assert res.returncode == 0, res.stderr
+    assert "Toggle: DISABLED" in res.stdout
+    assert "Result: Toggle OFF" in res.stdout
+
+
+
 
 
 
