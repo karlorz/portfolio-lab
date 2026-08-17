@@ -227,28 +227,41 @@ class RealDataBacktest:
             logger.error("No common core market dates available for backtest")
             return self._empty_result(recommendation="No common market dates")
 
+        has_crypto = bool(
+            data.get("BTC") and data["BTC"].get("prices")
+            and data.get("ETH") and data["ETH"].get("prices")
+        )
+
         spy_p = self._align_prices_to_dates(data["SPY"], dates)
         gld_p = self._align_prices_to_dates(data["GLD"], dates)
         tlt_p = self._align_prices_to_dates(data["TLT"], dates)
         ief_p = self._align_prices_to_dates(data.get("IEF"), dates, tlt_p)
-        btc_p = self._align_prices_to_dates(data.get("BTC"), dates, spy_p)
-        eth_p = self._align_prices_to_dates(data.get("ETH"), dates, spy_p)
         vix_d = self._align_prices_to_dates(data.get("VIX"), dates, [18.0] * len(dates))
+
+        if has_crypto:
+            btc_p = self._align_prices_to_dates(data["BTC"], dates)
+            eth_p = self._align_prices_to_dates(data["ETH"], dates)
+            btc_r = self._compute_returns(btc_p)
+            eth_r = self._compute_returns(eth_p)
+            btc_vol = self._compute_rolling_vol(btc_r, 30)
+            eth_vol = self._compute_rolling_vol(eth_r, 30)
+        else:
+            btc_p = []
+            eth_p = []
+            btc_r = []
+            eth_r = []
+            btc_vol = []
+            eth_vol = []
 
         spy_r = self._compute_returns(spy_p)
         gld_r = self._compute_returns(gld_p)
         tlt_r = self._compute_returns(tlt_p)
         ief_r = self._compute_returns(ief_p)
-        btc_r = self._compute_returns(btc_p)
-        eth_r = self._compute_returns(eth_p)
 
-        btc_vol = self._compute_rolling_vol(btc_r, 30)
-        eth_vol = self._compute_rolling_vol(eth_r, 30)
-
-        n = min(
-            len(spy_r), len(gld_r), len(tlt_r), len(ief_r),
-            len(btc_r), len(eth_r), len(dates),
-        ) - 1
+        series_lens = [len(spy_r), len(gld_r), len(tlt_r), len(ief_r), len(dates)]
+        if has_crypto:
+            series_lens.extend([len(btc_r), len(eth_r)])
+        n = min(series_lens) - 1
         warmup = 180  # Need 6 months for momentum
 
         base_val = 1.0
@@ -271,8 +284,6 @@ class RealDataBacktest:
             vix = vix_d[min(i, len(vix_d)-1)]
 
             # 6-month momentum
-            btc_mom = btc_p[i] / btc_p[max(0, i-126)] - 1 if i >= 126 else 0
-            eth_mom = eth_p[i] / eth_p[max(0, i-126)] - 1 if i >= 126 else 0
             tlt_mom = tlt_p[i] / tlt_p[max(0, i-126)] - 1 if i >= 126 else 0
 
             # Overlay signals
@@ -280,11 +291,17 @@ class RealDataBacktest:
             if abs(collar_delta) > 0:
                 collar_active += 1
 
-            crypto_w = self._crypto_signal(
-                btc_mom, eth_mom,
-                btc_vol[min(i, len(btc_vol)-1)],
-                eth_vol[min(i, len(eth_vol)-1)],
-            )
+            if has_crypto:
+                btc_mom = btc_p[i] / btc_p[max(0, i-126)] - 1 if i >= 126 else 0
+                eth_mom = eth_p[i] / eth_p[max(0, i-126)] - 1 if i >= 126 else 0
+                crypto_w = self._crypto_signal(
+                    btc_mom, eth_mom,
+                    btc_vol[min(i, len(btc_vol)-1)],
+                    eth_vol[min(i, len(eth_vol)-1)],
+                )
+            else:
+                crypto_w = 0.0
+
             if crypto_w > 0:
                 crypto_active += 1
 
@@ -297,8 +314,8 @@ class RealDataBacktest:
             tlt_alloc = self.BASELINE["tlt"] * tlt_w
             ief_alloc = self.BASELINE["tlt"] * ief_w
             shy_alloc = self.BASELINE["tlt"] * shy_w
-            btc_w = crypto_w * 0.6
-            eth_w = crypto_w * 0.4
+            btc_w = crypto_w * 0.6 if has_crypto else 0.0
+            eth_w = crypto_w * 0.4 if has_crypto else 0.0
             total = spy_w + gld_w + tlt_alloc + ief_alloc + shy_alloc + btc_w + eth_w
 
             # Returns for this day
@@ -306,8 +323,8 @@ class RealDataBacktest:
             gr = gld_r[min(i, len(gld_r)-1)]
             tr = tlt_r[min(i, len(tlt_r)-1)]
             ir = ief_r[min(i, len(ief_r)-1)]
-            br = btc_r[min(i, len(btc_r)-1)]
-            er = eth_r[min(i, len(eth_r)-1)]
+            br = btc_r[min(i, len(btc_r)-1)] if has_crypto else 0.0
+            er = eth_r[min(i, len(eth_r)-1)] if has_crypto else 0.0
 
             base_ret = (
                 self.BASELINE["spy"] * sr +

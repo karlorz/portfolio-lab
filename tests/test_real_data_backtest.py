@@ -220,6 +220,36 @@ class TestRealDataBacktest:
         assert result.extras["trading_days"] == 0
         assert result.extras["recommendation"] == "No common market dates"
 
+    def test_run_without_crypto_does_not_fabricate_from_spy(self, bt, monkeypatch):
+        """When BTC/ETH missing, backtest runs without crypto sleeve and without spy fallback."""
+        start = date(2021, 1, 1)
+        dates = [(start + timedelta(days=index)).isoformat() for index in range(400)]
+
+        def series(prices_dates, start_val):
+            return {"dates": prices_dates, "prices": [start_val + index * 0.1 for index in range(len(prices_dates))]}
+
+        monkeypatch.setattr(
+            bt,
+            "_load_market_data",
+            lambda: {
+                "SPY": series(dates, 100.0),
+                "GLD": series(dates, 200.0),
+                "TLT": series(dates, 300.0),
+                "IEF": series(dates, 250.0),
+                "VIX": series(dates, 18.0),
+            },
+        )
+
+        result = bt.run()
+        assert isinstance(result, BacktestResult)
+        assert result.extras["trading_days"] > 0
+        assert result.extras["crypto_days_pct"] == 0.0
+
+    def test_align_prices_to_dates_requires_fallback_if_series_missing(self, bt):
+        """_align_prices_to_dates returns empty or raises ValueError if series empty and no fallback."""
+        assert bt._align_prices_to_dates(None, ["2021-01-01"]) == []
+        assert bt._align_prices_to_dates({}, ["2021-01-01"]) == []
+
     def test_compute_rolling_vol(self, bt):
         rng = np.random.RandomState(42)
         rets = list(rng.normal(0, 0.01, 100))
