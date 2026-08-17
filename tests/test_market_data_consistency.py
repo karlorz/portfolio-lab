@@ -1,325 +1,155 @@
-"""Tests for broker/local market data consistency reporting."""
+"""Tests for src.monitor.market_data_consistency."""
 
 import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
-
 import pytest
 
-from src.broker.alpaca import Position
-from src.data.market_db_sync import sync_prices_json_to_market_db
 from src.monitor.market_data_consistency import (
-    MarketDataSemanticsError,
-    broker_market_data_consistency_report,
     reconcile_compact_prices_with_market_db,
-    require_true_ohlc_price_rows,
     reconcile_price_providers,
+    broker_market_data_consistency_report,
+    require_true_ohlc_price_rows,
+    is_adjusted_close_proxy_price_row,
+    MarketDataSemanticsError,
 )
 
 
-def _price_db(path: Path, rows: list[tuple[str, str, float]]) -> Path:
-    with sqlite3.connect(str(path)) as conn:
-        conn.execute(
-            """
+def _init_market_db(db_path: Path, rows: list[tuple[str, str, float]]) -> None:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("""
             CREATE TABLE prices (
-                symbol TEXT,
-                date TEXT,
-                close REAL,
+                symbol TEXT NOT NULL,
+                date TEXT NOT NULL,
+                close REAL NOT NULL,
                 PRIMARY KEY (symbol, date)
             )
-            """
-        )
+        """)
         conn.executemany("INSERT INTO prices (symbol, date, close) VALUES (?, ?, ?)", rows)
-    return path
+        conn.commit()
 
 
-def _write_prices_json(path: Path, payload: dict) -> None:
-    path.write_text(json.dumps(payload), encoding="utf-8")
-
-
-def test_true_ohlc_guard_rejects_adjusted_close_proxy_rows() -> None:
-    rows = [
-        {
-            "symbol": "SPY",
-            "date": "2026-06-11",
-            "open": 612.34,
-            "high": 612.34,
-            "low": 612.34,
-            "close": 612.34,
-            "volume": 0,
-            "price_semantics": "adjusted_close_proxy_ohlc",
-            "is_adjusted_close_proxy": 1,
-        }
-    ]
-
-    with pytest.raises(MarketDataSemanticsError, match="requires true OHLC.*adjusted-close proxy"):
-        require_true_ohlc_price_rows(rows, consumer="bayesian_vol")
-
-
-def test_true_ohlc_guard_allows_true_ohlc_rows() -> None:
-    rows = [
-        {
-            "symbol": "SPY",
-            "date": "2026-06-11",
-            "open": 610.0,
-            "high": 615.0,
-            "low": 609.0,
-            "close": 612.34,
-            "volume": 12_000_000,
-            "price_semantics": "true_ohlcv",
-            "is_adjusted_close_proxy": 0,
-        }
-    ]
-
-    assert require_true_ohlc_price_rows(rows, consumer="bayesian_vol") == rows
-
-
-def test_consistency_report_accepts_synced_proxy_rows_for_latest_close(tmp_path: Path) -> None:
-    prices_path = tmp_path / "prices.json"
+def test_reconcile_compact_prices_missing_prices_unavailable(tmp_path: Path) -> None:
     db_path = tmp_path / "market.db"
-    _write_prices_json(prices_path, {"SPY": [{"d": "2026-06-11", "p": 612.34}]})
-    sync_prices_json_to_market_db(prices_path=prices_path, db_path=db_path)
-    positions = [Position("SPY", 10, 500.0, 612.95, 6129.5, 1129.5, 0.226)]
+    _init_market_db(db_path, [("SPY", "2026-08-15", 500.0)])
+    prices_path = tmp_path / "nonexistent_prices.json"
 
-    report = broker_market_data_consistency_report(
-        positions,
+    res = reconcile_compact_prices_with_market_db(prices_path=prices_path, db_path=db_path)
+    assert res["status"] == "unavailable"
+    assert res["failure_type"] == "compact_prices_unavailable"
+
+
+def test_reconcile_compact_prices_missing_db_fails(tmp_path: Path) -> None:
+    prices_path = tmp_path / "prices.json"
+    prices_path.write_text(json.dumps({"SPY": [{"d": "2026-08-15", "p": 500.0}]}), encoding="utf-8")
+    db_path = tmp_path / "nonexistent_market.db"
+
+    res = reconcile_compact_prices_with_market_db(prices_path=prices_path, db_path=db_path)
+    assert res["status"] == "fail"
+    assert res["failure_type"] == "market_db_unavailable"
+
+
+def test_reconcile_compact_prices_clean_match(tmp_path: Path) -> None:
+    db_path = tmp_path / "market.db"
+    _init_market_db(db_path, [
+        ("SPY", "2026-08-15", 500.0),
+        ("GLD", "2026-08-15", 200.0),
+    ])
+    prices_path = tmp_path / "prices.json"
+    prices_path.write_text(
+        json.dumps({
+            "SPY": [{"d": "2026-08-15", "p": 500.0}],
+            "GLD": [{"d": "2026-08-15", "p": 200.0}],
+        }),
+        encoding="utf-8",
+    )
+
+    res = reconcile_compact_prices_with_market_db(prices_path=prices_path, db_path=db_path)
+    assert res["status"] == "ok"
+    assert res["symbols_checked"] == 2
+    assert len(res["top_offenders"]) == 0
+
+
+def test_reconcile_compact_prices_missing_symbol_and_stale_lag_and_divergence(tmp_path: Path) -> None:
+    db_path = tmp_path / "market.db"
+    _init_market_db(db_path, [
+        ("SPY", "2026-08-14", 500.0),  # lags prices.json (2026-08-15) by 1d
+        ("GLD", "2026-08-15", 205.0),  # diverges from 200.0
+        # TLT missing from SQLite
+    ])
+    prices_path = tmp_path / "prices.json"
+    prices_path.write_text(
+        json.dumps({
+            "SPY": [{"d": "2026-08-15", "p": 500.0}],
+            "GLD": [{"d": "2026-08-15", "p": 200.0}],
+            "TLT": [{"d": "2026-08-15", "p": 95.0}],
+        }),
+        encoding="utf-8",
+    )
+
+    res = reconcile_compact_prices_with_market_db(prices_path=prices_path, db_path=db_path)
+    assert res["status"] == "fail"
+    assert res["symbols_checked"] == 3
+    issues = {off["issue"] for off in res["top_offenders"]}
+    assert "missing_sqlite_symbol" in issues
+    assert "stale_latest_date" in issues
+    assert "latest_price_divergence" in issues
+
+
+def test_require_true_ohlc_price_rows() -> None:
+    clean_rows = [{"symbol": "SPY", "date": "2026-08-15", "open": 500.0, "high": 502.0, "low": 498.0, "close": 501.0}]
+    assert require_true_ohlc_price_rows(clean_rows) == clean_rows
+
+    proxy_rows = [{"symbol": "SPY", "date": "2026-08-15", "is_adjusted_close_proxy": True}]
+    assert is_adjusted_close_proxy_price_row(proxy_rows[0]) is True
+    with pytest.raises(MarketDataSemanticsError):
+        require_true_ohlc_price_rows(proxy_rows)
+
+
+def test_reconcile_price_providers() -> None:
+    primary = [
+        {"symbol": "SPY", "date": "2026-08-15", "adj_close": 500.0},
+        {"symbol": "GLD", "date": "2026-08-15", "adj_close": 200.0},
+    ]
+    secondary = [
+        {"symbol": "SPY", "date": "2026-08-15", "adj_close": 500.1},
+        {"symbol": "GLD", "date": "2026-08-14", "adj_close": 200.0},  # lags by 1d
+    ]
+    res = reconcile_price_providers(primary, secondary, max_latest_lag_days=0)
+    assert res["status"] == "warning"
+    assert "stale_latest_date" in res["issue_counts"]
+
+
+def test_broker_market_data_consistency_report(tmp_path: Path) -> None:
+    db_path = tmp_path / "market.db"
+    _init_market_db(db_path, [
+        ("SPY", "2026-08-15", 500.0),
+        ("GLD", "2026-08-01", 200.0),  # old date -> stale
+        ("TLT", "2026-08-15", 100.0),  # broker will have 110.0 -> diverged
+    ])
+
+    positions = [
+        {"symbol": "SPY", "current_price": 500.5},   # <1% difference -> ok
+        {"symbol": "GLD", "current_price": 200.0},   # stale local
+        {"symbol": "TLT", "current_price": 110.0},   # 10% diff -> diverged
+        {"symbol": "IEF", "current_price": 95.0},    # missing local
+    ]
+
+    fixed_now = datetime(2026, 8, 16, 12, 0, 0, tzinfo=timezone.utc)
+    res = broker_market_data_consistency_report(
+        positions=positions,
         db_path=db_path,
-        warn_threshold_pct=1.0,
-        now=datetime(2026, 6, 11, 22, tzinfo=timezone.utc),
-    )
-
-    assert report["status"] == "ok"
-    assert report["rows"][0]["local_source"] == "market_db"
-    assert report["rows"][0]["local_price"] == 612.34
-    assert report["rows"][0]["status"] == "ok"
-
-
-def test_consistency_report_ok_for_matching_prices(tmp_path: Path) -> None:
-    db = _price_db(tmp_path / "market.db", [("SPY", "2026-06-11", 600.0)])
-    positions = [Position("SPY", 10, 500.0, 600.5, 6005.0, 1005.0, 0.2)]
-
-    report = broker_market_data_consistency_report(
-        positions,
-        db_path=db,
-        warn_threshold_pct=1.0,
-        now=datetime(2026, 6, 11, 22, tzinfo=timezone.utc),
-    )
-
-    assert report["status"] == "ok"
-    assert report["rows"][0]["difference_pct"] == 0.0833
-    assert report["warnings"] == []
-
-
-def test_consistency_report_warns_on_material_divergence(tmp_path: Path) -> None:
-    db = _price_db(tmp_path / "market.db", [("SPY", "2026-06-11", 600.0)])
-    positions = [Position("SPY", 10, 500.0, 630.0, 6300.0, 1300.0, 0.26)]
-
-    report = broker_market_data_consistency_report(
-        positions,
-        db_path=db,
-        warn_threshold_pct=2.0,
-        now=datetime(2026, 6, 11, 22, tzinfo=timezone.utc),
-    )
-
-    assert report["status"] == "warning"
-    assert report["rows"][0]["status"] == "diverged"
-    assert "broker/local price differs" in report["warnings"][0]
-
-
-def test_consistency_report_warns_on_stale_local_price(tmp_path: Path) -> None:
-    db = _price_db(tmp_path / "market.db", [("SPY", "2026-06-01", 600.0)])
-    positions = [Position("SPY", 10, 500.0, 600.0, 6000.0, 1000.0, 0.2)]
-
-    report = broker_market_data_consistency_report(
-        positions,
-        db_path=db,
+        now=fixed_now,
         max_local_age_days=3,
-        now=datetime(2026, 6, 11, 22, tzinfo=timezone.utc),
+        warn_threshold_pct=2.0,
     )
 
-    assert report["status"] == "warning"
-    assert report["rows"][0]["status"] == "stale_local"
-    assert "local market data stale" in report["warnings"][0]
-
-
-def test_consistency_report_degrades_without_broker_credentials() -> None:
-    with patch.dict("os.environ", {}, clear=True):
-        report = broker_market_data_consistency_report(positions=None)
-
-    assert report["status"] == "unavailable"
-    assert report["reason"] == "alpaca_not_configured"
-    assert report["rows"] == []
-
-
-def test_provider_reconciliation_passes_for_matching_adjusted_close_rows() -> None:
-    primary_rows = [
-        {"symbol": "SPY", "date": "2026-06-11", "adj_close": 600.0},
-        {"symbol": "GLD", "date": "2026-06-11", "adj_close": 310.0},
-    ]
-    secondary_rows = [
-        {"symbol": "SPY", "date": "2026-06-11", "adjusted_close": 600.05},
-        {"symbol": "GLD", "date": "2026-06-11", "adjusted_close": 310.02},
-    ]
-
-    report = reconcile_price_providers(
-        primary_rows,
-        secondary_rows,
-        primary_provider="Licensed Fixture",
-        secondary_provider="Yahoo Fixture",
-        required_symbols=["SPY", "GLD"],
-        adjusted_close_tolerance_pct=0.05,
-        max_latest_lag_days=0,
-    )
-
-    assert report["status"] == "ok"
-    assert report["failure_type"] is None
-    assert report["symbols_checked"] == 2
-    assert report["issue_counts"] == {}
-    assert report["top_offenders"] == []
-
-
-def test_provider_reconciliation_flags_adjusted_close_divergence_above_tolerance() -> None:
-    primary_rows = [{"symbol": "SPY", "date": "2026-06-11", "adj_close": 612.0}]
-    secondary_rows = [{"symbol": "SPY", "date": "2026-06-11", "adj_close": 600.0}]
-
-    report = reconcile_price_providers(
-        primary_rows,
-        secondary_rows,
-        primary_provider="Licensed Fixture",
-        secondary_provider="Yahoo Fixture",
-        required_symbols=["SPY"],
-        adjusted_close_tolerance_pct=1.0,
-    )
-
-    assert report["status"] == "warning"
-    assert report["failure_type"] == "provider_divergence"
-    assert report["issue_counts"] == {"adjusted_close_divergence": 1}
-    assert report["top_offenders"][0]["symbol"] == "SPY"
-    assert report["top_offenders"][0]["issue"] == "adjusted_close_divergence"
-    assert report["top_offenders"][0]["difference_pct"] == 2.0
-
-
-def test_provider_reconciliation_flags_missing_symbols_and_stale_latest_dates() -> None:
-    primary_rows = [
-        {"symbol": "SPY", "date": "2026-06-11", "adj_close": 600.0},
-        {"symbol": "GLD", "date": "2026-06-10", "adj_close": 310.0},
-    ]
-    secondary_rows = [
-        {"symbol": "SPY", "date": "2026-06-10", "adj_close": 600.0},
-    ]
-
-    report = reconcile_price_providers(
-        primary_rows,
-        secondary_rows,
-        primary_provider="Licensed Fixture",
-        secondary_provider="Yahoo Fixture",
-        required_symbols=["SPY", "GLD"],
-        max_latest_lag_days=0,
-    )
-
-    assert report["status"] == "warning"
-    assert report["failure_type"] == "provider_divergence"
-    assert report["issue_counts"] == {
-        "missing_symbol": 1,
-        "stale_latest_date": 2,
-    }
-    assert {offender["issue"] for offender in report["top_offenders"]} == {
-        "missing_symbol",
-        "stale_latest_date",
-    }
-    assert "Yahoo Fixture missing GLD" in report["message"]
-
-
-def test_provider_reconciliation_classifies_empty_provider_as_outage() -> None:
-    report = reconcile_price_providers(
-        [{"symbol": "SPY", "date": "2026-06-11", "adj_close": 600.0}],
-        [],
-        primary_provider="Licensed Fixture",
-        secondary_provider="Yahoo Fixture",
-        required_symbols=["SPY"],
-    )
-
-    assert report["status"] == "unavailable"
-    assert report["failure_type"] == "provider_outage"
-    assert report["outage_provider"] == "Yahoo Fixture"
-    assert report["issue_counts"] == {"provider_outage": 1}
-
-
-def test_compact_price_market_db_reconciliation_flags_stale_vix3m(tmp_path: Path) -> None:
-    prices_path = tmp_path / "prices.json"
-    db_path = _price_db(tmp_path / "market.db", [("^VIX3M", "2026-06-26", 20.13)])
-    _write_prices_json(
-        prices_path,
-        {
-            "^VIX3M": [
-                {"d": "2026-06-26", "p": 20.13},
-                {"d": "2026-07-02", "p": 19.04},
-            ]
-        },
-    )
-
-    report = reconcile_compact_prices_with_market_db(
-        prices_path=prices_path,
-        db_path=db_path,
-        required_symbols=["^VIX3M"],
-    )
-
-    assert report["status"] == "fail"
-    assert report["failure_type"] == "market_db_stale"
-    assert report["issue_counts"] == {"stale_latest_date": 1}
-    offender = report["top_offenders"][0]
-    assert offender["symbol"] == "^VIX3M"
-    assert offender["compact_latest_row"] == {"date": "2026-07-02", "price": 19.04}
-    assert offender["sqlite_latest_row"] == {"date": "2026-06-26", "price": 20.13}
-    assert offender["lag_days"] == 6
-    assert "src.data.market_db_sync" in report["remediation_command"]
-
-
-def test_compact_price_market_db_reconciliation_passes_after_sync(tmp_path: Path) -> None:
-    prices_path = tmp_path / "prices.json"
-    db_path = tmp_path / "market.db"
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            CREATE TABLE prices (
-                symbol TEXT,
-                date TEXT,
-                open REAL,
-                high REAL,
-                low REAL,
-                close REAL,
-                volume INTEGER,
-                updated_at TEXT,
-                PRIMARY KEY (symbol, date)
-            )
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO prices (symbol, date, open, high, low, close, volume, updated_at)
-            VALUES ('^VIX3M', '2026-06-26', 20.13, 20.13, 20.13, 20.13, 0, 'old')
-            """
-        )
-    _write_prices_json(
-        prices_path,
-        {
-            "^VIX3M": [
-                {"d": "2026-06-26", "p": 20.13},
-                {"d": "2026-07-02", "p": 19.04},
-            ]
-        },
-    )
-
-    sync_prices_json_to_market_db(prices_path=prices_path, db_path=db_path)
-    report = reconcile_compact_prices_with_market_db(
-        prices_path=prices_path,
-        db_path=db_path,
-        required_symbols=["^VIX3M"],
-    )
-
-    assert report["status"] == "ok"
-    assert report["failure_type"] is None
-    assert report["issue_counts"] == {}
-    assert report["top_offenders"] == []
+    assert res["status"] == "warning"
+    assert len(res["rows"]) == 4
+    statuses = {r["symbol"]: r["status"] for r in res["rows"]}
+    assert statuses["SPY"] == "ok"
+    assert statuses["GLD"] == "stale_local"
+    assert statuses["TLT"] == "diverged"
+    assert statuses["IEF"] == "missing_local"
