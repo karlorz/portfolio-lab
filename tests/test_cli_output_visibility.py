@@ -1821,3 +1821,82 @@ def test_update_vix_term_structure_mock_db_writes_json(tmp_path) -> None:
     assert entry["vix_spot"] == 16.0
     assert entry["source"] == "market.db"
     assert (tmp_path / "public" / "data" / "vix_term_structure.json").exists()
+
+
+# BENCHMARK-CRITICAL-PATHS-SMOKE (Item Q22, 2026-08-17): subprocess smoke for
+# the critical-path benchmark CLI (scripts/benchmark_critical_paths.py). The
+# run case needs the real src modules (the suite imports src.backtest /
+# strategy / signals / dashboard internals), so the real script runs with all
+# writable paths (--output / --baseline / --runtime-dir) pointed at tmp_path —
+# no writes to live data/perf. Negative --runs raises ValueError in main
+# (traceback on stderr → exit 1).
+BENCHMARK_CP = os.path.join("scripts", "benchmark_critical_paths.py")
+
+
+def _run_benchmark_cp(*args: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, BENCHMARK_CP, *args],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def test_benchmark_critical_paths_help_exits_0() -> None:
+    """BENCHMARK-CRITICAL-PATHS-SMOKE: --help → exit 0 with the description
+    marker."""
+    res = _run_benchmark_cp("--help")
+    assert res.returncode == 0
+    assert "Benchmark portfolio-lab critical paths" in res.stdout
+
+
+def test_benchmark_critical_paths_negative_runs_errors(tmp_path) -> None:
+    """BENCHMARK-CRITICAL-PATHS-SMOKE: negative --runs → nonzero exit with
+    the runs-guard marker on stderr. The script raises ValueError in main
+    (exit 1 via traceback, not argparse exit 2), so the smoke pins the actual
+    behavior; nothing is written."""
+    output = tmp_path / "critical_paths_latest.json"
+    res = _run_benchmark_cp("--runs", "-1", "--output", str(output))
+    assert res.returncode == 1
+    assert "--runs must be >= 1" in res.stderr
+    assert not output.exists()
+
+
+def test_benchmark_critical_paths_minimal_run_writes_json(tmp_path) -> None:
+    """BENCHMARK-CRITICAL-PATHS-SMOKE: --runs 1 --warmup 0 with all writable
+    paths in tmp_path → exit 0, "status": "ok" in stdout, and valid results
+    JSON written to --output with the five benchmark cases (live data/perf
+    untouched)."""
+    output = tmp_path / "perf" / "critical_paths_latest.json"
+    baseline = tmp_path / "perf" / "critical_paths_baseline.json"
+    runtime = tmp_path / "runtime"
+    res = _run_benchmark_cp(
+        "--output",
+        str(output),
+        "--baseline",
+        str(baseline),
+        "--runtime-dir",
+        str(runtime),
+        "--runs",
+        "1",
+        "--warmup",
+        "0",
+    )
+    assert res.returncode == 0, res.stderr
+    assert '"status": "ok"' in res.stdout
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["status"] == "ok"
+    assert payload["runs"] == 1
+    names = {case["name"] for case in payload["benchmarks"]}
+    assert names == {
+        "price_loading",
+        "ensemble_compute_vote",
+        "signal_correlation_matrix",
+        "combined_regime_backtest_fixture",
+        "dashboard_health_generation",
+    }
