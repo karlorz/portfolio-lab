@@ -3284,6 +3284,66 @@ def test_walk_forward_validate_wrapper_help_exits_0() -> None:
     assert "Walk-forward validation for portfolio-lab grid search" in res.stdout
 
 
+# CONFIGURE-AUTONOMOUS-AGENT-JOB-SMOKE (Item Q38, 2026-08-17): subprocess smoke
+# for scripts/cron/configure_autonomous_agent_job.py. Tests --help output and
+# --dry-run against a hermetic mock hermes home fixture in tmp_path (live
+# /root/.hermes is never touched).
+CONFIGURE_AUTONOMOUS_JOB = os.path.join(
+    "scripts", "cron", "configure_autonomous_agent_job.py"
+)
+
+
+def _run_configure_autonomous_job(
+    *args: str,
+) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, CONFIGURE_AUTONOMOUS_JOB, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def test_configure_autonomous_agent_job_help_exits_0() -> None:
+    """CONFIGURE-AUTONOMOUS-AGENT-JOB-SMOKE: --help -> exit 0 with description."""
+    res = _run_configure_autonomous_job("--help")
+    assert res.returncode == 0
+    assert "Configure the portfolio-lab autonomous Hermes cron job" in res.stdout
+
+
+def test_configure_autonomous_agent_job_dry_run_exits_0(tmp_path) -> None:
+    """CONFIGURE-AUTONOMOUS-AGENT-JOB-SMOKE: --dry-run with mock hermes home
+    -> exit 0, 'changed' or 'already configured' in stdout, and jobs.json unchanged."""
+    hermes_home = tmp_path / "hermes"
+    (hermes_home / "cron").mkdir(parents=True)
+    jobs_json = hermes_home / "cron" / "jobs.json"
+    initial_payload = {
+        "jobs": [
+            {
+                "name": "portfolio-lab-autonomous-agent",
+                "script": "old.sh",
+                "no_agent": False,
+                "enabled_toolsets": ["bash"],
+                "workdir": "/old/dir",
+            }
+        ]
+    }
+    jobs_json.write_text(json.dumps(initial_payload), encoding="utf-8")
+    res = _run_configure_autonomous_job(
+        "--hermes-home", str(hermes_home), "--dry-run"
+    )
+    assert res.returncode == 0, res.stderr
+    assert "changed" in res.stdout
+    loaded = json.loads(jobs_json.read_text(encoding="utf-8"))
+    assert loaded["jobs"][0]["no_agent"] is False
+
+
+
 
 
 
