@@ -53,6 +53,7 @@ def test_session_a_is_compact_and_brainstorms_when_queue_empty():
     assert "Skip a script that already has a dedicated tests/test_*.py" in session_a
     assert "portfolio-lab-*.sh" in session_a
     assert "PROMOTE" in session_a
+    assert "recount only" in session_a
     assert len(session_a) < 4000
 
 

@@ -237,6 +237,131 @@ class TestReconcileToBroker:
         result = sync.reconcile_to_broker()
         assert result["status"] == "not_configured"
 
+
+class TestCLI:
+    """CLI interface tests for src.broker.position_sync.main."""
+
+    def test_cli_default_sync(self, monkeypatch, caplog):
+        from src.broker.position_sync import main
+        import logging
+
+        monkeypatch.setattr("sys.argv", ["position_sync.py"])
+        with patch.object(PositionSync, "sync", return_value={"status": "success", "synced": True}) as mock_sync:
+            with caplog.at_level(logging.INFO):
+                main()
+            mock_sync.assert_called_once_with()
+            assert '"status": "success"' in caplog.text
+
+    def test_cli_status(self, monkeypatch, caplog):
+        from src.broker.position_sync import main
+        import logging
+
+        monkeypatch.setattr("sys.argv", ["position_sync.py", "status"])
+        with patch.object(PositionSync, "is_ready", return_value=True):
+            with caplog.at_level(logging.INFO):
+                main()
+            assert '"ready": true' in caplog.text
+
+    def test_cli_sync_dry_run(self, monkeypatch, caplog):
+        from src.broker.position_sync import main
+        import logging
+
+        monkeypatch.setattr("sys.argv", ["position_sync.py", "sync", "--dry-run"])
+        with patch.object(PositionSync, "sync", return_value={"status": "success", "dry_run": True}) as mock_sync:
+            with caplog.at_level(logging.INFO):
+                main()
+            mock_sync.assert_called_once_with(dry_run=True)
+            assert '"dry_run": true' in caplog.text
+
+    def test_cli_sync_no_dry_run(self, monkeypatch, caplog):
+        from src.broker.position_sync import main
+        import logging
+
+        monkeypatch.setattr("sys.argv", ["position_sync.py", "sync"])
+        with patch.object(PositionSync, "sync", return_value={"status": "success", "dry_run": False}) as mock_sync:
+            with caplog.at_level(logging.INFO):
+                main()
+            mock_sync.assert_called_once_with(dry_run=False)
+            assert '"status": "success"' in caplog.text
+
+    def test_cli_reconcile(self, monkeypatch, caplog):
+        from src.broker.position_sync import main
+        import logging
+
+        monkeypatch.setattr("sys.argv", ["position_sync.py", "reconcile"])
+        with patch.object(PositionSync, "reconcile_to_broker", return_value={"status": "success", "positions_updated": 3}) as mock_rec:
+            with caplog.at_level(logging.INFO):
+                main()
+            mock_rec.assert_called_once_with()
+            assert '"positions_updated": 3' in caplog.text
+
+    def test_cli_drift_with_items(self, monkeypatch, caplog):
+        from src.broker.position_sync import main
+        import logging
+
+        monkeypatch.setattr("sys.argv", ["position_sync.py", "drift"])
+        report = {
+            "status": "success",
+            "drift": {
+                "items": [
+                    {
+                        "symbol": "SPY",
+                        "qty_delta": 10.0,
+                        "value_delta": 5000.0,
+                        "drift_pct": 10.0,
+                    }
+                ]
+            }
+        }
+        with patch.object(PositionSync, "sync", return_value=report) as mock_sync:
+            with caplog.at_level(logging.INFO):
+                main()
+            mock_sync.assert_called_once_with(dry_run=True)
+            assert "Found 1 position drifts:" in caplog.text
+            assert "SPY: +10.00 shares" in caplog.text
+
+    def test_cli_drift_none(self, monkeypatch, caplog):
+        from src.broker.position_sync import main
+        import logging
+
+        monkeypatch.setattr("sys.argv", ["position_sync.py", "drift"])
+        report = {
+            "status": "success",
+            "drift": {
+                "items": []
+            }
+        }
+        with patch.object(PositionSync, "sync", return_value=report) as mock_sync:
+            with caplog.at_level(logging.INFO):
+                main()
+            mock_sync.assert_called_once_with(dry_run=True)
+            assert "No position drift detected" in caplog.text
+
+    def test_cli_drift_error(self, monkeypatch, caplog):
+        from src.broker.position_sync import main
+        import logging
+
+        monkeypatch.setattr("sys.argv", ["position_sync.py", "drift"])
+        report = {
+            "status": "error",
+            "message": "Connection refused",
+        }
+        with patch.object(PositionSync, "sync", return_value=report):
+            with caplog.at_level(logging.INFO):
+                main()
+            assert "Error: Connection refused" in caplog.text
+
+    def test_cli_unknown_command(self, monkeypatch, caplog):
+        from src.broker.position_sync import main
+        import logging
+
+        monkeypatch.setattr("sys.argv", ["position_sync.py", "invalid_cmd"])
+        with caplog.at_level(logging.INFO):
+            main()
+        assert "Unknown command: invalid_cmd" in caplog.text
+        assert "Commands: status, sync [--dry-run], reconcile, drift" in caplog.text
+
+
     def test_reconcile_creates_table_and_inserts(self):
         sync = self._make_sync()
         sync.client = MagicMock()
