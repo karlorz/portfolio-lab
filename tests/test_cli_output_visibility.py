@@ -1542,3 +1542,111 @@ def test_capture_daily_pnl_backfill_dry_run(tmp_path) -> None:
     assert res.returncode == 0, res.stderr
     assert "backfill_daily_returns" in (res.stdout + res.stderr)
     assert daily_pnl.read_bytes() == before, "dry-run rewrote daily_pnl.jsonl"
+
+
+# REBUILD-PRICES-COMPACT-SMOKE (Item Q19, 2026-08-17): subprocess smoke for
+# the prices_compact rebuild CLI (scripts/rebuild_prices_compact.py). The
+# script loads prices + writes compact targets via DATA_DIR / PUBLIC_DATA_DIR
+# with no env override, so every case runs a byte-identical copy under a mock
+# root whose minimal src/paths.py points both dirs inside the mock tree (Q13
+# copy pattern). Repo data/prices_compact.json and public/data/prices_compact
+# .json are never touched.
+REBUILD_PRICES_COMPACT = os.path.join("scripts", "rebuild_prices_compact.py")
+
+
+def _run_rebuild_prices_compact(
+    script: str, *args: str
+) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PRICES_COMPACT_N_BARS"] = "2"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, script, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _copy_rebuild_prices_compact(tmp_path: Path) -> Path:
+    """Byte-identical copy under a mock root plus a minimal mock src/paths.py:
+    DATA_DIR and PUBLIC_DATA_DIR both resolve inside the mock tree, so the copy
+    never touches repo data/ or public/data/."""
+    import shutil
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    shutil.copyfile(REBUILD_PRICES_COMPACT, scripts_dir / "rebuild_prices_compact.py")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "src" / "paths.py").write_text(
+        "from pathlib import Path\n"
+        "DATA_DIR = Path(__file__).resolve().parent.parent / 'data'\n"
+        "PUBLIC_DATA_DIR = Path(__file__).resolve().parent.parent / 'public' / 'data'\n",
+        encoding="utf-8",
+    )
+    return scripts_dir / "rebuild_prices_compact.py"
+
+
+def test_rebuild_prices_compact_missing_prices_exits_1(tmp_path) -> None:
+    """REBUILD-PRICES-COMPACT-SMOKE: no prices.json in any candidate path
+    → exit 1 with the missing-source marker (nothing written)."""
+    copy = _copy_rebuild_prices_compact(tmp_path)
+    res = _run_rebuild_prices_compact(str(copy))
+    assert res.returncode == 1
+    assert "No prices.json found" in res.stderr
+    assert not (tmp_path / "data" / "prices_compact.json").exists()
+
+
+def test_rebuild_prices_compact_non_dict_payload_exits_1(tmp_path) -> None:
+    """REBUILD-PRICES-COMPACT-SMOKE: prices.json holds a non-object payload
+    → exit 1 with the must-be-object marker (nothing written)."""
+    copy = _copy_rebuild_prices_compact(tmp_path)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "prices.json").write_text('["not", "a", "dict"]', encoding="utf-8")
+    res = _run_rebuild_prices_compact(str(copy))
+    assert res.returncode == 1
+    assert "prices.json must be object" in res.stderr
+    assert not (data_dir / "prices_compact.json").exists()
+
+
+def test_rebuild_prices_compact_mock_fixture_exits_0(tmp_path) -> None:
+    """REBUILD-PRICES-COMPACT-SMOKE: mock prices fixture in the mock tree
+    → exit 0 with JSON {"ok": true, n_symbols, n_bars, written} and compact
+    files written, honoring last-N truncation (PRICES_COMPACT_N_BARS=2)."""
+    copy = _copy_rebuild_prices_compact(tmp_path)
+    public_dir = tmp_path / "public" / "data"
+    public_dir.mkdir(parents=True)
+    (public_dir / "prices.json").write_text(
+        json.dumps(
+            {
+                "SPY": [
+                    {"d": "2026-08-12", "p": 440.0},
+                    {"d": "2026-08-13", "p": 445.0},
+                    {"d": "2026-08-14", "p": 450.5},
+                ],
+                "GLD": {"bars": [{"d": "2026-08-14", "p": 210.0}]},
+                "meta": {"schema": "x"},
+                "_private": [1, 2, 3],
+            }
+        ),
+        encoding="utf-8",
+    )
+    res = _run_rebuild_prices_compact(str(copy))
+    assert res.returncode == 0, res.stdout + res.stderr
+    payload = json.loads(res.stdout)
+    assert payload["ok"] is True
+    assert payload["n_bars"] == 2
+    assert payload["n_symbols"] == 2
+    assert payload["written"]
+    assert (public_dir / "prices_compact.json").exists()
+    assert (tmp_path / "data" / "prices_compact.json").exists()
+    compact = json.loads((public_dir / "prices_compact.json").read_text(encoding="utf-8"))
+    assert compact["meta"]["schema"] == "prices/compact-v1"
+    assert compact["meta"]["n_bars"] == 2
+    assert len(compact["symbols"]["SPY"]) == 2  # last-N truncated
+    assert len(compact["symbols"]["GLD"]) == 1
