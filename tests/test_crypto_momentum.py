@@ -629,6 +629,47 @@ class TestSignalSnapshotBridge:
         assert "GLD" in snap.asset_signals
         assert snap.asset_signals["GLD"] == -0.03
 
+    @pytest.mark.parametrize("percent_conf", [50.0, 60.0, 67.5, 75.0, 85.0, 90.0, 95.0])
+    def test_snapshot_confidence_percent_style_normalized_to_unit(self, btc, eth, percent_conf):
+        """Percent-style producer confidence (50-95) must land in [0, 1]."""
+        signal = CryptoCompositeSignal(
+            timestamp="2025-01-01T00:00:00",
+            btc_signal=btc, eth_signal=eth,
+            composite_weight=0.03, vol_scale_factor=0.67,
+            funding_source="gld", gld_reduction=0.03,
+            signal_state="long", confidence=percent_conf,
+            is_valid=True, reason="Crypto tactical",
+        )
+        snap = signal.to_signal_snapshot()
+        assert 0.0 <= snap.confidence <= 1.0
+        assert snap.confidence == pytest.approx(percent_conf / 100.0)
+
+    def test_snapshot_confidence_zero_stays_zero(self, btc, eth):
+        """The 0.0 confidence 'no contribution' case must stay 0.0."""
+        signal = CryptoCompositeSignal(
+            timestamp="2025-01-01T00:00:00",
+            btc_signal=btc, eth_signal=eth,
+            composite_weight=0.0, vol_scale_factor=0.0,
+            funding_source="gld", gld_reduction=0.0,
+            signal_state="flat", confidence=0.0,
+            is_valid=False, reason="No positive signal",
+        )
+        snap = signal.to_signal_snapshot()
+        assert snap.confidence == 0.0
+
+    def test_snapshot_confidence_unit_style_untouched(self, btc, eth):
+        """Unit-style confidence already in [0, 1] must pass through unchanged."""
+        signal = CryptoCompositeSignal(
+            timestamp="2025-01-01T00:00:00",
+            btc_signal=btc, eth_signal=eth,
+            composite_weight=0.03, vol_scale_factor=0.67,
+            funding_source="gld", gld_reduction=0.03,
+            signal_state="long", confidence=0.75,
+            is_valid=True, reason="Crypto tactical",
+        )
+        snap = signal.to_signal_snapshot()
+        assert snap.confidence == 0.75
+
 
 class TestClassificationBoundaries:
     """Boundary conditions for signal classification."""

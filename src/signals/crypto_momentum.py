@@ -97,11 +97,14 @@ class CryptoCompositeSignal:
         # Map composite_weight (0-0.05) to value (-1 to +1)
         # 0.05 allocation -> +1.0 (max bullish), 0 -> 0.0 (neutral)
         value = min(1.0, self.composite_weight / 0.05) if self.is_valid else 0.0
+        # Producer confidence is percent-style (50-95); SignalSnapshot requires 0-1.
+        # Values already in 0-1 (e.g. the 0.0 "no contribution" case) pass through.
+        confidence = self.confidence / 100.0 if self.confidence > 1.0 else self.confidence
         return SignalSnapshot(
             source="crypto_momentum",
             timestamp=self.timestamp,
             value=value,
-            confidence=self.confidence,
+            confidence=confidence,
             asset_signals={
                 "GLD": -self.gld_reduction,
             },
