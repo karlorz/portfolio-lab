@@ -2748,6 +2748,145 @@ def test_compare_regime_weights_toggle_disabled_exits_0(tmp_path) -> None:
     assert "Result: Toggle OFF" in res.stdout
 
 
+# WALK-FORWARD-VALIDATION-SMOKE (Item Q32, 2026-08-17): subprocess smoke for the
+# walk-forward validation CLI (scripts/walk_forward_validation.py). The script
+# loads PRICES_JSON and writes DATA_DIR / walk_forward_report.json via src.paths.
+# A byte-identical copy under a mock root whose mock src package points
+# DATA_DIR/PRICES_JSON into tmp keeps the run completely hermetic: repo
+# data/walk_forward_report.json and public/data/prices.json are never touched.
+WALK_FORWARD_VALIDATION = os.path.join(
+    "scripts", "walk_forward_validation.py"
+)
+
+
+def _run_walk_forward_validation(
+    script: str, *args: str
+) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, script, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _copy_walk_forward_validation(tmp_path: Path) -> Path:
+    """Byte-identical copy under a mock root with a mock src package:
+    src/paths.py (DATA_DIR + PRICES_JSON in tmp_path) and delegating
+    src/backtest/metrics.py."""
+    import shutil
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    shutil.copyfile(
+        WALK_FORWARD_VALIDATION,
+        scripts_dir / "walk_forward_validation.py",
+    )
+    src_dir = tmp_path / "src"
+    (src_dir / "backtest").mkdir(parents=True)
+    (src_dir / "__init__.py").write_text("", encoding="utf-8")
+    (src_dir / "backtest" / "__init__.py").write_text("", encoding="utf-8")
+
+    (src_dir / "paths.py").write_text(
+        "from pathlib import Path\n"
+        "DATA_DIR = Path(__file__).resolve().parent.parent / 'data'\n"
+        "DATA_DIR.mkdir(parents=True, exist_ok=True)\n"
+        "PRICES_JSON = Path(__file__).resolve().parent.parent / 'public' / 'data' / 'prices.json'\n",
+        encoding="utf-8",
+    )
+    (src_dir / "backtest" / "metrics.py").write_text(
+        "from dataclasses import dataclass\n"
+        "import json\n"
+        "DEFAULT_CRISIS_YEARS = ['2008', '2020', '2022']\n"
+        "@dataclass\n"
+        "class BacktestMetrics:\n"
+        "    cagr: float = 0.10\n"
+        "    sharpe_ratio: float = 0.79\n"
+        "    volatility: float = 0.11\n"
+        "    max_drawdown: float = 0.12\n"
+        "def compute_metrics(returns=None, initial_capital=100000.0, **kwargs):\n"
+        "    return BacktestMetrics()\n"
+        "def compute_crisis_returns(*args, **kwargs):\n"
+        "    return {'2008': -5.0, '2020': 2.0, '2022': -10.0}\n"
+        "def compute_deflated_sharpe_ratio(*args, **kwargs):\n"
+        "    return 0.95\n"
+        "def save_results_json(data, output_path, experiment_manifest=None):\n"
+        "    with open(output_path, 'w') as f:\n"
+        "        json.dump(data, f, indent=2)\n",
+        encoding="utf-8",
+    )
+    return scripts_dir / "walk_forward_validation.py"
+
+
+def _write_walk_forward_prices(public_dir: Path, n_days: int = 80) -> None:
+    """Deterministic synthetic business-day prices for SPY, GLD, TLT."""
+    import datetime
+    import math
+
+    public_dir.mkdir(parents=True, exist_ok=True)
+    day = datetime.date(2025, 1, 2)
+    dates: list[str] = []
+    while len(dates) < n_days:
+        if day.weekday() < 5:
+            dates.append(day.isoformat())
+        day += datetime.timedelta(days=1)
+    payload = {}
+    for i, sym in enumerate(["SPY", "GLD", "TLT"]):
+        base = 100.0 + i * 20.0
+        payload[sym] = [
+            {
+                "d": date,
+                "p": round(
+                    base * (1 + 0.0006 * idx + 0.01 * math.sin(idx / 11.0 + i)), 4
+                ),
+            }
+            for idx, date in enumerate(dates)
+        ]
+    (public_dir / "prices.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_walk_forward_validation_help_exits_0(tmp_path) -> None:
+    """WALK-FORWARD-VALIDATION-SMOKE: --help -> exit 0 with description marker."""
+    copy = _copy_walk_forward_validation(tmp_path)
+    res = _run_walk_forward_validation(str(copy), "--help")
+    assert res.returncode == 0
+    assert "Walk-forward validation for portfolio-lab grid search" in res.stdout
+
+
+def test_walk_forward_validation_missing_prices_exits_0_with_error(tmp_path) -> None:
+    """WALK-FORWARD-VALIDATION-SMOKE: mock root without prices.json -> exit 0
+    with 'Prices file not found' logged (fail-closed, no exception)."""
+    copy = _copy_walk_forward_validation(tmp_path)
+    res = _run_walk_forward_validation(str(copy))
+    assert res.returncode == 0
+    assert "Prices file not found" in (res.stdout + res.stderr)
+
+
+def test_walk_forward_validation_fixture_run_with_save_exits_0(tmp_path) -> None:
+    """WALK-FORWARD-VALIDATION-SMOKE: hermetic mock SPY/GLD/TLT prices fixture with --save
+    -> exit 0 with walk-forward summary markers and mock data/walk_forward_report.json written."""
+    copy = _copy_walk_forward_validation(tmp_path)
+    _write_walk_forward_prices(tmp_path / "public" / "data", n_days=150)
+    res = _run_walk_forward_validation(
+        str(copy), "--n-splits", "2", "--test-size", "25", "--gap", "5", "--save"
+    )
+    assert res.returncode == 0, res.stderr
+    assert "Walk-forward: 2 windows" in (res.stdout + res.stderr)
+    assert "Champion Weight Consistency" in res.stdout
+    out_file = tmp_path / "data" / "walk_forward_report.json"
+    assert out_file.exists()
+    payload = json.loads(out_file.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "walk-forward-validation/v1"
+    assert payload["n_windows"] == 2
+    assert "walk_forward_efficiency" in payload
+
+
+
 
 
 
