@@ -1650,3 +1650,60 @@ def test_rebuild_prices_compact_mock_fixture_exits_0(tmp_path) -> None:
     assert compact["meta"]["n_bars"] == 2
     assert len(compact["symbols"]["SPY"]) == 2  # last-N truncated
     assert len(compact["symbols"]["GLD"]) == 1
+
+
+# RECOVERY-CLI-SMOKE (Item Q20, 2026-08-17): subprocess smoke for the
+# recovery CLI (scripts/portfolio_lab_recovery.py). The four cases are
+# side-effect-free (help/argparse validation/verify fail-closed before any
+# system access), so the real script path is hermetic — no mock root copy
+# needed and live system trees are never touched.
+RECOVERY_CLI = os.path.join("scripts", "portfolio_lab_recovery.py")
+
+
+def _run_recovery_cli(*args: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, RECOVERY_CLI, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def test_recovery_cli_help_exits_0() -> None:
+    """RECOVERY-CLI-SMOKE: --help → exit 0 with the description marker."""
+    res = _run_recovery_cli("--help")
+    assert res.returncode == 0
+    assert "Portfolio Lab recovery:" in res.stdout
+
+
+def test_recovery_cli_missing_subcommand_exits_2() -> None:
+    """RECOVERY-CLI-SMOKE: bare invocation → argparse exit 2 with the
+    required-command marker on stderr."""
+    res = _run_recovery_cli()
+    assert res.returncode == 2
+    assert "required: command" in res.stderr
+
+
+def test_recovery_cli_verify_relative_archive_exits_1() -> None:
+    """RECOVERY-CLI-SMOKE: verify with a relative --archive → exit 1 with
+    the absolute-path marker on stderr (nothing inspected)."""
+    res = _run_recovery_cli("verify", "--archive", "backups/x.tar")
+    assert res.returncode == 1
+    assert "verify --archive must be an absolute path" in res.stderr
+
+
+def test_recovery_cli_verify_missing_archive_exits_1(tmp_path) -> None:
+    """RECOVERY-CLI-SMOKE: verify with a nonexistent absolute --archive
+    → exit 1 with stdout JSON {"ok": false, ...} error "archive file
+    missing" (fails closed before any extraction)."""
+    missing = tmp_path / "nonexistent.portfolio-lab-recovery.tar"
+    res = _run_recovery_cli("verify", "--archive", str(missing))
+    assert res.returncode == 1
+    payload = json.loads(res.stdout)
+    assert payload["ok"] is False
+    assert "archive file missing" in payload["error"]
