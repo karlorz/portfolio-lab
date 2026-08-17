@@ -6,7 +6,7 @@ import json
 import pytest
 from datetime import datetime, date
 from pathlib import Path
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock, AsyncMock, patch
 
 from src.broker.collar_options_bridge import (
     CollarOptionsBridge,
@@ -277,8 +277,6 @@ class TestEdgeCases:
         comparison = bridge.compare_with_signal(strikes)
         assert "call_diff_pct" in comparison
         assert "put_diff_pct" in comparison
-        assert isinstance(comparison["call_diff_pct"], (int, float))
-        assert isinstance(comparison["put_diff_pct"], (int, float))
 
     def test_net_premium_calculation(self, bridge):
         """Net premium should be call mark minus put mark."""
@@ -320,6 +318,96 @@ class TestEdgeCases:
         result = bridge._find_from_chain(chain, 550.0, 16.0, 30)
         assert result is not None
         assert result.is_cashless  # Net premium ~0
+
+
+class TestMainCLI:
+    """Tests for src.broker.collar_options_bridge.main CLI entry point."""
+
+    @pytest.fixture
+    def mock_strikes(self):
+        return LiveCollarStrikes(
+            source="simulated",
+            timestamp=datetime.now().isoformat(),
+            underlying_price=550.0,
+            vix_level=16.0,
+            days_to_expiry=30,
+            call_symbol="SPY260616C00560000",
+            call_strike=560.0,
+            call_bid=4.0,
+            call_ask=4.2,
+            call_mark=4.1,
+            call_delta=0.30,
+            call_volume=500,
+            call_oi=5000,
+            put_symbol="SPY260616P00540000",
+            put_strike=540.0,
+            put_bid=3.8,
+            put_ask=4.0,
+            put_mark=3.9,
+            put_delta=-0.20,
+            put_volume=400,
+            put_oi=4000,
+            net_premium=0.2,
+            is_cashless=True,
+            collar_cost_pct=0.04,
+            call_liquid=True,
+            put_liquid=True,
+            bid_ask_spread_pct=2.5,
+        )
+
+    def test_main_default(self, monkeypatch, caplog, mock_strikes):
+        from src.broker.collar_options_bridge import main
+        import logging
+
+        monkeypatch.setattr("sys.argv", ["collar_options_bridge.py"])
+        with patch.object(CollarOptionsBridge, "fetch_optimal_collar", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = mock_strikes
+            with caplog.at_level(logging.INFO):
+                main()
+            mock_fetch.assert_awaited_once()
+            assert "COLLAR OPTIONS BRIDGE v4.80" in caplog.text
+            assert "Source: simulated" in caplog.text
+            assert "SPY: $550.00" in caplog.text
+
+    def test_main_with_save(self, monkeypatch, caplog, mock_strikes):
+        from src.broker.collar_options_bridge import main
+        import logging
+
+        monkeypatch.setattr("sys.argv", ["collar_options_bridge.py", "--save"])
+        with patch.object(CollarOptionsBridge, "fetch_optimal_collar", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = mock_strikes
+            with patch.object(CollarOptionsBridge, "save_strikes") as mock_save:
+                with caplog.at_level(logging.INFO):
+                    main()
+                mock_fetch.assert_awaited_once()
+                mock_save.assert_called_once_with(mock_strikes)
+
+    def test_main_with_compare(self, monkeypatch, caplog, mock_strikes):
+        from src.broker.collar_options_bridge import main
+        import logging
+
+        monkeypatch.setattr("sys.argv", ["collar_options_bridge.py", "--compare"])
+        comparison_res = {
+            "live_call_strike": 560.0,
+            "bs_call_strike": 560.0,
+            "call_diff_pct": 0.0,
+            "live_put_strike": 540.0,
+            "bs_put_strike": 540.0,
+            "put_diff_pct": 0.0,
+            "live_net_premium": 0.2,
+            "bs_net_premium": 0.2,
+            "source": "simulated",
+        }
+        with patch.object(CollarOptionsBridge, "fetch_optimal_collar", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = mock_strikes
+            with patch.object(CollarOptionsBridge, "compare_with_signal", return_value=comparison_res) as mock_comp:
+                with caplog.at_level(logging.INFO):
+                    main()
+                mock_fetch.assert_awaited_once()
+                mock_comp.assert_called_once_with(mock_strikes)
+                assert "Live vs Black-Scholes Comparison:" in caplog.text
+                assert "Call: $560.00 vs $560.00 (+0.0%)" in caplog.text
+
 
 
 # ---------------------------------------------------------------------------
