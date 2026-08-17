@@ -3447,6 +3447,89 @@ def test_cron_guard_overlap_skipped_exits_0(tmp_path) -> None:
         assert "lock held" in res.stdout
 
 
+# UV-UPDATE-CHECK-SMOKE (Item Q41, 2026-08-17): subprocess smoke for the
+# dependency check script (scripts/uv-update-check.sh). Tests unknown arg exit 1
+# and hermetic mock project --check run exit 0 with status markers.
+UV_UPDATE_CHECK = os.path.join("scripts", "uv-update-check.sh")
+
+
+def test_uv_update_check_unknown_arg_exits_1() -> None:
+    """UV-UPDATE-CHECK-SMOKE: unknown argument -> exit 1 with 'Unknown:' message."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script_path = os.path.join(repo_root, UV_UPDATE_CHECK)
+    res = subprocess.run(
+        ["bash", script_path, "--unknown-flag"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=repo_root,
+    )
+    assert res.returncode == 1
+    assert "Unknown: --unknown-flag" in (res.stdout + res.stderr)
+
+
+def test_uv_update_check_mock_project_check_exits_0(tmp_path) -> None:
+    """UV-UPDATE-CHECK-SMOKE: hermetic mock project with mock uv shim -> exit 0
+    with lockfile check and summary pass markers."""
+    import shutil
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    shutil.copyfile(UV_UPDATE_CHECK, scripts_dir / "uv-update-check.sh")
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    uv_shim = bin_dir / "uv"
+    uv_shim.write_text(
+        "#!/bin/sh\n"
+        'case "$*" in\n'
+        '  *"lock --check"*)\n'
+        '    echo "uv.lock matches pyproject.toml"\n'
+        "    exit 0\n"
+        "    ;;\n"
+        '  *"pip list --outdated"*)\n'
+        '    echo ""\n'
+        "    exit 0\n"
+        "    ;;\n"
+        '  *"pip check"*)\n'
+        '    echo "No dependency conflicts"\n'
+        "    exit 0\n"
+        "    ;;\n"
+        '  *"tree"*)\n'
+        '    echo "portfolio-lab v0.1.0"\n'
+        "    exit 0\n"
+        "    ;;\n"
+        '  *"run pytest"*)\n'
+        '    echo "=== 3 passed in 0.1s ==="\n'
+        "    exit 0\n"
+        "    ;;\n"
+        "  *)\n"
+        "    exit 0\n"
+        "    ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    uv_shim.chmod(0o755)
+
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+
+    res = subprocess.run(
+        ["bash", str(scripts_dir / "uv-update-check.sh"), "--check"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=env,
+        cwd=str(tmp_path),
+    )
+    assert res.returncode == 0, res.stderr
+    assert "Lockfile status" in res.stdout
+    assert "uv.lock matches pyproject.toml" in res.stdout
+    assert "All checks passed. Environment is clean." in res.stdout
+
+
+
 
 
 
