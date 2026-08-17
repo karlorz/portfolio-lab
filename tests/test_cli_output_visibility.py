@@ -3386,6 +3386,68 @@ def test_test_repo_guard_missing_claude_md_exits_78(tmp_path) -> None:
     assert "CLAUDE.md marker not found" in res.stderr
 
 
+# CRON-GUARD-SMOKE (Item Q40, 2026-08-17): subprocess smoke for the shared cron
+# guard library (scripts/cron_guard.sh). Tests normal execution lifecycle
+# (cron_guard_start + cron_guard_end) and overlap avoidance via flock.
+CRON_GUARD = os.path.join("scripts", "cron_guard.sh")
+
+
+def test_cron_guard_normal_lifecycle_exits_0(tmp_path) -> None:
+    """CRON-GUARD-SMOKE: normal job start + end -> exit 0, STARTED and COMPLETED markers."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    guard_path = os.path.join(repo_root, CRON_GUARD)
+    lock_dir = tmp_path / "locks"
+    cmd = (
+        f'source "{guard_path}"\n'
+        'cron_guard_start "smoke-test-job" 60\n'
+        'cron_guard_end "smoke-test-job" 0\n'
+    )
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["CRON_GUARD_LOCK_DIR"] = str(lock_dir)
+    res = subprocess.run(
+        ["bash", "-c", cmd],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=env,
+        cwd=repo_root,
+    )
+    assert res.returncode == 0, res.stderr
+    assert "CRON_GUARD: smoke-test-job STARTED" in res.stdout
+    assert "CRON_GUARD: smoke-test-job COMPLETED" in res.stdout
+
+
+def test_cron_guard_overlap_skipped_exits_0(tmp_path) -> None:
+    """CRON-GUARD-SMOKE: active lock held -> exit 0 with SKIPPED marker."""
+    import fcntl
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    guard_path = os.path.join(repo_root, CRON_GUARD)
+    lock_dir = tmp_path / "locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_file = lock_dir / "overlap-job.lock"
+
+    with open(lock_file, "w", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        cmd = f'source "{guard_path}"\ncron_guard_start "overlap-job" 60\n'
+        env = dict(os.environ)
+        env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+        env["CRON_GUARD_LOCK_DIR"] = str(lock_dir)
+        res = subprocess.run(
+            ["bash", "-c", cmd],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+            cwd=repo_root,
+        )
+        assert res.returncode == 0, res.stderr
+        assert "CRON_GUARD: overlap-job SKIPPED" in res.stdout
+        assert "lock held" in res.stdout
+
+
+
 
 
 
