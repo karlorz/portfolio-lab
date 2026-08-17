@@ -233,11 +233,42 @@ HEALTH_LAG_RESTAMP_FILES: tuple[str, ...] = (
 )
 
 
+def resolve_mirror_file_list(
+    source_root: Path,
+    files: Optional[Sequence[str]] = None,
+) -> tuple[str, ...]:
+    """Resolve the list of files to mirror.
+
+    When ``files`` is None, discover the managed file set from source
+    ``index.json`` (if present and valid), prepending ``index.json`` itself.
+    If ``index.json`` is absent or invalid, fall back to ``DEFAULT_FILE_GLOBS``.
+    When ``files`` is explicitly passed, expand globs over ``source_root``.
+    """
+    if files is not None:
+        return expand_mirror_file_specs(source_root, files)
+
+    index_path = source_root / "index.json"
+    if index_path.is_file():
+        try:
+            payload = json.loads(index_path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict) and isinstance(payload.get("files"), list):
+                # index.json itself + all managed files in source index.json
+                managed = ["index.json"]
+                for f in payload["files"]:
+                    if isinstance(f, str) and f not in managed:
+                        managed.append(f)
+                return tuple(managed)
+        except Exception:
+            pass
+
+    return expand_mirror_file_specs(source_root, DEFAULT_FILE_GLOBS)
+
+
 def mirror_repo_public_data(
     *,
     source_root: Path,
     dest_root: Path,
-    files: Sequence[str] = DEFAULT_FILE_GLOBS,
+    files: Optional[Sequence[str]] = None,
     dry_run: bool = False,
     force: bool = False,
     restamp_health_lag: bool = True,
@@ -257,12 +288,12 @@ def mirror_repo_public_data(
     )
     source_root = Path(source_root)
     dest_root = Path(dest_root)
-    files = expand_mirror_file_specs(source_root, files)
+    file_list = resolve_mirror_file_list(source_root, files)
     if not source_root.is_dir():
         report.errors.append(f"source root missing: {source_root}")
         return report
 
-    for rel in files:
+    for rel in file_list:
         try:
             src, dst = resolve_mirror_paths(rel, source_root, dest_root)
         except ValueError as exc:
@@ -392,13 +423,16 @@ def mirror_repo_public_data(
 def lag_report(
     source_root: Path,
     dest_root: Path,
-    files: Sequence[str] = DEFAULT_FILE_GLOBS,
+    files: Optional[Sequence[str]] = None,
 ) -> list[dict[str, Any]]:
     """Compare generator_git_sha (or presence) between source and dest."""
     rows: list[dict[str, Any]] = []
-    for rel in expand_mirror_file_specs(Path(source_root), files):
+    file_list = resolve_mirror_file_list(Path(source_root), files)
+    dest_root = Path(dest_root)
+    source_root = Path(source_root)
+    for rel in file_list:
         try:
-            src, dst = resolve_mirror_paths(rel, Path(source_root), Path(dest_root))
+            src, dst = resolve_mirror_paths(rel, source_root, dest_root)
         except ValueError:
             continue
         src_b = _read_bytes(src) if src.is_file() else None
@@ -429,7 +463,7 @@ def lag_report(
 def lag_sli_report(
     source_root: Path,
     dest_root: Path,
-    files: Sequence[str] = DEFAULT_FILE_GLOBS,
+    files: Optional[Sequence[str]] = None,
 ) -> list[dict[str, Any]]:
     """Return only comparisons that qualify for the mirror-lag SLI."""
     return [

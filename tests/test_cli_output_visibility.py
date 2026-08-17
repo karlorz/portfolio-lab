@@ -1244,6 +1244,52 @@ def test_mirror_repo_public_data_lag_only_exits_1(tmp_path) -> None:
     assert lag_row[0]["source_sha"] != lag_row[0]["dest_sha"]
 
 
+def test_mirror_repo_public_data_copies_exact_index_file_list(tmp_path) -> None:
+    """MIRROR-REPO-SMOKE: mirror copy-set driven by source index.json.
+
+    A file present in source and listed in index.json is copied; a file present in
+    source directory and in DEFAULT_FILE_GLOBS but absent from index.json is omitted;
+    dest remains empty on --dry-run.
+    """
+    source = tmp_path / "source"
+    source.mkdir(parents=True)
+    dest = tmp_path / "dest"
+    dest.mkdir(parents=True)
+
+    # index.json specifies only signals.json as managed
+    index_payload = {
+        "schema_version": "public-data-index/v1",
+        "files": ["signals.json"],
+        "entries": [],
+    }
+    (source / "index.json").write_text(json.dumps(index_payload), encoding="utf-8")
+    (source / "signals.json").write_text(json.dumps({"generator_git_sha": "sha-s"}), encoding="utf-8")
+    # health.json is in DEFAULT_FILE_GLOBS but NOT in this index.json
+    (source / "health.json").write_text(json.dumps({"generator_git_sha": "sha-h"}), encoding="utf-8")
+
+    # dry-run
+    res_dry = _run_mirror_repo_public(
+        "--source", str(source), "--dest", str(dest), "--dry-run"
+    )
+    assert res_dry.returncode == 0, res_dry.stderr
+    payload_dry = json.loads(res_dry.stdout)
+    assert payload_dry["dry_run"] is True
+    assert set(payload_dry["copied"]) == {"index.json", "signals.json"}
+    assert "health.json" not in payload_dry["copied"]
+    assert list(dest.iterdir()) == []
+
+    # actual copy
+    res_run = _run_mirror_repo_public(
+        "--source", str(source), "--dest", str(dest)
+    )
+    assert res_run.returncode == 0, res_run.stderr
+    payload_run = json.loads(res_run.stdout)
+    assert set(payload_run["copied"]) == {"index.json", "signals.json"}
+    assert (dest / "index.json").is_file()
+    assert (dest / "signals.json").is_file()
+    assert not (dest / "health.json").exists()
+
+
 # BUILD-LAB-RELEASE-SMOKE (Item Q16, 2026-08-17): subprocess smoke for the
 # static release builder (scripts/build_lab_release.py). The happy path runs
 # the full pipeline (clean-check → detached git worktree → mock build/install
