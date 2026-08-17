@@ -2006,3 +2006,87 @@ def test_archive_ic_pre_contract_rows_archives_misaligned(tmp_path) -> None:
     assert saved["__observation_metadata__"]["ensemble_equity"] == [
         {"prediction_field": "ensemble_voting.equity_bias"}
     ]
+
+
+# FABER-SMA-GATE-SMOKE (Item Q24, 2026-08-17): subprocess smoke for the
+# Faber 10-month SMA gate PoC CLI (scripts/faber_sma_gate.py). The script
+# reads prices from a fixed path relative to __file__ (parents[1] /
+# public/data/prices.json) with no env override and no src imports, so a
+# byte-identical copy under a mock root points it at the mock tree (Q13 copy
+# pattern). Live repo public/data/prices.json is never read.
+FABER_SMA_GATE = os.path.join("scripts", "faber_sma_gate.py")
+
+
+def _run_faber_sma_gate(script: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _copy_faber_sma_gate(tmp_path: Path) -> Path:
+    """Byte-identical copy under a mock root; DATA_FILE resolves to the mock
+    tree's public/data/prices.json (no src package needed — stdlib + numpy/
+    pandas only)."""
+    import shutil
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    shutil.copyfile(FABER_SMA_GATE, scripts_dir / "faber_sma_gate.py")
+    return scripts_dir / "faber_sma_gate.py"
+
+
+def _write_faber_prices(public_dir: Path, n_days: int = 260) -> None:
+    """Deterministic synthetic business-day prices for SPY/GLD/TLT (> SMA
+    window so the 200-day gate is meaningful)."""
+    import datetime
+    import math
+
+    public_dir.mkdir(parents=True, exist_ok=True)
+    day = datetime.date(2025, 1, 2)
+    dates: list[str] = []
+    while len(dates) < n_days:
+        if day.weekday() < 5:
+            dates.append(day.isoformat())
+        day += datetime.timedelta(days=1)
+    payload = {}
+    for i, sym in enumerate(["SPY", "GLD", "TLT"]):
+        base = 100.0 + i * 20.0
+        payload[sym] = [
+            {
+                "d": date,
+                "p": round(
+                    base * (1 + 0.0006 * idx + 0.01 * math.sin(idx / 19.0)), 4
+                ),
+            }
+            for idx, date in enumerate(dates)
+        ]
+    (public_dir / "prices.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_faber_sma_gate_missing_prices_exits_1(tmp_path) -> None:
+    """FABER-SMA-GATE-SMOKE: mock root without prices.json → exit 1 with
+    FileNotFoundError on stderr (nothing else runs)."""
+    copy = _copy_faber_sma_gate(tmp_path)
+    res = _run_faber_sma_gate(str(copy))
+    assert res.returncode == 1
+    assert "FileNotFoundError" in res.stderr
+    assert "prices.json" in res.stderr
+
+
+def test_faber_sma_gate_fixture_run_exits_0(tmp_path) -> None:
+    """FABER-SMA-GATE-SMOKE: hermetic mock prices fixture → exit 0 with the
+    gate header and Sharpe-delta markers in stdout."""
+    copy = _copy_faber_sma_gate(tmp_path)
+    _write_faber_prices(tmp_path / "public" / "data")
+    res = _run_faber_sma_gate(str(copy))
+    assert res.returncode == 0, res.stderr
+    assert "FABER 10-MONTH SMA GATE" in res.stdout
+    assert "Sharpe delta" in res.stdout
