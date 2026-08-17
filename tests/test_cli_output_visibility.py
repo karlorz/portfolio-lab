@@ -3343,6 +3343,50 @@ def test_configure_autonomous_agent_job_dry_run_exits_0(tmp_path) -> None:
     assert loaded["jobs"][0]["no_agent"] is False
 
 
+# TEST-REPO-GUARD-SMOKE (Item Q39, 2026-08-17): subprocess smoke for the
+# test directory protection guard (scripts/test-repo-guard.sh).
+# Tests valid directory execution, deny-listed directory block (exit 78),
+# and missing CLAUDE.md marker block (exit 78).
+TEST_REPO_GUARD = os.path.join("scripts", "test-repo-guard.sh")
+
+
+def _run_test_repo_guard_in_dir(
+    cwd: str | Path,
+) -> subprocess.CompletedProcess[str]:
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    guard_path = os.path.join(repo_root, TEST_REPO_GUARD)
+    return subprocess.run(
+        ["bash", "-c", f'source "{guard_path}" && guard_ensure_portfolio_lab'],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=str(cwd),
+    )
+
+
+def test_test_repo_guard_valid_dir_exits_0(tmp_path) -> None:
+    """TEST-REPO-GUARD-SMOKE: valid repo directory with CLAUDE.md marker -> exit 0."""
+    (tmp_path / "CLAUDE.md").write_text("# portfolio-lab\n", encoding="utf-8")
+    res = _run_test_repo_guard_in_dir(tmp_path)
+    assert res.returncode == 0, res.stderr
+
+
+def test_test_repo_guard_deny_listed_dir_exits_78() -> None:
+    """TEST-REPO-GUARD-SMOKE: deny-listed directory -> exit 78 with error log."""
+    res = _run_test_repo_guard_in_dir("/root/.hermes")
+    assert res.returncode == 78
+    assert "refusing to run tests in" in res.stderr
+    assert "deny-list entry" in res.stderr
+
+
+def test_test_repo_guard_missing_claude_md_exits_78(tmp_path) -> None:
+    """TEST-REPO-GUARD-SMOKE: missing CLAUDE.md -> exit 78 with marker missing error."""
+    res = _run_test_repo_guard_in_dir(tmp_path)
+    assert res.returncode == 78
+    assert "CLAUDE.md marker not found" in res.stderr
+
+
+
 
 
 
