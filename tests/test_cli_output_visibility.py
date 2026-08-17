@@ -2171,3 +2171,89 @@ def test_donchian_breakout_fixture_run_exits_0(tmp_path) -> None:
     assert "DONCHIAN CHANNEL BREAKOUT ENSEMBLE" in res.stdout
     assert "Ensemble (20/55/252d)" in res.stdout
 
+
+# VOL-ADJUSTED-MOMENTUM-SMOKE (Item Q26, 2026-08-17): subprocess smoke for the
+# vol-adjusted momentum PoC CLI (scripts/vol_adjusted_momentum.py). The script
+# reads prices from parents[1] / public/data/prices.json with no env override
+# and no src imports (pandas + numpy only), so a byte-identical copy under a
+# mock root points it at the mock tree (Q13/Q24/Q25 copy pattern). Live repo
+# public/data/prices.json is never read.
+VOL_ADJUSTED_MOMENTUM = os.path.join("scripts", "vol_adjusted_momentum.py")
+
+
+def _run_vol_adjusted_momentum(script: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _copy_vol_adjusted_momentum(tmp_path: Path) -> Path:
+    """Byte-identical copy under a mock root; DATA_FILE resolves to the mock
+    tree's public/data/prices.json."""
+    import shutil
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    shutil.copyfile(
+        VOL_ADJUSTED_MOMENTUM, scripts_dir / "vol_adjusted_momentum.py"
+    )
+    return scripts_dir / "vol_adjusted_momentum.py"
+
+
+def _write_vol_momentum_prices(public_dir: Path, n_days: int = 280) -> None:
+    """Deterministic synthetic business-day prices for SPY, GLD, TLT
+    (>= 252d momentum window + 21d skip)."""
+    import datetime
+    import math
+
+    public_dir.mkdir(parents=True, exist_ok=True)
+    day = datetime.date(2025, 1, 2)
+    dates: list[str] = []
+    while len(dates) < n_days:
+        if day.weekday() < 5:
+            dates.append(day.isoformat())
+        day += datetime.timedelta(days=1)
+    payload = {}
+    for i, sym in enumerate(["SPY", "GLD", "TLT"]):
+        base = 100.0 + i * 25.0
+        payload[sym] = [
+            {
+                "d": date,
+                "p": round(
+                    base * (1 + 0.0007 * idx + 0.015 * math.sin(idx / 17.0)), 4
+                ),
+            }
+            for idx, date in enumerate(dates)
+        ]
+    (public_dir / "prices.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_vol_adjusted_momentum_missing_prices_exits_1(tmp_path) -> None:
+    """VOL-ADJUSTED-MOMENTUM-SMOKE: mock root without prices.json -> exit 1 with
+    FileNotFoundError on stderr."""
+    copy = _copy_vol_adjusted_momentum(tmp_path)
+    res = _run_vol_adjusted_momentum(str(copy))
+    assert res.returncode == 1
+    assert "FileNotFoundError" in res.stderr
+    assert "prices.json" in res.stderr
+
+
+def test_vol_adjusted_momentum_fixture_run_exits_0(tmp_path) -> None:
+    """VOL-ADJUSTED-MOMENTUM-SMOKE: hermetic mock SPY/GLD/TLT prices fixture
+    -> exit 0 with vol-adjusted momentum header and Sharpe delta markers."""
+    copy = _copy_vol_adjusted_momentum(tmp_path)
+    _write_vol_momentum_prices(tmp_path / "public" / "data")
+    res = _run_vol_adjusted_momentum(str(copy))
+    assert res.returncode == 0, res.stderr
+    assert "VOL-ADJUSTED MOMENTUM" in res.stdout
+    assert "Sharpe delta" in res.stdout
+
+
