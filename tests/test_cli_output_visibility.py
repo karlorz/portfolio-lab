@@ -3022,6 +3022,95 @@ def test_compute_garch_risk_fixture_run_exits_0(tmp_path) -> None:
     assert (tmp_path / "public" / "data" / "garch_cvar.json").exists()
 
 
+# FETCH-GOOGLE-TRENDS-SMOKE (Item Q34, 2026-08-17): subprocess smoke for the
+# Google Trends fetch CLI (scripts/fetch_google_trends.py). When pytrends is
+# absent, the script fail-closes with exit 1. With a hermetic mock pytrends
+# module injected via PYTHONPATH, the script executes without network access
+# and writes google-trends-cache/v1 JSON to --output.
+FETCH_GOOGLE_TRENDS = os.path.join("scripts", "fetch_google_trends.py")
+
+
+def _run_fetch_google_trends(
+    *args: str, extra_pythonpath: str | None = None
+) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ppath = repo_root
+    if extra_pythonpath:
+        ppath = f"{extra_pythonpath}:{ppath}"
+    env["PYTHONPATH"] = ppath
+    return subprocess.run(
+        [sys.executable, FETCH_GOOGLE_TRENDS, *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=repo_root,
+    )
+
+
+def test_fetch_google_trends_help_exits_0() -> None:
+    """FETCH-GOOGLE-TRENDS-SMOKE: --help -> exit 0 with description marker."""
+    res = _run_fetch_google_trends("--help")
+    assert res.returncode == 0
+    assert "Fetch Google Trends data" in res.stdout
+
+
+def test_fetch_google_trends_missing_pytrends_exits_1(tmp_path) -> None:
+    """FETCH-GOOGLE-TRENDS-SMOKE: invocation without pytrends -> exit 1
+    with 'pytrends not installed' error log on stderr/stdout."""
+    shadow_dir = tmp_path / "shadow"
+    shadow_dir.mkdir()
+    (shadow_dir / "pytrends.py").write_text(
+        'raise ImportError("mock pytrends missing")\n', encoding="utf-8"
+    )
+    res = _run_fetch_google_trends(extra_pythonpath=str(shadow_dir))
+    assert res.returncode == 1
+    assert "pytrends not installed" in (res.stderr + res.stdout)
+
+
+def test_fetch_google_trends_mock_pytrends_writes_json(tmp_path) -> None:
+    """FETCH-GOOGLE-TRENDS-SMOKE: hermetic mock pytrends run with --output
+    -> exit 0, 'Saved' marker on stderr, and valid JSON written with schema."""
+    mock_lib = tmp_path / "mock_lib"
+    (mock_lib / "pytrends").mkdir(parents=True)
+    (mock_lib / "pytrends" / "__init__.py").write_text("", encoding="utf-8")
+    (mock_lib / "pytrends" / "request.py").write_text(
+        "import pandas as pd\n"
+        "class TrendReq:\n"
+        "    def __init__(self, hl='en-US', tz=480):\n"
+        "        self.terms = []\n"
+        "    def build_payload(self, kw_list, cat=0, timeframe='', geo='', gprop=''):\n"
+        "        self.terms = kw_list\n"
+        "    def interest_over_time(self):\n"
+        "        dates = pd.date_range('2026-05-01', '2026-08-01', freq='D')\n"
+        "        data = {term: [50 for _ in dates] for term in self.terms}\n"
+        "        return pd.DataFrame(data, index=dates)\n",
+        encoding="utf-8",
+    )
+    output_file = tmp_path / "google_trends.json"
+    res = _run_fetch_google_trends(
+        "--output",
+        str(output_file),
+        "--terms",
+        "recession",
+        "inflation",
+        "--days",
+        "30",
+        extra_pythonpath=str(mock_lib),
+    )
+    assert res.returncode == 0, res.stderr
+    assert "Saved 2 terms" in res.stderr
+    assert output_file.exists()
+    payload = json.loads(output_file.read_text(encoding="utf-8"))
+    assert payload["_meta"]["schema"] == "google-trends-cache/v1"
+    assert payload["_meta"]["term_count"] == 2
+    assert "recession" in payload
+    assert "inflation" in payload
+
+
+
 
 
 
