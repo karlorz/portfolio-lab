@@ -1900,3 +1900,109 @@ def test_benchmark_critical_paths_minimal_run_writes_json(tmp_path) -> None:
         "combined_regime_backtest_fixture",
         "dashboard_health_generation",
     }
+
+
+# ARCHIVE-IC-PRE-CONTRACT-SMOKE (Item Q23, 2026-08-17): subprocess smoke for
+# the IC pre-contract archive CLI (scripts/archive_ic_pre_contract_rows.py).
+# The script loads/saves state via DATA_DIR with no env override, so every
+# case runs a byte-identical copy under a mock root whose src package points
+# DATA_DIR into the mock tree AND carries a byte-identical copy of the real
+# src/monitor/ic_decay_monitor.py (its only src import is src.paths; numpy
+# comes from the venv). Repo data/ic_monitor_state.json and
+# data/ic_rebaseline_archives are never touched. NOTE: the script prints the
+# returned archive path ("archived: <path>"), not a count.
+ARCHIVE_IC = os.path.join("scripts", "archive_ic_pre_contract_rows.py")
+IC_DECAY_MONITOR = os.path.join("src", "monitor", "ic_decay_monitor.py")
+
+
+def _run_archive_ic(script: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["PORTFOLIO_LAB_ENABLE_ML"] = "0"
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return subprocess.run(
+        [sys.executable, script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    )
+
+
+def _copy_archive_ic(tmp_path: Path) -> Path:
+    """Byte-identical copies of the script and the real ICMonitor module
+    under a mock root whose src.paths points DATA_DIR into the mock tree."""
+    import shutil
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    shutil.copyfile(ARCHIVE_IC, scripts_dir / "archive_ic_pre_contract_rows.py")
+    (tmp_path / "src" / "monitor").mkdir(parents=True)
+    (tmp_path / "src" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "src" / "monitor" / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "src" / "paths.py").write_text(
+        "from pathlib import Path\n"
+        "DATA_DIR = Path(__file__).resolve().parent.parent / 'data'\n",
+        encoding="utf-8",
+    )
+    shutil.copyfile(
+        IC_DECAY_MONITOR, tmp_path / "src" / "monitor" / "ic_decay_monitor.py"
+    )
+    return scripts_dir / "archive_ic_pre_contract_rows.py"
+
+
+def test_archive_ic_pre_contract_rows_empty_state(tmp_path) -> None:
+    """ARCHIVE-IC-PRE-CONTRACT-SMOKE: mock root with no state file → exit 0,
+    stdout "archived: <archive path>" with an empty snapshot written and the
+    state file created as {} (nothing in the repo is touched)."""
+    copy = _copy_archive_ic(tmp_path)
+    res = _run_archive_ic(str(copy))
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.strip().startswith("archived: ")
+    archive_path = Path(res.stdout.strip().split(" ", 1)[1])
+    assert archive_path.is_file()
+    archive = json.loads(archive_path.read_text(encoding="utf-8"))
+    assert archive["schema"] == "ic-rebaseline-archive/v1"
+    assert archive["observations"] == {}
+    assert archive["staged"] == []
+    saved = tmp_path / "data" / "ic_monitor_state.json"
+    assert saved.exists()
+    assert json.loads(saved.read_text(encoding="utf-8")) == {}
+
+
+def test_archive_ic_pre_contract_rows_archives_misaligned(tmp_path) -> None:
+    """ARCHIVE-IC-PRE-CONTRACT-SMOKE: populated state with a None-metadata
+    ensemble_equity row → exit 0, that row archived to the snapshot and
+    dropped from the re-saved state (aligned row kept)."""
+    copy = _copy_archive_ic(tmp_path)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "ic_monitor_state.json").write_text(
+        json.dumps(
+            {
+                "ensemble_equity": [[0.5, 0.01], [0.4, 0.02]],
+                "__state_schema_version__": "ic-monitor-state/v2",
+                "__observation_metadata__": {
+                    "ensemble_equity": [
+                        None,
+                        {"prediction_field": "ensemble_voting.equity_bias"},
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    res = _run_archive_ic(str(copy))
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.strip().startswith("archived: ")
+    archives = list((data_dir / "ic_rebaseline_archives").glob("ic_pre_contract_archive_*.json"))
+    assert len(archives) == 1
+    archive = json.loads(archives[0].read_text(encoding="utf-8"))
+    assert archive["archive_kind"] == "pre-contract-rows"
+    assert archive["observations"]["ensemble_equity"] == [[0.5, 0.01]]
+    assert archive["observation_metadata"]["ensemble_equity"] == [None]
+    saved = json.loads((data_dir / "ic_monitor_state.json").read_text(encoding="utf-8"))
+    assert saved["ensemble_equity"] == [[0.4, 0.02]]
+    assert saved["__observation_metadata__"]["ensemble_equity"] == [
+        {"prediction_field": "ensemble_voting.equity_bias"}
+    ]
