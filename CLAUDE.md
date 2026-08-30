@@ -17,7 +17,7 @@ Keep this file short: it is always injected into agent context. **Do not re-expa
   - **Full `make test`**: merge/pre-release only (~30–45m). Never stack a second full suite; never poll with a 10m Bash timeout. Wait with `scripts/wait-test-exit.sh` (60m max) or skip if `pgrep` empty + stale `data/test_last_exit.json`.
   - **`make test-unit`**: still ~15k tests (not a fast gate). `make test-ml` only when user asks for ML.
 - **Frontend/data**: `bun run dev` / `build` / `fetch-data`. Python: `uv sync`, `uv run python …`.
-- **Gotchas**: no `bc`; no bare `~/.hermes/` in app code (read `data/cron_status.json`); skillwiki pages need `started`/`updated`/`completed` frontmatter when validating.
+- **Gotchas**: no `bc`; no bare `~/.hermes/` in app code (read `data/cron_status.json`); skillwiki pages need `started`/`updated`/`completed` frontmatter when validating; on sg01, Orca SSH tabs can leave stale `grok` TUIs — compare live `grok` PIDs + `~/.grok/active_sessions.json` to visible terminals before assuming the host is idle (vault: `projects/portfolio-lab/compound/sg01-orca-stale-grok-threads-2026-08-17`).
 
 ### Knowledge index (canonical docs)
 All project documentation, research status, architecture, ensemble weights, grid/FIRE tables, and compound notes live in the SkillWiki vault. **Start here:**
