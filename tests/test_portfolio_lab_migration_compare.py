@@ -21,7 +21,9 @@ Tests cover:
    or unused entry is unavailable and blocking; duplicate explanations rejected.
 10. Output contains no raw mismatching values, secret sentinel, input/output path, credentials,
     query token, Authorization/Bearer text, or arbitrary exception text.
-11. Blocked Markdown ends with exact failed check IDs, Dry run blocked, and retained safe-state line.
+11. Blocked Markdown ends with exact failed check IDs, Dry run blocked, and the
+    read-only no-change statement (the comparison tool never asserts or implies
+    who holds authority or whether any scheduler is disabled).
     CLI exits 2 after reports are written.
 12. Atomic output: injected write/replace failure leaves prior reports unchanged and no sibling temp file.
 13. Output paths same/colliding, symlink output, or missing parent are rejected before writes.
@@ -535,7 +537,14 @@ class TestMigrationCompareCLI:
         md = out_md.read_text()
         assert "Dry run blocked" in md
         assert "git.commit" in md
-        assert "Retained safe state: sg01 remains authoritative; cursor-box scheduler remains disabled." in md
+        assert "Read-only comparison: this tool did not change authority or scheduler state." in md
+        assert "sg01 remains authoritative" not in md
+        assert "cursor-box scheduler remains disabled" not in md
+        stdout_rep = json.loads(res.stdout)
+        assert stdout_rep["terminal_statement"] == (
+            "Dry run blocked (git.bundle_source_commit, git.commit, release.source_git_sha). "
+            "Read-only comparison: this tool did not change authority or scheduler state."
+        )
 
     def test_allocation_strictness(self, tmp_path: Path) -> None:
         """Requirement 8: Champion allocation 46/38/16 must match exactly."""
@@ -1936,12 +1945,14 @@ class TestStaleExplanationDimensionAndBlockedSuffix:
             "- `release.manifest_sha256`\n"
             "- `release.source_git_sha`\n"
             "\n"
-            "Retained safe state: sg01 remains authoritative; cursor-box scheduler remains disabled."
+            "Read-only comparison: this tool did not change authority or scheduler state."
         )
         assert md.rstrip().endswith(expected_suffix)
         assert md.rstrip().splitlines()[-1] == (
-            "Retained safe state: sg01 remains authoritative; cursor-box scheduler remains disabled."
+            "Read-only comparison: this tool did not change authority or scheduler state."
         )
+        assert "sg01 remains authoritative" not in md
+        assert "cursor-box scheduler remains disabled" not in md
 
     def test_freshness_expected_reasons_static(self, tmp_path: Path) -> None:
         src_file = tmp_path / "src.json"

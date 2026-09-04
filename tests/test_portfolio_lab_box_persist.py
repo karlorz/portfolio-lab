@@ -6,7 +6,9 @@ records received argv/environment (no secrets) and creates/removes fake
 ``PLBP_PROC_ROOT`` entries, and real child PIDs/signals where useful. Start/
 stop/kill deadlines are lowered through the named environment variables
 (PLBP_START_TIMEOUT / PLBP_STOP_TIMEOUT / PLBP_KILL_TIMEOUT); no sleep-heavy
-tests.
+tests. One determinism test inspects the shipped script itself: its shebang
+must invoke the user-owned cursor-box python3 entrypoint directly so that
+direct execution of the installed controller never depends on PATH resolution.
 
 The fake process identity mirrors /proc: ``<proc>/<pid>/{status,cmdline,
 environ,exe,cwd,fd}`` plus ``<proc>/net/tcp`` (and ``tcp6``). The helper's
@@ -1997,3 +1999,17 @@ def test_activate_rolls_back_production_scheduler_when_marker_write_fails(bp, mo
     # Original write failure preserved in exception chain
     assert isinstance(excinfo.value.__cause__, OSError)
     assert "simulated disk full during marker write" in str(excinfo.value.__cause__)
+
+
+# ── shipped executable determinism (direct execution, PATH without python3) ─
+
+
+def test_shipped_executable_uses_user_owned_python_entrypoint_directly():
+    """Direct execution of the installed controller at CONTROLLER_PATH must stay
+    deterministic even when PATH lacks python3: the shipped script's shebang must
+    invoke the user-owned cursor-box python3 entrypoint (same .local/bin dir as
+    the controller) directly, never /usr/bin/env python3, which resolves
+    python3 through PATH and fails on a bare Alpine host with no system python."""
+    first_line = BP_SCRIPT.read_text(encoding="utf-8").splitlines()[0]
+    assert first_line == f"#!{Path(CONTROLLER_PATH).parent / 'python3'}"
+    assert not first_line.startswith("#!/usr/bin/env")

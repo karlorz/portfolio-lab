@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/box/.local/bin/python3
 """Native box-persist lifecycle controller for Portfolio Lab on cursor-box.
 
 Task 2.2 of the sg01 -> cursor-box migration: a focused, stdlib-only

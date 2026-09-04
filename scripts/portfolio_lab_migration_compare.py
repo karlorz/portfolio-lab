@@ -1477,7 +1477,7 @@ def run_comparison(
         failed_ids = [d["check_id"] for d in differences if d["classification"] in ("blocking", "unavailable")]
         report_json["terminal_statement"] = (
             f"Dry run blocked ({', '.join(failed_ids)}). "
-            "Retained safe state: sg01 remains authoritative; cursor-box scheduler remains disabled."
+            "Read-only comparison: this tool did not change authority or scheduler state."
         )
 
     # Build Markdown report
@@ -1529,7 +1529,7 @@ def run_comparison(
         for fid in failed_ids:
             md_lines.append(f"- `{markdown_escape(fid)}`")
         md_lines.append("")
-        md_lines.append("Retained safe state: sg01 remains authoritative; cursor-box scheduler remains disabled.")
+        md_lines.append("Read-only comparison: this tool did not change authority or scheduler state.")
 
     md_content = "\n".join(md_lines) + "\n"
     return report_json, md_content, exit_code
