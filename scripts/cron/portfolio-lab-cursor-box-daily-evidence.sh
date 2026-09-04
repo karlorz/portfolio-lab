@@ -47,12 +47,11 @@ set +e
 "$FLOCK_BIN" -n 9
 flock_rc=$?
 set -e
-if [ "$flock_rc" -eq 0 ]; then
-    :
-elif [ "$flock_rc" -eq 1 ]; then
+if [ "$flock_rc" -eq 1 ]; then
     echo "portfolio-lab-daily-evidence: lock held; skipping" >&2
     exit 0
-else
+fi
+if [ "$flock_rc" -ne 0 ]; then
     echo "portfolio-lab-daily-evidence: flock failed ($flock_rc); not collecting" >&2
     exit 1
 fi

@@ -425,17 +425,11 @@ def run_controller(controller: Path, argv: list[str], timeout: float) -> dict[st
 
 
 def bounded_read(response: Any, max_bytes: int) -> tuple[bytes, bool]:
-    chunks: list[bytes] = []
-    total = 0
-    while True:
-        chunk = response.read(min(65536, max_bytes - total + 1))
-        if not chunk:
-            break
-        total += len(chunk)
-        chunks.append(chunk)
-        if total > max_bytes:
-            break
-    return b"".join(chunks), total > max_bytes
+    """One capped read: HTTPResponse.read(n)/readinto accumulates until n
+    bytes or EOF (BufferedReader loops across raw reads), so a single call
+    returns the same bytes as chunked accumulation."""
+    data = response.read(max_bytes + 1)
+    return data, len(data) > max_bytes
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -521,7 +515,7 @@ def controller_status(
         or obj["scheduler_instances"] != 1
     ):
         problems.append("scheduler instance count is not exactly 1")
-    if obj.get("service_name") != expected_service:
+    if not partial["service_name_exact"]:
         problems.append("service name mismatch")
     app_ok = app_r is None or (isinstance(obj.get("app_dir"), str) and Path(obj["app_dir"]).resolve() == app_r)
     web_ok = isinstance(obj.get("web_root"), str) and Path(obj["web_root"]).resolve() == web_r
@@ -818,31 +812,13 @@ def collect_authority(cfg: Config) -> tuple[str, dict[str, Any]]:
         (tasker_active, tasker_enabled, archive_active, archive_enabled)
     )
     if active_or_enabled:
-        return "fail", _authority_result(
-            status="fail",
-            present=True,
-            host_label=host_label,
-            collected_at=collected_raw,
-            tasker_active=tasker_active,
-            tasker_enabled=tasker_enabled,
-            archive_timer_active=archive_active,
-            archive_timer_enabled=archive_enabled,
-            reason="former authority still active or enabled",
-        )
-    if stale:
-        return "warning", _authority_result(
-            status="warning",
-            present=True,
-            host_label=host_label,
-            collected_at=collected_raw,
-            tasker_active=tasker_active,
-            tasker_enabled=tasker_enabled,
-            archive_timer_active=archive_active,
-            archive_timer_enabled=archive_enabled,
-            reason="proof is stale",
-        )
-    return "pass", _authority_result(
-        status="pass",
+        status, reason = "fail", "former authority still active or enabled"
+    elif stale:
+        status, reason = "warning", "proof is stale"
+    else:
+        status, reason = "pass", None
+    return status, _authority_result(
+        status=status,
         present=True,
         host_label=host_label,
         collected_at=collected_raw,
@@ -850,6 +826,7 @@ def collect_authority(cfg: Config) -> tuple[str, dict[str, Any]]:
         tasker_enabled=tasker_enabled,
         archive_timer_active=archive_active,
         archive_timer_enabled=archive_enabled,
+        reason=reason,
     )
 
 
@@ -877,7 +854,8 @@ def write_evidence(
     payloads: dict[str, dict[str, Any]],
 ) -> Path:
     """Serialize with a per-file bound, then commit atomically: a fresh day
-    dir appears via one rename; a same-day rerun replaces files one by one.
+    dir appears via one rename (temp dir populated once); a same-day rerun
+    performs only per-file atomic replacements with no temp-dir I/O.
     Temp dirs are unique (mkdtemp), so stale/colliding .tmp-* siblings are
     never an error; every OSError here is a clean exit-1 diagnostic."""
     serialized: dict[str, bytes] = {}
@@ -891,21 +869,20 @@ def write_evidence(
         out_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(out_root, 0o700)  # harden a pre-existing output root too
         target = out_root / day
-        tmp_dir = Path(tempfile.mkdtemp(dir=str(out_root), prefix=f".tmp-{day}-"))
-        try:
-            for file_name, data in serialized.items():
-                path = tmp_dir / file_name
-                path.write_bytes(data)
-                os.chmod(path, 0o600)
-            if target.exists():
-                for file_name in serialized:
-                    atomic_replace(target / file_name, serialized[file_name], 0o600)
-                shutil.rmtree(tmp_dir)
-            else:
+        if target.exists():
+            for file_name in serialized:
+                atomic_replace(target / file_name, serialized[file_name], 0o600)
+        else:
+            tmp_dir = Path(tempfile.mkdtemp(dir=str(out_root), prefix=f".tmp-{day}-"))
+            try:
+                for file_name, data in serialized.items():
+                    path = tmp_dir / file_name
+                    path.write_bytes(data)
+                    os.chmod(path, 0o600)
                 os.replace(tmp_dir, target)
-        except BaseException:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-            raise
+            except BaseException:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                raise
     except OSError as exc:
         die(f"failed to write evidence: {exc}")
     return target

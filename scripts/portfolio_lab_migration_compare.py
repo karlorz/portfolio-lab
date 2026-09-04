@@ -29,6 +29,10 @@ SCHEMA_EXPLANATIONS = "portfolio-lab-migration-explanations/v1"
 SCHEMA_COMPARISON = "portfolio-lab-migration-comparison/v1"
 SCHEMA_RELEASE = "portfolio-lab-static-release/v1"
 PASS_TERMINAL_STATEMENT = "Comparison passed; attended operational gates remain required."
+# Blocked terminal wording shared verbatim by the JSON terminal_statement and
+# the Markdown "Terminal Status" suffix so the two outputs cannot drift.
+BLOCKED_TERMINAL_PREFIX = "Dry run blocked"
+BLOCKED_TERMINAL_STATEMENT = "Read-only comparison: this tool did not change authority or scheduler state."
 
 HEX_40_RE = re.compile(r"^[0-9a-f]{40}$")
 HEX_64_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -1477,8 +1481,8 @@ def run_comparison(
     else:
         failed_ids = [d["check_id"] for d in differences if d["classification"] in ("blocking", "unavailable")]
         report_json["terminal_statement"] = (
-            f"Dry run blocked ({', '.join(failed_ids)}). "
-            "Read-only comparison: this tool did not change authority or scheduler state."
+            f"{BLOCKED_TERMINAL_PREFIX} ({', '.join(failed_ids)}). "
+            f"{BLOCKED_TERMINAL_STATEMENT}"
         )
 
     # Build Markdown report
@@ -1526,11 +1530,11 @@ def run_comparison(
         md_lines.append(PASS_TERMINAL_STATEMENT)
     else:
         failed_ids = [d["check_id"] for d in differences if d["classification"] in ("blocking", "unavailable")]
-        md_lines.append("Dry run blocked")
+        md_lines.append(BLOCKED_TERMINAL_PREFIX)
         for fid in failed_ids:
             md_lines.append(f"- `{markdown_escape(fid)}`")
         md_lines.append("")
-        md_lines.append("Read-only comparison: this tool did not change authority or scheduler state.")
+        md_lines.append(BLOCKED_TERMINAL_STATEMENT)
 
     md_content = "\n".join(md_lines) + "\n"
     return report_json, md_content, exit_code
