@@ -50,6 +50,8 @@ WRAPPER = PROJECT_ROOT / "scripts" / "cron" / "portfolio-lab-cursor-box-daily-ev
 SCHEMA = "portfolio-lab-daily-evidence/v1"
 BOX_PERSIST_SCHEMA = "portfolio-lab-box-persist/v1"
 STATIC_PERSIST_SCHEMA = "portfolio-lab-static-persist/v1"
+PROOF_SCHEMA = "portfolio-lab-former-authority-proof/v1"
+DEFAULT_EXPECTED_HOST = "sg01"
 
 DEFAULT_ROOT = Path("/home/box/.local/share/portfolio-lab")
 DEFAULT_OUTPUT_REL = "evidence"
@@ -331,6 +333,7 @@ def api_payload(
 
 def proof_payload(**over: object) -> dict[str, object]:
     payload: dict[str, object] = {
+        "schema": PROOF_SCHEMA,
         "host_label": "sg01",
         "collected_at": "2026-09-05T03:30:00Z",
         "tasker": {"active": False, "enabled": False},
@@ -338,6 +341,14 @@ def proof_payload(**over: object) -> dict[str, object]:
     }
     payload.update(over)
     return payload
+
+
+def write_proof(box: SimpleNamespace, content: object) -> None:
+    """Write the proof with the exact production mode 0600 so mode/ownership
+    checks are opt-in (tests that vary them flip the mode explicitly)."""
+    text = content if isinstance(content, str) else json.dumps(content)
+    box.proof.write_text(text, encoding="utf-8")
+    box.proof.chmod(0o600)
 
 
 SECRET = "SUPERSECRETVALUE42"
@@ -363,7 +374,7 @@ def prepare_pass_data(box: SimpleNamespace, *, ref: datetime | None = None) -> N
         path.write_text(json.dumps({"allocation": {"SPY": 0.46, "GLD": 0.38, "TLT": 0.16}}), encoding="utf-8")
         os.utime(path, (ref.timestamp() - 600, ref.timestamp() - 600))
     collected = (ref - timedelta(minutes=30)).isoformat()
-    box.proof.write_text(json.dumps(proof_payload(collected_at=collected)), encoding="utf-8")
+    write_proof(box, proof_payload(collected_at=collected))
     (box.run / "s3-archive-last-utc-day").write_text(day + "\n", encoding="utf-8")
     log_ts = ref.strftime("%Y-%m-%dT%H:%M:%SZ")
     (box.run / "s3-archive.log").write_text(
@@ -830,6 +841,142 @@ def test_same_day_rerun_is_deterministic_replacement(box):
     assert first_resources["status"] == second_resources["status"] == "pass"
 
 
+def test_same_day_non_directory_or_symlink_day_path_rejected(box):
+    """A same-day target must be a real non-symlink directory: a regular
+    file or a symlink at the day path is a clean exit-1 rejection."""
+    prepare_pass_data(box)
+    with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        first = run_cli(base_args(), env=env)
+    assert first.returncode == 0
+    day_dir = box.out / TODAY
+
+    shutil.rmtree(day_dir)
+    day_dir.write_text("not a directory", encoding="utf-8")
+    with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        res = run_cli(base_args(), env=env)
+    assert res.returncode == 1
+    assert res.stdout == ""
+    assert "Traceback" not in res.stderr
+
+    day_dir.unlink()
+    elsewhere = box.out / "elsewhere"
+    elsewhere.mkdir()
+    day_dir.symlink_to(elsewhere)
+    with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        res = run_cli(base_args(), env=env)
+    assert res.returncode == 1
+    assert "Traceback" not in res.stderr
+    assert day_dir.is_symlink(), "rejected symlink day path must be left in place"
+
+
+def test_same_day_unexpected_entries_rejected_and_never_deleted(box):
+    prepare_pass_data(box)
+    with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        first = run_cli(base_args(), env=env)
+    assert first.returncode == 0
+    day_dir = box.out / TODAY
+
+    extra = day_dir / "evil.json"
+    extra.write_text("{}", encoding="utf-8")
+    with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        res = run_cli(base_args(), env=env)
+    assert res.returncode == 1, "unexpected entry must be rejected"
+    assert res.stdout == ""
+    assert "Traceback" not in res.stderr
+    assert extra.read_text(encoding="utf-8") == "{}", "unexpected entry must not be deleted"
+    assert (day_dir / "summary.json").exists(), "known files must be left untouched"
+
+    extra.unlink()
+    (day_dir / "summary.json").unlink()  # missing expected entry is also unexpected
+    with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        res = run_cli(base_args(), env=env)
+    assert res.returncode == 1
+    assert "Traceback" not in res.stderr
+
+
+def test_same_day_symlink_or_non_regular_expected_file_rejected(box):
+    prepare_pass_data(box)
+    with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        first = run_cli(base_args(), env=env)
+    assert first.returncode == 0
+    day_dir = box.out / TODAY
+
+    summary = day_dir / "summary.json"
+    summary.unlink()
+    summary.symlink_to(box.data / "signals.json")
+    with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        res = run_cli(base_args(), env=env)
+    assert res.returncode == 1
+    assert "Traceback" not in res.stderr
+    assert summary.is_symlink(), "symlinked expected file must not be replaced"
+
+    summary.unlink()
+    summary.mkdir()  # non-regular expected file
+    with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        res = run_cli(base_args(), env=env)
+    assert res.returncode == 1
+    assert "Traceback" not in res.stderr
+    assert summary.is_dir(), "non-regular expected file must not be replaced"
+
+
+def test_same_day_rerun_hardens_day_dir_mode(box):
+    prepare_pass_data(box)
+    with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        first = run_cli(base_args(), env=env)
+    assert first.returncode == 0
+    day_dir = box.out / TODAY
+    os.chmod(day_dir, 0o755)
+    with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        second = run_cli(base_args(), env=env)
+    assert second.returncode == 0, second.stderr
+    assert stat.S_IMODE(day_dir.stat().st_mode) == 0o700
+
+
+def test_unit_controller_poll_sleeps_while_child_alive_at_eof(tmp_path, monkeypatch):
+    """The bounded poll loop must keep sleeping while the child is alive even
+    after both pipes hit EOF; otherwise it busy-spins (zero sleeps) until the
+    deadline once EOF is observed."""
+    mod = _load_cli_module()
+    child = tmp_path / "hold.py"
+    child.write_text(
+        f"#!{sys.executable}\n"
+        "import os, sys, time\n"
+        "sys.stdout.write('ready\\n')\n"
+        "sys.stdout.flush()\n"
+        "os.close(1)\n"
+        "os.close(2)\n"
+        "time.sleep(5)\n",
+        encoding="utf-8",
+    )
+    child.chmod(0o755)
+    sleeps: list[float] = []
+    real_sleep = mod.time.sleep
+
+    def recording_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        real_sleep(seconds)
+
+    monkeypatch.setattr(mod.time, "sleep", recording_sleep)
+    res = mod.run_controller(child, [], 3.0)
+    # The child drains 'ready' then EOFs both pipes while staying alive for
+    # 5s: the loop must sleep through the remaining ~3s at 10ms per sleep
+    # (expect ~300 sleeps), not spin hot (a handful of pre-EOF sleeps only).
+    assert len(sleeps) >= 100, f"poll loop busy-spun: only {len(sleeps)} sleeps"
+    assert res["status"] == "fail"
+    assert "timeout" in res["reason"]
+
+
 def test_output_permissions(box):
     prepare_pass_data(box)
     # Pre-create the output root with loose mode: the collector must harden it.
@@ -962,13 +1109,23 @@ def test_missing_root_is_config_error(box):
     assert result.stdout == ""
 
 
-def test_invalid_now_and_timeout_and_max_age_rejected():
+def test_invalid_now_and_timeout_and_max_age_rejected(box):
     for args in (["--now", "not-a-date"], ["--timeout", "-1"], ["--timeout", "abc"],
                  ["--freshness-max-age", "0"]):
         result = run_cli(args)
         assert result.returncode == 1, args
         assert result.stdout == ""
         assert result.stderr
+    # Non-finite values must be rejected at config time with exit 1, an
+    # empty stdout, and no traceback (a valid root isolates the config
+    # rejection as the only failure path).
+    for flag in ("--timeout", "--freshness-max-age"):
+        for value in ("nan", "inf", "-inf", "1e309"):
+            result = run_cli([flag, value], env={"PLDE_ROOT": str(box.root)})
+            assert result.returncode == 1, (flag, value)
+            assert result.stdout == "", (flag, value)
+            assert "Traceback" not in result.stderr, (flag, value)
+            assert result.stderr, (flag, value)
 
 
 def test_unknown_flag_exits_one_with_empty_stdout():
@@ -1042,14 +1199,14 @@ def test_controller_argv_contract(box):
     assert result.returncode == 0, result.stderr
     tasker_argv = json.loads((box.run / "tasker-argv.jsonl").read_text(encoding="utf-8").splitlines()[0])
     assert tasker_argv == [
-        "status", "--mode", "production",
+        "status", "--read-only", "--mode", "production",
         "--app-dir", str(box.app.resolve()),
         "--web-root", str(box.www.resolve()),
         "--service-name", TASKER_SERVICE,
     ]
     static_argv = json.loads((box.run / "static-argv.jsonl").read_text(encoding="utf-8").splitlines()[0])
     assert static_argv == [
-        "status", "--mode", "production",
+        "status", "--read-only", "--mode", "production",
         "--web-root", str(box.www.resolve()),
         "--service-name", STATIC_SERVICE,
     ]
@@ -1367,7 +1524,7 @@ def test_freshness_missing_and_stale_are_warnings_with_no_content_leak(box):
     os.utime(fresh, (NOW_DT.timestamp() - 60, NOW_DT.timestamp() - 60))
     assert not (box.data / "signals.json").exists()
     assert not (box.public / "signals.json").exists()
-    box.proof.write_text(json.dumps(proof_payload()), encoding="utf-8")
+    write_proof(box, proof_payload())
     (box.run / "s3-archive-last-utc-day").write_text("20260905\n", encoding="utf-8")
     with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
         env = full_env(box, api_url, static_url)
@@ -1442,6 +1599,25 @@ def test_archive_oversized_stamp_fails_bounded(box):
     assert archive["status"] == "fail"
     assert archive["details"]["utc_day"] is None
     assert "malformed" in archive["details"]["reason"]
+
+
+def test_archive_calendar_invalid_stamp_fails_cleanly_not_traceback(box):
+    """Eight-digit but calendar-invalid stamps (month > 12, impossible day,
+    zero date) are archive fail evidence with exit 2 — never a traceback
+    with exit 1 while formatting the day."""
+    api = json.dumps(api_payload(box)).encode()
+    for stamp in ("20261301", "20260230", "20260000"):
+        prepare_pass_data(box)
+        (box.run / "s3-archive-last-utc-day").write_text(stamp + "\n", encoding="utf-8")
+        with http_pair(api_body=api) as (api_url, static_url):
+            env = full_env(box, api_url, static_url)
+            result = run_cli(base_args(), env=env)
+        assert result.returncode == 2, stamp
+        assert "Traceback" not in result.stderr, stamp
+        archive = read_evidence(box)["archive"]
+        assert archive["status"] == "fail", stamp
+        assert archive["details"]["utc_day"] is None, stamp
+        assert "malformed" in archive["details"]["reason"], stamp
 
 
 def test_archive_log_redaction_and_latest_success(box):
@@ -1542,7 +1718,7 @@ def test_authority_pass_when_fresh_all_false(box):
 )
 def test_authority_active_or_enabled_fails(box, over):
     prepare_pass_data(box)
-    box.proof.write_text(json.dumps(proof_payload(**over)), encoding="utf-8")
+    write_proof(box, proof_payload(**over))
     with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
         env = full_env(box, api_url, static_url)
         result = run_cli(base_args(), env=env)
@@ -1573,7 +1749,7 @@ def test_authority_absent_stale_and_malformed_warn(box):
     # stale (valid, all false, but collected_at older than max age)
     prepare_pass_data(box)
     stale_proof = proof_payload(collected_at="2026-09-04T03:30:00Z")
-    box.proof.write_text(json.dumps(stale_proof), encoding="utf-8")
+    write_proof(box, stale_proof)
     with http_pair(api_body=api) as (api_url, static_url):
         env = full_env(box, api_url, static_url)
         result = run_cli(base_args(), env=env)
@@ -1587,12 +1763,129 @@ def test_authority_absent_stale_and_malformed_warn(box):
                     json.dumps(proof_payload(tasker={"active": "yes", "enabled": 0})),
                     json.dumps({"pad": "x" * 70000})):
         prepare_pass_data(box)
-        box.proof.write_text(content, encoding="utf-8")
+        write_proof(box, content)
         with http_pair(api_body=api) as (api_url, static_url):
             env = full_env(box, api_url, static_url)
             result = run_cli(base_args(), env=env)
         assert result.returncode == 0, content
         assert read_evidence(box)["authority"]["status"] == "warning"
+
+
+def test_authority_wrong_schema_and_host_warn(box):
+    api = json.dumps(api_payload(box)).encode()
+    for over, keyword in (
+        ({"schema": "portfolio-lab-migration-evidence/v1"}, "schema"),
+        ({"host_label": "sg02"}, "host"),
+    ):
+        prepare_pass_data(box)
+        write_proof(box, proof_payload(**over))
+        with http_pair(api_body=api) as (api_url, static_url):
+            env = full_env(box, api_url, static_url)
+            result = run_cli(base_args(), env=env)
+        assert result.returncode == 0, over
+        authority = read_evidence(box)["authority"]
+        assert authority["status"] == "warning", over
+        assert keyword in authority["details"]["reason"].lower(), over
+
+
+def test_authority_expected_host_override(box):
+    prepare_pass_data(box)
+    write_proof(box, proof_payload(host_label="box1"))
+    with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        env["PLDE_EXPECTED_HOST"] = "box1"
+        result = run_cli(base_args(), env=env)
+    assert result.returncode == 0, result.stderr
+    authority = read_evidence(box)["authority"]
+    assert authority["status"] == "pass"
+    assert authority["details"]["host_label"] == "box1"
+
+
+def test_authority_future_dated_warns_and_skew_passes(box):
+    api = json.dumps(api_payload(box)).encode()
+    # +1 day is beyond the fixed clock-skew allowance: warning, not fail.
+    prepare_pass_data(box)
+    write_proof(box, proof_payload(collected_at="2026-09-06T03:30:00Z"))
+    with http_pair(api_body=api) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        result = run_cli(base_args(), env=env)
+    assert result.returncode == 0
+    authority = read_evidence(box)["authority"]
+    assert authority["status"] == "warning"
+    assert "future" in authority["details"]["reason"]
+
+    # +60 seconds is inside the small fixed skew allowance: pass.
+    prepare_pass_data(box)
+    write_proof(box, proof_payload(collected_at="2026-09-05T04:01:00Z"))
+    with http_pair(api_body=api) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        result = run_cli(base_args(), env=env)
+    assert result.returncode == 0
+    assert read_evidence(box)["authority"]["status"] == "pass"
+
+
+def test_authority_mode_symlink_and_ownership_warn(box, monkeypatch):
+    api = json.dumps(api_payload(box)).encode()
+
+    # mode must be exactly 0600
+    prepare_pass_data(box)
+    box.proof.chmod(0o644)
+    with http_pair(api_body=api) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        result = run_cli(base_args(), env=env)
+    assert result.returncode == 0
+    authority = read_evidence(box)["authority"]
+    assert authority["status"] == "warning"
+    assert "0600" in authority["details"]["reason"]
+
+    # symlink proof: rejected at config time, never followed, target untouched
+    prepare_pass_data(box)
+    victim = box.run / "victim-proof.json"
+    victim.write_text(json.dumps(proof_payload()), encoding="utf-8")
+    victim.chmod(0o600)
+    box.proof.unlink()
+    box.proof.symlink_to(victim)
+    with http_pair(api_body=api) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        result = run_cli(base_args(), env=env)
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "Traceback" not in result.stderr
+    assert box.proof.is_symlink(), "rejected symlink must be left in place"
+    assert victim.read_text(encoding="utf-8") == json.dumps(proof_payload())
+    assert "sg01" not in (result.stdout + result.stderr), "symlink target must never be read"
+
+    # ownership mismatch (module-level unit; cannot chown in tests)
+    mod = _load_cli_module()
+    owner_path = box.run / "owner-proof.json"
+    owner_path.write_text(json.dumps(proof_payload()), encoding="utf-8")
+    owner_path.chmod(0o600)
+    args = mod.parse_args(["--now", NOW, "--timeout", "10",
+                           "--freshness-max-age", "3600",
+                           "--authority-proof", str(owner_path)])
+    cfg = mod.Config(args)
+    real_uid = os.getuid()
+    monkeypatch.setattr(os, "getuid", lambda: real_uid + 1)
+    status, details = mod.collect_authority(cfg)
+    assert status == "warning"
+    assert "own" in details["reason"].lower()
+
+
+def test_authority_active_or_enabled_still_fails_with_wrong_schema(box):
+    """Fail precedence: active/enabled remains fail even when the schema is
+    wrong or the file layout is off (warning-only conditions)."""
+    prepare_pass_data(box)
+    write_proof(box, proof_payload(
+        schema="portfolio-lab-migration-evidence/v1",
+        tasker={"active": True, "enabled": False},
+    ))
+    with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        result = run_cli(base_args(), env=env)
+    assert result.returncode == 2
+    authority = read_evidence(box)["authority"]
+    assert authority["status"] == "fail"
+    assert "active" in authority["details"]["reason"]
 
 
 # ── pure decision functions (module import) ───────────────────────────────
@@ -1605,6 +1898,8 @@ def test_unit_archive_status_tiers():
     assert mod.archive_status("20260903", "2026-09-05") == "fail"
     assert mod.archive_status(None, "2026-09-05") == "fail"
     assert mod.archive_status("garbage", "2026-09-05") == "fail"
+    assert mod.archive_status("20261301", "2026-09-05") == "fail"
+    assert mod.archive_status("20260230", "2026-09-05") == "fail"
     assert mod.archive_status("20260905", "2026-09-06") == "warning"
 
 

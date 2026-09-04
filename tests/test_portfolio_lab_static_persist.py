@@ -741,6 +741,68 @@ def test_stale_pid_cleanup(layout: dict[str, Path]) -> None:
     assert not state_file.exists()
 
 
+def test_status_read_only_preserves_stale_records(layout: dict[str, Path]) -> None:
+    pid_file = layout["root"] / "run" / "static-candidate.pid"
+    state_file = layout["root"] / "run" / "static-candidate-state.json"
+    pid_file.write_text("9999999\n")
+    pid_file.chmod(0o600)
+    state_file.write_text("{}", encoding="utf-8")
+    state_file.chmod(0o600)
+
+    res = run_persist_cli([
+        "status", "--read-only",
+        "--mode", "candidate",
+        "--web-root", str(layout["www_candidate"]),
+        "--service-name", SERVICE,
+    ], layout=layout)
+    assert res.returncode == 0
+    data = json.loads(res.stdout)
+    assert data["state"] == "inactive"
+    assert data["identity_exact"] is True
+    assert pid_file.exists(), "read-only status must not delete stale PID record"
+    assert state_file.exists(), "read-only status must not delete state record"
+
+
+def test_status_read_only_preserves_garbage_pid_record(layout: dict[str, Path]) -> None:
+    pid_file = layout["root"] / "run" / "static-candidate.pid"
+    pid_file.write_text("not-a-pid\n")
+    pid_file.chmod(0o600)
+
+    res = run_persist_cli([
+        "status", "--read-only",
+        "--mode", "candidate",
+        "--web-root", str(layout["www_candidate"]),
+        "--service-name", SERVICE,
+    ], layout=layout)
+    assert res.returncode == 0
+    data = json.loads(res.stdout)
+    assert data["state"] == "inactive"
+    assert pid_file.exists(), "read-only status must not delete a garbage PID record"
+
+
+def test_read_only_rejected_for_non_status_actions(layout: dict[str, Path]) -> None:
+    res = run_persist_cli([
+        "preflight", "--read-only",
+        "--mode", "candidate",
+        "--web-root", str(layout["www_candidate"]),
+        "--service-name", SERVICE,
+    ], layout=layout)
+    assert res.returncode != 0
+    assert res.stdout.strip() == ""
+    assert "read-only" in res.stderr.lower()
+
+
+def test_env_timeout_rejects_non_finite_values(monkeypatch, capsys) -> None:
+    import scripts.portfolio_lab_static_persist as persist_mod
+
+    for value in ("nan", "inf", "-inf", "1e309"):
+        monkeypatch.setenv("PLSP_STOP_TIMEOUT", value)
+        with pytest.raises(SystemExit) as excinfo:
+            persist_mod._env_float("PLSP_STOP_TIMEOUT", 10.0)
+        assert excinfo.value.code != 0, value
+        assert "PLSP_STOP_TIMEOUT" in capsys.readouterr().err
+
+
 def test_unsafe_pid_file_permissions_fail_closed(layout: dict[str, Path]) -> None:
     pid_file = layout["root"] / "run" / "static-candidate.pid"
     pid_file.write_text("12345\n")

@@ -48,6 +48,7 @@ Overrides (test-safe; flag > env > production default)
     --api-url             PLDE_API_URL            http://127.0.0.1:8000/api/tasker/status
     --static-url          PLDE_STATIC_URL         http://127.0.0.1:8001/
     --authority-proof     PLDE_AUTHORITY_PROOF    <root>/run/former-authority-proof.json
+    --expected-host       PLDE_EXPECTED_HOST      sg01
     --timeout             PLDE_TIMEOUT            10.0        (seconds, per check)
     --freshness-max-age   PLDE_FRESHNESS_MAX_AGE  21600       (seconds)
     --now                 PLDE_NOW                (actual time; ISO-8601, any zone -> UTC)
@@ -76,9 +77,11 @@ import errno
 import fcntl
 import http.client
 import json
+import math
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -93,6 +96,9 @@ from typing import Any
 SCHEMA = "portfolio-lab-daily-evidence/v1"
 BOX_PERSIST_SCHEMA = "portfolio-lab-box-persist/v1"
 STATIC_PERSIST_SCHEMA = "portfolio-lab-static-persist/v1"
+PROOF_SCHEMA = "portfolio-lab-former-authority-proof/v1"
+DEFAULT_EXPECTED_HOST = "sg01"
+PROOF_CLOCK_SKEW_ALLOWANCE = 300.0  # fixed small skew allowance (seconds)
 
 DEFAULT_ROOT = Path("/home/box/.local/share/portfolio-lab")
 DEFAULT_OUTPUT_ROOT = DEFAULT_ROOT / "evidence"
@@ -185,6 +191,8 @@ def _positive_float(raw: str, what: str) -> float:
         value = float(raw)
     except ValueError:
         die(f"PLDE_{what} must be a numeric value in seconds")
+    if not math.isfinite(value):
+        die(f"PLDE_{what} must be a finite numeric value in seconds")
     if value <= 0:
         die(f"PLDE_{what} must be positive")
     return value
@@ -244,6 +252,9 @@ class Config:
             ),
             "AUTHORITY_PROOF",
         )
+        self.expected_host = _opt(
+            args.expected_host, "EXPECTED_HOST", DEFAULT_EXPECTED_HOST
+        )
         self.timeout = _positive_float(_opt(args.timeout, "TIMEOUT", str(DEFAULT_TIMEOUT)), "TIMEOUT")
         self.freshness_max_age = _positive_float(
             _opt(args.freshness_max_age, "FRESHNESS_MAX_AGE", str(DEFAULT_FRESHNESS_MAX_AGE)),
@@ -284,6 +295,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--api-url", default=None)
     parser.add_argument("--static-url", default=None)
     parser.add_argument("--authority-proof", default=None)
+    parser.add_argument("--expected-host", default=None)
     parser.add_argument("--timeout", default=None)
     parser.add_argument("--freshness-max-age", default=None)
     parser.add_argument("--now", default=None)
@@ -404,7 +416,10 @@ def run_controller(controller: Path, argv: list[str], timeout: float) -> dict[st
                     exceeded = True
             else:
                 eof[name] = True
-        if not exceeded and drained and proc.poll() is None and not all(eof.values()):
+        if not exceeded and drained and proc.poll() is None:
+            # Sleep whenever the child is alive and no bytes were drained —
+            # including after both pipes hit EOF — so an idle child never
+            # busy-spins the poll loop until the deadline.
             time.sleep(0.01)
     still_running = proc.poll() is None
     if still_running:
@@ -535,7 +550,7 @@ def collect_tasker(cfg: Config) -> tuple[str, dict[str, Any]]:
         schema=BOX_PERSIST_SCHEMA,
         expected_service=TASKER_SERVICE,
         argv=[
-            "status", "--mode", "production",
+            "status", "--read-only", "--mode", "production",
             "--app-dir", str(cfg.app),
             "--web-root", str(cfg.www),
             "--service-name", TASKER_SERVICE,
@@ -549,7 +564,7 @@ def collect_tasker(cfg: Config) -> tuple[str, dict[str, Any]]:
         schema=STATIC_PERSIST_SCHEMA,
         expected_service=STATIC_SERVICE,
         argv=[
-            "status", "--mode", "production",
+            "status", "--read-only", "--mode", "production",
             "--web-root", str(cfg.www),
             "--service-name", STATIC_SERVICE,
         ],
@@ -674,10 +689,15 @@ def collect_archive(cfg: Config) -> tuple[str, dict[str, Any]]:
         raw = ""  # unreadable or oversized: treated as missing/malformed
     if STAMP_RE.fullmatch(raw):
         stamp_day = raw
+    utc_day: str | None = None
+    if stamp_day is not None:
+        try:
+            utc_day = datetime.strptime(stamp_day, "%Y%m%d").strftime("%Y-%m-%d")
+        except ValueError:
+            # Calendar-invalid eight-digit stamp (e.g. month 13): malformed.
+            stamp_day = None
     details: dict[str, Any] = {
-        "utc_day": (
-            datetime.strptime(stamp_day, "%Y%m%d").strftime("%Y-%m-%d") if stamp_day else None
-        ),
+        "utc_day": utc_day,
         "latest_success": None,
         "sha256": None,
     }
@@ -754,6 +774,15 @@ def _authority_result(
 
 
 def collect_authority(cfg: Config) -> tuple[str, dict[str, Any]]:
+    """Evaluate the former-authority proof (v1 schema).
+
+    Pass requires: non-symlink regular file owned by the collector uid with
+    exactly mode 0600, bounded contents, valid v1 schema, expected host
+    label, timestamp not future-dated beyond a small fixed clock-skew
+    allowance, fresh under max age, and all four active/enabled booleans
+    false. Wrong schema/host/ownership/mode/future timestamp is a warning;
+    active/enabled stays fail. Reasons are static and never include the
+    source path."""
     none = dict(
         host_label=None,
         collected_at=None,
@@ -763,12 +792,31 @@ def collect_authority(cfg: Config) -> tuple[str, dict[str, Any]]:
         archive_timer_enabled=None,
     )
     path = cfg.authority_proof
-    data = read_bounded_bytes(path, MAX_PROOF_BYTES)
-    if data is None:
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
         return "warning", _authority_result(
             status="warning", present=False, reason="proof file absent", **none
         )
-    if len(data) > MAX_PROOF_BYTES:
+    except OSError:
+        return "warning", _authority_result(
+            status="warning", present=False, reason="proof file unreadable", **none
+        )
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+        return "warning", _authority_result(
+            status="warning", present=True,
+            reason="source file must be a regular non-symlink file", **none
+        )
+    if st.st_uid != os.getuid():
+        return "warning", _authority_result(
+            status="warning", present=True, reason="source file ownership mismatch", **none
+        )
+    if stat.S_IMODE(st.st_mode) != 0o600:
+        return "warning", _authority_result(
+            status="warning", present=True, reason="source file must be exactly mode 0600", **none
+        )
+    data = read_bounded_bytes(path, MAX_PROOF_BYTES)
+    if data is None or len(data) > MAX_PROOF_BYTES:
         return "warning", _authority_result(
             status="warning", present=True, reason="malformed proof", **none
         )
@@ -807,18 +855,43 @@ def collect_authority(cfg: Config) -> tuple[str, dict[str, Any]]:
         or archive_active is None or archive_enabled is None
     ):
         return "warning", invalid
-    stale = (cfg.now - collected_dt).total_seconds() > cfg.freshness_max_age
-    active_or_enabled = any(
-        (tasker_active, tasker_enabled, archive_active, archive_enabled)
-    )
-    if active_or_enabled:
-        status, reason = "fail", "former authority still active or enabled"
-    elif stale:
-        status, reason = "warning", "proof is stale"
-    else:
-        status, reason = "pass", None
-    return status, _authority_result(
-        status=status,
+    if any((tasker_active, tasker_enabled, archive_active, archive_enabled)):
+        return "fail", _authority_result(
+            status="fail",
+            present=True,
+            host_label=host_label,
+            collected_at=collected_raw,
+            tasker_active=tasker_active,
+            tasker_enabled=tasker_enabled,
+            archive_timer_active=archive_active,
+            archive_timer_enabled=archive_enabled,
+            reason="former authority still active or enabled",
+        )
+    if obj.get("schema") != PROOF_SCHEMA:
+        return "warning", _authority_result(
+            status="warning", present=True, reason="unexpected source schema", **none
+        )
+    if host_label != cfg.expected_host:
+        return "warning", _authority_result(
+            status="warning", present=True, reason="host label mismatch", **none
+        )
+    if (collected_dt - cfg.now).total_seconds() > PROOF_CLOCK_SKEW_ALLOWANCE:
+        return "warning", _authority_result(
+            status="warning", present=True, reason="source timestamp is future-dated", **none
+        )
+    if (cfg.now - collected_dt).total_seconds() > cfg.freshness_max_age:
+        return "warning", _authority_result(
+            status="warning", present=True,
+            host_label=host_label,
+            collected_at=collected_raw,
+            tasker_active=tasker_active,
+            tasker_enabled=tasker_enabled,
+            archive_timer_active=archive_active,
+            archive_timer_enabled=archive_enabled,
+            reason="proof is stale",
+        )
+    return "pass", _authority_result(
+        status="pass",
         present=True,
         host_label=host_label,
         collected_at=collected_raw,
@@ -826,7 +899,6 @@ def collect_authority(cfg: Config) -> tuple[str, dict[str, Any]]:
         tasker_enabled=tasker_enabled,
         archive_timer_active=archive_active,
         archive_timer_enabled=archive_enabled,
-        reason=reason,
     )
 
 
@@ -855,9 +927,13 @@ def write_evidence(
 ) -> Path:
     """Serialize with a per-file bound, then commit atomically: a fresh day
     dir appears via one rename (temp dir populated once); a same-day rerun
-    performs only per-file atomic replacements with no temp-dir I/O.
-    Temp dirs are unique (mkdtemp), so stale/colliding .tmp-* siblings are
-    never an error; every OSError here is a clean exit-1 diagnostic."""
+    performs only per-file atomic replacements with no temp-dir I/O. A
+    same-day target must be a non-symlink directory chmod'ed to 0700 with
+    exactly the expected entry set; unexpected entries are rejected, never
+    deleted, and expected files must be regular non-symlinks before
+    replacement. Temp dirs are unique (mkdtemp), so stale/colliding .tmp-*
+    siblings are never an error; every failure here is a clean exit-1
+    diagnostic without a traceback."""
     serialized: dict[str, bytes] = {}
     for category, payload in payloads.items():
         file_name = f"{category}.json"
@@ -869,10 +945,11 @@ def write_evidence(
         out_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(out_root, 0o700)  # harden a pre-existing output root too
         target = out_root / day
-        if target.exists():
-            for file_name in serialized:
-                atomic_replace(target / file_name, serialized[file_name], 0o600)
-        else:
+        try:
+            target_stat = target.lstat()
+        except FileNotFoundError:
+            target_stat = None
+        if target_stat is None:
             tmp_dir = Path(tempfile.mkdtemp(dir=str(out_root), prefix=f".tmp-{day}-"))
             try:
                 for file_name, data in serialized.items():
@@ -883,6 +960,31 @@ def write_evidence(
             except BaseException:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
                 raise
+        else:
+            if stat.S_ISLNK(target_stat.st_mode) or not stat.S_ISDIR(target_stat.st_mode):
+                die(f"evidence day path must be a non-symlink directory: {day}")
+            entries = set(os.listdir(target))
+            if entries != set(serialized):
+                die(
+                    "evidence day directory contains unexpected entries "
+                    f"(expected files: {', '.join(sorted(serialized))}); "
+                    f"refusing to rewrite {day}"
+                )
+            os.chmod(target, 0o700)
+            for file_name in serialized:
+                path = target / file_name
+                try:
+                    file_stat = path.lstat()
+                except FileNotFoundError:
+                    file_stat = None
+                if file_stat is not None and (
+                    stat.S_ISLNK(file_stat.st_mode) or not stat.S_ISREG(file_stat.st_mode)
+                ):
+                    die(
+                        f"evidence file must be a regular non-symlink file "
+                        f"before rewrite: {file_name}"
+                    )
+                atomic_replace(path, serialized[file_name], 0o600)
     except OSError as exc:
         die(f"failed to write evidence: {exc}")
     return target

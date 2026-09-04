@@ -712,6 +712,64 @@ def test_status_garbage_pid_file_cleaned(bp):
     assert not path.exists()
 
 
+# ── read-only status: --read-only never cleans stale/unsafe records ──────
+
+
+def test_status_read_only_preserves_stale_pid_and_state_records(bp):
+    pid_file = write_pid_file(bp, "candidate", 999999)
+    state_file = bp.root / "run" / "tasker-candidate-state.json"
+    _write(state_file, '{"pid": 999999}\n')
+    payload, _ = ok_cli(bp, "--read-only", *bp_args(bp, "status"))
+    assert payload["state"] == "inactive"
+    assert payload["identity_exact"] is True
+    assert pid_file.exists(), "read-only status must not delete stale PID record"
+    assert state_file.exists(), "read-only status must not delete state record"
+
+
+def test_status_read_only_preserves_garbage_pid_record(bp):
+    path = bp.root / "run" / "tasker-candidate.pid"
+    _write(path, "not-a-pid\n")
+    os.chmod(path, 0o600)
+    payload, _ = ok_cli(bp, "--read-only", *bp_args(bp, "status"))
+    assert payload["state"] == "inactive"
+    assert payload["identity_exact"] is True
+    assert path.exists(), "read-only status must not delete a garbage PID record"
+
+
+def test_status_read_only_preserves_zombie_records_without_signal(bp):
+    proc = spawn_direct(bp, ["-m", "src.tasker.service", "--no-scheduler"])
+    write_pid_file(bp, "candidate", proc.pid)
+    state_file = bp.root / "run" / "tasker-candidate-state.json"
+    _write(state_file, f'{{"pid": {proc.pid}}}\n')
+    rewrite_status(bp, proc.pid)
+    payload, _ = ok_cli(bp, "--read-only", *bp_args(bp, "status"))
+    assert payload["state"] == "inactive"
+    assert payload["identity_exact"] is True
+    assert (bp.root / "run" / "tasker-candidate.pid").exists()
+    assert (bp.root / "run" / "tasker-candidate-state.json").exists()
+    assert all(e.get("event") != "term" for e in helper_lines(bp))
+    os.kill(proc.pid, 0)
+
+
+def test_read_only_rejected_for_non_status_actions(bp):
+    res = fail_cli(bp, "--read-only", *bp_args(bp, "stop"))
+    assert "read-only" in res.stderr.lower()
+    res = fail_cli(bp, "--read-only", *bp_args(bp, "preflight"))
+    assert "read-only" in res.stderr.lower()
+
+
+def test_env_timeout_rejects_non_finite_values(monkeypatch, capsys):
+    sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+    import portfolio_lab_box_persist as bp_mod
+
+    for value in ("nan", "inf", "-inf", "1e309"):
+        monkeypatch.setenv("PLBP_START_TIMEOUT", value)
+        with pytest.raises(SystemExit) as excinfo:
+            bp_mod._env_float("PLBP_START_TIMEOUT", 5.0)
+        assert excinfo.value.code != 0, value
+        assert "PLBP_START_TIMEOUT" in capsys.readouterr().err
+
+
 def test_preflight_leaves_garbage_pid_and_state_unchanged(bp):
     pid_file = bp.root / "run" / "tasker-candidate.pid"
     _write(pid_file, "not-a-pid\n")
