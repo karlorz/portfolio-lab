@@ -11,9 +11,11 @@ unrelated recovery fields; this collector uses its own lightweight schema
 Read-only guarantees
     * Never starts/stops/ensures services, never touches cron/systemd, never
       invokes a shell (controllers and HTTP servers are probed with explicit
-      argv and bounded timeouts).
+      argv, bounded timeouts, and capped stdout/stderr reads; uncooperative
+      children are killed and reaped).
     * Never sources or echoes credentials; evidencing retains only compact
       summaries, ages/sizes, a UTC day, one timestamp and one 64-hex SHA-256.
+      Failure reasons are static and never echo captured output.
     * Bounded: every HTTP/log/response read has a byte cap and every evidence
       file has a conservative per-file serialized size cap enforced before
       any directory is created.
@@ -70,19 +72,21 @@ Archive evidence semantics (deterministic under ``--now``)
 from __future__ import annotations
 
 import argparse
+import errno
+import fcntl
 import http.client
 import json
 import os
 import re
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -115,6 +119,8 @@ MAX_RESPONSE_BYTES = 1048576  # per HTTP body
 MAX_LOG_BYTES = 1048576  # per archive log read
 MAX_PROOF_BYTES = 65536  # per former-authority proof read
 MAX_FILE_BYTES = 262144  # conservative per-evidence-file serialized cap
+MAX_CONTROLLER_BYTES = 65536  # per controller stdout/stderr stream
+MAX_STAMP_BYTES = 64  # archive stamp file read bound
 RUNS_CAP = 50
 GIB = 1024**3
 DISK_WARNING_PERCENT = 90.0
@@ -257,8 +263,17 @@ class Config:
                 die("PLDE_OUTPUT_ROOT must sit outside app/www/run/data")
 
 
+class _ArgumentParser(argparse.ArgumentParser):
+    """argparse exits 2 on usage errors by default; the collector contract
+    is exit 1 for invalid CLI usage (stdout stays empty)."""
+
+    def error(self, message: str) -> None:
+        self.print_usage(sys.stderr)
+        self.exit(1, f"{self.prog}: error: {message}\n")
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
+    parser = _ArgumentParser(
         prog="portfolio_lab_daily_evidence.py",
         description="Read-only daily operational evidence for cursor-box Portfolio Lab.",
     )
@@ -339,19 +354,74 @@ def overall_status(categories: dict[str, str]) -> tuple[str, bool]:
 
 
 def run_controller(controller: Path, argv: list[str], timeout: float) -> dict[str, Any]:
+    """Probe one controller with bounded stdout/stderr reads and a hard
+    deadline. On timeout or bound exceed the child is SIGKILLed and reaped.
+    Failure reasons are static and never echo controller output.
+
+    Pipes are non-blocking: EOF after the child closes a pipe is delivered
+    as an empty read deterministically (select(2) on macOS can miss the
+    post-drain EOF event and stall until the deadline)."""
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             [str(controller), *argv],
-            capture_output=True,
-            timeout=timeout,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
-    except subprocess.TimeoutExpired:
-        return {"status": "fail", "reason": f"controller timeout after {timeout:g}s"}
     except OSError:
         return {"status": "fail", "reason": "controller not executable"}
+    for stream in (proc.stdout, proc.stderr):
+        flags = fcntl.fcntl(stream.fileno(), fcntl.F_GETFL)
+        fcntl.fcntl(stream.fileno(), fcntl.F_SETFL, flags | os.O_NONBLOCK)
+    deadline = time.monotonic() + timeout
+    totals = {"out": 0, "err": 0}
+    chunks: dict[str, list[bytes]] = {"out": [], "err": []}
+    eof = {"out": False, "err": False}
+    exceeded = False
+    streams = (("out", proc.stdout), ("err", proc.stderr))
+    while not exceeded:
+        if time.monotonic() >= deadline:
+            break
+        if proc.poll() is not None and all(eof.values()):
+            break
+        drained = True
+        for name, stream in streams:
+            if eof[name]:
+                continue
+            try:
+                chunk = os.read(stream.fileno(), 65536)
+            except BlockingIOError:
+                continue  # nothing buffered yet
+            except OSError as exc:
+                if exc.errno == errno.EINTR:
+                    continue
+                chunk = b""  # broken stream: treat as closed
+            if chunk:
+                drained = False
+                totals[name] += len(chunk)
+                chunks[name].append(chunk)
+                if totals[name] > MAX_CONTROLLER_BYTES:
+                    exceeded = True
+            else:
+                eof[name] = True
+        if not exceeded and drained and proc.poll() is None and not all(eof.values()):
+            time.sleep(0.01)
+    still_running = proc.poll() is None
+    if still_running:
+        proc.kill()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.poll()
+    proc.stdout.close()
+    proc.stderr.close()
+    if exceeded:
+        return {"status": "fail", "reason": f"controller output exceeded the {MAX_CONTROLLER_BYTES} byte bound"}
+    if still_running:
+        return {"status": "fail", "reason": f"controller timeout after {timeout:g}s"}
     if proc.returncode != 0:
         return {"status": "fail", "reason": f"controller exited with code {proc.returncode}"}
-    return {"status": "ok", "stdout": proc.stdout.decode("utf-8", "replace")}
+    return {"status": "ok", "stdout": b"".join(chunks["out"]).decode("utf-8", "replace")}
 
 
 def bounded_read(response: Any, max_bytes: int) -> tuple[bytes, bool]:
@@ -368,9 +438,25 @@ def bounded_read(response: Any, max_bytes: int) -> tuple[bytes, bool]:
     return b"".join(chunks), total > max_bytes
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Loopback probes must never follow redirects off-loopback."""
+
+    def redirect_request(
+        self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str
+    ) -> None:
+        return None
+
+
+# Probes are always direct (no env/system proxies) and never follow
+# redirects; a 3xx is evidence of a fail, not a license to re-request.
+_NO_PROXY_OPENER = urllib.request.build_opener(
+    urllib.request.ProxyHandler({}), _NoRedirect()
+)
+
+
 def fetch(url: str, timeout: float) -> dict[str, Any]:
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:
+        with _NO_PROXY_OPENER.open(url, timeout=timeout) as response:
             status = response.status
             ctype = response.headers.get("Content-Type", "")[:200]
             data, exceeded = bounded_read(response, MAX_RESPONSE_BYTES)
@@ -587,10 +673,11 @@ def _parse_archive_log(path: Path) -> tuple[str | None, str | None]:
 
 def collect_archive(cfg: Config) -> tuple[str, dict[str, Any]]:
     stamp_day: str | None = None
-    try:
-        raw = (cfg.root / ARCHIVE_STAMP_REL).read_text(encoding="utf-8", errors="replace").strip()
-    except OSError:
-        raw = ""
+    stamp_data = read_bounded_bytes(cfg.root / ARCHIVE_STAMP_REL, MAX_STAMP_BYTES)
+    if stamp_data is not None and len(stamp_data) <= MAX_STAMP_BYTES:
+        raw = stamp_data.decode("utf-8", "replace").strip()
+    else:
+        raw = ""  # unreadable or oversized: treated as missing/malformed
     if STAMP_RE.fullmatch(raw):
         stamp_day = raw
     details: dict[str, Any] = {
@@ -644,33 +731,59 @@ def _strict_bool(obj: Any, key: str) -> bool | None:
     return value if isinstance(value, bool) else None
 
 
-def collect_authority(cfg: Config) -> tuple[str, dict[str, Any]]:
-    nulls: dict[str, Any] = {
-        "status": "warning",
-        "present": False,
-        "host_label": None,
-        "collected_at": None,
-        "tasker_active": None,
-        "tasker_enabled": None,
-        "archive_timer_active": None,
-        "archive_timer_enabled": None,
+def _authority_result(
+    *,
+    status: str,
+    present: bool,
+    host_label: str | None,
+    collected_at: str | None,
+    tasker_active: bool | None,
+    tasker_enabled: bool | None,
+    archive_timer_active: bool | None,
+    archive_timer_enabled: bool | None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """Shared builder for every authority outcome (no duplicate literals)."""
+    result: dict[str, Any] = {
+        "status": status,
+        "present": present,
+        "host_label": host_label,
+        "collected_at": collected_at,
+        "tasker_active": tasker_active,
+        "tasker_enabled": tasker_enabled,
+        "archive_timer_active": archive_timer_active,
+        "archive_timer_enabled": archive_timer_enabled,
     }
+    if reason is not None:
+        result["reason"] = reason
+    return result
+
+
+def collect_authority(cfg: Config) -> tuple[str, dict[str, Any]]:
+    none = dict(
+        host_label=None,
+        collected_at=None,
+        tasker_active=None,
+        tasker_enabled=None,
+        archive_timer_active=None,
+        archive_timer_enabled=None,
+    )
     path = cfg.authority_proof
     data = read_bounded_bytes(path, MAX_PROOF_BYTES)
     if data is None:
-        nulls["reason"] = "proof file absent"
-        return "warning", nulls
+        return "warning", _authority_result(
+            status="warning", present=False, reason="proof file absent", **none
+        )
     if len(data) > MAX_PROOF_BYTES:
-        nulls["present"] = True
-        nulls["reason"] = "malformed proof"
-        return "warning", nulls
+        return "warning", _authority_result(
+            status="warning", present=True, reason="malformed proof", **none
+        )
     try:
         obj = json.loads(data.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError):
-        nulls["status"] = "warning"
-        nulls["present"] = True
-        nulls["reason"] = "malformed proof"
-        return "warning", nulls
+        return "warning", _authority_result(
+            status="warning", present=True, reason="malformed proof", **none
+        )
     host_label = obj.get("host_label") if isinstance(obj, dict) else None
     collected_raw = obj.get("collected_at") if isinstance(obj, dict) else None
     tasker = obj.get("tasker") if isinstance(obj, dict) else None
@@ -688,66 +801,56 @@ def collect_authority(cfg: Config) -> tuple[str, dict[str, Any]]:
         except ValueError:
             collected_dt = None
 
-    def invalid() -> dict[str, Any]:
-        return {
-            "status": "warning",
-            "present": True,
-            "host_label": None,
-            "collected_at": None,
-            "tasker_active": None,
-            "tasker_enabled": None,
-            "archive_timer_active": None,
-            "archive_timer_enabled": None,
-            "reason": "malformed proof",
-        }
-
+    invalid = _authority_result(
+        status="warning", present=True, reason="malformed proof", **none
+    )
     if not isinstance(host_label, str) or not host_label:
-        return "warning", invalid()
+        return "warning", invalid
     if collected_dt is None:
-        return "warning", invalid()
+        return "warning", invalid
     if (
         tasker_active is None or tasker_enabled is None
         or archive_active is None or archive_enabled is None
     ):
-        return "warning", invalid()
+        return "warning", invalid
     stale = (cfg.now - collected_dt).total_seconds() > cfg.freshness_max_age
     active_or_enabled = any(
         (tasker_active, tasker_enabled, archive_active, archive_enabled)
     )
     if active_or_enabled:
-        return "fail", {
-            "status": "fail",
-            "present": True,
-            "host_label": host_label,
-            "collected_at": collected_raw,
-            "tasker_active": tasker_active,
-            "tasker_enabled": tasker_enabled,
-            "archive_timer_active": archive_active,
-            "archive_timer_enabled": archive_enabled,
-            "reason": "former authority still active or enabled",
-        }
+        return "fail", _authority_result(
+            status="fail",
+            present=True,
+            host_label=host_label,
+            collected_at=collected_raw,
+            tasker_active=tasker_active,
+            tasker_enabled=tasker_enabled,
+            archive_timer_active=archive_active,
+            archive_timer_enabled=archive_enabled,
+            reason="former authority still active or enabled",
+        )
     if stale:
-        return "warning", {
-            "status": "warning",
-            "present": True,
-            "host_label": host_label,
-            "collected_at": collected_raw,
-            "tasker_active": tasker_active,
-            "tasker_enabled": tasker_enabled,
-            "archive_timer_active": archive_active,
-            "archive_timer_enabled": archive_enabled,
-            "reason": "proof is stale",
-        }
-    return "pass", {
-        "status": "pass",
-        "present": True,
-        "host_label": host_label,
-        "collected_at": collected_raw,
-        "tasker_active": tasker_active,
-        "tasker_enabled": tasker_enabled,
-        "archive_timer_active": archive_active,
-        "archive_timer_enabled": archive_enabled,
-    }
+        return "warning", _authority_result(
+            status="warning",
+            present=True,
+            host_label=host_label,
+            collected_at=collected_raw,
+            tasker_active=tasker_active,
+            tasker_enabled=tasker_enabled,
+            archive_timer_active=archive_active,
+            archive_timer_enabled=archive_enabled,
+            reason="proof is stale",
+        )
+    return "pass", _authority_result(
+        status="pass",
+        present=True,
+        host_label=host_label,
+        collected_at=collected_raw,
+        tasker_active=tasker_active,
+        tasker_enabled=tasker_enabled,
+        archive_timer_active=archive_active,
+        archive_timer_enabled=archive_enabled,
+    )
 
 
 # ── evidence writing ──────────────────────────────────────────────────────
@@ -774,7 +877,9 @@ def write_evidence(
     payloads: dict[str, dict[str, Any]],
 ) -> Path:
     """Serialize with a per-file bound, then commit atomically: a fresh day
-    dir appears via one rename; a same-day rerun replaces files one by one."""
+    dir appears via one rename; a same-day rerun replaces files one by one.
+    Temp dirs are unique (mkdtemp), so stale/colliding .tmp-* siblings are
+    never an error; every OSError here is a clean exit-1 diagnostic."""
     serialized: dict[str, bytes] = {}
     for category, payload in payloads.items():
         file_name = f"{category}.json"
@@ -782,27 +887,27 @@ def write_evidence(
         if len(data) > MAX_FILE_BYTES:
             die(f"serialized size for {file_name} exceeds the {MAX_FILE_BYTES} byte bound")
         serialized[file_name] = data
-    out_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    target = out_root / day
-    tmp_dir = out_root / f".tmp-{day}-{os.getpid()}"
-    tmp_dir.mkdir(mode=0o700)
     try:
-        for file_name, data in serialized.items():
-            path = tmp_dir / file_name
-            path.write_bytes(data)
-            os.chmod(path, 0o600)
-        if target.exists():
-            for file_name in serialized:
-                atomic_replace(target / file_name, serialized[file_name], 0o600)
-            shutil.rmtree(tmp_dir)
-        else:
-            os.replace(tmp_dir, target)
+        out_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(out_root, 0o700)  # harden a pre-existing output root too
+        target = out_root / day
+        tmp_dir = Path(tempfile.mkdtemp(dir=str(out_root), prefix=f".tmp-{day}-"))
+        try:
+            for file_name, data in serialized.items():
+                path = tmp_dir / file_name
+                path.write_bytes(data)
+                os.chmod(path, 0o600)
+            if target.exists():
+                for file_name in serialized:
+                    atomic_replace(target / file_name, serialized[file_name], 0o600)
+                shutil.rmtree(tmp_dir)
+            else:
+                os.replace(tmp_dir, target)
+        except BaseException:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
     except OSError as exc:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
         die(f"failed to write evidence: {exc}")
-    except BaseException:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise
     return target
 
 

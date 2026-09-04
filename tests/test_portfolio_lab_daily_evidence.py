@@ -108,6 +108,9 @@ if delay > 0:
 exit_code = os.environ.get(prefix + "_EXIT", "")
 if exit_code:
     sys.exit(int(exit_code))
+stderr_blob = os.environ.get(prefix + "_STDERR", "")
+if stderr_blob:
+    sys.stderr.write(stderr_blob)
 payload = os.environ.get(prefix + "_PAYLOAD", "")
 argv_log = os.environ.get(prefix + "_ARGV_LOG", "")
 if argv_log:
@@ -121,11 +124,18 @@ print(payload)
     return _write_exec(path, source)
 
 
-def write_fake_flock(path: Path) -> Path:
+def write_fake_flock(path: Path, *, mode: str = "normal") -> Path:
     """Mirror of flock(1) 'flock -n FD': non-blocking exclusive lock on the
-    numeric file descriptor inherited from the caller (BusyBox on cursor-box
-    provides the real binary; this fake keeps wrapper tests hermetic)."""
-    source = f"""#!{sys.executable}
+    numeric file descriptor inherited from the caller. Mode 'error' emulates
+    a broken flock(1) failing outside lock contention (usage/exit 2)."""
+    if mode == "error":
+        source = f"""#!{sys.executable}
+import sys
+sys.stderr.write("flock: invalid option\\n")
+sys.exit(2)
+"""
+    else:
+        source = f"""#!{sys.executable}
 import fcntl, sys
 fd = None
 for arg in sys.argv[1:]:
@@ -411,9 +421,9 @@ def assert_envelope(payload: dict, category: str, status: str) -> None:
 def assert_tree_clean(*texts: str) -> None:
     """None of the collected text may leak secrets, source paths, or URLs."""
     blob = "\n".join(texts)
-    for forbidden in (SECRET, "log_path", "run-20260905t035500-abcdef12.log",
+    for forbidden in (SECRET, "supersecret", "log_path", "run-20260905t035500-abcdef12.log",
                       "make fetch-secrets", "s3://", "daily/2026", "aws_secret",
-                      "AWS_SECRET", "supersecret"):
+                      "AWS_SECRET", "boom "):
         assert forbidden not in blob, f"leaked {forbidden!r}"
 
 
@@ -424,6 +434,7 @@ def http_pair(
     api_status: int = 200,
     api_ctype: str = "application/json",
     api_delay: float = 0.0,
+    api_headers: dict[str, str] | None = None,
     static_body: bytes = b"<html>ok</html>",
     static_status: int = 200,
     static_delay: float = 0.0,
@@ -431,12 +442,16 @@ def http_pair(
     class _Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802 (stdlib name)
             time.sleep(_Handler.delays.get(self.path, 0.0))
-            status, body, ctype = _Handler.routes.get(
+            parts = _Handler.routes.get(
                 self.path, (200, static_body if self.path == "/" else b"{}", "text/html")
             )
+            status, body, ctype = parts[:3]
+            extra_headers = parts[3] if len(parts) > 3 else {}
             self.send_response(status)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
+            for key, value in extra_headers.items():
+                self.send_header(key, value)
             self.end_headers()
             self.wfile.write(body)
 
@@ -446,7 +461,9 @@ def http_pair(
     _Handler.routes = {}
     _Handler.delays = {}
     if api_body is not None:
-        _Handler.routes["/api/tasker/status"] = (api_status, api_body, api_ctype)
+        _Handler.routes["/api/tasker/status"] = (
+            api_status, api_body, api_ctype, api_headers or {}
+        )
     _Handler.routes["/"] = (static_status, static_body, "text/html")
     _Handler.delays = {"/api/tasker/status": api_delay, "/": static_delay}
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
@@ -505,6 +522,7 @@ def test_wrapper_is_posix_and_service_free():
     assert "PORTFOLIO_LAB_ENABLE_ML=0" in text
     assert "flock" in text
     assert "exec 9>" in text
+    assert "--now" in text
     for forbidden in ("ensure", "activate", "start-candidate", " stop ", "rclone",
                       "source ", "credential", "AWS_SECRET", "aws_access"):
         assert forbidden not in text, f"wrapper must not contain {forbidden!r}"
@@ -531,9 +549,15 @@ def test_wrapper_runs_cli_once_per_day_and_stamps_only_on_success(box):
     calls = json.loads((box.run / "calls.jsonl").read_text(encoding="utf-8").splitlines()[0])
     assert calls["ml"] == "0"
     assert calls["root"] == str(box.root)
-    expected_day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # The wrapper pins one RFC3339 UTC timestamp and passes it as --now, so
+    # the evidence day can never straddle midnight against the stamp day.
+    argv = calls["argv"]
+    assert len(argv) == 2
+    assert argv[0] == "--now"
+    parsed_now = datetime.strptime(argv[1], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    assert abs((parsed_now - datetime.now(timezone.utc)).total_seconds()) < 300
     stamp = (box.run / STAMP_NAME).read_text(encoding="utf-8").strip()
-    assert stamp == expected_day
+    assert stamp == parsed_now.strftime("%Y-%m-%d")
     assert SECRET not in first.stdout + first.stderr
 
     second = run_wrapper(env)  # already collected today: no re-invocation
@@ -595,6 +619,41 @@ def test_wrapper_skips_when_lock_held(box):
     assert (box.run / STAMP_NAME).exists()
 
 
+def test_wrapper_flock_missing_is_static_error_without_leak(box):
+    env = {
+        "PLDE_ROOT": str(box.root),
+        "PLDE_PYTHON": sys.executable,
+        "PLDE_SCRIPT": str(box.fake_cli),
+        "PLDE_FLOCK": str(box.root / "no-such-flock"),
+        "FAKE_CLI_LOG": str(box.run / "calls.jsonl"),
+    }
+    result = run_wrapper(env)
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert not (box.run / "calls.jsonl").exists()
+    assert not (box.run / STAMP_NAME).exists()
+    assert not (box.root / "run" / LOCK_NAME).exists(), "no lock-file leak"
+    assert "flock" in result.stderr.lower()
+
+
+def test_wrapper_flock_error_is_static_error(box):
+    broken = write_fake_flock(box.root.parent / "broken-flock", mode="error")
+    env = {
+        "PLDE_ROOT": str(box.root),
+        "PLDE_PYTHON": sys.executable,
+        "PLDE_SCRIPT": str(box.fake_cli),
+        "PLDE_FLOCK": str(broken),
+        "FAKE_CLI_LOG": str(box.run / "calls.jsonl"),
+    }
+    result = run_wrapper(env)
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert not (box.run / "calls.jsonl").exists()
+    assert not (box.run / STAMP_NAME).exists()
+    assert "lock held" not in result.stderr  # contention message only for exit 1
+    assert "flock" in result.stderr.lower()
+
+
 def test_wrapper_end_to_end_with_real_cli(box):
     real_now = datetime.now(timezone.utc)
     prepare_pass_data(box, ref=real_now)
@@ -623,6 +682,7 @@ def test_wrapper_end_to_end_with_real_cli(box):
         assert (day_dir / name).is_file()
     stamp = (box.run / STAMP_NAME).read_text(encoding="utf-8").strip()
     assert stamp == real_utc_day
+    assert summary["utc_day"] == stamp  # --now pin: evidence day == stamp day
 
 
 def test_wrapper_fail_exit_code_with_real_cli(box):
@@ -772,11 +832,13 @@ def test_same_day_rerun_is_deterministic_replacement(box):
 
 def test_output_permissions(box):
     prepare_pass_data(box)
+    # Pre-create the output root with loose mode: the collector must harden it.
+    box.out.mkdir(parents=True, exist_ok=True)
+    os.chmod(box.out, 0o755)
     with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
         env = full_env(box, api_url, static_url)
         result = run_cli(base_args(), env=env)
     assert result.returncode == 0, result.stderr
-    box.out.mkdir(exist_ok=True)
     assert stat.S_IMODE(box.out.stat().st_mode) == 0o700
     day_dir = box.out / TODAY
     assert stat.S_IMODE(day_dir.stat().st_mode) == 0o700
@@ -786,6 +848,48 @@ def test_output_permissions(box):
         payload = json.loads(path.read_text(encoding="utf-8"))
         assert payload["schema"] == SCHEMA
         assert payload["status"] in ("pass", "warning", "fail")
+
+
+def test_stale_temp_dir_does_not_break_evidence(tmp_path, monkeypatch):
+    """A stale/colliding .tmp-* sibling (same process pid reused) must not
+    crash the writer: temp dirs are unique and stale ones are left alone."""
+    mod = _load_cli_module()
+    out_root = tmp_path / "out"
+    out_root.mkdir()
+    day = "2026-09-05"
+    stale = out_root / f".tmp-{day}-424242"
+    stale.mkdir()
+    (stale / "junk.json").write_text("junk", encoding="utf-8")
+    monkeypatch.setattr(mod.os, "getpid", lambda: 424242)
+    payloads = {
+        "summary": {
+            "schema": mod.SCHEMA,
+            "category": "summary",
+            "collected_at": "2026-09-05T04:00:00+00:00",
+            "status": "pass",
+            "details": {},
+        }
+    }
+    target = mod.write_evidence(out_root, day, payloads)
+    assert target.is_dir()
+    assert sorted(p.name for p in target.iterdir()) == ["summary.json"]
+    assert stale.is_dir()  # stale sibling untouched, no traceback
+
+
+def test_write_failure_is_clean_exit_one(box):
+    prepare_pass_data(box)
+    parent = box.out.parent
+    os.chmod(parent, 0o500)  # block evidence creation
+    try:
+        with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
+            env = full_env(box, api_url, static_url)
+            result = run_cli(base_args(), env=env)
+    finally:
+        os.chmod(parent, 0o700)
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "Traceback" not in result.stderr
+    assert "write" in result.stderr.lower()
 
 
 # ── CLI: invalid configuration (exit 1) ───────────────────────────────────
@@ -865,6 +969,20 @@ def test_invalid_now_and_timeout_and_max_age_rejected():
         assert result.returncode == 1, args
         assert result.stdout == ""
         assert result.stderr
+
+
+def test_unknown_flag_exits_one_with_empty_stdout():
+    result = run_cli(["--definitely-unknown-flag"])
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr
+
+
+def test_missing_flag_value_exits_one_with_empty_stdout():
+    result = run_cli(["--now"])
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr
 
 
 def test_non_loopback_and_unsafe_urls_rejected():
@@ -1012,6 +1130,54 @@ def test_controller_timeout_is_bounded(box):
     assert "timeout" in reason
 
 
+def test_controller_stdout_exceeding_bound_fails_static_reason(box):
+    prepare_pass_data(box)
+    with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        env["FT_PAYLOAD"] = json.dumps(tasker_payload(box, padding="x" * 70000))
+        started = time.monotonic()
+        result = run_cli(base_args(), env=env)
+        elapsed = time.monotonic() - started
+    assert result.returncode == 2
+    assert elapsed < 15, "bound must stop the read promptly"
+    assert json.loads(result.stdout.splitlines()[0])["categories"]["tasker"] == "fail"
+    tasker = read_evidence(box)["tasker"]["details"]["tasker_controller"]
+    assert tasker["status"] == "fail"
+    assert "bound" in tasker["reason"]
+
+
+def test_controller_stderr_exceeding_bound_is_secret_free(box):
+    prepare_pass_data(box)
+    with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        env["FT_STDERR"] = SECRET + "Z" * 70000
+        env["FT_PAYLOAD"] = json.dumps(tasker_payload(box))
+        started = time.monotonic()
+        result = run_cli(base_args(), env=env)
+        elapsed = time.monotonic() - started
+    assert result.returncode == 2
+    assert elapsed < 15, "bound must stop the read promptly"
+    tasker = read_evidence(box)["tasker"]["details"]["tasker_controller"]
+    assert tasker["status"] == "fail"
+    assert "bound" in tasker["reason"]
+    assert_tree_clean(json.dumps(read_evidence(box)), result.stdout, result.stderr)
+
+
+def test_controller_failure_reason_is_static_and_secret_free(box):
+    prepare_pass_data(box)
+    with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        env["FT_EXIT"] = "5"
+        env["FT_STDERR"] = "boom " + SECRET
+        env["FT_PAYLOAD"] = json.dumps(tasker_payload(box))
+        result = run_cli(base_args(), env=env)
+    assert result.returncode == 2
+    tasker = read_evidence(box)["tasker"]["details"]["tasker_controller"]
+    assert tasker["status"] == "fail"
+    assert tasker["reason"] == "controller exited with code 5"
+    assert_tree_clean(json.dumps(read_evidence(box)), result.stdout, result.stderr)
+
+
 def test_static_controller_failures(box):
     prepare_pass_data(box)
     with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
@@ -1106,6 +1272,32 @@ def test_jobs_connection_refused_fails(box):
     jobs = read_evidence(box)["jobs"]
     assert jobs["details"]["api"]["status"] == "fail"
     assert jobs["details"]["static_root"]["status"] == "fail"
+
+
+def test_jobs_redirect_is_not_followed(box):
+    prepare_pass_data(box)
+    with http_pair(
+        api_body=json.dumps(api_payload(box)).encode(),
+        api_status=302,
+        api_headers={"Location": "http://example.com/api/tasker/status"},
+    ) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        result = run_cli(base_args(), env=env)
+    assert result.returncode == 2
+    jobs = read_evidence(box)["jobs"]
+    assert jobs["details"]["api"]["status"] == "fail"
+    assert jobs["details"]["api"]["http_status"] == 302
+
+
+def test_jobs_ignores_proxy_environment(box):
+    prepare_pass_data(box)
+    with http_pair(api_body=json.dumps(api_payload(box)).encode()) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        for name in ("http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY"):
+            env[name] = "http://127.0.0.1:1"  # a live proxy here would fail the probe
+        result = run_cli(base_args(), env=env)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout.splitlines()[0])["overall"] == "pass"
 
 
 def test_jobs_http_timeout_is_bounded(box):
@@ -1233,6 +1425,23 @@ def test_archive_missing_and_malformed_stamp_fail(box):
         archive = read_evidence(box)["archive"]
         assert archive["status"] == "fail"
         assert archive["details"]["utc_day"] is None
+
+
+def test_archive_oversized_stamp_fails_bounded(box):
+    api = json.dumps(api_payload(box)).encode()
+    prepare_pass_data(box)
+    # Whitespace-only padding: an unbounded read would strip and parse this
+    # as the valid current day; the collector must bound the read instead.
+    (box.run / "s3-archive-last-utc-day").write_text(
+        "20260905" + " " * 100000, encoding="utf-8")
+    with http_pair(api_body=api) as (api_url, static_url):
+        env = full_env(box, api_url, static_url)
+        result = run_cli(base_args(), env=env)
+    assert result.returncode == 2
+    archive = read_evidence(box)["archive"]
+    assert archive["status"] == "fail"
+    assert archive["details"]["utc_day"] is None
+    assert "malformed" in archive["details"]["reason"]
 
 
 def test_archive_log_redaction_and_latest_success(box):
