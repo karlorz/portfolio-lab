@@ -256,8 +256,9 @@ class TaskerStore:
 
         Deletes older per-run ``.log`` files and their ``task_runs`` rows in
         lockstep, so ``list_runs()`` never returns dangling references. Orphan
-        rows (file already missing) are dropped and reported in ``errors``.
-        Hygiene, not a release gate — pruning never raises on a missing file.
+        rows (file already missing) or unreadable files (PermissionError) are
+        dropped and reported in ``errors``.
+        Hygiene, not a release gate — pruning never raises on a missing or unreadable file.
 
         Returns a summary dict:
             deleted_files, deleted_rows, kept_files, bytes_freed, errors, plan.
@@ -299,6 +300,12 @@ class TaskerStore:
                 except FileNotFoundError:
                     size = 0
                     summary["errors"].append({"run_id": run_id, "reason": "log file missing"})
+                except PermissionError:
+                    size = 0
+                    summary["errors"].append({"run_id": run_id, "reason": "log file unreadable (permission denied)"})
+                except OSError as err:
+                    size = 0
+                    summary["errors"].append({"run_id": run_id, "reason": f"log file error: {err}"})
                 summary["bytes_freed"] += size
                 if dry_run:
                     summary["plan"].append(
@@ -306,8 +313,11 @@ class TaskerStore:
                     )
                     continue
                 if size:
-                    log_path.unlink(missing_ok=True)
-                    summary["deleted_files"] += 1
+                    try:
+                        log_path.unlink(missing_ok=True)
+                        summary["deleted_files"] += 1
+                    except OSError as err:
+                        summary["errors"].append({"run_id": run_id, "reason": f"log file delete error: {err}"})
                 ids_to_delete.append(run_id)
             if ids_to_delete and not dry_run:
                 placeholders = ",".join("?" for _ in ids_to_delete)

@@ -1327,12 +1327,25 @@ def test_create_verify_failure_keeps_archive_and_restarts(hermetic, tmp_path: Pa
 
 
 def test_create_restart_failure_reported(hermetic, tmp_path: Path):
+    # Backward-compatible create output: the archive was produced and verified
+    # before the restart attempt, so a failed systemd restart must not swallow
+    # the report — stdout keeps the JSON create report (ok false,
+    # service_started false, archive/report fields) and stderr reports the
+    # systemctl start failure.
     set_systemctl_mode(hermetic, "start-fail")
     repo = make_repo(tmp_path / "repo")
     commit_all(repo)
     web = make_web_root(tmp_path / "web", "x" * 40)
     archive, res = standard_create(hermetic, repo, web)
     assert res.returncode != 0
+    report = json.loads(res.stdout)
+    assert report["ok"] is False
+    assert report["service_started"] is False
+    assert report["command"] == "create"
+    assert report["service_controller"] == "systemd"
+    assert report["initially_active"] is True
+    assert report["service_stopped"] is True
+    assert Path(report["archive"]) == archive
     assert "start" in res.stderr.lower()
     assert archive.exists()
 
@@ -2370,11 +2383,33 @@ def test_restore_start_dev_api_rejected_in_prod_mode(hermetic, tmp_path: Path):
 # ── restore: bundle / staging / target safety ───────────────────────────────
 
 
-def test_restore_rejects_bundle_symlink_checkout(hermetic, tmp_path: Path):
-    """A committed Git symlink in the bundle must block restore before any
-    target mutation (no data/config/static copy through bundle symlinks)."""
+def test_restore_accepts_bundle_tracked_file_symlink(hermetic, tmp_path: Path):
+    """A committed Git symlink whose raw target is a relative path to an
+    ordinary non-symlink file inside the checkout (git mode 120000; the
+    authoritative repo legitimately contains AGENTS.md -> CLAUDE.md) must be
+    accepted by restore and reproduced exactly at the target."""
     repo = make_repo(tmp_path / "repo")
-    os.symlink("README.md", repo / "link.md")
+    _write(repo / "CLAUDE.md", "# claude content\n")
+    os.symlink("CLAUDE.md", repo / "AGENTS.md")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    archive, res = standard_create(hermetic, repo, web)
+    assert res.returncode == 0, res.stderr
+    app_dir, web_root, res = standard_restore(hermetic, archive, "dev")
+    assert res.returncode == 0, res.stderr
+    restored = app_dir / "AGENTS.md"
+    assert restored.is_symlink()
+    assert os.readlink(restored) == "CLAUDE.md"
+    assert (app_dir / "CLAUDE.md").is_file()
+    assert restored.resolve() == (app_dir / "CLAUDE.md").resolve()
+
+
+def test_restore_rejects_tracked_symlink_escaping_checkout(hermetic, tmp_path: Path):
+    """A committed symlink whose relative raw target escapes the checkout is
+    still rejected before any target mutation."""
+    repo = make_repo(tmp_path / "repo")
+    _write(tmp_path / "outside.txt", "outside\n")
+    os.symlink("../outside.txt", repo / "link.md")
     commit_all(repo)
     web = make_web_root(tmp_path / "web", "x" * 40)
     archive, res = standard_create(hermetic, repo, web)
@@ -2405,6 +2440,92 @@ def test_restore_rejects_bundle_gitlink(hermetic, tmp_path: Path):
     assert "gitlink" in res.stderr.lower() or "symlink" in res.stderr.lower()
     assert not app_dir.exists()
     assert not web_root.exists()
+
+
+# ── restore: scan_checkout_unsafe file-symlink contract ────────────────────
+
+
+def test_scan_checkout_unsafe_accepts_tracked_file_symlink(monkeypatch, tmp_path: Path):
+    """Scan-level acceptance: AGENTS.md -> CLAUDE.md yields no bad entries —
+    not flagged as a tracked 120000 nor double-reported as an untracked
+    symlink."""
+    monkeypatch.setenv("PLR_GIT", "git")
+    repo = make_repo(tmp_path / "repo")
+    _write(repo / "CLAUDE.md", "# claude content\n")
+    os.symlink("CLAUDE.md", repo / "AGENTS.md")
+    commit_all(repo)
+    mod = _load_recovery_module()
+    assert mod.scan_checkout_unsafe(repo) == []
+
+
+def test_scan_checkout_unsafe_rejects_tracked_symlink_absolute_target(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("PLR_GIT", "git")
+    repo = make_repo(tmp_path / "repo")
+    os.symlink("/etc/hosts", repo / "abs.md")
+    commit_all(repo)
+    mod = _load_recovery_module()
+    bad = mod.scan_checkout_unsafe(repo)
+    assert any(entry.split()[0] == "abs.md" for entry in bad)
+
+
+def test_scan_checkout_unsafe_rejects_tracked_symlink_broken_target(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("PLR_GIT", "git")
+    repo = make_repo(tmp_path / "repo")
+    os.symlink("missing-target.txt", repo / "broken.md")
+    commit_all(repo)
+    mod = _load_recovery_module()
+    bad = mod.scan_checkout_unsafe(repo)
+    assert any(entry.split()[0] == "broken.md" for entry in bad)
+
+
+def test_scan_checkout_unsafe_rejects_tracked_symlink_directory_target(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("PLR_GIT", "git")
+    repo = make_repo(tmp_path / "repo")
+    (repo / "subdir").mkdir()
+    _write(repo / "subdir" / "inner.txt", "x\n")
+    os.symlink("subdir", repo / "dirlink")
+    commit_all(repo)
+    mod = _load_recovery_module()
+    bad = mod.scan_checkout_unsafe(repo)
+    assert any(entry.split()[0] == "dirlink" for entry in bad)
+
+
+def test_scan_checkout_unsafe_rejects_tracked_symlink_chain(monkeypatch, tmp_path: Path):
+    """A tracked symlink whose raw target is itself a symlink (chain) is
+    rejected, while the terminal file symlink in the chain is allowed."""
+    monkeypatch.setenv("PLR_GIT", "git")
+    repo = make_repo(tmp_path / "repo")
+    _write(repo / "f.txt", "content\n")
+    os.symlink("f.txt", repo / "b")
+    os.symlink("b", repo / "a")
+    commit_all(repo)
+    mod = _load_recovery_module()
+    bad = mod.scan_checkout_unsafe(repo)
+    assert any(entry.split()[0] == "a" for entry in bad)
+    assert not any(entry.split()[0] == "b" for entry in bad)
+
+
+def test_scan_checkout_unsafe_rejects_untracked_symlink(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("PLR_GIT", "git")
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    (repo / "untracked-link").symlink_to("README.md")
+    mod = _load_recovery_module()
+    bad = mod.scan_checkout_unsafe(repo)
+    assert any(
+        entry.split()[0] == "untracked-link" and "untracked symlink" in entry for entry in bad
+    )
+
+
+def test_scan_checkout_unsafe_rejects_hardlinked_regular_file(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("PLR_GIT", "git")
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    os.link(repo / "README.md", repo / "hard.md")
+    commit_all(repo)
+    mod = _load_recovery_module()
+    bad = mod.scan_checkout_unsafe(repo)
+    assert any(entry.split()[0] == "README.md" and "hardlinked" in entry for entry in bad)
 
 
 def test_restore_clone_failure_leaves_existing_target_intact(hermetic, tmp_path: Path):
@@ -3226,3 +3347,2693 @@ def test_restore_dev_api_rejects_percent_in_service_name(hermetic, tmp_path):
     assert "%" in res.stderr
     assert not app_dir.exists()
     assert not web_root.exists()
+
+
+# ── service-controller abstraction (plan Task 2.1) ─────────────────────────
+#
+# The fake box-persist controller below is an executable script (argv arrays
+# only) that records every invocation to PLR_BP_LOG and emits a configurable
+# portfolio-lab-box-persist/v1 status. Per-action defaults:
+#   start-candidate -> active/disabled/0/pid 4242
+#   activate        -> active/enabled/1/pid 4242
+#   status|stop     -> inactive/disabled/0/no pid
+# Overrides: PLR_BP_REPLIES holds {action: payload} (payload dict merged into
+# the default, or a raw string printed verbatim), plus "__all__"; PLR_BP_EXIT
+# forces a nonzero exit. PLR_BOX_PERSIST_ALLOWED_ROOT pins the production
+# root guard to the pytest tmp tree (test-only escape hatch).
+
+BOX_PERSIST_FAKE = r'''#!/usr/bin/env python3
+import json
+import os
+import sys
+
+log_path = os.environ.get("PLR_BP_LOG")
+if log_path:
+    with open(log_path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(sys.argv[1:]) + "\n")
+
+
+def arg_value(name):
+    for i, item in enumerate(sys.argv):
+        if item == name and i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+    return None
+
+
+action = sys.argv[1] if len(sys.argv) > 1 else "?"
+payload = {
+    "schema": "portfolio-lab-box-persist/v1",
+    "state": "inactive",
+    "scheduler_mode": "disabled",
+    "identity_exact": True,
+    "scheduler_instances": 0,
+    "pid": None,
+    "service_name": arg_value("--service-name") or "",
+    "mode": arg_value("--mode") or "",
+    "app_dir": arg_value("--app-dir") or "",
+    "web_root": arg_value("--web-root") or "",
+}
+if action == "start-candidate":
+    payload.update({"state": "active", "pid": 4242})
+elif action == "activate":
+    payload.update({"state": "active", "scheduler_mode": "enabled", "scheduler_instances": 1, "pid": 4242})
+replies_file = os.environ.get("PLR_BP_REPLIES")
+if replies_file and os.path.exists(replies_file):
+    with open(replies_file, encoding="utf-8") as fh:
+        replies = json.load(fh)
+    override = replies.get(action, replies.get("__all__"))
+    if isinstance(override, dict):
+        payload.update(override)
+    elif isinstance(override, str):
+        print(override)
+        sys.exit(0)
+exit_code = os.environ.get("PLR_BP_EXIT")
+if exit_code:
+    sys.exit(int(exit_code))
+print(json.dumps(payload))
+'''
+
+
+@pytest.fixture
+def box_persist_env(hermetic, tmp_path: Path):
+    """Hermetic fake box-persist controller (see BOX_PERSIST_FAKE)."""
+    make_fake(hermetic.bin / "portfolio-lab-box-persist", BOX_PERSIST_FAKE)
+    bp_log = tmp_path / "box-persist.log"
+    replies = tmp_path / "box-persist-replies.json"
+    overrides = {
+        "PLR_BOX_PERSIST_CONTROLLER": str(hermetic.bin / "portfolio-lab-box-persist"),
+        "PLR_BOX_PERSIST_ALLOWED_ROOT": str(tmp_path),
+        "PLR_BP_LOG": str(bp_log),
+        "PLR_BP_REPLIES": str(replies),
+    }
+    return SimpleNamespace(
+        tmp=tmp_path,
+        env={**hermetic.env, **overrides},
+        bp_log=bp_log,
+        replies=replies,
+        bp_controller=hermetic.bin / "portfolio-lab-box-persist",
+        units=hermetic.units,
+        systemctl_log=hermetic.systemctl_log,
+    )
+
+
+def run_box_persist_recovery(
+    args: list[str],
+    bp: SimpleNamespace,
+    extra_env: dict[str, str] | None = None,
+    cwd: Path | None = None,
+) -> subprocess.CompletedProcess:
+    env = {**os.environ, **bp.env}
+    if extra_env:
+        env.update(extra_env)
+    return subprocess.run(
+        [sys.executable, str(RECOVERY_SCRIPT), *args],
+        env=env,
+        capture_output=True,
+        text=True,
+        cwd=str(cwd) if cwd else None,
+        timeout=120,
+    )
+
+
+def box_persist_log_lines(bp: SimpleNamespace) -> list[list[str]]:
+    if not bp.bp_log.exists():
+        return []
+    return [
+        json.loads(line)
+        for line in bp.bp_log.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def reset_bp_log(bp: SimpleNamespace) -> None:
+    bp.bp_log.unlink(missing_ok=True)
+
+
+def set_box_persist_replies(bp: SimpleNamespace, replies: dict) -> None:
+    _write(bp.replies, json.dumps(replies))
+
+
+def standard_create_bp(
+    bp: SimpleNamespace,
+    repo: Path,
+    web: Path,
+    archive_name: str = "bp-backup" + ARCHIVE_SUFFIX,
+) -> tuple[Path, subprocess.CompletedProcess]:
+    archive = bp.tmp / "backups" / archive_name
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    _write(bp.units / f"{TASKER}.service", UNIT_TEXT)
+    _write(repo / "data/tasker_status.json", json.dumps({"state": "idle", "version": 1}) + "\n")
+    args = [
+        "create",
+        "--app-dir",
+        str(repo),
+        "--web-root",
+        str(web),
+        "--tasker-service",
+        TASKER,
+        "--archive",
+        str(archive),
+        "--storage-encryption-attested",
+    ]
+    return archive, run_box_persist_recovery(args, bp)
+
+
+def standard_restore_bp(
+    bp: SimpleNamespace,
+    archive: Path,
+    mode: str,
+    extra: list[str] | None = None,
+    app_name: str = "app",
+    web_name: str = "www",
+    extra_env: dict[str, str] | None = None,
+) -> tuple[Path, Path, subprocess.CompletedProcess]:
+    app_dir = bp.tmp / app_name
+    web_root = bp.tmp / web_name
+    args = [
+        "restore",
+        "--archive",
+        str(archive),
+        "--app-dir",
+        str(app_dir),
+        "--web-root",
+        str(web_root),
+        "--target-mode",
+        mode,
+        "--service-controller",
+        "box-persist",
+        *(extra or []),
+    ]
+    return app_dir, web_root, run_box_persist_recovery(args, bp, extra_env=extra_env)
+
+
+def create_and_restore_box_persist(
+    bp: SimpleNamespace,
+    tmp_path: Path,
+    archive_name: str = "bp-prod" + ARCHIVE_SUFFIX,
+) -> tuple[Path, Path, Path, str]:
+    """create (systemd source) + box-persist prod restore + .env.local."""
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web", source_sha, generator_sha=source_sha[:12])
+    archive, res = standard_create_bp(bp, repo, web, archive_name=archive_name)
+    assert res.returncode == 0, res.stderr
+    app_dir, web_root, res = standard_restore_bp(bp, archive, "prod", extra=["--allow-production-paths"])
+    assert res.returncode == 0, res.stderr
+    _write(app_dir / ".env.local", "PORTFOLIO_LAB_MODE=lab\n")
+    return archive, app_dir, web_root, source_sha
+
+
+def run_activate_bp(bp: SimpleNamespace, app_dir: Path, web_root: Path) -> subprocess.CompletedProcess:
+    args = [
+        "activate-prod",
+        "--app-dir",
+        str(app_dir),
+        "--web-root",
+        str(web_root),
+        "--tasker-service",
+        TASKER,
+        "--confirm-authoritative-activation",
+        "--former-authority-confirmed-stopped",
+        "former-host.example",
+        "--service-controller",
+        "box-persist",
+    ]
+    return run_box_persist_recovery(args, bp)
+
+
+def test_service_controller_defaults_to_systemd_on_create(hermetic, tmp_path: Path):
+    """Omitting --service-controller keeps the systemd behavior unchanged."""
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    archive, res = standard_create(hermetic, repo, web)
+    assert res.returncode == 0, res.stderr
+    report = report_of(res)
+    assert report["service_controller"] == "systemd"
+    log = hermetic.systemctl_log.read_text(encoding="utf-8").splitlines()
+    assert log == ["is-active portfolio-lab-tasker", "stop portfolio-lab-tasker", "start portfolio-lab-tasker"]
+
+
+def test_unknown_service_controller_fails_through_parser_before_mutation(hermetic, tmp_path: Path):
+    """Unknown --service-controller values must be rejected by argparse (rc 2)
+    before any systemctl/controller call, source stop, or target/archive write."""
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    archive = hermetic.tmp / "backups" / ("x" + ARCHIVE_SUFFIX)
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    _write(hermetic.units / f"{TASKER}.service", UNIT_TEXT)
+    _write(repo / "data/tasker_status.json", json.dumps({"state": "idle"}) + "\n")
+    cases = [
+        (
+            "create",
+            [
+                "create",
+                "--app-dir",
+                str(repo),
+                "--web-root",
+                str(web),
+                "--tasker-service",
+                TASKER,
+                "--archive",
+                str(archive),
+                "--storage-encryption-attested",
+                "--service-controller",
+                "bogus",
+            ],
+        ),
+        (
+            "restore",
+            [
+                "restore",
+                "--archive",
+                str(archive),
+                "--app-dir",
+                str(hermetic.tmp / "app"),
+                "--web-root",
+                str(hermetic.tmp / "www"),
+                "--target-mode",
+                "dev",
+                "--service-controller",
+                "bogus",
+            ],
+        ),
+        (
+            "activate-prod",
+            [
+                "activate-prod",
+                "--app-dir",
+                str(hermetic.tmp / "app"),
+                "--web-root",
+                str(hermetic.tmp / "www"),
+                "--tasker-service",
+                TASKER,
+                "--confirm-authoritative-activation",
+                "--former-authority-confirmed-stopped",
+                "old-host",
+                "--service-controller",
+                "bogus",
+            ],
+        ),
+    ]
+    for label, args in cases:
+        res = run_recovery(args, hermetic)
+        assert res.returncode == 2, label
+        assert "invalid choice" in res.stderr, label
+    assert not hermetic.systemctl_log.exists()
+    assert not archive.exists()
+    assert not (hermetic.tmp / "app").exists()
+    assert not (hermetic.tmp / "www").exists()
+
+
+def test_create_rejects_box_persist_controller_before_mutation(hermetic, tmp_path: Path):
+    """create is sg01 source-side only; explicit box-persist must fail before
+    any systemctl/box command, source stop, or archive write."""
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    archive = hermetic.tmp / "backups" / ("x" + ARCHIVE_SUFFIX)
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    _write(hermetic.units / f"{TASKER}.service", UNIT_TEXT)
+    _write(repo / "data/tasker_status.json", json.dumps({"state": "idle"}) + "\n")
+    res = run_recovery(
+        [
+            "create",
+            "--app-dir",
+            str(repo),
+            "--web-root",
+            str(web),
+            "--tasker-service",
+            TASKER,
+            "--archive",
+            str(archive),
+            "--storage-encryption-attested",
+            "--service-controller",
+            "box-persist",
+        ],
+        hermetic,
+    )
+    assert res.returncode != 0
+    assert "box-persist" in res.stderr.lower()
+    assert "systemd" in res.stderr.lower()
+    assert not hermetic.systemctl_log.exists()
+    assert not archive.exists()
+
+
+def test_box_persist_controller_path_must_be_absolute(box_persist_env, tmp_path: Path):
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    archive, res = standard_create_bp(box_persist_env, repo, web)
+    assert res.returncode == 0, res.stderr
+    app_dir, web_root, res = standard_restore_bp(
+        box_persist_env,
+        archive,
+        "dev",
+        extra_env={"PLR_BOX_PERSIST_CONTROLLER": "relative/box-persist"},
+    )
+    assert res.returncode != 0
+    assert "absolute" in res.stderr.lower()
+    assert not app_dir.exists()
+    assert not web_root.exists()
+    assert box_persist_log_lines(box_persist_env) == []
+
+
+def test_box_persist_missing_controller_rejected_before_mutation(box_persist_env, tmp_path: Path):
+    """An absolute PLR_BOX_PERSIST_CONTROLLER path that does not exist must be
+    rejected with an executable diagnostic before any controller invocation:
+    the restore must not place targets and the fake controller must never be
+    called."""
+    bp = box_persist_env
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    archive, res = standard_create_bp(bp, repo, web)
+    assert res.returncode == 0, res.stderr
+    app_dir = bp.tmp / "app-missing"
+    web_root = bp.tmp / "www-missing"
+    res = run_box_persist_recovery(
+        [
+            "restore",
+            "--archive",
+            str(archive),
+            "--app-dir",
+            str(app_dir),
+            "--web-root",
+            str(web_root),
+            "--target-mode",
+            "dev",
+            "--service-controller",
+            "box-persist",
+            "--start-dev-api",
+        ],
+        bp,
+        extra_env={"PLR_BOX_PERSIST_CONTROLLER": str(bp.tmp / "bin" / "no-such-box-persist")},
+    )
+    assert res.returncode != 0
+    assert "box-persist controller" in res.stderr
+    assert "not found" in res.stderr
+    assert not app_dir.exists()
+    assert not web_root.exists()
+    assert not bp.bp_log.exists()
+
+
+def test_box_persist_non_executable_controller_rejected_before_mutation(box_persist_env, tmp_path: Path):
+    """An absolute regular file without execute permission as
+    PLR_BOX_PERSIST_CONTROLLER must be rejected with an executable diagnostic
+    before any controller invocation or target mutation."""
+    bp = box_persist_env
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    archive, res = standard_create_bp(bp, repo, web)
+    assert res.returncode == 0, res.stderr
+    noexec = bp.tmp / "bin" / "box-persist-noexec"
+    _write(noexec, "#!/bin/sh\nexit 0\n")
+    noexec.chmod(0o644)
+    app_dir = bp.tmp / "app-noexec"
+    web_root = bp.tmp / "www-noexec"
+    res = run_box_persist_recovery(
+        [
+            "restore",
+            "--archive",
+            str(archive),
+            "--app-dir",
+            str(app_dir),
+            "--web-root",
+            str(web_root),
+            "--target-mode",
+            "dev",
+            "--service-controller",
+            "box-persist",
+            "--start-dev-api",
+        ],
+        bp,
+        extra_env={"PLR_BOX_PERSIST_CONTROLLER": str(noexec)},
+    )
+    assert res.returncode != 0
+    assert "box-persist controller" in res.stderr
+    assert "not executable" in res.stderr
+    assert not app_dir.exists()
+    assert not web_root.exists()
+    assert not bp.bp_log.exists()
+
+
+def test_box_persist_restore_rejects_paths_outside_allowed_root(box_persist_env, tmp_path: Path):
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    archive, res = standard_create_bp(box_persist_env, repo, web)
+    assert res.returncode == 0, res.stderr
+    allowed = tmp_path / "allowed-root"
+    app_dir, web_root, res = standard_restore_bp(
+        box_persist_env,
+        archive,
+        "dev",
+        extra_env={"PLR_BOX_PERSIST_ALLOWED_ROOT": str(allowed)},
+    )
+    assert res.returncode != 0
+    assert "under" in res.stderr.lower()
+    assert str(allowed) in res.stderr
+    assert not app_dir.exists()
+    assert not web_root.exists()
+    assert box_persist_log_lines(box_persist_env) == []
+
+
+def test_restore_box_persist_dev_without_start_is_pure_staging(box_persist_env, tmp_path: Path):
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web", source_sha, generator_sha=source_sha[:12])
+    archive, res = standard_create_bp(box_persist_env, repo, web)
+    assert res.returncode == 0, res.stderr
+    app_dir, web_root, res = standard_restore_bp(box_persist_env, archive, "dev")
+    assert res.returncode == 0, res.stderr
+    report = report_of(res)
+    assert report["service_controller"] == "box-persist"
+    assert report["service_started"] is False
+    # pure staging: no controller invocation at all
+    assert box_persist_log_lines(box_persist_env) == []
+    assert _git(app_dir, "rev-parse", "HEAD").stdout.strip() == source_sha
+
+
+def test_restore_box_persist_dev_start_candidate_accepts_active_status(box_persist_env, tmp_path: Path):
+    """box-persist dev --start-dev-api delegates start-candidate and accepts
+    the returned active/disabled/zero-instance status (idempotent: no inactive
+    pre-condition), with no systemd unit writes or systemctl calls."""
+    bp = box_persist_env
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    archive, res = standard_create_bp(bp, repo, web)
+    assert res.returncode == 0, res.stderr
+    app_dir, web_root, res = standard_restore_bp(bp, archive, "dev", extra=["--start-dev-api"])
+    assert res.returncode == 0, res.stderr
+    report = report_of(res)
+    assert report["service_controller"] == "box-persist"
+    assert report["service_started"] is True
+    assert report["service_name"] == DEV_SERVICE
+    assert report["dev_api_unit"] is None
+    assert report["controller_status"] == {
+        "state": "active",
+        "scheduler_mode": "disabled",
+        "identity_exact": True,
+        "scheduler_instances": 0,
+        "pid": 4242,
+    }
+    assert box_persist_log_lines(bp) == [
+        [
+            "start-candidate",
+            "--mode",
+            "candidate",
+            "--app-dir",
+            str(app_dir),
+            "--web-root",
+            str(web_root),
+            "--service-name",
+            DEV_SERVICE,
+        ]
+    ]
+    # no systemd unit was written and systemctl saw no dev-unit operation
+    assert sorted(p.name for p in bp.units.iterdir()) == [f"{TASKER}.service"]
+    log = bp.systemctl_log.read_text(encoding="utf-8").splitlines()
+    assert log == ["is-active portfolio-lab-tasker", "stop portfolio-lab-tasker", "start portfolio-lab-tasker"]
+
+
+def test_restore_box_persist_dev_start_rejects_enabled_scheduler(box_persist_env, tmp_path: Path):
+    bp = box_persist_env
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    archive, res = standard_create_bp(bp, repo, web)
+    assert res.returncode == 0, res.stderr
+    set_box_persist_replies(bp, {"start-candidate": {"scheduler_mode": "enabled"}})
+    app_dir, web_root, res = standard_restore_bp(bp, archive, "dev", extra=["--start-dev-api"])
+    assert res.returncode != 0
+    assert "scheduler" in res.stderr.lower()
+
+
+def test_restore_box_persist_dev_start_rejects_scheduler_instances(box_persist_env, tmp_path: Path):
+    """A candidate that claims scheduler disabled while reporting running
+    scheduler instances must fail closed (inconsistent scheduler counts)."""
+    bp = box_persist_env
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    archive, res = standard_create_bp(bp, repo, web)
+    assert res.returncode == 0, res.stderr
+    set_box_persist_replies(bp, {"start-candidate": {"scheduler_instances": 1}})
+    app_dir, web_root, res = standard_restore_bp(bp, archive, "dev", extra=["--start-dev-api"])
+    assert res.returncode != 0
+    assert "scheduler" in res.stderr.lower()
+
+
+def test_restore_box_persist_rejects_malformed_and_unsupported_status(box_persist_env, tmp_path: Path):
+    bp = box_persist_env
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    archive, res = standard_create_bp(bp, repo, web)
+    assert res.returncode == 0, res.stderr
+    set_box_persist_replies(bp, {"start-candidate": "not json at all"})
+    _, _, res = standard_restore_bp(bp, archive, "dev", extra=["--start-dev-api"], app_name="app-malformed")
+    assert res.returncode != 0
+    assert "json" in res.stderr.lower()
+    bp.bp_log.unlink(missing_ok=True)
+    set_box_persist_replies(bp, {"start-candidate": {"state": "loading"}})
+    _, _, res = standard_restore_bp(bp, archive, "dev", extra=["--start-dev-api"], app_name="app-unsupported")
+    assert res.returncode != 0
+    assert "state" in res.stderr.lower()
+    bp.bp_log.unlink(missing_ok=True)
+    # active state must carry a PID (validation layer, ruling 5)
+    set_box_persist_replies(bp, {"start-candidate": {"pid": None}})
+    _, _, res = standard_restore_bp(bp, archive, "dev", extra=["--start-dev-api"], app_name="app-nopid")
+    assert res.returncode != 0
+    assert "pid" in res.stderr.lower()
+
+
+def test_restore_box_persist_rejects_mismatched_identity(box_persist_env, tmp_path: Path):
+    """The returned status must echo the requested service/mode/app/web
+    identity; any mismatch fails closed before the start is accepted."""
+    bp = box_persist_env
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    archive, res = standard_create_bp(bp, repo, web)
+    assert res.returncode == 0, res.stderr
+    set_box_persist_replies(bp, {"start-candidate": {"service_name": "other-service"}})
+    _, _, res = standard_restore_bp(bp, archive, "dev", extra=["--start-dev-api"], app_name="app-identity")
+    assert res.returncode != 0
+    assert "identity" in res.stderr.lower()
+    bp.bp_log.unlink(missing_ok=True)
+    set_box_persist_replies(bp, {"start-candidate": {"web_root": "/elsewhere/www"}})
+    _, _, res = standard_restore_bp(bp, archive, "dev", extra=["--start-dev-api"], app_name="app-identity2")
+    assert res.returncode != 0
+    assert "identity" in res.stderr.lower()
+
+
+def test_restore_box_persist_prod_preflight_requires_inactive(box_persist_env, tmp_path: Path):
+    """Prod staging checks target production status before mutation and
+    requires inactive/disabled/zero-instance/exact-identity/null-pid."""
+    bp = box_persist_env
+    active_status = {
+        "state": "active",
+        "scheduler_mode": "enabled",
+        "identity_exact": True,
+        "scheduler_instances": 1,
+        "pid": 4242,
+    }
+    for label, replies, marker in (
+        ("active", {"status": active_status}, "inactive"),
+        ("enabled", {"status": {"scheduler_mode": "enabled"}}, "disable"),
+        ("instances", {"status": {"scheduler_instances": 2}}, "scheduler"),
+    ):
+        repo = make_repo(tmp_path / f"repo-{label}")
+        commit_all(repo)
+        web = make_web_root(tmp_path / f"web-{label}", "x" * 40)
+        archive, res = standard_create_bp(bp, repo, web, archive_name=f"{label}" + ARCHIVE_SUFFIX)
+        assert res.returncode == 0, res.stderr
+        set_box_persist_replies(bp, replies)
+        app_dir, web_root, res = standard_restore_bp(
+            bp,
+            archive,
+            "prod",
+            extra=["--allow-production-paths"],
+            app_name=f"app-{label}",
+            web_name=f"www-{label}",
+        )
+        assert res.returncode != 0, label
+        assert marker in res.stderr.lower(), (label, res.stderr)
+        assert not app_dir.exists(), label
+        assert not web_root.exists(), label
+        assert box_persist_log_lines(bp) == [
+            [
+                "status",
+                "--mode",
+                "production",
+                "--app-dir",
+                str(app_dir),
+                "--web-root",
+                str(web_root),
+                "--service-name",
+                TASKER,
+            ]
+        ], label
+        bp.bp_log.unlink(missing_ok=True)
+
+
+def test_restore_box_persist_prod_stages_after_inactive_preflight(box_persist_env, tmp_path: Path):
+    bp = box_persist_env
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web", source_sha, generator_sha=source_sha[:12])
+    archive, res = standard_create_bp(bp, repo, web)
+    assert res.returncode == 0, res.stderr
+    app_dir, web_root, res = standard_restore_bp(bp, archive, "prod", extra=["--allow-production-paths"])
+    assert res.returncode == 0, res.stderr
+    report = report_of(res)
+    assert report["service_controller"] == "box-persist"
+    assert report["service_started"] is False
+    assert report["controller_status"] == {
+        "state": "inactive",
+        "scheduler_mode": "disabled",
+        "identity_exact": True,
+        "scheduler_instances": 0,
+        "pid": None,
+    }
+    assert "activate" in report["activation_note"].lower()
+    assert box_persist_log_lines(bp) == [
+        [
+            "status",
+            "--mode",
+            "production",
+            "--app-dir",
+            str(app_dir),
+            "--web-root",
+            str(web_root),
+            "--service-name",
+            TASKER,
+        ]
+    ]
+    # no start-candidate and no systemctl/unit writes on this box-persist path
+    log = bp.systemctl_log.read_text(encoding="utf-8").splitlines()
+    assert log == ["is-active portfolio-lab-tasker", "stop portfolio-lab-tasker", "start portfolio-lab-tasker"]
+    assert (app_dir / "README.md").is_file()
+
+
+def test_activate_box_persist_preflight_blocks_before_activate_call(box_persist_env, tmp_path: Path):
+    """Activation preflight must block an active target or a second scheduler
+    before the activate command is ever invoked."""
+    bp = box_persist_env
+    active_status = {
+        "state": "active",
+        "scheduler_mode": "enabled",
+        "identity_exact": True,
+        "scheduler_instances": 1,
+        "pid": 4242,
+    }
+    for label, replies, marker in (
+        ("active", {"status": active_status}, "inactive"),
+        ("second-scheduler", {"status": {"scheduler_instances": 2}}, "scheduler"),
+    ):
+        # stale replies from a previous subcase must not leak into the
+        # helper's own restore preflight
+        bp.replies.unlink(missing_ok=True)
+        _, app_dir, web_root, _ = create_and_restore_box_persist(
+            bp, tmp_path / f"t-{label}", archive_name=f"t-{label}" + ARCHIVE_SUFFIX
+        )
+        reset_bp_log(bp)
+        set_box_persist_replies(bp, replies)
+        res = run_activate_bp(bp, app_dir, web_root)
+        assert res.returncode != 0, label
+        assert marker in res.stderr.lower(), (label, res.stderr)
+        lines = box_persist_log_lines(bp)
+        assert len(lines) == 1, label
+        assert lines[0][0] == "status", label
+
+
+def test_activate_box_persist_requires_exactly_one_scheduler_instance(box_persist_env, tmp_path: Path):
+    """The activate response must report exactly one scheduler instance; 0 or
+    multiple instances fail closed (second-scheduler prevention gate)."""
+    bp = box_persist_env
+    for label, instances in (("zero", 0), ("two", 2)):
+        _, app_dir, web_root, _ = create_and_restore_box_persist(
+            bp, tmp_path / f"o-{label}", archive_name=f"o-{label}" + ARCHIVE_SUFFIX
+        )
+        reset_bp_log(bp)
+        set_box_persist_replies(bp, {"activate": {"scheduler_instances": instances}})
+        res = run_activate_bp(bp, app_dir, web_root)
+        assert res.returncode != 0, label
+        assert "exactly one" in res.stderr.lower(), (label, res.stderr)
+        assert [line[0] for line in box_persist_log_lines(bp)] == ["status", "activate"], label
+
+
+def test_activate_box_persist_happy_path_forwards_proof_and_reports_status(box_persist_env, tmp_path: Path):
+    """box-persist activation: inactive preflight, activate invocation with
+    the former-authority proof label forwarded exactly, exactly one active
+    scheduler returned, no systemctl/unit writes, normalized status fields in
+    the JSON recovery report."""
+    bp = box_persist_env
+    _, app_dir, web_root, _ = create_and_restore_box_persist(bp, tmp_path)
+    reset_bp_log(bp)
+    res = run_activate_bp(bp, app_dir, web_root)
+    assert res.returncode == 0, res.stderr
+    report = report_of(res)
+    assert report["ok"] is True
+    assert report["service_controller"] == "box-persist"
+    assert report["unit_installed"] is False
+    assert report["service_started"] is True
+    assert report["former_authority_confirmed_stopped"] == "former-host.example"
+    assert report["dns_caddy_unchanged"] is True
+    assert report["controller_preflight_status"] == {
+        "state": "inactive",
+        "scheduler_mode": "disabled",
+        "identity_exact": True,
+        "scheduler_instances": 0,
+        "pid": None,
+    }
+    assert report["controller_activation_status"] == {
+        "state": "active",
+        "scheduler_mode": "enabled",
+        "identity_exact": True,
+        "scheduler_instances": 1,
+        "pid": 4242,
+    }
+    assert isinstance(report["post_activation_acceptance"], list) and len(report["post_activation_acceptance"]) >= 3
+    assert box_persist_log_lines(bp) == [
+        [
+            "status",
+            "--mode",
+            "production",
+            "--app-dir",
+            str(app_dir),
+            "--web-root",
+            str(web_root),
+            "--service-name",
+            TASKER,
+        ],
+        [
+            "activate",
+            "--mode",
+            "production",
+            "--app-dir",
+            str(app_dir),
+            "--web-root",
+            str(web_root),
+            "--service-name",
+            TASKER,
+            "--former-authority-confirmed-stopped",
+            "former-host.example",
+        ],
+    ]
+    log = bp.systemctl_log.read_text(encoding="utf-8").splitlines()
+    assert log == ["is-active portfolio-lab-tasker", "stop portfolio-lab-tasker", "start portfolio-lab-tasker"]
+    assert bp.units.joinpath(f"{TASKER}.service").read_text(encoding="utf-8") == UNIT_TEXT
+
+
+def test_restore_box_persist_nonzero_controller_exit_fails_closed(box_persist_env, tmp_path: Path):
+    bp = box_persist_env
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    archive, res = standard_create_bp(bp, repo, web)
+    assert res.returncode == 0, res.stderr
+    app_dir, web_root, res = standard_restore_bp(
+        bp,
+        archive,
+        "dev",
+        extra=["--start-dev-api"],
+        extra_env={"PLR_BP_EXIT": "7"},
+    )
+    assert res.returncode != 0
+    assert "failed" in res.stderr.lower()
+    assert "box-persist" in res.stderr.lower()
+
+
+def test_box_persist_stop_command_contract(box_persist_env, monkeypatch):
+    """The stop command contract (for the future Task 2.2 script) must be
+    emitted as an argv array and its normalized status parsed."""
+    bp = box_persist_env
+    mod = _load_recovery_module()
+    monkeypatch.setenv("PLR_BP_LOG", str(bp.bp_log))
+    controller = mod.BoxPersistController(bp.bp_controller)
+    app_dir = bp.tmp / "app-stop"
+    web_root = bp.tmp / "www-stop"
+    status = controller.stop("tasker", "production", app_dir, web_root)
+    assert status["state"] == "inactive"
+    assert status["scheduler_mode"] == "disabled"
+    assert status["identity_exact"] is True
+    assert status["scheduler_instances"] == 0
+    assert status["pid"] is None
+    assert box_persist_log_lines(bp) == [
+        [
+            "stop",
+            "--mode",
+            "production",
+            "--app-dir",
+            str(app_dir),
+            "--web-root",
+            str(web_root),
+            "--service-name",
+            "tasker",
+        ]
+    ]
+
+
+def test_box_persist_command_timeout_fails_closed(box_persist_env, monkeypatch, capsys):
+    """A controller command that exceeds the bounded subprocess ceiling must
+    fail closed: the shared run() converts TimeoutExpired into SystemExit
+    with a timeout diagnostic (no slow real-timeout test; the 180s bound
+    stays in run())."""
+    bp = box_persist_env
+    mod = _load_recovery_module()
+
+    def timeout_run(argv, cwd=None, env=None, **kwargs):
+        raise subprocess.TimeoutExpired(argv[0], 180)
+
+    monkeypatch.setattr(subprocess, "run", timeout_run)
+    controller = mod.BoxPersistController(bp.bp_controller)
+    with pytest.raises(SystemExit):
+        controller.status("tasker", "production", bp.tmp / "app", bp.tmp / "www")
+    err = capsys.readouterr().err
+    assert "timed out" in err
+
+
+# ── Task 2.4 generation materialization tests ───────────────────────────────
+
+
+def test_generation_materialization_flag_parser_contract():
+    """Parser must accept --materialize-generations-current on create only;
+    verify and restore must reject the unknown argument."""
+    mod = _load_recovery_module()
+    parser = mod.build_parser()
+
+    # Create accepts the flag
+    args = parser.parse_args([
+        "create",
+        "--app-dir", "/app",
+        "--web-root", "/www",
+        "--tasker-service", "tasker",
+        "--archive", "/dest.portfolio-lab-recovery.tar",
+        "--storage-encryption-attested",
+        "--materialize-generations-current",
+    ])
+    assert args.materialize_generations_current is True
+
+    # Default is False
+    args_default = parser.parse_args([
+        "create",
+        "--app-dir", "/app",
+        "--web-root", "/www",
+        "--tasker-service", "tasker",
+        "--archive", "/dest.portfolio-lab-recovery.tar",
+        "--storage-encryption-attested",
+    ])
+    assert args_default.materialize_generations_current is False
+
+    # Verify rejects the flag
+    with pytest.raises(SystemExit):
+        parser.parse_args(["verify", "--archive", "/a.tar", "--materialize-generations-current"])
+
+    # Restore rejects the flag
+    with pytest.raises(SystemExit):
+        parser.parse_args([
+            "restore",
+            "--archive", "/a.tar",
+            "--app-dir", "/app",
+            "--web-root", "/www",
+            "--target-mode", "dev",
+            "--materialize-generations-current",
+        ])
+
+
+def test_create_without_flag_rejects_current_symlink_before_stop(hermetic, tmp_path: Path):
+    """Without --materialize-generations-current, existing behavior remains:
+    data/generations/current directory symlink is rejected before source stop,
+    and no archive is written."""
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    gen_dir = repo / "data" / "generations"
+    gen_target = gen_dir / "gen-2026-09-03-001"
+    gen_target.mkdir(parents=True)
+    _write(gen_target / "manifest.json", '{"run_id": "gen-2026-09-03-001"}\n')
+    (gen_dir / "current").symlink_to("gen-2026-09-03-001")
+
+    archive, res = standard_create(hermetic, repo, web)
+    assert res.returncode != 0
+    assert "symlink" in res.stderr.lower()
+    assert not hermetic.systemctl_log.exists()
+    assert not archive.exists()
+
+
+def test_create_with_flag_success_and_verify_restore_reconstruction(hermetic, tmp_path: Path):
+    """Safe relative current -> gen-id creates a verified archive with the flag.
+    Source link bytes/type remain unchanged.
+    Archive contains ordinary runtime/data/generations/current/... files and normal target files.
+    Manifest has exact generation_materialization object with no absolute host paths.
+    Restore reconstructs data/generations/current as the exact relative symlink.
+    Prove subsequent atomic replacement of that symlink succeeds."""
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web", source_sha, generator_sha=source_sha[:12])
+
+    gen_dir = repo / "data" / "generations"
+    gen_id = "gen-2026-09-03-001"
+    gen_target = gen_dir / "gen-2026-09-03-001"
+    gen_target.mkdir(parents=True)
+    _write(gen_target / "manifest.json", '{"schema": "portfolio-lab-generation/v1", "run_id": "gen-2026-09-03-001"}\n')
+    _write(gen_target / "index.json", '{"status": "ok"}\n')
+    (gen_dir / "current").symlink_to(gen_id)
+
+    # Prove source is a symlink before create
+    assert (gen_dir / "current").is_symlink()
+    assert os.readlink(gen_dir / "current") == gen_id
+
+    archive, res = standard_create(
+        hermetic,
+        repo,
+        web,
+        extra=["--materialize-generations-current"],
+    )
+    assert res.returncode == 0, res.stderr
+    report = report_of(res)
+    assert report["ok"] is True
+    assert report["checks"]["generation_materialization_metadata_ok"] is True
+    assert report["checks"]["generation_materialization_members_match"] is True
+
+    # Source symlink bytes and type remain untouched
+    assert (gen_dir / "current").is_symlink()
+    assert not (gen_dir / "current").is_file()
+    assert os.readlink(gen_dir / "current") == gen_id
+    assert (gen_target / "manifest.json").read_text(encoding="utf-8") == '{"schema": "portfolio-lab-generation/v1", "run_id": "gen-2026-09-03-001"}\n'
+    assert (gen_target / "index.json").read_text(encoding="utf-8") == '{"status": "ok"}\n'
+
+    # Verify tar contents: no directory/symlink members, only regular files
+    with tarfile.open(str(archive), "r:") as tf:
+        names = tf.getnames()
+        for member in tf.getmembers():
+            assert member.isfile()
+            assert not member.issym()
+            assert not member.isdir()
+
+    assert "runtime/data/generations/gen-2026-09-03-001/manifest.json" in names
+    assert "runtime/data/generations/gen-2026-09-03-001/index.json" in names
+    assert "runtime/data/generations/current/manifest.json" in names
+    assert "runtime/data/generations/current/index.json" in names
+
+    # Manifest check
+    manifest_raw = extract_tar_member(archive, "recovery-manifest.json")
+    manifest = json.loads(manifest_raw)
+    mat = manifest.get("generation_materialization")
+    assert mat == {
+        "schema_version": "portfolio-lab-generation-materialization/v1",
+        "link_path": "data/generations/current",
+        "original_link": gen_id,
+        "target_path": f"data/generations/{gen_id}",
+        "archive_path": "runtime/data/generations/current",
+    }
+    # Ensure no absolute host paths in manifest
+    assert str(tmp_path) not in json.dumps(mat)
+
+    # Verify command also reports the generation materialization checks
+    vres = run_recovery(["verify", "--archive", str(archive)], hermetic)
+    assert vres.returncode == 0, vres.stderr
+    vrep = report_of(vres)
+    assert vrep["ok"] is True
+    assert vrep["checks"]["generation_materialization_metadata_ok"] is True
+    assert vrep["checks"]["generation_materialization_members_match"] is True
+
+    # Dev restore: prove reconstruction of current as relative symlink
+    app_dir = hermetic.tmp / "app-dev"
+    web_root = hermetic.tmp / "web-dev"
+    rres = run_recovery(
+        [
+            "restore",
+            "--archive", str(archive),
+            "--app-dir", str(app_dir),
+            "--web-root", str(web_root),
+            "--target-mode", "dev",
+        ],
+        hermetic,
+    )
+    assert rres.returncode == 0, rres.stderr
+    restored_link = app_dir / "data" / "generations" / "current"
+    assert restored_link.is_symlink()
+    assert os.readlink(restored_link) == gen_id
+    assert restored_link.resolve() == (app_dir / "data" / "generations" / gen_id).resolve()
+    assert (restored_link / "manifest.json").is_file()
+
+    # Prove subsequent atomic replacement of that symlink succeeds (GenerationStore._activate pattern)
+    tmp_link = restored_link.with_name("current.link.tmp")
+    os.symlink("gen-next", tmp_link)
+    os.replace(tmp_link, restored_link)
+    assert os.readlink(restored_link) == "gen-next"
+
+    # Prod restore: prove reconstruction also in prod mode
+    set_systemctl_mode(hermetic, "inactive")
+    prod_app = hermetic.tmp / "app-prod"
+    prod_web = hermetic.tmp / "web-prod"
+    pres = run_recovery(
+        [
+            "restore",
+            "--archive", str(archive),
+            "--app-dir", str(prod_app),
+            "--web-root", str(prod_web),
+            "--target-mode", "prod",
+            "--allow-production-paths",
+        ],
+        hermetic,
+    )
+    assert pres.returncode == 0, pres.stderr
+    prod_link = prod_app / "data" / "generations" / "current"
+    assert prod_link.is_symlink()
+    assert os.readlink(prod_link) == gen_id
+    assert (prod_link / "manifest.json").is_file()
+
+
+def test_old_archive_without_materialization_verifies_and_restores_unchanged(hermetic, tmp_path: Path):
+    """Old archives without generation_materialization object remain valid,
+    verify with None checks, and restore unchanged."""
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web", source_sha)
+    archive, res = standard_create(hermetic, repo, web)
+    assert res.returncode == 0, res.stderr
+
+    vres = run_recovery(["verify", "--archive", str(archive)], hermetic)
+    assert vres.returncode == 0, vres.stderr
+    vrep = report_of(vres)
+    assert vrep["checks"]["generation_materialization_metadata_ok"] is None
+    assert vrep["checks"]["generation_materialization_members_match"] is None
+
+    app_dir = hermetic.tmp / "app-old"
+    web_root = hermetic.tmp / "web-old"
+    rres = run_recovery(
+        [
+            "restore",
+            "--archive", str(archive),
+            "--app-dir", str(app_dir),
+            "--web-root", str(web_root),
+            "--target-mode", "dev",
+        ],
+        hermetic,
+    )
+    assert rres.returncode == 0, rres.stderr
+    assert (app_dir / "README.md").is_file()
+
+
+@pytest.mark.parametrize(
+    "setup_fn,expected_error_snippet",
+    [
+        (lambda d: None, "missing or is not a symlink"),  # missing current
+        (lambda d: (d / "current").mkdir(), "missing or is not a symlink"),  # regular directory
+        (lambda d: _write(d / "current", "regular file"), "missing or is not a symlink"),  # regular file
+        (lambda d: (d / "current").symlink_to("gen-missing"), "unresolvable or broken link"),  # broken link
+        (lambda d: (d / "current").symlink_to("/etc/passwd"), "invalid generations/current symlink target text"),  # absolute link
+        (lambda d: (d / "current").symlink_to(""), "invalid generations/current symlink target text"),  # empty component / target
+        (lambda d: (d / "current").symlink_to("."), "invalid generations/current symlink target text"),  # dot component
+        (lambda d: (d / "current").symlink_to(".."), "invalid generations/current symlink target text"),  # dot-dot component
+        (lambda d: (d / "current").symlink_to("../escape"), "invalid generations/current symlink target text"),  # traversal
+        (lambda d: (d / "current").symlink_to(r"gen\backslash"), "invalid generations/current symlink target text"),  # backslash
+        (lambda d: (d / "current").symlink_to("gen\x01ctrl"), "invalid generations/current symlink target text"),  # control character
+        (lambda d: (d / "current").symlink_to("current"), "target cannot be current symlink itself"),  # target equal to current
+    ],
+)
+def test_create_pre_stop_rejection_invalid_current_links(
+    hermetic, tmp_path: Path, setup_fn, expected_error_snippet
+):
+    """Pre-stop rejection, no service log/stop, bounded error, and no archive for invalid current links."""
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    gen_dir = repo / "data" / "generations"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    setup_fn(gen_dir)
+
+    archive, res = standard_create(
+        hermetic,
+        repo,
+        web,
+        extra=["--materialize-generations-current"],
+    )
+    assert res.returncode != 0
+    assert expected_error_snippet.lower() in res.stderr.lower(), (expected_error_snippet, res.stderr)
+    assert not hermetic.systemctl_log.exists()
+    assert not archive.exists()
+    assert not Path(str(archive) + ".sha256").exists()
+
+
+def test_create_pre_stop_rejection_target_is_file(hermetic, tmp_path: Path):
+    """Target of current is a regular file instead of a directory: rejected pre-stop."""
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    gen_dir = repo / "data" / "generations"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    _write(gen_dir / "gen-file", "not a directory")
+    (gen_dir / "current").symlink_to("gen-file")
+
+    archive, res = standard_create(
+        hermetic,
+        repo,
+        web,
+        extra=["--materialize-generations-current"],
+    )
+    assert res.returncode != 0
+    assert "not an ordinary directory" in res.stderr.lower()
+    assert not hermetic.systemctl_log.exists()
+    assert not archive.exists()
+    assert not Path(str(archive) + ".sha256").exists()
+
+
+def test_create_pre_stop_rejection_target_contains_unsafe_entries(hermetic, tmp_path: Path):
+    """Target contains nested symlinks, hardlinks, excluded secrets, or unsafe permissions:
+    fail closed before stop, do not create archive."""
+    cases = [
+        ("nested_dir_symlink", lambda t: (t / "nested_dir").symlink_to(t), "nested directory symlink"),
+        ("nested_file_symlink", lambda t: (t / "nested_file").symlink_to("f.txt"), "nested symlink"),
+        ("hardlinked_file", lambda t: os.link(t / "f.txt", t / "f_hardlink.txt"), "hardlinked regular file"),
+        ("excluded_secret", lambda t: _write(t / "secrets.json", '{"key": "val"}'), "excluded secret-like path"),
+        ("excluded_env", lambda t: _write(t / ".env.local", "FOO=bar"), "excluded secret-like path"),
+        ("sticky_mode", lambda t: (t / "f.txt").chmod(0o1644), "sticky mode"),
+        ("setuid_mode", lambda t: (t / "f.txt").chmod(0o4755), "setuid mode"),
+        ("setgid_mode", lambda t: (t / "f.txt").chmod(0o2755), "setgid mode"),
+        ("control_filename", lambda t: _write(t / "file\x01bad.txt", "data"), "control character"),
+    ]
+
+    for label, setup_bad, expected_snippet in cases:
+        repo = make_repo(tmp_path / f"repo-{label}")
+        commit_all(repo)
+        web = make_web_root(tmp_path / f"web-{label}", "x" * 40)
+        gen_dir = repo / "data" / "generations"
+        gen_target = gen_dir / "gen-001"
+        gen_target.mkdir(parents=True, exist_ok=True)
+        _write(gen_target / "f.txt", "content\n")
+        (gen_dir / "current").symlink_to("gen-001")
+
+        setup_bad(gen_target)
+
+        archive, res = standard_create(
+            hermetic,
+            repo,
+            web,
+            archive_name=f"backup-{label}" + ARCHIVE_SUFFIX,
+            extra=["--materialize-generations-current"],
+        )
+        assert res.returncode != 0, label
+        assert expected_snippet.lower() in res.stderr.lower(), (label, expected_snippet, res.stderr)
+        assert not hermetic.systemctl_log.exists(), label
+        assert not archive.exists(), label
+        assert not Path(str(archive) + ".sha256").exists(), label
+
+
+def test_create_pre_stop_rejection_empty_target_dir(hermetic, tmp_path: Path):
+    """Empty generation target directory must be rejected before service stop."""
+    repo = make_repo(tmp_path / "repo-empty")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web-empty", "x" * 40)
+    gen_dir = repo / "data" / "generations"
+    gen_target = gen_dir / "gen-empty"
+    gen_target.mkdir(parents=True, exist_ok=True)
+    (gen_dir / "current").symlink_to("gen-empty")
+
+    archive, res = standard_create(
+        hermetic,
+        repo,
+        web,
+        extra=["--materialize-generations-current"],
+    )
+    assert res.returncode != 0
+    assert "empty" in res.stderr.lower()
+    assert not hermetic.systemctl_log.exists()
+    assert not archive.exists()
+    assert not Path(str(archive) + ".sha256").exists()
+
+
+def test_create_pre_stop_rejection_symlinked_target_component(hermetic, tmp_path: Path):
+    """Target path component containing a symlink is rejected before stop."""
+    repo = make_repo(tmp_path / "repo-comp")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web-comp", "x" * 40)
+    gen_dir = repo / "data" / "generations"
+    real_target = gen_dir / "real-001"
+    real_target.mkdir(parents=True, exist_ok=True)
+    _write(real_target / "f.txt", "content\n")
+
+    # Intermediate component symlink: intermediate -> real-001, current -> intermediate
+    (gen_dir / "intermediate").symlink_to("real-001")
+    (gen_dir / "current").symlink_to("intermediate")
+
+    archive, res = standard_create(
+        hermetic,
+        repo,
+        web,
+        extra=["--materialize-generations-current"],
+    )
+    assert res.returncode != 0
+    assert "symlink in generations target path component" in res.stderr.lower()
+    assert not hermetic.systemctl_log.exists()
+    assert not archive.exists()
+    assert not Path(str(archive) + ".sha256").exists()
+
+
+def test_create_pre_stop_rejection_unreadable_target(hermetic, tmp_path: Path):
+    """Unreadable target directory is rejected before stop with clean diagnostic."""
+    repo = make_repo(tmp_path / "repo-unreadable")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web-unreadable", "x" * 40)
+    gen_dir = repo / "data" / "generations"
+    gen_target = gen_dir / "gen-unreadable"
+    gen_target.mkdir(parents=True, exist_ok=True)
+    _write(gen_target / "f.txt", "content\n")
+    (gen_dir / "current").symlink_to("gen-unreadable")
+
+    # Make target unreadable
+    gen_target.chmod(0o000)
+    try:
+        archive, res = standard_create(
+            hermetic,
+            repo,
+            web,
+            extra=["--materialize-generations-current"],
+        )
+        assert res.returncode != 0
+        assert "cannot traverse generation target" in res.stderr.lower()
+        assert not hermetic.systemctl_log.exists()
+        assert not archive.exists()
+        assert not Path(str(archive) + ".sha256").exists()
+    finally:
+        gen_target.chmod(0o755)
+
+
+def test_create_pre_stop_rejection_fifo_in_target(hermetic, tmp_path: Path):
+    """Non-regular file (FIFO) in generation target is rejected before stop."""
+    repo = make_repo(tmp_path / "repo-fifo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web-fifo", "x" * 40)
+    gen_dir = repo / "data" / "generations"
+    gen_target = gen_dir / "gen-fifo"
+    gen_target.mkdir(parents=True, exist_ok=True)
+    _write(gen_target / "f.txt", "content\n")
+    os.mkfifo(gen_target / "named_pipe")
+    (gen_dir / "current").symlink_to("gen-fifo")
+
+    archive, res = standard_create(
+        hermetic,
+        repo,
+        web,
+        extra=["--materialize-generations-current"],
+    )
+    assert res.returncode != 0
+    assert "non-regular file" in res.stderr.lower()
+    assert not hermetic.systemctl_log.exists()
+    assert not archive.exists()
+    assert not Path(str(archive) + ".sha256").exists()
+
+
+def test_create_pre_stop_rejection_containment_escape_via_alias(hermetic, tmp_path: Path):
+    """Containment escape via alias directory symlink is rejected before stop."""
+    repo = make_repo(tmp_path / "repo-alias")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web-alias", "x" * 40)
+    external = tmp_path / "external-gen"
+    external.mkdir(parents=True, exist_ok=True)
+    _write(external / "f.txt", "secret\n")
+
+    gen_dir = repo / "data" / "generations"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    (gen_dir / "escape_alias").symlink_to(external)
+    (gen_dir / "current").symlink_to("escape_alias")
+
+    archive, res = standard_create(
+        hermetic,
+        repo,
+        web,
+        extra=["--materialize-generations-current"],
+    )
+    assert res.returncode != 0
+    assert "escapes generations directory" in res.stderr.lower() or "symlink in generations target path component" in res.stderr.lower()
+    assert not hermetic.systemctl_log.exists()
+    assert not archive.exists()
+    assert not Path(str(archive) + ".sha256").exists()
+
+
+def test_create_secret_safe_diagnostics(hermetic, tmp_path: Path):
+    """Secret tokens in invalid link text or excluded filenames must NOT appear in stderr/stdout."""
+    secret_link_token = "SUPER_SECRET_LINK_TOKEN_XYZ123"
+    secret_file_token = "SUPER_SECRET_FILE_TOKEN_ABC456"
+
+    # Case 1: Secret in link target
+    repo1 = make_repo(tmp_path / "repo1")
+    commit_all(repo1)
+    web1 = make_web_root(tmp_path / "web1", "x" * 40)
+    gen_dir1 = repo1 / "data" / "generations"
+    gen_dir1.mkdir(parents=True, exist_ok=True)
+    # Link with control character containing secret token
+    (gen_dir1 / "current").symlink_to(f"gen\x01{secret_link_token}")
+    _, res1 = standard_create(hermetic, repo1, web1, extra=["--materialize-generations-current"])
+    assert res1.returncode != 0
+    assert secret_link_token not in res1.stderr
+    assert secret_link_token not in res1.stdout
+    assert str(tmp_path) not in res1.stderr
+
+    # Case 2: Secret in excluded filename inside target
+    repo2 = make_repo(tmp_path / "repo2")
+    commit_all(repo2)
+    web2 = make_web_root(tmp_path / "web2", "x" * 40)
+    gen_dir2 = repo2 / "data" / "generations"
+    gen_target2 = gen_dir2 / "gen-002"
+    gen_target2.mkdir(parents=True, exist_ok=True)
+    _write(gen_target2 / f"secret_{secret_file_token}.json", '{"key": 1}')
+    (gen_dir2 / "current").symlink_to("gen-002")
+    _, res2 = standard_create(hermetic, repo2, web2, extra=["--materialize-generations-current"])
+    assert res2.returncode != 0
+    assert secret_file_token not in res2.stderr
+    assert secret_file_token not in res2.stdout
+    assert str(tmp_path) not in res2.stderr
+
+
+def test_create_with_flag_still_rejects_other_symlinks(hermetic, tmp_path: Path):
+    """All non-current directory symlinks under data/ or static/web remain rejected
+    even when --materialize-generations-current is passed."""
+    # Symlink elsewhere in data/
+    repo = make_repo(tmp_path / "repo1")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web1", "x" * 40)
+    gen_dir = repo / "data" / "generations"
+    gen_target = gen_dir / "gen-001"
+    gen_target.mkdir(parents=True)
+    _write(gen_target / "f.txt", "ok\n")
+    (gen_dir / "current").symlink_to("gen-001")
+
+    # another directory symlink under data/
+    other = tmp_path / "other"
+    other.mkdir()
+    (repo / "data" / "other_link").symlink_to(other, target_is_directory=True)
+
+    archive, res = standard_create(
+        hermetic,
+        repo,
+        web,
+        extra=["--materialize-generations-current"],
+    )
+    assert res.returncode != 0
+    assert "symlink" in res.stderr.lower()
+    assert not hermetic.systemctl_log.exists()
+    assert not archive.exists()
+
+
+def test_create_post_stop_tamper_fails_closed_and_restarts(hermetic, tmp_path: Path):
+    """A controller stop that changes the link or target after preflight
+    causes a post-stop snapshot mismatch failure, creates no archive, and attempts restart."""
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web", source_sha)
+    gen_dir = repo / "data" / "generations"
+    gen_target1 = gen_dir / "gen-001"
+    gen_target1.mkdir(parents=True)
+    _write(gen_target1 / "f.txt", "v1\n")
+    (gen_dir / "current").symlink_to("gen-001")
+
+    # Custom systemctl stop that mutates data/generations/current during stop
+    fake_body = (
+        '#!/bin/sh\n'
+        f'printf \'%s\\n\' "$*" >> "{hermetic.systemctl_log}"\n'
+        'case "$1" in\n'
+        '  is-active) printf "active\\n"; exit 0 ;;\n'
+        f'  stop) rm "{gen_dir / "current"}"; ln -s gen-002 "{gen_dir / "current"}"; exit 0 ;;\n'
+        '  start) exit 0 ;;\n'
+        'esac\n'
+        'exit 0\n'
+    )
+    make_fake(hermetic.bin / "systemctl", fake_body)
+
+    archive, res = standard_create(
+        hermetic,
+        repo,
+        web,
+        extra=["--materialize-generations-current"],
+    )
+    assert res.returncode != 0
+    assert "snapshot" in res.stderr.lower() or "mismatch" in res.stderr.lower() or "changed" in res.stderr.lower()
+    assert not archive.exists()
+    log = hermetic.systemctl_log.read_text(encoding="utf-8").splitlines()
+    # Ensure systemctl stop was called, then restart was attempted
+    assert "stop portfolio-lab-tasker" in log
+    assert "start portfolio-lab-tasker" in log
+
+
+def test_verify_rejects_tampered_generation_materialization_manifest(hermetic, tmp_path: Path):
+    """Tampered manifest metadata (bad schema, unsafe original link, target mismatch,
+    missing/extra keys, member mismatch, digest mismatch) fails verify and fails restore before target mutation."""
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web", source_sha, generator_sha=source_sha[:12])
+
+    gen_dir = repo / "data" / "generations"
+    gen_id = "gen-2026-09-03-001"
+    gen_target = gen_dir / gen_id
+    gen_target.mkdir(parents=True)
+    _write(gen_target / "manifest.json", '{"schema": "portfolio-lab-generation/v1"}\n')
+    (gen_dir / "current").symlink_to(gen_id)
+
+    archive, res = standard_create(
+        hermetic,
+        repo,
+        web,
+        extra=["--materialize-generations-current"],
+    )
+    assert res.returncode == 0, res.stderr
+
+    # Helper to repack archive with modified manifest and updated member list
+    def repack_with_modified_manifest(mod_fn, output_name: str) -> Path:
+        out_archive = hermetic.tmp / "backups" / (output_name + ARCHIVE_SUFFIX)
+        extract_dir = hermetic.tmp / f"extract-{output_name}"
+        extract_tar(archive, extract_dir)
+        mpath = extract_dir / "recovery-manifest.json"
+        manifest = json.loads(mpath.read_text(encoding="utf-8"))
+        mod_fn(manifest, extract_dir)
+        mpath.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        all_members = [
+            p.relative_to(extract_dir).as_posix()
+            for p in sorted(extract_dir.rglob("*"))
+            if p.is_file()
+        ]
+        subprocess.run(
+            ["tar", "-cf", str(out_archive), "-C", str(extract_dir), *all_members],
+            check=True,
+            env={**os.environ, "COPYFILE_DISABLE": "1"},
+        )
+        sidecar = Path(str(out_archive) + ".sha256")
+        sidecar.write_text(f"{_sha256_bytes(out_archive.read_bytes())}  {out_archive.name}\n", encoding="utf-8")
+        return out_archive
+
+    # Test cases for metadata tampering
+    tamper_cases = [
+        ("bad_schema", lambda m, ed: m["generation_materialization"].update({"schema_version": "wrong-schema"})),
+        ("wrong_link_path", lambda m, ed: m["generation_materialization"].update({"link_path": "data/generations/wrong_link"})),
+        ("wrong_archive_path", lambda m, ed: m["generation_materialization"].update({"archive_path": "runtime/data/generations/wrong_archive"})),
+        ("extra_key", lambda m, ed: m["generation_materialization"].update({"extra_key": "forbidden"})),
+        ("missing_key_schema", lambda m, ed: m["generation_materialization"].pop("schema_version")),
+        ("missing_key_link_path", lambda m, ed: m["generation_materialization"].pop("link_path")),
+        ("missing_key_original_link", lambda m, ed: m["generation_materialization"].pop("original_link")),
+        ("missing_key_target_path", lambda m, ed: m["generation_materialization"].pop("target_path")),
+        ("missing_key_archive_path", lambda m, ed: m["generation_materialization"].pop("archive_path")),
+        ("unsafe_link", lambda m, ed: m["generation_materialization"].update({"original_link": "../escape", "target_path": "data/generations/../escape"})),
+        ("target_mismatch", lambda m, ed: m["generation_materialization"].update({"target_path": "data/generations/wrong-target"})),
+    ]
+
+    for label, tamper_fn in tamper_cases:
+        bad_tar = repack_with_modified_manifest(tamper_fn, f"tamper-{label}")
+        vres = run_recovery(["verify", "--archive", str(bad_tar)], hermetic)
+        assert vres.returncode != 0, label
+
+        # Also prove restore fails before target mutation
+        app_dir = hermetic.tmp / f"app-{label}"
+        web_root = hermetic.tmp / f"web-{label}"
+        rres = run_recovery(
+            [
+                "restore",
+                "--archive", str(bad_tar),
+                "--app-dir", str(app_dir),
+                "--web-root", str(web_root),
+                "--target-mode", "dev",
+            ],
+            hermetic,
+        )
+        assert rres.returncode != 0, label
+        assert not app_dir.exists(), label
+        assert not web_root.exists(), label
+
+
+def test_verify_rejects_tampered_generation_member_pairs(hermetic, tmp_path: Path):
+    """Tampering member pairs (digest, size, mode mismatch, missing member, extra member)
+    fails verify and fails restore before mutation."""
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web", source_sha, generator_sha=source_sha[:12])
+
+    gen_dir = repo / "data" / "generations"
+    gen_id = "gen-2026-09-03-001"
+    gen_target = gen_dir / gen_id
+    gen_target.mkdir(parents=True)
+    _write(gen_target / "manifest.json", '{"schema": "portfolio-lab-generation/v1"}\n')
+    _write(gen_target / "extra.json", '{"item": 1}\n')
+    (gen_dir / "current").symlink_to(gen_id)
+
+    archive, res = standard_create(
+        hermetic,
+        repo,
+        web,
+        extra=["--materialize-generations-current"],
+    )
+    assert res.returncode == 0, res.stderr
+
+    def repack_tampered_members(tamper_fn, output_name: str) -> Path:
+        out_archive = hermetic.tmp / "backups" / (output_name + ARCHIVE_SUFFIX)
+        extract_dir = hermetic.tmp / f"extract-{output_name}"
+        extract_tar(archive, extract_dir)
+        mpath = extract_dir / "recovery-manifest.json"
+        manifest = json.loads(mpath.read_text(encoding="utf-8"))
+        tamper_fn(manifest, extract_dir)
+        mpath.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        all_members = [
+            p.relative_to(extract_dir).as_posix()
+            for p in sorted(extract_dir.rglob("*"))
+            if p.is_file()
+        ]
+        subprocess.run(
+            ["tar", "-cf", str(out_archive), "-C", str(extract_dir), *all_members],
+            check=True,
+            env={**os.environ, "COPYFILE_DISABLE": "1"},
+        )
+        sidecar = Path(str(out_archive) + ".sha256")
+        sidecar.write_text(f"{_sha256_bytes(out_archive.read_bytes())}  {out_archive.name}\n", encoding="utf-8")
+        return out_archive
+
+    # 1. Tamper digest of current copy only (and update global member digest so global verify passes and generation check fails)
+    def tamper_digest(m, ed):
+        f = ed / "runtime" / "data" / "generations" / "current" / "manifest.json"
+        f.write_text('{"tampered": true}\n', encoding="utf-8")
+        new_sha = _sha256_bytes(f.read_bytes())
+        for entry in m["members"]:
+            if entry["path"] == "runtime/data/generations/current/manifest.json":
+                entry["sha256"] = new_sha
+                entry["bytes"] = f.stat().st_size
+
+    # 2. Tamper mode of current copy only
+    def tamper_mode(m, ed):
+        for entry in m["members"]:
+            if entry["path"] == "runtime/data/generations/current/manifest.json":
+                entry["mode"] = 0o644 if entry["mode"] != 0o644 else 0o600
+                (ed / entry["path"]).chmod(entry["mode"])
+
+    # 3. Extra member in current not in target
+    def tamper_extra_current(m, ed):
+        extra_f = ed / "runtime" / "data" / "generations" / "current" / "added.json"
+        extra_f.write_text('{"added": 1}\n', encoding="utf-8")
+        extra_f.chmod(0o600)
+        m["members"].append({
+            "path": "runtime/data/generations/current/added.json",
+            "sha256": _sha256_bytes(extra_f.read_bytes()),
+            "bytes": extra_f.stat().st_size,
+            "mode": 0o600,
+        })
+        m["members"] = sorted(m["members"], key=lambda e: e["path"])
+
+    # 4. Extra member in target not in current
+    def tamper_extra_target(m, ed):
+        extra_f = ed / "runtime" / "data" / "generations" / gen_id / "added.json"
+        extra_f.write_text('{"added": 1}\n', encoding="utf-8")
+        extra_f.chmod(0o600)
+        m["members"].append({
+            "path": f"runtime/data/generations/{gen_id}/added.json",
+            "sha256": _sha256_bytes(extra_f.read_bytes()),
+            "bytes": extra_f.stat().st_size,
+            "mode": 0o600,
+        })
+        m["members"] = sorted(m["members"], key=lambda e: e["path"])
+
+    member_tamper_cases = [
+        ("digest_mismatch", tamper_digest),
+        ("mode_mismatch", tamper_mode),
+        ("extra_current", tamper_extra_current),
+        ("extra_target", tamper_extra_target),
+    ]
+
+    for label, tamper_fn in member_tamper_cases:
+        bad_tar = repack_tampered_members(tamper_fn, f"tamper-mem-{label}")
+        vres = run_recovery(["verify", "--archive", str(bad_tar)], hermetic)
+        assert vres.returncode != 0, label
+        vrep = json.loads(vres.stdout)
+        assert vrep["checks"]["generation_materialization_members_match"] is False, (label, vrep)
+
+        # Ensure restore fails before target mutation
+        app_dir = hermetic.tmp / f"app-mem-{label}"
+        web_root = hermetic.tmp / f"web-mem-{label}"
+        rres = run_recovery(
+            [
+                "restore",
+                "--archive", str(bad_tar),
+                "--app-dir", str(app_dir),
+                "--web-root", str(web_root),
+                "--target-mode", "dev",
+            ],
+            hermetic,
+        )
+        assert rres.returncode != 0, label
+        assert not app_dir.exists(), label
+        assert not web_root.exists(), label
+
+
+def test_restore_reconstruction_failure_leaves_target_untouched(hermetic, tmp_path: Path):
+    """If staging reconstruction fails (e.g. invalid target in staged tree),
+    pre-existing target app and web roots remain untouched."""
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web", source_sha, generator_sha=source_sha[:12])
+
+    gen_dir = repo / "data" / "generations"
+    gen_id = "gen-2026-09-03-001"
+    gen_target = gen_dir / gen_id
+    gen_target.mkdir(parents=True)
+    _write(gen_target / "f.txt", "data\n")
+    (gen_dir / "current").symlink_to(gen_id)
+
+    archive, res = standard_create(
+        hermetic,
+        repo,
+        web,
+        extra=["--materialize-generations-current"],
+    )
+    assert res.returncode == 0, res.stderr
+
+    # Existing pre-existing targets
+    app_dir = hermetic.tmp / "app-existing"
+    _write(app_dir / "keep.txt", "keep app\n")
+    web_root = hermetic.tmp / "web-existing"
+    _write(web_root / "keep.txt", "keep web\n")
+
+    # Tamper with the archive by removing the target member but keeping materialized current
+    # So verify will fail or restore staging will fail
+    bad_tar = hermetic.tmp / "backups" / ("missing-target" + ARCHIVE_SUFFIX)
+    extract_dir = hermetic.tmp / "extract-missing-target"
+    extract_tar(archive, extract_dir)
+    # Remove target file and its manifest entry
+    (extract_dir / "runtime" / "data" / "generations" / gen_id / "f.txt").unlink()
+    mpath = extract_dir / "recovery-manifest.json"
+    manifest = json.loads(mpath.read_text(encoding="utf-8"))
+    manifest["members"] = [
+        m for m in manifest["members"]
+        if not m["path"].startswith(f"runtime/data/generations/{gen_id}/")
+    ]
+    mpath.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    all_members = [
+        p.relative_to(extract_dir).as_posix()
+        for p in sorted(extract_dir.rglob("*"))
+        if p.is_file()
+    ]
+    subprocess.run(
+        ["tar", "-cf", str(bad_tar), "-C", str(extract_dir), *all_members],
+        check=True,
+        env={**os.environ, "COPYFILE_DISABLE": "1"},
+    )
+    sidecar = Path(str(bad_tar) + ".sha256")
+    sidecar.write_text(f"{_sha256_bytes(bad_tar.read_bytes())}  {bad_tar.name}\n", encoding="utf-8")
+
+    rres = run_recovery(
+        [
+            "restore",
+            "--archive", str(bad_tar),
+            "--app-dir", str(app_dir),
+            "--web-root", str(web_root),
+            "--target-mode", "dev",
+        ],
+        hermetic,
+    )
+    assert rres.returncode != 0
+    # Pre-existing files must be untouched
+    assert (app_dir / "keep.txt").read_text(encoding="utf-8") == "keep app\n"
+    assert (web_root / "keep.txt").read_text(encoding="utf-8") == "keep web\n"
+
+
+def test_restore_reconstruction_staging_mutation_leaves_target_untouched(hermetic, tmp_path: Path, monkeypatch):
+    """An archive that passes verify_archive but experiences a staging mutation/failure
+    during reconstruction leaves pre-existing target files untouched."""
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web", source_sha, generator_sha=source_sha[:12])
+
+    gen_dir = repo / "data" / "generations"
+    gen_id = "gen-2026-09-03-001"
+    gen_target = gen_dir / gen_id
+    gen_target.mkdir(parents=True)
+    _write(gen_target / "f.txt", "data\n")
+    (gen_dir / "current").symlink_to(gen_id)
+
+    archive, res = standard_create(
+        hermetic,
+        repo,
+        web,
+        extra=["--materialize-generations-current"],
+    )
+    assert res.returncode == 0, res.stderr
+
+    # Existing pre-existing targets
+    app_dir = hermetic.tmp / "app-staging-fail"
+    _write(app_dir / "keep.txt", "keep app\n")
+    web_root = hermetic.tmp / "web-staging-fail"
+    _write(web_root / "keep.txt", "keep web\n")
+
+    # In cmd_restore, hook os.symlink when called for 'current' to raise an error
+    # We can test this via a subprocess wrapper or python invocation where os.symlink is monkeypatched
+    patch_script = hermetic.tmp / "run_restore_patched.py"
+    patch_script.write_text(f"""
+import sys, os
+sys.path.insert(0, "{PROJECT_ROOT}")
+import scripts.portfolio_lab_recovery as plr
+
+orig_symlink = os.symlink
+def patched_symlink(src, dst, *args, **kwargs):
+    if "current" in str(dst):
+        raise OSError("injected symlink failure")
+    return orig_symlink(src, dst, *args, **kwargs)
+
+os.symlink = patched_symlink
+sys.argv = [
+    "portfolio_lab_recovery.py",
+    "restore",
+    "--archive", "{archive}",
+    "--app-dir", "{app_dir}",
+    "--web-root", "{web_root}",
+    "--target-mode", "dev",
+]
+raise SystemExit(plr.main())
+""", encoding="utf-8")
+
+    res = subprocess.run([sys.executable, str(patch_script)], env={**os.environ, **hermetic.env}, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert (app_dir / "keep.txt").read_text(encoding="utf-8") == "keep app\n"
+    assert (web_root / "keep.txt").read_text(encoding="utf-8") == "keep web\n"
+
+
+def test_create_failure_cleans_up_destination_archive_and_sidecar(hermetic, tmp_path: Path):
+    """Transactional cleanup: any failure during generation materialization create
+    after archive/sidecar creation but before successful verified completion must remove both destination files."""
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    gen_dir = repo / "data" / "generations"
+    gen_id = "gen-2026-09-03-001"
+    gen_target = gen_dir / gen_id
+    gen_target.mkdir(parents=True)
+    _write(gen_target / "manifest.json", '{"schema": "portfolio-lab-generation/v1"}\n')
+    _write(gen_target / "f.txt", "initial\n")
+    (gen_dir / "current").symlink_to(gen_id)
+
+    # Corrupt sqlite database will fail self-verify in verify_archive
+    _write(repo / "data/market.db", b"garbage not a sqlite database" * 100)
+
+    archive = hermetic.tmp / "backups" / ("failed-verify" + ARCHIVE_SUFFIX)
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    _write(hermetic.units / f"{TASKER}.service", UNIT_TEXT)
+    _write(repo / "data/tasker_status.json", json.dumps({"state": "idle", "version": 1}) + "\n")
+
+    res = run_recovery(
+        [
+            "create",
+            "--app-dir", str(repo),
+            "--web-root", str(web),
+            "--tasker-service", TASKER,
+            "--archive", str(archive),
+            "--storage-encryption-attested",
+            "--materialize-generations-current",
+        ],
+        hermetic,
+    )
+    assert res.returncode != 0
+    assert not archive.exists()
+    assert not Path(str(archive) + ".sha256").exists()
+
+
+def test_create_post_stop_staging_drift_fails_closed_restarts_and_cleans_up(hermetic, tmp_path: Path):
+    """Mutating a source file between post-stop validation and staging copies
+    causes staged tree snapshot validation failure, source restart, no archive, no sidecar."""
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web", source_sha)
+
+    gen_dir = repo / "data" / "generations"
+    gen_id = "gen-2026-09-03-001"
+    gen_target = gen_dir / gen_id
+    gen_target.mkdir(parents=True)
+    _write(gen_target / "manifest.json", '{"schema": "portfolio-lab-generation/v1"}\n')
+    _write(gen_target / "f.txt", "initial\n")
+    (gen_dir / "current").symlink_to(gen_id)
+
+    archive = hermetic.tmp / "backups" / ("drift-archive" + ARCHIVE_SUFFIX)
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    _write(hermetic.units / f"{TASKER}.service", UNIT_TEXT)
+    _write(repo / "data/tasker_status.json", json.dumps({"state": "idle", "version": 1}) + "\n")
+
+    # Patch copy_members_to_staging to mutate a source file in target during copy
+    drift_script = hermetic.tmp / "run_drift_create.py"
+    drift_script.write_text(f"""
+import sys, os
+sys.path.insert(0, "{PROJECT_ROOT}")
+import scripts.portfolio_lab_recovery as plr
+
+orig_copy = plr.copy_members_to_staging
+def drifting_copy(members, src_root, staging, prefix):
+    # mutate f.txt in source before copying
+    target_f = plr.Path("{gen_target}") / "f.txt"
+    if target_f.is_file():
+        target_f.write_text("drifted content\\n", encoding="utf-8")
+    return orig_copy(members, src_root, staging, prefix)
+
+plr.copy_members_to_staging = drifting_copy
+sys.argv = [
+    "portfolio_lab_recovery.py",
+    "create",
+    "--app-dir", "{repo}",
+    "--web-root", "{web}",
+    "--tasker-service", "{TASKER}",
+    "--archive", "{archive}",
+    "--storage-encryption-attested",
+    "--materialize-generations-current",
+]
+raise SystemExit(plr.main())
+""", encoding="utf-8")
+
+    res = subprocess.run(
+        [sys.executable, str(drift_script)],
+        env={**os.environ, **hermetic.env, "PATH": f"{hermetic.bin}:{os.environ.get('PATH', '')}"},
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0, f"stdout={res.stdout}\nstderr={res.stderr}"
+    assert "snapshot" in res.stderr.lower() or "drift" in res.stderr.lower() or "match" in res.stderr.lower(), res.stderr
+    assert not archive.exists()
+    assert not Path(str(archive) + ".sha256").exists()
+    log = hermetic.systemctl_log.read_text(encoding="utf-8").splitlines()
+    assert "stop portfolio-lab-tasker" in log
+    assert "start portfolio-lab-tasker" in log
+
+
+def test_create_materialized_tar_failure_cleans_up_destination_archive_and_sidecar(hermetic, tmp_path: Path):
+    """Transactional cleanup: partial tar failure for materialized create cleans up archive/sidecar."""
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    gen_dir = repo / "data" / "generations"
+    gen_id = "gen-2026-09-03-001"
+    gen_target = gen_dir / gen_id
+    gen_target.mkdir(parents=True)
+    _write(gen_target / "manifest.json", '{"schema": "portfolio-lab-generation/v1"}\n')
+    _write(gen_target / "f.txt", "content\n")
+    (gen_dir / "current").symlink_to(gen_id)
+
+    archive = hermetic.tmp / "backups" / ("failed-tar" + ARCHIVE_SUFFIX)
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    _write(hermetic.units / f"{TASKER}.service", UNIT_TEXT)
+    _write(repo / "data/tasker_status.json", json.dumps({"state": "idle", "version": 1}) + "\n")
+
+    # Hook tar to create partial file and return nonzero exit
+    fake_tar_script = hermetic.tmp / "fake_failing_tar.sh"
+    fake_tar_script.write_text("""#!/bin/sh
+# write partial archive bytes to target archive argument
+for arg in "$@"; do
+    case "$arg" in
+        *.tar) echo "partial junk" > "$arg" ;;
+    esac
+done
+exit 1
+""", encoding="utf-8")
+    fake_tar_script.chmod(0o755)
+
+    res = run_recovery(
+        [
+            "create",
+            "--app-dir", str(repo),
+            "--web-root", str(web),
+            "--tasker-service", TASKER,
+            "--archive", str(archive),
+            "--storage-encryption-attested",
+            "--materialize-generations-current",
+        ],
+        hermetic,
+        extra_env={"PLR_TAR": str(fake_tar_script)},
+    )
+    assert res.returncode != 0
+    assert not archive.exists()
+    assert not Path(str(archive) + ".sha256").exists()
+
+
+def test_create_materialized_sidecar_write_failure_cleans_up(hermetic, tmp_path: Path):
+    """Transactional cleanup: sidecar write failure cleans up archive and sidecar."""
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    gen_dir = repo / "data" / "generations"
+    gen_id = "gen-2026-09-03-001"
+    gen_target = gen_dir / gen_id
+    gen_target.mkdir(parents=True)
+    _write(gen_target / "manifest.json", '{"schema": "portfolio-lab-generation/v1"}\n')
+    _write(gen_target / "f.txt", "content\n")
+    (gen_dir / "current").symlink_to(gen_id)
+
+    archive = hermetic.tmp / "backups" / ("failed-sidecar" + ARCHIVE_SUFFIX)
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    _write(hermetic.units / f"{TASKER}.service", UNIT_TEXT)
+    _write(repo / "data/tasker_status.json", json.dumps({"state": "idle", "version": 1}) + "\n")
+
+    fail_script = hermetic.tmp / "run_sidecar_fail.py"
+    fail_script.write_text(f"""
+import sys, os
+sys.path.insert(0, "{PROJECT_ROOT}")
+import scripts.portfolio_lab_recovery as plr
+
+orig_write_text = plr.Path.write_text
+def failing_write_text(self, text, *args, **kwargs):
+    if str(self).endswith(".sha256"):
+        # write partial sidecar then raise
+        orig_write_text(self, "partial sidecar", *args, **kwargs)
+        raise OSError("injected sidecar write failure")
+    return orig_write_text(self, text, *args, **kwargs)
+
+plr.Path.write_text = failing_write_text
+sys.argv = [
+    "portfolio_lab_recovery.py",
+    "create",
+    "--app-dir", "{repo}",
+    "--web-root", "{web}",
+    "--tasker-service", "{TASKER}",
+    "--archive", "{archive}",
+    "--storage-encryption-attested",
+    "--materialize-generations-current",
+]
+raise SystemExit(plr.main())
+""", encoding="utf-8")
+
+    res = subprocess.run([sys.executable, str(fail_script)], env={**os.environ, **hermetic.env, "PATH": f"{hermetic.bin}:{os.environ.get('PATH', '')}"}, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert not archive.exists()
+    assert not Path(str(archive) + ".sha256").exists()
+
+
+def test_create_materialized_retains_verified_archive_on_restart_failure(hermetic, tmp_path: Path):
+    """Verified archive and sidecar are preserved if only source service restart fails."""
+    set_systemctl_mode(hermetic, "start-fail")
+    repo = make_repo(tmp_path / "repo")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web", "x" * 40)
+    gen_dir = repo / "data" / "generations"
+    gen_id = "gen-2026-09-03-001"
+    gen_target = gen_dir / gen_id
+    gen_target.mkdir(parents=True)
+    _write(gen_target / "manifest.json", '{"schema": "portfolio-lab-generation/v1"}\n')
+    _write(gen_target / "f.txt", "content\n")
+    (gen_dir / "current").symlink_to(gen_id)
+
+    archive, res = standard_create(
+        hermetic,
+        repo,
+        web,
+        archive_name="restart-fail" + ARCHIVE_SUFFIX,
+        extra=["--materialize-generations-current"],
+    )
+    assert res.returncode != 0
+    report = json.loads(res.stdout)
+    assert report["ok"] is False
+    assert report["service_started"] is False
+    assert archive.exists()
+    assert Path(str(archive) + ".sha256").exists()
+
+
+def test_parse_and_validate_generation_metadata_secret_safe_tamper(hermetic, tmp_path: Path):
+    """Metadata validation failures must never echo raw hostile strings or secret sentinels."""
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web", source_sha, generator_sha=source_sha[:12])
+
+    gen_dir = repo / "data" / "generations"
+    gen_id = "gen-2026-09-03-001"
+    gen_target = gen_dir / gen_id
+    gen_target.mkdir(parents=True)
+    _write(gen_target / "manifest.json", '{"schema": "portfolio-lab-generation/v1"}\n')
+    (gen_dir / "current").symlink_to(gen_id)
+
+    archive, res = standard_create(hermetic, repo, web, extra=["--materialize-generations-current"])
+    assert res.returncode == 0, res.stderr
+
+    secret_sentinel = "MY_SUPER_SECRET_HOSTILE_VALUE_9999"
+
+    def repack(mutator, name: str) -> Path:
+        out_archive = hermetic.tmp / "backups" / (name + ARCHIVE_SUFFIX)
+        extract_dir = hermetic.tmp / f"extract-{name}"
+        extract_tar(archive, extract_dir)
+        mpath = extract_dir / "recovery-manifest.json"
+        manifest = json.loads(mpath.read_text(encoding="utf-8"))
+        mutator(manifest)
+        mpath.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        all_members = [
+            p.relative_to(extract_dir).as_posix()
+            for p in sorted(extract_dir.rglob("*"))
+            if p.is_file()
+        ]
+        subprocess.run(
+            ["tar", "-cf", str(out_archive), "-C", str(extract_dir), *all_members],
+            check=True,
+            env={**os.environ, "COPYFILE_DISABLE": "1"},
+        )
+        sidecar = Path(str(out_archive) + ".sha256")
+        sidecar.write_text(f"{_sha256_bytes(out_archive.read_bytes())}  {out_archive.name}\n", encoding="utf-8")
+        return out_archive
+
+    cases = [
+        ("schema", lambda m: m["generation_materialization"].update({"schema_version": f"bad_schema_{secret_sentinel}"})),
+        ("link_path", lambda m: m["generation_materialization"].update({"link_path": f"data/generations/{secret_sentinel}"})),
+        ("archive_path", lambda m: m["generation_materialization"].update({"archive_path": f"runtime/data/{secret_sentinel}"})),
+        ("orig_link", lambda m: m["generation_materialization"].update({"original_link": f"../{secret_sentinel}"})),
+        ("target_path", lambda m: m["generation_materialization"].update({"target_path": f"data/generations/{secret_sentinel}"})),
+    ]
+
+    for label, mutator in cases:
+        bad_tar = repack(mutator, f"sentinel-{label}")
+        vres = run_recovery(["verify", "--archive", str(bad_tar)], hermetic)
+        assert vres.returncode != 0
+        assert secret_sentinel not in vres.stderr, label
+        assert secret_sentinel not in vres.stdout, label
+
+        rres = run_recovery(
+            [
+                "restore",
+                "--archive", str(bad_tar),
+                "--app-dir", str(hermetic.tmp / f"app-sentinel-{label}"),
+                "--web-root", str(hermetic.tmp / f"web-sentinel-{label}"),
+                "--target-mode", "dev",
+            ],
+            hermetic,
+        )
+        assert rres.returncode != 0
+        assert secret_sentinel not in rres.stderr, label
+        assert secret_sentinel not in rres.stdout, label
+
+
+def test_staged_validation_injected_filesystem_error_handled_cleanly(hermetic, tmp_path: Path):
+    """Injected filesystem errors during staged validation emit bounded static diagnostics without traceback."""
+    repo = make_repo(tmp_path / "repo")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web", source_sha, generator_sha=source_sha[:12])
+
+    gen_dir = repo / "data" / "generations"
+    gen_id = "gen-2026-09-03-001"
+    gen_target = gen_dir / gen_id
+    gen_target.mkdir(parents=True)
+    _write(gen_target / "manifest.json", '{"schema": "portfolio-lab-generation/v1"}\n')
+    (gen_dir / "current").symlink_to(gen_id)
+
+    _write(hermetic.units / f"{TASKER}.service", UNIT_TEXT)
+    _write(repo / "data/tasker_status.json", json.dumps({"state": "idle", "version": 1}) + "\n")
+
+    # 1. Create side injected failure in validate_staged_generation_trees
+    create_fail_script = hermetic.tmp / "run_create_fs_fail.py"
+    create_archive = hermetic.tmp / f"fs-fail{ARCHIVE_SUFFIX}"
+    create_fail_script.write_text(f"""
+import sys, os
+sys.path.insert(0, "{PROJECT_ROOT}")
+import scripts.portfolio_lab_recovery as plr
+
+orig_validate = plr.validate_staged_generation_trees
+def failing_validate(*args, **kwargs):
+    raise PermissionError("injected permission error during create staging validation")
+
+plr.validate_staged_generation_trees = failing_validate
+sys.argv = [
+    "portfolio_lab_recovery.py",
+    "create",
+    "--app-dir", "{repo}",
+    "--web-root", "{web}",
+    "--tasker-service", "{TASKER}",
+    "--archive", "{create_archive}",
+    "--storage-encryption-attested",
+    "--materialize-generations-current",
+]
+raise SystemExit(plr.main())
+""", encoding="utf-8")
+
+    res = subprocess.run([sys.executable, str(create_fail_script)], env={**os.environ, **hermetic.env, "PATH": f"{hermetic.bin}:{os.environ.get('PATH', '')}"}, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "Traceback" not in res.stderr
+    assert "cannot validate staged generation trees" in res.stderr.lower()
+    assert str(tmp_path) not in res.stderr
+    assert not create_archive.exists()
+
+    # 2. Restore side injected failure in staged target rglob / validation
+    target_archive, c_res = standard_create(hermetic, repo, web, archive_name="restore-fs-fail" + ARCHIVE_SUFFIX, extra=["--materialize-generations-current"])
+    assert c_res.returncode == 0, c_res.stderr
+
+    restore_fail_script = hermetic.tmp / "run_restore_fs_fail.py"
+    restore_fail_script.write_text(f"""
+import sys, os
+sys.path.insert(0, "{PROJECT_ROOT}")
+import scripts.portfolio_lab_recovery as plr
+
+orig_rglob = plr.Path.rglob
+def failing_rglob(self, pattern, *args, **kwargs):
+    if "generations" in str(self):
+        raise PermissionError("injected permission error during restore staging validation")
+    return orig_rglob(self, pattern, *args, **kwargs)
+
+plr.Path.rglob = failing_rglob
+sys.argv = [
+    "portfolio_lab_recovery.py",
+    "restore",
+    "--archive", "{target_archive}",
+    "--app-dir", "{hermetic.tmp / 'app-fs-fail'}",
+    "--web-root", "{hermetic.tmp / 'web-fs-fail'}",
+    "--target-mode", "dev",
+]
+raise SystemExit(plr.main())
+""", encoding="utf-8")
+
+    r_res = subprocess.run([sys.executable, str(restore_fail_script)], env={**os.environ, **hermetic.env, "PATH": f"{hermetic.bin}:{os.environ.get('PATH', '')}"}, capture_output=True, text=True)
+    assert r_res.returncode != 0
+    assert "Traceback" not in r_res.stderr
+    assert "failed to reconstruct staged generations/current symlink" in r_res.stderr.lower()
+    assert str(tmp_path) not in r_res.stderr
+    assert not (hermetic.tmp / "app-fs-fail").exists()
+
+
+def test_create_verify_restore_nested_ordinary_directories(hermetic, tmp_path: Path):
+    """Target containing at least two nested directory levels and files at multiple levels
+    creates a verified archive without directory members and restores with relative symlink."""
+    repo = make_repo(tmp_path / "repo-nested")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web-nested", source_sha, generator_sha=source_sha[:12])
+
+    gen_dir = repo / "data" / "generations"
+    gen_id = "gen-nested-001"
+    gen_target = gen_dir / gen_id
+    gen_target.mkdir(parents=True)
+
+    # File at root level
+    _write(gen_target / "manifest.json", '{"schema": "portfolio-lab-generation/v1"}\n')
+    # Level 1 nested dir with file
+    level1 = gen_target / "nested1"
+    level1.mkdir()
+    _write(level1 / "file1.json", '{"level": 1}\n')
+    # Level 2 nested dir with file
+    level2 = level1 / "nested2"
+    level2.mkdir()
+    _write(level2 / "file2.json", '{"level": 2}\n')
+
+    (gen_dir / "current").symlink_to(gen_id)
+
+    archive = hermetic.tmp / "backups" / ("nested-archive" + ARCHIVE_SUFFIX)
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    _write(hermetic.units / f"{TASKER}.service", UNIT_TEXT)
+    _write(repo / "data/tasker_status.json", json.dumps({"state": "idle", "version": 1}) + "\n")
+
+    res = run_recovery(
+        [
+            "create",
+            "--app-dir", str(repo),
+            "--web-root", str(web),
+            "--tasker-service", TASKER,
+            "--archive", str(archive),
+            "--storage-encryption-attested",
+            "--materialize-generations-current",
+        ],
+        hermetic,
+    )
+    assert res.returncode == 0, f"stdout={res.stdout}\nstderr={res.stderr}"
+
+    # Verify no directory tar members exist in the archive
+    with tarfile.open(str(archive), "r:") as tf:
+        for m in tf.getmembers():
+            assert not m.isdir(), f"directory member found in tar: {m.name}"
+            assert m.isfile()
+        names = tf.getnames()
+        assert f"runtime/data/generations/{gen_id}/manifest.json" in names
+        assert f"runtime/data/generations/{gen_id}/nested1/file1.json" in names
+        assert f"runtime/data/generations/{gen_id}/nested1/nested2/file2.json" in names
+        assert "runtime/data/generations/current/manifest.json" in names
+        assert "runtime/data/generations/current/nested1/file1.json" in names
+        assert "runtime/data/generations/current/nested1/nested2/file2.json" in names
+
+    # Verify command passes
+    vres = run_recovery(["verify", "--archive", str(archive)], hermetic)
+    assert vres.returncode == 0, vres.stderr
+
+    # Dev restore: prove reconstruction
+    app_dir = hermetic.tmp / "app-nested-restore"
+    web_root = hermetic.tmp / "web-nested-restore"
+    rres = run_recovery(
+        [
+            "restore",
+            "--archive", str(archive),
+            "--app-dir", str(app_dir),
+            "--web-root", str(web_root),
+            "--target-mode", "dev",
+        ],
+        hermetic,
+    )
+    assert rres.returncode == 0, f"stdout={rres.stdout}\nstderr={rres.stderr}"
+    restored_link = app_dir / "data" / "generations" / "current"
+    assert restored_link.is_symlink()
+    assert os.readlink(restored_link) == gen_id
+    assert (restored_link / "nested1" / "nested2" / "file2.json").is_file()
+
+
+def test_is_safe_original_link_rejects_lone_surrogate():
+    """is_safe_original_link must reject surrogate code points that cannot be UTF-8 encoded."""
+    mod = _load_recovery_module()
+    # Lone surrogate
+    surrogate_target = "gen-\ud800"
+    assert mod.is_safe_original_link(surrogate_target) is False
+    # Valid unicode should pass
+    valid_unicode_target = "gen-2026-测试-001"
+    assert mod.is_safe_original_link(valid_unicode_target) is True
+
+
+def test_create_pre_stop_rejection_surrogate_link_target(hermetic, tmp_path: Path):
+    """A symlink target containing a surrogate code point is rejected before stop without traceback or leak."""
+    repo = make_repo(tmp_path / "repo-surrogate")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web-surrogate", "x" * 40)
+    gen_dir = repo / "data" / "generations"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+
+    # We can create a symlink with non-UTF-8 bytes or surrogate on filesystem
+    # or patch os.readlink for data/generations/current
+    (gen_dir / "current").symlink_to("gen-valid")
+
+    surr_archive = hermetic.tmp / f"surrogate{ARCHIVE_SUFFIX}"
+    surrogate_script = hermetic.tmp / "run_surrogate_create.py"
+    surrogate_script.write_text(f"""
+import sys, os
+sys.path.insert(0, "{PROJECT_ROOT}")
+import scripts.portfolio_lab_recovery as plr
+
+orig_readlink = plr.os.readlink
+def surrogate_readlink(path, *args, **kwargs):
+    if "current" in str(path):
+        return "gen-\\ud800-bad"
+    return orig_readlink(path, *args, **kwargs)
+
+plr.os.readlink = surrogate_readlink
+sys.argv = [
+    "portfolio_lab_recovery.py",
+    "create",
+    "--app-dir", "{repo}",
+    "--web-root", "{web}",
+    "--tasker-service", "{TASKER}",
+    "--archive", "{surr_archive}",
+    "--storage-encryption-attested",
+    "--materialize-generations-current",
+]
+raise SystemExit(plr.main())
+""", encoding="utf-8")
+
+    res = subprocess.run([sys.executable, str(surrogate_script)], env={**os.environ, **hermetic.env, "PATH": f"{hermetic.bin}:{os.environ.get('PATH', '')}"}, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "Traceback" not in res.stderr
+    assert "invalid generations/current symlink target text" in res.stderr.lower()
+    assert "ud800" not in res.stderr
+
+
+def test_inspect_generation_target_rejects_surrogate_filename(hermetic, tmp_path: Path):
+    """Non-UTF-8 encodable surrogate filenames inside generation target are rejected before stop."""
+    repo = make_repo(tmp_path / "repo-surr-file")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web-surr-file", "x" * 40)
+    gen_dir = repo / "data" / "generations"
+    gen_id = "gen-001"
+    gen_target = gen_dir / gen_id
+    gen_target.mkdir(parents=True)
+    _write(gen_target / "manifest.json", '{"schema": "portfolio-lab-generation/v1"}\n')
+    (gen_dir / "current").symlink_to(gen_id)
+
+    surr_file_archive = hermetic.tmp / f"surr-file{ARCHIVE_SUFFIX}"
+    surr_file_script = hermetic.tmp / "run_surr_file_create.py"
+    surr_file_script.write_text(f"""
+import sys, os
+sys.path.insert(0, "{PROJECT_ROOT}")
+import scripts.portfolio_lab_recovery as plr
+
+orig_walk = plr.os.walk
+def surr_walk(top, *args, **kwargs):
+    for root, dirs, files in orig_walk(top, *args, **kwargs):
+        if str(top) in root:
+            yield root, dirs, files + ["bad-\\ud800.json"]
+        else:
+            yield root, dirs, files
+
+plr.os.walk = surr_walk
+sys.argv = [
+    "portfolio_lab_recovery.py",
+    "create",
+    "--app-dir", "{repo}",
+    "--web-root", "{web}",
+    "--tasker-service", "{TASKER}",
+    "--archive", "{surr_file_archive}",
+    "--storage-encryption-attested",
+    "--materialize-generations-current",
+]
+raise SystemExit(plr.main())
+""", encoding="utf-8")
+
+    res = subprocess.run([sys.executable, str(surr_file_script)], env={**os.environ, **hermetic.env, "PATH": f"{hermetic.bin}:{os.environ.get('PATH', '')}"}, capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "Traceback" not in res.stderr
+    assert "unsafe relative name in generation target" in res.stderr.lower() or "control character" in res.stderr.lower()
+    assert "ud800" not in res.stderr
+
+
+# ── Correction Round 4: Focused Tests ──────────────────────────────────────────
+
+
+def test_parse_and_validate_generation_metadata_rejects_current_and_current_nested():
+    """Defect 1: parse_and_validate_generation_metadata must reject original_link == 'current'
+    and 'current/...' (first path component 'current') with bounded static secret-safe error."""
+    mod = _load_recovery_module()
+    for link in ["current", "current/nested", "current/sub/dir"]:
+        payload = {
+            "schema_version": mod.GENERATION_MATERIALIZATION_SCHEMA,
+            "link_path": mod.GENERATION_LINK_PATH,
+            "archive_path": mod.GENERATION_ARCHIVE_PATH,
+            "original_link": link,
+            "target_path": f"data/generations/{link}",
+        }
+        ok, orig_link, err = mod.parse_and_validate_generation_metadata(payload)
+        assert ok is False
+        assert orig_link is None
+        assert err == "generation_materialization original_link cannot target current"
+
+
+def test_verify_and_restore_reject_tampered_original_link_current(hermetic, tmp_path: Path):
+    """Defect 1: Real-archive verify and restore tests for original_link='current' and 'current/nested',
+    proving verify fails, restore fails before app/web mutation, no sentinel/path leak, and no traceback."""
+    repo = make_repo(tmp_path / "repo-cur-tamper")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web-cur-tamper", source_sha, generator_sha=source_sha[:12])
+
+    gen_dir = repo / "data" / "generations"
+    gen_id = "gen-orig"
+    gen_target = gen_dir / gen_id
+    gen_target.mkdir(parents=True)
+    _write(gen_target / "manifest.json", '{"schema": "portfolio-lab-generation/v1"}\n')
+    (gen_dir / "current").symlink_to(gen_id)
+
+    archive, res = standard_create(
+        hermetic,
+        repo,
+        web,
+        extra=["--materialize-generations-current"],
+    )
+    assert res.returncode == 0, res.stderr
+
+    secret_sentinel = "SECRET_SENTINEL_CURRENT_LEAK_TEST_12345"
+
+    def repack_tampered_current(link_value: str, name: str) -> Path:
+        out_archive = hermetic.tmp / "backups" / (name + ARCHIVE_SUFFIX)
+        extract_dir = hermetic.tmp / f"extract-{name}"
+        extract_tar(archive, extract_dir)
+        mpath = extract_dir / "recovery-manifest.json"
+        manifest = json.loads(mpath.read_text(encoding="utf-8"))
+        manifest["generation_materialization"]["original_link"] = link_value
+        manifest["generation_materialization"]["target_path"] = f"data/generations/{link_value}"
+        mpath.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        all_members = [
+            p.relative_to(extract_dir).as_posix()
+            for p in sorted(extract_dir.rglob("*"))
+            if p.is_file()
+        ]
+        subprocess.run(
+            ["tar", "-cf", str(out_archive), "-C", str(extract_dir), *all_members],
+            check=True,
+            env={**os.environ, "COPYFILE_DISABLE": "1"},
+        )
+        sidecar = Path(str(out_archive) + ".sha256")
+        sidecar.write_text(f"{_sha256_bytes(out_archive.read_bytes())}  {out_archive.name}\n", encoding="utf-8")
+        return out_archive
+
+    for link_val, label in [
+        ("current", "cur-exact"),
+        (f"current/nested_{secret_sentinel}", "cur-nested"),
+    ]:
+        bad_archive = repack_tampered_current(link_val, f"tamper-{label}")
+
+        # Verify must fail, no traceback, no sentinel leak
+        vres = run_recovery(["verify", "--archive", str(bad_archive)], hermetic)
+        assert vres.returncode != 0
+        assert "Traceback" not in vres.stderr
+        assert secret_sentinel not in vres.stderr
+        assert secret_sentinel not in vres.stdout
+
+        # Restore must fail before app/web mutation, no traceback, no sentinel leak
+        app_dir = hermetic.tmp / f"app-{label}"
+        web_root = hermetic.tmp / f"web-{label}"
+        rres = run_recovery(
+            [
+                "restore",
+                "--archive", str(bad_archive),
+                "--app-dir", str(app_dir),
+                "--web-root", str(web_root),
+                "--target-mode", "dev",
+            ],
+            hermetic,
+        )
+        assert rres.returncode != 0
+        assert "Traceback" not in rres.stderr
+        assert secret_sentinel not in rres.stderr
+        assert not app_dir.exists(), f"app_dir should not have been created for {label}"
+        assert not web_root.exists(), f"web_root should not have been created for {label}"
+
+
+def test_create_verify_dev_restore_nested_safe_original_link(hermetic, tmp_path: Path):
+    """Defect 2: Support nested safe original_link like 'releases/gen-001'.
+    Shipped create + verify + dev restore test proving:
+    - exact manifest target_path: 'data/generations/releases/gen-001'
+    - normal target/current member pairing
+    - exact reconstructed raw link: 'releases/gen-001'
+    - retained target files in staging and final app_dir."""
+    repo = make_repo(tmp_path / "repo-nested-link")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web-nested-link", source_sha, generator_sha=source_sha[:12])
+
+    gen_dir = repo / "data" / "generations"
+    target_rel = "releases/gen-001"
+    target_dir = gen_dir / target_rel
+    target_dir.mkdir(parents=True)
+    _write(target_dir / "manifest.json", '{"schema": "portfolio-lab-generation/v1"}\n')
+    _write(target_dir / "data.csv", "a,b,c\n1,2,3\n")
+    (gen_dir / "current").symlink_to(target_rel)
+
+    archive, res = standard_create(
+        hermetic,
+        repo,
+        web,
+        extra=["--materialize-generations-current"],
+    )
+    assert res.returncode == 0, res.stderr
+
+    # Verify manifest details
+    extract_dir = hermetic.tmp / "extract-nested-link"
+    extract_tar(archive, extract_dir)
+    manifest = json.loads((extract_dir / "recovery-manifest.json").read_text(encoding="utf-8"))
+    gen_mat = manifest.get("generation_materialization")
+    assert gen_mat is not None
+    assert gen_mat["original_link"] == target_rel
+    assert gen_mat["target_path"] == f"data/generations/{target_rel}"
+
+    # Verify pass
+    vres = run_recovery(["verify", "--archive", str(archive)], hermetic)
+    assert vres.returncode == 0, vres.stderr
+
+    # Dev restore pass
+    app_dir = hermetic.tmp / "app-nested-link"
+    web_root = hermetic.tmp / "web-nested-link"
+    rres = run_recovery(
+        [
+            "restore",
+            "--archive", str(archive),
+            "--app-dir", str(app_dir),
+            "--web-root", str(web_root),
+            "--target-mode", "dev",
+        ],
+        hermetic,
+    )
+    assert rres.returncode == 0, rres.stderr
+
+    # Assert reconstructed symlink and target files
+    restored_current = app_dir / "data" / "generations" / "current"
+    assert restored_current.is_symlink()
+    assert os.readlink(restored_current) == target_rel
+    assert restored_current.resolve() == (app_dir / "data" / "generations" / target_rel).resolve()
+    assert (app_dir / "data" / "generations" / target_rel / "manifest.json").read_text(encoding="utf-8") == '{"schema": "portfolio-lab-generation/v1"}\n'
+    assert (app_dir / "data" / "generations" / target_rel / "data.csv").read_text(encoding="utf-8") == "a,b,c\n1,2,3\n"
+    assert (restored_current / "manifest.json").read_text(encoding="utf-8") == '{"schema": "portfolio-lab-generation/v1"}\n'
+
+
+def test_verify_rejects_regular_member_at_target_or_current_directory_path(hermetic, tmp_path: Path):
+    """Defect 3: Verify contract says no regular member may exist directly at either target directory path
+    (runtime/data/generations/<target>) or GENERATION_ARCHIVE_PATH (runtime/data/generations/current).
+    Explicit checks in generation verification reject crafted/tampered real-tar with these regular members."""
+    repo = make_repo(tmp_path / "repo-reg-dir-member")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web-reg-dir-member", source_sha, generator_sha=source_sha[:12])
+
+    gen_dir = repo / "data" / "generations"
+    gen_id = "gen-001"
+    gen_target = gen_dir / gen_id
+    gen_target.mkdir(parents=True)
+    _write(gen_target / "manifest.json", '{"schema": "portfolio-lab-generation/v1"}\n')
+    (gen_dir / "current").symlink_to(gen_id)
+
+    archive, res = standard_create(
+        hermetic,
+        repo,
+        web,
+        extra=["--materialize-generations-current"],
+    )
+    assert res.returncode == 0, res.stderr
+
+    # Tamper tarfile directly to add regular member at target directory path or current path
+    def repack_with_regular_dir_member(target_member_name: str, remove_children_prefix: str, name: str) -> Path:
+        import shutil
+        out_archive = hermetic.tmp / "backups" / (name + ARCHIVE_SUFFIX)
+        extract_dir = hermetic.tmp / f"extract-{name}"
+        extract_tar(archive, extract_dir)
+        mpath = extract_dir / "recovery-manifest.json"
+        manifest = json.loads(mpath.read_text(encoding="utf-8"))
+
+        # Remove children under remove_children_prefix from manifest and disk so topology check passes
+        manifest["members"] = [
+            entry for entry in manifest["members"]
+            if not entry["path"].startswith(remove_children_prefix)
+        ]
+        target_rm = extract_dir / remove_children_prefix
+        if target_rm.is_dir():
+            shutil.rmtree(target_rm)
+
+        manifest["members"].append({
+            "path": target_member_name,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "bytes": 0,
+            "mode": 0o600,
+        })
+        manifest["members"] = sorted(manifest["members"], key=lambda e: e["path"])
+        mpath.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+        with tarfile.open(str(out_archive), "w:") as tf:
+            for p in sorted(extract_dir.rglob("*")):
+                if p.is_file():
+                    rel = p.relative_to(extract_dir).as_posix()
+                    tf.add(str(p), arcname=rel)
+            ti = tarfile.TarInfo(name=target_member_name)
+            ti.type = tarfile.REGTYPE
+            ti.mode = 0o600
+            ti.size = 0
+            import io
+            tf.addfile(ti, io.BytesIO(b""))
+
+        sidecar = Path(str(out_archive) + ".sha256")
+        sidecar.write_text(f"{_sha256_bytes(out_archive.read_bytes())}  {out_archive.name}\n", encoding="utf-8")
+        return out_archive
+
+    # Test exact target directory member path
+    bad_tar_target = repack_with_regular_dir_member(
+        f"runtime/data/generations/{gen_id}",
+        f"runtime/data/generations/{gen_id}/",
+        "reg-target",
+    )
+    vres = run_recovery(["verify", "--archive", str(bad_tar_target)], hermetic)
+    assert vres.returncode != 0
+    assert "Traceback" not in vres.stderr
+    assert "regular member exists at generation target directory" in vres.stderr.lower() or "regular member exists at generation target directory" in vres.stdout.lower()
+
+    # Test exact GENERATION_ARCHIVE_PATH
+    bad_tar_current = repack_with_regular_dir_member(
+        "runtime/data/generations/current",
+        "runtime/data/generations/current/",
+        "reg-current",
+    )
+    vres = run_recovery(["verify", "--archive", str(bad_tar_current)], hermetic)
+    assert vres.returncode != 0
+    assert "Traceback" not in vres.stderr
+    assert "regular member exists at generation current archive path" in vres.stderr.lower() or "regular member exists at generation current archive path" in vres.stdout.lower()
+
+
+def test_verify_rejects_member_pair_bytes_mismatch(hermetic, tmp_path: Path):
+    """Defect 4: Member-pair bytes mismatch tamper case."""
+    repo = make_repo(tmp_path / "repo-bytes-mismatch")
+    source_sha = commit_all(repo)
+    web = make_web_root(tmp_path / "web-bytes-mismatch", source_sha, generator_sha=source_sha[:12])
+
+    gen_dir = repo / "data" / "generations"
+    gen_id = "gen-001"
+    gen_target = gen_dir / gen_id
+    gen_target.mkdir(parents=True)
+    _write(gen_target / "manifest.json", '{"schema": "portfolio-lab-generation/v1"}\n')
+    (gen_dir / "current").symlink_to(gen_id)
+
+    archive, res = standard_create(
+        hermetic,
+        repo,
+        web,
+        extra=["--materialize-generations-current"],
+    )
+    assert res.returncode == 0, res.stderr
+
+    out_archive = hermetic.tmp / "backups" / ("tamper-bytes-mismatch" + ARCHIVE_SUFFIX)
+    extract_dir = hermetic.tmp / "extract-bytes-mismatch"
+    extract_tar(archive, extract_dir)
+    mpath = extract_dir / "recovery-manifest.json"
+    manifest = json.loads(mpath.read_text(encoding="utf-8"))
+
+    # Modify bytes recorded for current copy in manifest (or change file content and keep sha same, or change recorded bytes)
+    for entry in manifest["members"]:
+        if entry["path"] == "runtime/data/generations/current/manifest.json":
+            entry["bytes"] = entry["bytes"] + 1
+
+    mpath.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    all_members = [
+        p.relative_to(extract_dir).as_posix()
+        for p in sorted(extract_dir.rglob("*"))
+        if p.is_file()
+    ]
+    subprocess.run(
+        ["tar", "-cf", str(out_archive), "-C", str(extract_dir), *all_members],
+        check=True,
+        env={**os.environ, "COPYFILE_DISABLE": "1"},
+    )
+    sidecar = Path(str(out_archive) + ".sha256")
+    sidecar.write_text(f"{_sha256_bytes(out_archive.read_bytes())}  {out_archive.name}\n", encoding="utf-8")
+
+    vres = run_recovery(["verify", "--archive", str(out_archive)], hermetic)
+    assert vres.returncode != 0
+    assert "Traceback" not in vres.stderr
+
+
+def test_activate_prod_rejects_materialize_generations_current_flag():
+    """Defect 4: Prove --materialize-generations-current is rejected by activate-prod as unknown."""
+    mod = _load_recovery_module()
+    parser = mod.build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args([
+            "activate-prod",
+            "--app-dir", "/app",
+            "--web-root", "/www",
+            "--tasker-service", "tasker",
+            "--materialize-generations-current",
+        ])
+
+
+def test_control_characters_ascii_del_and_c1_rejected_in_link_and_entries(hermetic, tmp_path: Path):
+    """Defect 4: Treat ASCII DEL (0x7f) and C1 controls U+0080-U+009F as control characters
+    in original link and generation relative paths, with focused tests."""
+    mod = _load_recovery_module()
+
+    # ASCII DEL
+    assert mod.is_safe_original_link("gen-\x7f-bad") is False
+    # C1 controls: 0x80 to 0x9f
+    for code in [0x80, 0x85, 0x90, 0x9F]:
+        assert mod.is_safe_original_link(f"gen-{chr(code)}-bad") is False
+
+    # Non-control character at 0xA0 (NBSP) or standard unicode should pass
+    assert mod.is_safe_original_link("gen-\u00a0-ok") is True
+    assert mod.is_safe_original_link("gen-ok-001") is True
+
+    # Pre-stop test for DEL in symlink target
+    repo = make_repo(tmp_path / "repo-del-link")
+    commit_all(repo)
+    web = make_web_root(tmp_path / "web-del-link", "x" * 40)
+    gen_dir = repo / "data" / "generations"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    (gen_dir / "current").symlink_to("gen-\x7f-target")
+
+    archive, res = standard_create(
+        hermetic,
+        repo,
+        web,
+        extra=["--materialize-generations-current"],
+    )
+    assert res.returncode != 0
+    assert "Traceback" not in res.stderr
+    assert "invalid generations/current symlink target text" in res.stderr.lower()
+
+    # Pre-stop test for C1 control (e.g. \x85) in symlink target
+    (gen_dir / "current").unlink()
+    (gen_dir / "current").symlink_to("gen-\x85-target")
+    archive, res = standard_create(
+        hermetic,
+        repo,
+        web,
+        extra=["--materialize-generations-current"],
+    )
+    assert res.returncode != 0
+    assert "Traceback" not in res.stderr
+    assert "invalid generations/current symlink target text" in res.stderr.lower()

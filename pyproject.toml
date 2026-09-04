@@ -29,6 +29,7 @@ dependencies = [
     "flask>=3.0",
     "waitress>=3.0",
     # Utilities
+    "tzdata>=2024.1",
     "joblib>=1.4",
     "typing-extensions>=4.12",
     "arch>=7.0",
@@ -60,6 +61,7 @@ ml = [
 # Use: uv sync --group ml  to include torch/xgboost
 # Or:   uv run --group ml python -m src.agents.ai_controller
 no-build-isolation-package = []
+build-constraint-dependencies = ["scikit-build-core>=0.10,<1.0.0"]
 
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"

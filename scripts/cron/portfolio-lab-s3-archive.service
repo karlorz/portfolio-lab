@@ -1,0 +1,14 @@
+[Unit]
+Description=Portfolio Lab SeaweedFS S3 Daily Archive
+Documentation=https://github.com/karlorz/portfolio-lab
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+TimeoutStartSec=2400
+Nice=10
+Environment=HOME=/root
+Environment=PORTFOLIO_LAB_PROJECT_DIR=/root/projects/portfolio-lab
+EnvironmentFile=-/root/.config/portfolio-lab/s3-credentials.env
+ExecStart=/var/backups/portfolio-lab-migration/sidecar/scripts/cron/portfolio-lab-s3-archive.sh

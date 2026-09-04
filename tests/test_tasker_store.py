@@ -304,6 +304,35 @@ def test_prune_run_skips_missing_log_file(tmp_path):
     assert orphan_id in summary["errors"][0]["run_id"]
 
 
+def test_prune_run_skips_unreadable_log_file(tmp_path, monkeypatch):
+    store = _store(tmp_path)
+    store.sync_registry(_registry())
+
+    run_ids = _seed_runs(store, "portfolio-lab-health", 25)
+    unreadable_id = run_ids[0]
+    unreadable_path = Path(store.log_dir / f"{unreadable_id}.log")
+
+    orig_stat = Path.stat
+
+    def fake_stat(self, *args, **kwargs):
+        if self.resolve() == unreadable_path.resolve():
+            raise PermissionError(13, "Permission denied", str(self))
+        return orig_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", fake_stat)
+
+    summary = store.prune_runs(keep_per_task=20)
+
+    # must not raise; unreadable row deleted and reported in errors
+    assert unreadable_id not in [r["run_id"] for r in store.list_runs("portfolio-lab-health", limit=500)]
+    assert summary["deleted_rows"] == 5
+    assert summary["deleted_files"] == 4
+    assert len(summary["errors"]) == 1
+    assert unreadable_id in summary["errors"][0]["run_id"]
+    reason = summary["errors"][0]["reason"].lower()
+    assert "permission" in reason or "unreadable" in reason
+
+
 def test_prune_runs_dry_run_deletes_nothing(tmp_path):
     store = _store(tmp_path)
     store.sync_registry(_registry())

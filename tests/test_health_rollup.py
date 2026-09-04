@@ -218,6 +218,9 @@ def test_attach_shared_freshness_slis_to_ops_report(
 ) -> None:
     data_dir = tmp_path / "data"
     data_dir.mkdir()
+    # Isolate the module-level PUBLIC_DATA_DIR fallback so an ambient
+    # repo/live rebalance_health.json cannot override the supplied tmp dir.
+    monkeypatch.setattr(hr, "PUBLIC_DATA_DIR", data_dir)
     monkeypatch.setattr(
         "src.monitor.repo_public_mirror_lag.summarize_repo_public_mirror_lag",
         lambda **kwargs: {

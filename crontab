@@ -72,6 +72,10 @@
 # Google Trends — weekly Sunday 04:20 (DISABLED: owned by tasker portfolio-lab-fetch-trends)
 # 20 4 * * 0 CRON_BACKEND=crontab make -C /root/projects/portfolio-lab fetch-trends >> /root/projects/portfolio-lab/data/fetch_trends.log 2>&1
 
+# SeaweedFS S3 daily archive — daily 04:17 UTC (DISABLED fallback: owned by systemd timer portfolio-lab-s3-archive.timer; not in CRON_TARGETS)
+# 17 4 * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab s3-archive >> /root/projects/portfolio-lab/data/s3_archive.log 2>&1
+
+
 
 # ── S18b optional suite segments (NOT tasker/CRON_TARGETS; emergency/local only) ──
 # Full safe suite is the merge gate (`make test`, ~28m, 6GB VSZ). Unit segment

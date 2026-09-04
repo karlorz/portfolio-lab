@@ -15,8 +15,9 @@ PyPortfolioOpt: https://pyportfolioopt.readthedocs.io/
 """
 
 import logging
+import multiprocessing as mp
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -365,6 +366,107 @@ def _compute_turnover_bps(
     return round(total_turnover / 2 * 10000, 1)  # One-way, in bps
 
 
+def _ef_worker_target(
+    conn: Any,
+    posterior_rets: Any,
+    posterior_cov: Any,
+    risk_free_rate: float,
+    turnover_penalty: float,
+    current_weights: Optional[Dict[str, float]],
+    symbols: List[str],
+) -> None:
+    """Worker function executed in child process to isolate cvxpy / cvxcore solves."""
+    try:
+        from pypfopt import EfficientFrontier
+        ef = EfficientFrontier(posterior_rets, posterior_cov)
+        if turnover_penalty > 0 and current_weights is not None:
+            import cvxpy as cp
+            curr_w = np.array([current_weights.get(s, 0.0) for s in symbols])
+
+            def _turnover_penalty(w):
+                return turnover_penalty * cp.sum(cp.square(w - curr_w))
+
+            ef.add_objective(_turnover_penalty)
+
+        _ = ef.max_sharpe(risk_free_rate=risk_free_rate)
+        cleaned = dict(ef.clean_weights())
+        raw_perf = ef.portfolio_performance(risk_free_rate=risk_free_rate)
+        perf = tuple(float(x) if x is not None else None for x in raw_perf)
+        conn.send({"ok": True, "cleaned": cleaned, "perf": perf})
+    except Exception as exc:
+        conn.send({"ok": False, "error": str(exc), "exc_type": type(exc).__name__})
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _run_isolated_ef_max_sharpe(
+    posterior_rets: Any,
+    posterior_cov: Any,
+    risk_free_rate: float,
+    turnover_penalty: float = 0.0,
+    current_weights: Optional[Dict[str, float]] = None,
+    symbols: Optional[List[str]] = None,
+    timeout: float = 30.0,
+) -> Tuple[Dict[str, float], Tuple[Optional[float], Optional[float], Optional[float]]]:
+    """Run EfficientFrontier.max_sharpe in an isolated child process.
+
+    Protects the caller against native library crashes (e.g. cvxcore SIGABRT).
+    If the child exits nonzero, aborts, times out, or returns an error, raises
+    RuntimeError so callers can fall back (e.g. to HRP).
+    """
+    syms = list(symbols) if symbols is not None else []
+    start_method = "fork" if "fork" in mp.get_all_start_methods() else "spawn"
+    ctx = mp.get_context(start_method)
+    parent_conn, child_conn = ctx.Pipe()
+
+    proc = ctx.Process(
+        target=_ef_worker_target,
+        args=(
+            child_conn,
+            posterior_rets,
+            posterior_cov,
+            risk_free_rate,
+            turnover_penalty,
+            current_weights,
+            syms,
+        ),
+    )
+    proc.start()
+    child_conn.close()
+
+    proc.join(timeout=timeout)
+
+    if proc.is_alive():
+        proc.terminate()
+        proc.join(timeout=2.0)
+        parent_conn.close()
+        raise RuntimeError(f"EfficientFrontier.max_sharpe child process timed out after {timeout}s")
+
+    if proc.exitcode != 0:
+        parent_conn.close()
+        raise RuntimeError(
+            f"EfficientFrontier.max_sharpe child process exited with code {proc.exitcode}"
+        )
+
+    res: Optional[Dict[str, Any]] = None
+    try:
+        if parent_conn.poll():
+            res = parent_conn.recv()
+    except EOFError:
+        pass
+    finally:
+        parent_conn.close()
+
+    if res is None or not res.get("ok"):
+        err_msg = res.get("error") if res else "No response from child process"
+        raise RuntimeError(f"EfficientFrontier.max_sharpe failed in child process: {err_msg}")
+
+    return res["cleaned"], res["perf"]
+
+
 def run_black_litterman(
     cov_matrix: np.ndarray,
     views: BLViews,
@@ -464,26 +566,20 @@ def run_black_litterman(
     # Optimize via EfficientFrontier with cascade fallback:
     # BL max_sharpe → HRP → Equal Weight
     optimization_method = "bl_max_sharpe"
-    turnover_applied = False
+    turnover_applied = bool(turnover_penalty > 0 and current_weights is not None)
     turnover_lambda = turnover_penalty
-    ef = EfficientFrontier(posterior_rets, posterior_cov)
-
-    # Turnover penalty: quadratic penalty on weight changes from current
-    if turnover_penalty > 0 and current_weights is not None:
-        import cvxpy as cp
-        curr_w = np.array([current_weights.get(s, 0.0) for s in symbols])
-
-        def _turnover_penalty(w):
-            return turnover_penalty * cp.sum(cp.square(w - curr_w))
-
-        ef.add_objective(_turnover_penalty)
-        turnover_applied = True
+    if turnover_applied:
         logger.info("BL turnover penalty applied: lambda=%.2f", turnover_penalty)
 
     try:
-        _ = ef.max_sharpe(risk_free_rate=risk_free_rate)
-        cleaned = ef.clean_weights()
-        perf = ef.portfolio_performance(risk_free_rate=risk_free_rate)
+        cleaned, perf = _run_isolated_ef_max_sharpe(
+            posterior_rets=posterior_rets,
+            posterior_cov=posterior_cov,
+            risk_free_rate=risk_free_rate,
+            turnover_penalty=turnover_penalty,
+            current_weights=current_weights,
+            symbols=symbols,
+        )
     except (KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError, RuntimeError) as e:
         logger.warning("BL EfficientFrontier.max_sharpe failed: %s", e)
 

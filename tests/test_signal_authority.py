@@ -12,10 +12,8 @@ Tests cover:
 """
 
 import json
-import math
 import os
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -96,9 +94,14 @@ def test_is_ephemeral_write_path() -> None:
 
 
 def test_is_production_ssot_path() -> None:
+    from src.paths import PROJECT_ROOT
+
+    # SSOT prefixes derive from the current checkout (not a foreign /root tree)
+    # plus the live operator /var/www tree.
+    project = str(Path(PROJECT_ROOT).resolve())
     assert sa.is_production_ssot_path("/var/www/portfolio-lab/data/signals.json") is True
-    assert sa.is_production_ssot_path("/root/projects/portfolio-lab/data/signals.json") is True
-    assert sa.is_production_ssot_path("/root/projects/portfolio-lab/public/data/signals.json") is True
+    assert sa.is_production_ssot_path(f"{project}/data/signals.json") is True
+    assert sa.is_production_ssot_path(f"{project}/public/data/signals.json") is True
     # Ephemeral paths are never production SSOT
     assert sa.is_production_ssot_path("/tmp/plab-pytest-public-123/signals.json") is False
     assert sa.is_production_ssot_path(None) is False

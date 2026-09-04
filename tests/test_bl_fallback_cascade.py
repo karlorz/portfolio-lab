@@ -94,6 +94,17 @@ class TestFallbackCascade:
         assert result.extras["optimization_method"] == "bl_max_sharpe"
         assert result.expected_sharpe is not None
 
+    def test_hrp_fallback_when_max_sharpe_aborts(self, sample_cov):
+        """When isolated max_sharpe child process aborts (SIGABRT, exitcode=-6), fallback to HRP."""
+        views = map_biases_to_views(0.3, 0.1, 0.2)
+        with patch("src.strategy.black_litterman_mapper._run_isolated_ef_max_sharpe") as mock_isolated:
+            mock_isolated.side_effect = RuntimeError("EfficientFrontier.max_sharpe child process exited with code -6")
+
+            result = run_black_litterman(sample_cov, views)
+            assert "hrp" in result.extras["optimization_method"]
+            assert len(result.bl_weights) > 0
+            assert abs(sum(result.bl_weights.values()) - 1.0) < 0.05
+
     def test_hrp_fallback_when_max_sharpe_fails(self, sample_cov):
         """When max_sharpe fails, should fall back to HRP (not directly to bl_weights)."""
         views = map_biases_to_views(0.3, 0.1, 0.2)

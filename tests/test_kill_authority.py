@@ -14,9 +14,6 @@ Tests cover:
 
 import json
 from pathlib import Path
-from typing import Any
-
-import pytest
 
 from src.dashboard import kill_authority as ka
 

@@ -52,6 +52,23 @@ cron_guard_start() {
             echo "[$(date -Iseconds)] CRON_GUARD: $job_name SKIPPED (previous run still active, lock held)"
             exit 0  # Not an error — previous cycle still running
         fi
+    elif command -v python3 >/dev/null 2>&1; then
+        # Portable fallback for hosts without flock(1) (e.g. macOS): take
+        # the same flock(2) lock on the inherited lock fd via Python 3, so
+        # contention with any fcntl.flock holder is still detected.
+        if ! GUARD_LOCK_FD="$lock_fd" python3 -c '
+import fcntl
+import os
+import sys
+
+try:
+    fcntl.flock(int(os.environ["GUARD_LOCK_FD"]), fcntl.LOCK_EX | fcntl.LOCK_NB)
+except OSError:
+    sys.exit(1)
+' 2>/dev/null; then
+            echo "[$(date -Iseconds)] CRON_GUARD: $job_name SKIPPED (previous run still active, lock held)"
+            exit 0  # Not an error — previous cycle still running
+        fi
     else
         local fallback_lock_dir="${lock_file}.d"
         if ! mkdir "$fallback_lock_dir" 2>/dev/null; then
@@ -71,6 +88,13 @@ cron_guard_start() {
         trap 'exit 0' TERM INT
         if [[ "$lock_fd" =~ ^[0-9]+$ ]]; then
             eval "exec ${lock_fd}>&-" 2>/dev/null || true
+        fi
+        # Do not hold the parent's captured stdout/stderr pipes open after
+        # the parent exits: drop them when they are pipes (e.g. a test
+        # harness), keeping cron-log/terminal output otherwise.
+        exec </dev/null
+        if [ -p /dev/fd/1 ] || [ -p /dev/fd/2 ]; then
+            exec >/dev/null 2>&1
         fi
         sleep "$timeout_secs" </dev/null >/dev/null 2>&1 &
         watchdog_sleep_pid=$!

@@ -5,14 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from src.monitor.paper_return_ssot import (
     DEFAULT_NAV_EPS,
     DEFAULT_RETURN_EPS,
-    FIVE_SURFACES,
-    _as_float,
-    _read_json,
     align_portfolio_history_to_ssot,
     apply_capture_ssot_side_effects,
     compare_five_surfaces,

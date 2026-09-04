@@ -72,6 +72,7 @@ help:
 	@echo "  make mirror-repo-public-data  Mirror live PUBLIC_DATA_DIR → repo public/data (H22b)"
 	@echo "  make mirror-repo-public-data-lag  Exit 1 if repo public/data lags live"
 	@echo "  make sync         Broker position reconciliation"
+	@echo "  make s3-archive   Daily SeaweedFS S3 archive backup and retention prune"
 	@echo "  make all          Run all tasks sequentially"
 	@echo "  make cron-reset   Reset cron status file to defaults"
 	@echo "  make unified-dashboard  Generate unified system dashboard"
@@ -945,3 +946,10 @@ fetch-trends:
 	else STATUS="error"; fi; \
 	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-fetch-trends $$STATUS $$DUR; \
 	exit $$EXIT
+
+# ── SeaweedFS S3 Daily Archive (Track A) ─────────────────────────────
+
+.PHONY: s3-archive
+s3-archive:
+	@echo "=== SeaweedFS S3 Daily Archive: $$(date) ==="; \
+	timeout 2400 $(PROJECT_DIR)/scripts/cron/portfolio-lab-s3-archive.sh

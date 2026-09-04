@@ -15,10 +15,10 @@ Tests cover:
 """
 
 import json
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -118,6 +118,9 @@ def test_pending_job_artifact_evidence(tmp_path: Path) -> None:
         }),
         encoding="utf-8",
     )
+    # Pin the artifact mtime to the supplied now_ts: pending evidence rejects
+    # future artifacts (age < 0), while content keeps the fixed _meta.fetched_at.
+    os.utime(trends_file, (now_ts, now_ts))
 
     pending_job = {
         "name": "portfolio-lab-fetch-trends",
@@ -203,7 +206,9 @@ def test_load_local_cron_jobs(tmp_path: Path) -> None:
     assert jobs_corrupt == []
     assert summary_corrupt["status"] == "error"
 
-    # 3. Valid status file
+    # 3. Valid status file; last_run must be current or the fixed-August date
+    # makes the schedule-aware heartbeat overdue and the summary degraded.
+    now_ts = time.time()
     status_file.write_text(
         json.dumps({
             "backend": "tasker",
@@ -212,7 +217,7 @@ def test_load_local_cron_jobs(tmp_path: Path) -> None:
                     "name": "job-1",
                     "status": "success",
                     "schedule": "0 * * * *",
-                    "last_run": "2026-08-17T08:00:00Z",
+                    "last_run": datetime.fromtimestamp(now_ts - 600, tz=timezone.utc).isoformat(),
                 }
             ],
         }),

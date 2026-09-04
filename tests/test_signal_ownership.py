@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import pytest
-
 from src.monitor.signal_ownership import (
     OPTIONAL_ADVISORY_SIGNALS,
     SIGNAL_OWNERSHIP,

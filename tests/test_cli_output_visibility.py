@@ -3398,16 +3398,38 @@ TEST_REPO_GUARD = os.path.join("scripts", "test-repo-guard.sh")
 
 def _run_test_repo_guard_in_dir(
     cwd: str | Path,
+    *,
+    bin_dir: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     guard_path = os.path.join(repo_root, TEST_REPO_GUARD)
+    cmd = f'source "{guard_path}" && guard_ensure_portfolio_lab'
+    env = None
+    if bin_dir is not None:
+        # The guard resolves cwd via `pwd -P` (test-repo-guard.sh:28); bash
+        # would prefer its pwd builtin over the PATH shim, so disable the
+        # builtin and let the fake `pwd` report the deny-listed value.
+        cmd = f"enable -n pwd 2>/dev/null; {cmd}"
+        env = dict(os.environ)
+        env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
     return subprocess.run(
-        ["bash", "-c", f'source "{guard_path}" && guard_ensure_portfolio_lab'],
+        ["bash", "-c", cmd],
         capture_output=True,
         text=True,
         timeout=30,
         cwd=str(cwd),
+        env=env,
     )
+
+
+def _fake_pwd_bin(tmp_path: Path, reports: str) -> Path:
+    """Fake `pwd` that reports a fixed path (the deny-list value) on PATH."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    shim = bin_dir / "pwd"
+    shim.write_text(f"#!/bin/sh\necho {reports}\n", encoding="utf-8")
+    shim.chmod(0o755)
+    return bin_dir
 
 
 def test_test_repo_guard_valid_dir_exits_0(tmp_path) -> None:
@@ -3417,12 +3439,18 @@ def test_test_repo_guard_valid_dir_exits_0(tmp_path) -> None:
     assert res.returncode == 0, res.stderr
 
 
-def test_test_repo_guard_deny_listed_dir_exits_78() -> None:
-    """TEST-REPO-GUARD-SMOKE: deny-listed directory -> exit 78 with error log."""
-    res = _run_test_repo_guard_in_dir("/root/.hermes")
+def test_test_repo_guard_deny_listed_dir_exits_78(tmp_path) -> None:
+    """TEST-REPO-GUARD-SMOKE: deny-listed directory -> exit 78 with error log.
+
+    Hermetic on any OS: the subprocess cwd is a real tmp_path, while a fake
+    `pwd` on PATH reports the exact /root/.hermes deny-list entry
+    (test-repo-guard.sh:16-18), so the guard's `pwd -P` probe resolves to the
+    value it must refuse (no live /root/.hermes is read or required)."""
+    bin_dir = _fake_pwd_bin(tmp_path, "/root/.hermes")
+    res = _run_test_repo_guard_in_dir(tmp_path, bin_dir=bin_dir)
     assert res.returncode == 78
-    assert "refusing to run tests in" in res.stderr
-    assert "deny-list entry" in res.stderr
+    assert "refusing to run tests in /root/.hermes" in res.stderr
+    assert "deny-list entry: /root/.hermes" in res.stderr
 
 
 def test_test_repo_guard_missing_claude_md_exits_78(tmp_path) -> None:

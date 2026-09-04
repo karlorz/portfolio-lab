@@ -83,3 +83,23 @@ def test_mark_to_market_uses_loaded_prices():
     updated = mtm.mark_to_market(portfolio, {"SPY": 200.0})
     assert updated["positions"]["SPY"]["current_price"] == 200.0
     assert updated["positions"]["SPY"]["value"] == 2000.0
+
+
+def test_mark_to_market_declares_tzdata_dependency():
+    """tzdata must be listed in pyproject.toml dependencies for systems lacking system tzdata (e.g. Alpine)."""
+    import tomllib
+
+    pyproject_path = REPO / "pyproject.toml"
+    with open(pyproject_path, "rb") as f:
+        data = tomllib.load(f)
+    deps = data.get("project", {}).get("dependencies", [])
+    tzdata_dep = [d for d in deps if d.startswith("tzdata")]
+    assert len(tzdata_dep) == 1, "tzdata>=2024.1 must be in project dependencies"
+    assert "tzdata>=2024.1" in tzdata_dep[0]
+
+
+def test_mark_to_market_zoneinfo_resolution():
+    """ZoneInfo('America/New_York') must construct successfully."""
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("America/New_York")
+    assert str(tz) == "America/New_York"

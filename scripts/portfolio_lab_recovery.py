@@ -8,14 +8,16 @@ Commands use subprocess argument arrays only (never a shell).
 Usage::
 
   portfolio_lab_recovery.py create --app-dir PATH --web-root PATH \\
-      --tasker-service NAME --archive PATH --storage-encryption-attested
+      --tasker-service NAME --archive PATH --storage-encryption-attested \\
+      [--service-controller systemd|box-persist]
   portfolio_lab_recovery.py verify --archive PATH
   portfolio_lab_recovery.py restore --archive PATH --app-dir PATH --web-root PATH \\
       --target-mode dev|prod [--allow-production-paths] [--start-dev-api] \\
-      [--tasker-service NAME]
+      [--tasker-service NAME] [--service-controller systemd|box-persist]
   portfolio_lab_recovery.py activate-prod --app-dir PATH --web-root PATH \\
       --tasker-service NAME --confirm-authoritative-activation \\
-      --former-authority-confirmed-stopped LABEL
+      --former-authority-confirmed-stopped LABEL \\
+      [--service-controller systemd|box-persist]
 
 Archive layout (member names)::
 
@@ -62,9 +64,30 @@ never touches DNS or Caddy.
 
 Command overrides (tests use fakes; production defaults): PLR_GIT, PLR_TAR,
 PLR_SYSTEMCTL, PLR_SYSTEMD_UNIT_DIR, PLR_WIKI_DIR, PLR_CADDY_CONFIG,
-PLR_DEV_SERVICE_NAME. PLR_ALLOW_TMP_DEST (default unset): test-only escape
+PLR_DEV_SERVICE_NAME, PLR_BOX_PERSIST_CONTROLLER (default
+/home/box/.local/bin/portfolio-lab-box-persist), PLR_BOX_PERSIST_ALLOWED_ROOT
+(test-only escape hatch for the box-persist target-root guard). PLR_ALLOW_TMP_DEST (default unset): test-only escape
 hatch permitting archive destinations under pytest tmp trees
 (/tmp/pytest-of-*); every other /tmp destination stays forbidden.
+
+The optional ``--service-controller`` selection (default ``systemd``, the
+unchanged sg01 behavior) makes service operations explicit: ``systemd`` for
+the sg01 source create/restart and systemd targets; ``box-persist`` for
+cursor-box native processes, valid only for target restore and
+activate-prod. create is sg01 source-side and rejects box-persist. All
+box-persist commands run the focused controller executable with argv arrays
+only (never a shell) and must return the same normalized status JSON
+(schema portfolio-lab-box-persist/v1: state active|inactive,
+scheduler_mode enabled|disabled, identity_exact bool, scheduler_instances
+nonnegative int, pid positive-int|null, plus the requested
+service_name/mode/app_dir/web_root) with exit zero. Malformed JSON,
+unsupported states, service/mode/app/web identity mismatch, active state
+with inexact identity or missing PID, inactive state with a PID, and
+inconsistent scheduler counts fail closed; dev candidate start requires
+active/disabled/zero-instance/exact/PID, production staging and activation
+preflight require inactive/disabled/zero-instance/exact/no-PID, and
+activation requires exactly one returned scheduler instance (the explicit
+second-scheduler prevention gate).
 """
 
 from __future__ import annotations
@@ -75,17 +98,21 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from urllib.error import URLError
 from urllib.request import urlopen
 
 SCHEMA_VERSION = "portfolio-lab-recovery/v2"
+GENERATION_MATERIALIZATION_SCHEMA = "portfolio-lab-generation-materialization/v1"
+GENERATION_LINK_PATH = "data/generations/current"
+GENERATION_ARCHIVE_PATH = "runtime/data/generations/current"
 DEFAULT_DEV_SERVICE_NAME = "portfolio-lab-tasker-recovery-dev"
 BUNDLE_MEMBER = "source/repository.bundle"
 REVISION_MEMBER = "source/revision.json"
@@ -298,6 +325,358 @@ def validate_unit_value(value: str, what: str) -> None:
         die(f"{what} contains '%' (systemd specifier); refusing unit interpolation: {value!r}")
 
 
+# ── service controllers ────────────────────────────────────────────────────
+
+BOX_PERSIST_SCHEMA = "portfolio-lab-box-persist/v1"
+DEFAULT_BOX_PERSIST_CONTROLLER = "/home/box/.local/bin/portfolio-lab-box-persist"
+BOX_PERSIST_PRODUCTION_ROOT = Path("/home/box/.local/share/portfolio-lab")
+NORMALIZED_STATUS_FIELDS = ("state", "scheduler_mode", "identity_exact", "scheduler_instances", "pid")
+
+
+class ServiceController(Protocol):
+    """Explicit service-controller surface used by the recovery CLI.
+
+    ``status`` returns a normalized status with exactly: state
+    (active|inactive), scheduler_mode (enabled|disabled), identity_exact
+    (bool; must be true before an active state is treated as healthy),
+    scheduler_instances (nonnegative int), pid (positive int when active,
+    null when inactive)."""
+
+    name: str
+
+    def status(self, service_name: str, mode: str, app_dir: Path, web_root: Path) -> dict[str, Any]: ...
+    def stop(self, service_name: str, mode: str, app_dir: Path, web_root: Path) -> Any: ...
+    def start(self, service_name: str, mode: str, app_dir: Path, web_root: Path) -> dict[str, Any]: ...
+
+
+class SystemdController:
+    """systemd controller (sg01 source + systemd targets).
+
+    Unit-name identity: ``systemctl is-active`` yields only the normalized
+    active/inactive states (failed/unknown fail closed). Status reports
+    scheduler mode enabled for the production service and disabled for the
+    no-scheduler dev unit; scheduler_instances and pid are not tracked at
+    unit level (systemd owns process identity), and recovery gates never
+    consult them on systemd paths. stop/start keep the existing bounded
+    180-second subprocess ceiling and exact systemctl argv."""
+
+    name = "systemd"
+
+    def status(
+        self,
+        service_name: str,
+        mode: str = "production",
+        app_dir: Path | None = None,
+        web_root: Path | None = None,
+    ) -> dict[str, Any]:
+        res = run([_cmd("systemctl"), "is-active", service_name])
+        state = res.stdout.strip()
+        if res.returncode not in (0, 3):
+            die(f"systemctl is-active {service_name} failed (rc={res.returncode}); failing closed")
+        if state not in ("active", "inactive"):
+            die(
+                f"systemctl service {service_name} is in unexpected state {state!r}; "
+                "failing closed (expected active or inactive)"
+            )
+        return {
+            "state": state,
+            "scheduler_mode": "enabled" if mode == "production" else "disabled",
+            "identity_exact": True,
+            "scheduler_instances": 0,
+            "pid": None,
+        }
+
+    def stop(
+        self,
+        service_name: str,
+        mode: str = "production",
+        app_dir: Path | None = None,
+        web_root: Path | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        res = run([_cmd("systemctl"), "stop", service_name])
+        if res.returncode != 0:
+            die(f"systemctl stop {service_name} failed: {(res.stderr or res.stdout).strip()}")
+        return res
+
+    def start(
+        self,
+        service_name: str,
+        mode: str = "production",
+        app_dir: Path | None = None,
+        web_root: Path | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        res = run([_cmd("systemctl"), "start", service_name])
+        if res.returncode != 0:
+            die(f"systemctl start {service_name} failed: {(res.stderr or res.stdout).strip()}")
+        return res
+
+
+def get_service_controller(name: str) -> ServiceController:
+    if name == "systemd":
+        return SystemdController()
+    if name == "box-persist":
+        return BoxPersistController()
+    die(f"unknown service controller: {name}")
+    raise AssertionError("unreachable")
+
+
+def box_persist_allowed_root() -> Path:
+    """Production box-persist target root; PLR_BOX_PERSIST_ALLOWED_ROOT is a
+    test-only escape hatch overriding it (absolute when set)."""
+    override = os.environ.get("PLR_BOX_PERSIST_ALLOWED_ROOT")
+    if override:
+        if not os.path.isabs(override):
+            die("PLR_BOX_PERSIST_ALLOWED_ROOT must be an absolute path")
+        return Path(override).resolve()
+    return BOX_PERSIST_PRODUCTION_ROOT
+
+
+def validate_box_persist_targets(app_dir: Path, web_root: Path) -> None:
+    """box-persist restore/activate targets (resolved) must both sit under
+    the box-persist allowed root; rejected before any target mutation or
+    controller call."""
+    root = box_persist_allowed_root()
+    for path, role in ((app_dir, "--app-dir"), (web_root, "--web-root")):
+        if not path.is_absolute():
+            die(f"box-persist {role} must be an absolute path")
+        if not path.is_relative_to(root):
+            die(f"box-persist {role} must be under {root}; got {path}")
+
+
+def normalized_status(status: dict[str, Any]) -> dict[str, Any]:
+    """The five normalized controller status fields, for JSON reports."""
+    return {field: status[field] for field in NORMALIZED_STATUS_FIELDS}
+
+
+def parse_box_persist_status(
+    stdout: str,
+    *,
+    mode: str,
+    app_dir: Path,
+    web_root: Path,
+    service_name: str,
+) -> dict[str, Any]:
+    """Validate a box-persist command's stdout as normalized status JSON.
+
+    Rejects malformed JSON, unsupported states, mismatched
+    service/mode/app/web identity, active state with inexact identity or
+    missing PID, inactive state with a PID, and inconsistent scheduler
+    counts (disabled with running instances)."""
+    try:
+        payload = json.loads(stdout)
+    except ValueError:
+        die(f"box-persist returned malformed JSON on stdout: {stdout.strip()[:160]!r}; failing closed")
+    if not isinstance(payload, dict):
+        die("box-persist returned non-object JSON on stdout; failing closed")
+    if payload.get("schema") != BOX_PERSIST_SCHEMA:
+        die(f"box-persist status schema mismatch: {payload.get('schema')!r}")
+    state = payload.get("state")
+    if state not in ("active", "inactive"):
+        die(f"box-persist status has unsupported state {state!r}; failing closed")
+    scheduler_mode = payload.get("scheduler_mode")
+    if scheduler_mode not in ("enabled", "disabled"):
+        die(f"box-persist status has unsupported scheduler_mode {scheduler_mode!r}; failing closed")
+    identity_exact = payload.get("identity_exact")
+    if not isinstance(identity_exact, bool):
+        die("box-persist status identity_exact must be a boolean; failing closed")
+    instances = payload.get("scheduler_instances")
+    if isinstance(instances, bool) or not isinstance(instances, int) or instances < 0:
+        die("box-persist status scheduler_instances must be a nonnegative integer; failing closed")
+    pid = payload.get("pid")
+    if pid is not None and (isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0):
+        die(f"box-persist status pid must be a positive integer or null: {pid!r}; failing closed")
+    if state == "active":
+        if pid is None:
+            die("box-persist status reports active state without a PID; failing closed")
+        if not identity_exact:
+            die("box-persist status reports active state with inexact process identity; failing closed")
+    elif pid is not None:
+        die("box-persist status reports inactive state with a PID; failing closed")
+    if scheduler_mode == "disabled" and instances > 0:
+        die(
+            "box-persist status is inconsistent: scheduler_mode disabled with "
+            f"scheduler_instances {instances}; failing closed"
+        )
+    expected = {
+        "service_name": service_name,
+        "mode": mode,
+        "app_dir": str(app_dir),
+        "web_root": str(web_root),
+    }
+    mismatched = [
+        field
+        for field, wanted in expected.items()
+        if not isinstance(payload.get(field), str) or payload.get(field) != wanted
+    ]
+    if mismatched:
+        shown = ", ".join(
+            f"{field}={payload.get(field)!r} (expected {expected[field]!r})" for field in mismatched
+        )
+        die(f"box-persist status identity mismatch: {shown}; failing closed")
+    return payload
+
+
+class BoxPersistController:
+    """box-persist controller for cursor-box native (non-systemd) processes.
+
+    Every command runs the focused controller executable as an argv array
+    (never a shell) and must return the same normalized
+    portfolio-lab-box-persist/v1 status JSON on stdout with exit zero.
+    Nonzero exit, timeout, malformed output, unsupported states, identity
+    mismatch, active-without-PID, inactive-with-PID, and inconsistent
+    scheduler counts all fail closed. ``start`` maps to ``start-candidate``
+    (mode candidate); ``activate`` always uses mode production and forwards
+    the former-authority proof label."""
+
+    name = "box-persist"
+
+    def __init__(self, executable: Path | None = None) -> None:
+        raw = (
+            str(executable)
+            if executable is not None
+            else os.environ.get("PLR_BOX_PERSIST_CONTROLLER", DEFAULT_BOX_PERSIST_CONTROLLER)
+        )
+        if not os.path.isabs(raw):
+            die(f"box-persist controller path must be absolute: {raw!r}")
+        path = Path(raw)
+        if not path.is_file():
+            die(f"box-persist controller executable not found: {path}")
+        if not os.access(path, os.X_OK):
+            die(f"box-persist controller executable is not executable: {path}")
+        self.executable = path
+
+    def _invoke(
+        self,
+        action: str,
+        *,
+        mode: str,
+        app_dir: Path,
+        web_root: Path,
+        service_name: str,
+        label: str | None = None,
+    ) -> dict[str, Any]:
+        argv = [
+            str(self.executable),
+            action,
+            "--mode",
+            mode,
+            "--app-dir",
+            str(app_dir),
+            "--web-root",
+            str(web_root),
+            "--service-name",
+            service_name,
+        ]
+        if label is not None:
+            argv += ["--former-authority-confirmed-stopped", label]
+        # Timeouts are converted by the shared run() (fail-closed SystemExit),
+        # so no controller-level TimeoutExpired handling is reachable here.
+        res = run(argv)
+        if res.returncode != 0:
+            detail = (res.stderr or res.stdout).strip()
+            die(f"box-persist {action} failed: {detail or f'exit {res.returncode}'}")
+        return parse_box_persist_status(
+            res.stdout,
+            mode=mode,
+            app_dir=app_dir,
+            web_root=web_root,
+            service_name=service_name,
+        )
+
+    def status(self, service_name: str, mode: str, app_dir: Path, web_root: Path) -> dict[str, Any]:
+        return self._invoke(
+            "status", mode=mode, app_dir=app_dir, web_root=web_root, service_name=service_name
+        )
+
+    def stop(self, service_name: str, mode: str, app_dir: Path, web_root: Path) -> dict[str, Any]:
+        return self._invoke(
+            "stop", mode=mode, app_dir=app_dir, web_root=web_root, service_name=service_name
+        )
+
+    def start(self, service_name: str, mode: str, app_dir: Path, web_root: Path) -> dict[str, Any]:
+        if mode != "candidate":
+            die(f"box-persist start maps to start-candidate and requires --mode candidate; got {mode!r}")
+        return self._invoke(
+            "start-candidate",
+            mode="candidate",
+            app_dir=app_dir,
+            web_root=web_root,
+            service_name=service_name,
+        )
+
+    def activate(self, service_name: str, app_dir: Path, web_root: Path, label: str) -> dict[str, Any]:
+        return self._invoke(
+            "activate",
+            mode="production",
+            app_dir=app_dir,
+            web_root=web_root,
+            service_name=service_name,
+            label=label,
+        )
+
+
+def require_prod_inactive_status(status: dict[str, Any], service_name: str, context: str) -> None:
+    """box-persist production preflight: inactive, scheduler disabled, zero
+    scheduler instances, exact identity, no PID."""
+    ok = (
+        status["state"] == "inactive"
+        and status["scheduler_mode"] == "disabled"
+        and status["identity_exact"] is True
+        and status["scheduler_instances"] == 0
+        and status["pid"] is None
+    )
+    if not ok:
+        die(
+            f"box-persist {context}: target service {service_name} preflight requires "
+            "inactive state with the scheduler disabled, zero scheduler instances, exact "
+            "identity, and no PID "
+            f"(state={status['state']}, scheduler_mode={status['scheduler_mode']}, "
+            f"identity_exact={status['identity_exact']}, "
+            f"scheduler_instances={status['scheduler_instances']}, pid={status['pid']})"
+        )
+
+
+def require_candidate_started(status: dict[str, Any], service_name: str) -> None:
+    """box-persist dev candidate start: active, scheduler disabled, zero
+    scheduler instances, exact identity, positive PID."""
+    ok = (
+        status["state"] == "active"
+        and status["scheduler_mode"] == "disabled"
+        and status["identity_exact"] is True
+        and status["scheduler_instances"] == 0
+        and status["pid"] is not None
+    )
+    if not ok:
+        die(
+            f"box-persist start-candidate for {service_name} did not yield a "
+            "scheduler-disabled active process "
+            f"(state={status['state']}, scheduler_mode={status['scheduler_mode']}, "
+            f"identity_exact={status['identity_exact']}, "
+            f"scheduler_instances={status['scheduler_instances']}, pid={status['pid']})"
+        )
+
+
+def require_activation_status(status: dict[str, Any], service_name: str) -> None:
+    """box-persist activation: exactly one active scheduler (enabled mode,
+    exact identity, positive PID, one scheduler instance)."""
+    ok = (
+        status["state"] == "active"
+        and status["scheduler_mode"] == "enabled"
+        and status["identity_exact"] is True
+        and isinstance(status["pid"], int)
+        and status["pid"] > 0
+        and status["scheduler_instances"] == 1
+    )
+    if not ok:
+        die(
+            f"box-persist activation of {service_name} did not yield exactly one active "
+            "scheduler "
+            f"(state={status['state']}, scheduler_mode={status['scheduler_mode']}, "
+            f"identity_exact={status['identity_exact']}, "
+            f"scheduler_instances={status['scheduler_instances']}, pid={status['pid']})"
+        )
+
+
 # ── git + dirty-source policy ───────────────────────────────────────────────
 
 
@@ -371,13 +750,193 @@ def is_excluded(rel: str) -> bool:
     return False
 
 
-def _walk_tree_files(root: Path, prefix: str):
+def is_control_char(c: str) -> bool:
+    """Check if character is ASCII C0 control (<32), ASCII DEL (0x7F), or C1 control (0x80-0x9F)."""
+    o = ord(c)
+    return o < 32 or o == 0x7F or (0x80 <= o <= 0x9F)
+
+
+def is_safe_original_link(raw_target: str) -> bool:
+    """Validate raw original link text according to generation link source contract:
+    relative, non-empty UTF-8-safe path string with no absolute root, backslash,
+    control characters, empty component, '.' component, or '..' component."""
+    if not isinstance(raw_target, str) or not raw_target:
+        return False
+    try:
+        raw_target.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    if raw_target.startswith("/") or "\\" in raw_target:
+        return False
+    if any(is_control_char(c) for c in raw_target):
+        return False
+    parts = raw_target.split("/")
+    if any(p in ("", ".", "..") for p in parts):
+        return False
+    if ":" in parts[0]:
+        return False
+    return True
+
+
+def inspect_generation_target(
+    generations_dir: Path,
+    raw_link: str,
+) -> tuple[Path, str, list[dict[str, Any]]]:
+    """Validate generations/current link and inspect target tree according to contract.
+
+    Returns (resolved_target_path, target_rel_to_generations, snapshot_entries).
+    Fails closed on any contract violation with bounded, secret-safe diagnostics."""
+    if not is_safe_original_link(raw_link):
+        die("invalid generations/current symlink target text")
+
+    # Target cannot be 'current' or any path resolving to the 'current' symlink itself
+    if raw_link == "current" or Path(raw_link).parts[0] == "current":
+        die("generations/current target cannot be current symlink itself")
+
+    try:
+        gen_dir_resolved = generations_dir.resolve(strict=True)
+    except OSError:
+        die("cannot resolve generations directory")
+
+    try:
+        raw_target_path = generations_dir / raw_link
+        target_path = raw_target_path.resolve(strict=True)
+    except OSError:
+        die("generations/current target unresolvable or broken link")
+
+    # Must remain strictly beneath resolved generations_dir; not generations_dir itself or current
+    if not target_path.is_relative_to(gen_dir_resolved):
+        die("generations/current target escapes generations directory")
+    if target_path == gen_dir_resolved:
+        die("generations/current target cannot be generations directory itself")
+    if target_path == (generations_dir / "current"):
+        die("generations/current target cannot be current symlink itself")
+
+    # Every component from generations_dir to target must be ordinary and non-symlink
+    rel_parts = Path(raw_link).parts
+    curr = generations_dir
+    for part in rel_parts:
+        curr = curr / part
+        try:
+            if curr.is_symlink():
+                if curr != target_path or target_path.is_symlink():
+                    die("symlink in generations target path component")
+            if not curr.exists():
+                die("generations target path component does not exist")
+        except OSError:
+            die("generations target path component inaccessible")
+
+    if not target_path.is_dir() or target_path.is_symlink():
+        die("generations target is not an ordinary directory")
+
+    # Inspect target tree
+    target_rel = target_path.relative_to(gen_dir_resolved).as_posix()
+    entries: list[dict[str, Any]] = []
+
+    def _onerror(error: OSError) -> None:
+        die("cannot traverse generation target")
+
+    try:
+        for dirpath, dirnames, filenames in os.walk(
+            target_path, followlinks=False, onerror=_onerror
+        ):
+            dp = Path(dirpath)
+            for dname in sorted(dirnames):
+                try:
+                    dname.encode("utf-8")
+                except UnicodeEncodeError:
+                    die("unsafe relative name in generation target")
+                candidate = dp / dname
+                try:
+                    if candidate.is_symlink():
+                        die("nested directory symlink in generation target")
+                except OSError:
+                    die("cannot inspect directory in generation target")
+            for fname in sorted(filenames):
+                try:
+                    fname.encode("utf-8")
+                except UnicodeEncodeError:
+                    die("unsafe relative name in generation target")
+                p = dp / fname
+                try:
+                    if p.is_symlink():
+                        die("nested symlink in generation target")
+                    st = p.lstat()
+                except OSError:
+                    die("cannot stat file in generation target")
+                if stat.S_ISDIR(st.st_mode):
+                    continue
+                if not stat.S_ISREG(st.st_mode):
+                    die("non-regular file in generation target")
+                if st.st_nlink != 1:
+                    die("hardlinked regular file in generation target")
+                mode = st.st_mode & 0o7777
+                if mode & 0o4000:
+                    die("setuid mode in generation target")
+                if mode & 0o2000:
+                    die("setgid mode in generation target")
+                if mode & 0o1000:
+                    die("sticky mode in generation target")
+                try:
+                    rel_file = p.relative_to(target_path).as_posix()
+                    rel_file.encode("utf-8")
+                except (UnicodeEncodeError, ValueError):
+                    die("unsafe relative name in generation target")
+                if any(is_control_char(c) for c in rel_file):
+                    die("control character in generation file path")
+                if not path_safe(rel_file):
+                    die("unsafe relative name in generation target")
+                # Excluded secret-like path check
+                if is_excluded(f"generations/{target_rel}/{rel_file}"):
+                    die("generation target contains excluded secret-like path")
+                digest = sha256_file(p)
+                entries.append({
+                    "rel_path": rel_file,
+                    "sha256": digest,
+                    "bytes": st.st_size,
+                    "mode": mode,
+                })
+    except OSError:
+        die("cannot traverse generation target")
+
+    if not entries:
+        die("generation target directory is empty")
+
+    return target_path, target_rel, sorted(entries, key=lambda e: e["rel_path"])
+
+
+def validate_generation_snapshot(
+    generations_dir: Path,
+    expected_link: str,
+    expected_target: Path,
+    expected_entries: list[dict[str, Any]],
+) -> None:
+    """Validate that current symlink and target tree exactly match pre-stop snapshot."""
+    current_link = generations_dir / "current"
+    if not current_link.is_symlink():
+        die("generations/current changed from symlink during quiesce")
+    try:
+        raw_link = os.readlink(current_link)
+    except OSError:
+        die("cannot read generations/current symlink after stop")
+    if raw_link != expected_link:
+        die("generations/current link changed after stop")
+    target_path, _, entries = inspect_generation_target(generations_dir, raw_link)
+    if target_path != expected_target:
+        die("generations target path changed after stop")
+    if entries != expected_entries:
+        die("generations target snapshot changed after stop")
+
+
+def _walk_tree_files(
+    root: Path,
+    prefix: str,
+    allowed_dir_symlink: Path | None = None,
+):
     """Yield regular non-symlink files under ``root`` without ever descending
     into symlinked directories; fail closed on any symlinked directory or
-    traversal error (unreadable/deleted/I/O-error directory) encountered —
-    collection must never follow links out of the archived tree, and a
-    linked or unreadable subtree must never be silently omitted from a
-    recovery point."""
+    traversal error encountered — unless allowed_dir_symlink is explicitly
+    permitted (checked by identity)."""
 
     def _onerror(error: OSError) -> None:
         die(f"refusing to archive: cannot traverse {prefix}: {error}")
@@ -386,25 +945,34 @@ def _walk_tree_files(root: Path, prefix: str):
         for dirpath, dirnames, filenames in os.walk(
             root, followlinks=False, onerror=_onerror
         ):
+            dp = Path(dirpath)
             for name in sorted(dirnames):
-                candidate = Path(dirpath) / name
+                candidate = dp / name
                 if candidate.is_symlink():
+                    if allowed_dir_symlink is not None and candidate.resolve() == allowed_dir_symlink.resolve() and candidate == allowed_dir_symlink:
+                        # Permitted directory symlink; do not descend into it via os.walk
+                        continue
                     die(f"refusing to archive: symlinked directory {candidate} under {prefix}")
             for name in sorted(filenames):
-                path = Path(dirpath) / name
-                if not path.is_file() or path.is_symlink():
+                path = dp / name
+                if path.is_symlink():
+                    if allowed_dir_symlink is not None and path == allowed_dir_symlink:
+                        continue
+                    continue
+                if not path.is_file():
                     continue
                 yield path
     except OSError as error:
-        # os.walk only routes scandir() open failures through onerror;
-        # iteration errors (e.g. a directory deleted mid-walk) propagate,
-        # so fail closed on those too.
         die(f"refusing to archive: cannot traverse {prefix}: {error}")
 
 
-def iter_tree_files(root: Path, prefix: str) -> list[str]:
+def iter_tree_files(
+    root: Path,
+    prefix: str,
+    allowed_dir_symlink: Path | None = None,
+) -> list[str]:
     members = []
-    for path in _walk_tree_files(root, prefix):
+    for path in _walk_tree_files(root, prefix, allowed_dir_symlink=allowed_dir_symlink):
         rel = path.relative_to(root).as_posix()
         if is_excluded(rel):
             continue
@@ -416,11 +984,14 @@ def iter_tree_files(root: Path, prefix: str) -> list[str]:
     return sorted(members)
 
 
-def check_no_symlinked_dirs(root: Path, prefix: str) -> None:
+def check_no_symlinked_dirs(
+    root: Path,
+    prefix: str,
+    allowed_dir_symlink: Path | None = None,
+) -> None:
     """Pre-quiesce preflight: refuse to proceed if any symlinked directory
-    sits under an archived tree. Runs before the source service is stopped so
-    a refusal never drains Tasker and never writes an archive."""
-    for _ in _walk_tree_files(root, prefix):
+    sits under an archived tree (except allowed_dir_symlink if provided)."""
+    for _ in _walk_tree_files(root, prefix, allowed_dir_symlink=allowed_dir_symlink):
         pass
 
 
@@ -443,6 +1014,102 @@ def member_entries(members: list[str], staging: Path) -> list[dict[str, Any]]:
             die(f"refusing to archive file with setuid/setgid/sticky mode: {path} ({oct(mode)})")
         entries.append({"path": member, "sha256": sha256_file(path), "bytes": st.st_size, "mode": mode})
     return entries
+
+
+def validate_staged_generation_trees(
+    staging: Path,
+    expected_link: str,
+    expected_entries: list[dict[str, Any]],
+) -> None:
+    """Validate both staged target tree and staged materialized-current tree
+    against snapshot entries and against each other before tar creation."""
+    target_staged_root = staging / "runtime" / "data" / "generations" / expected_link
+    current_staged_root = staging / GENERATION_ARCHIVE_PATH
+
+    try:
+        for root, name in ((target_staged_root, "target"), (current_staged_root, "current duplicate")):
+            if not root.is_dir() or root.is_symlink():
+                die(f"staged {name} is not an ordinary directory")
+            for p in root.rglob("*"):
+                if p.is_symlink():
+                    die(f"staged {name} contains symlink")
+                st = p.lstat()
+                if stat.S_ISDIR(st.st_mode):
+                    continue
+                if not stat.S_ISREG(st.st_mode):
+                    die(f"staged {name} contains non-regular file")
+
+        target_files = {
+            p.relative_to(target_staged_root).as_posix(): p
+            for p in target_staged_root.rglob("*")
+            if p.is_file()
+        }
+        current_files = {
+            p.relative_to(current_staged_root).as_posix(): p
+            for p in current_staged_root.rglob("*")
+            if p.is_file()
+        }
+
+        expected_map = {e["rel_path"]: e for e in expected_entries}
+
+        if set(target_files.keys()) != set(expected_map.keys()):
+            die("staged generation target files do not match snapshot")
+        if set(current_files.keys()) != set(expected_map.keys()):
+            die("staged generation current duplicate files do not match snapshot")
+
+        for rel_f, exp in expected_map.items():
+            t_p = target_files[rel_f]
+            c_p = current_files[rel_f]
+            t_st = t_p.stat()
+            c_st = c_p.stat()
+            t_sha = sha256_file(t_p)
+            c_sha = sha256_file(c_p)
+
+            if t_sha != exp["sha256"] or t_st.st_size != exp["bytes"] or (t_st.st_mode & 0o7777) != exp["mode"]:
+                die("staged generation target file does not match snapshot")
+            if c_sha != exp["sha256"] or c_st.st_size != exp["bytes"] or (c_st.st_mode & 0o7777) != exp["mode"]:
+                die("staged generation current duplicate does not match snapshot")
+    except OSError:
+        die("cannot validate staged generation trees")
+
+
+def parse_and_validate_generation_metadata(
+    gen_mat: Any,
+) -> tuple[bool, str | None, str | None]:
+    """Validate generation materialization metadata shape and content.
+    Returns (ok, original_link, error_reason)."""
+    if not isinstance(gen_mat, dict):
+        return False, None, "generation_materialization is not an object"
+
+    # Exactly five keys required
+    expected_keys = {
+        "schema_version",
+        "link_path",
+        "original_link",
+        "target_path",
+        "archive_path",
+    }
+    if set(gen_mat.keys()) != expected_keys:
+        return False, None, "generation_materialization keys mismatch"
+
+    if gen_mat.get("schema_version") != GENERATION_MATERIALIZATION_SCHEMA:
+        return False, None, "generation_materialization schema mismatch"
+    if gen_mat.get("link_path") != GENERATION_LINK_PATH:
+        return False, None, "generation_materialization link_path mismatch"
+    if gen_mat.get("archive_path") != GENERATION_ARCHIVE_PATH:
+        return False, None, "generation_materialization archive_path mismatch"
+
+    orig_link = gen_mat.get("original_link")
+    if not isinstance(orig_link, str) or not is_safe_original_link(orig_link):
+        return False, None, "generation_materialization original_link is unsafe"
+    if orig_link == "current" or Path(orig_link).parts[0] == "current":
+        return False, None, "generation_materialization original_link cannot target current"
+
+    expected_target_path = f"data/generations/{orig_link}"
+    if gen_mat.get("target_path") != expected_target_path:
+        return False, None, "generation_materialization target_path mismatch"
+
+    return True, orig_link, None
 
 
 def _write_staging_text(staging: Path, member: str, text: str) -> None:
@@ -701,6 +1368,8 @@ def verify_archive(archive: Path, sidecar: Path) -> tuple[bool, dict[str, Any]]:
         "static_provenance_note": None,
         "data_index_generator_sha": None,
         "data_index_generator_reachable": None,
+        "generation_materialization_metadata_ok": None,
+        "generation_materialization_members_match": None,
     }
     report: dict[str, Any] = {
         "command": "verify",
@@ -837,10 +1506,7 @@ def verify_archive(archive: Path, sidecar: Path) -> tuple[bool, dict[str, Any]]:
             checks["digests_match"] = False
             return fail("member digest/size mismatch (archive tampered)")
         checks["digests_match"] = True
-        if not modes_ok:
-            checks["modes_match"] = False
-            return fail("member mode mismatch (archive tampered)")
-        checks["modes_match"] = True
+        checks["modes_match"] = modes_ok
 
         bundle = tmp / BUNDLE_MEMBER
         bundle_res = run([_cmd("git"), "bundle", "verify", str(bundle)], cwd=tmp)
@@ -927,6 +1593,64 @@ def verify_archive(archive: Path, sidecar: Path) -> tuple[bool, dict[str, Any]]:
                 else:
                     matches = [rev for rev in revs.stdout.split() if rev.startswith(generator_sha)]
                     checks["data_index_generator_reachable"] = len(matches) == 1
+
+        # Optional generation link materialization validation
+        gen_mat = manifest.get("generation_materialization")
+        if gen_mat is not None:
+            mat_ok, orig_link, mat_err = parse_and_validate_generation_metadata(gen_mat)
+            if not mat_ok:
+                checks["generation_materialization_metadata_ok"] = False
+                return fail(mat_err or "generation_materialization metadata invalid")
+            assert orig_link is not None
+            checks["generation_materialization_metadata_ok"] = True
+
+            # Member sets validation
+            target_dir_member = f"runtime/data/generations/{orig_link}"
+            curr_dir_member = GENERATION_ARCHIVE_PATH
+            target_prefix = f"runtime/data/generations/{orig_link}/"
+            curr_prefix = f"{GENERATION_ARCHIVE_PATH}/"
+
+            entries_by_path = {str(entry.get("path")): entry for entry in members}
+            if target_dir_member in entries_by_path:
+                checks["generation_materialization_members_match"] = False
+                return fail("regular member exists at generation target directory")
+            if curr_dir_member in entries_by_path:
+                checks["generation_materialization_members_match"] = False
+                return fail("regular member exists at generation current archive path")
+
+            target_files = {p[len(target_prefix):]: p for p in entries_by_path if p.startswith(target_prefix)}
+            curr_files = {p[len(curr_prefix):]: p for p in entries_by_path if p.startswith(curr_prefix)}
+
+            if not target_files or not curr_files:
+                checks["generation_materialization_members_match"] = False
+                return fail("generation_materialization member sets must be non-empty")
+
+            if set(target_files.keys()) != set(curr_files.keys()):
+                checks["generation_materialization_members_match"] = False
+                return fail("generation_materialization target and current members relative paths do not match")
+
+            pairs_ok = True
+            for rel_file, tpath in target_files.items():
+                cpath = curr_files[rel_file]
+                t_entry = entries_by_path[tpath]
+                c_entry = entries_by_path[cpath]
+                if (
+                    t_entry.get("sha256") != c_entry.get("sha256")
+                    or t_entry.get("bytes") != c_entry.get("bytes")
+                    or t_entry.get("mode") != c_entry.get("mode")
+                ):
+                    pairs_ok = False
+                    break
+
+            checks["generation_materialization_members_match"] = pairs_ok
+            if not pairs_ok:
+                return fail("generation_materialization member metadata mismatch between target and current")
+        else:
+            checks["generation_materialization_metadata_ok"] = None
+            checks["generation_materialization_members_match"] = None
+
+        if not modes_ok:
+            return fail("member mode mismatch (archive tampered)")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -945,18 +1669,15 @@ def print_failed_verify(report: dict[str, Any], command: str) -> None:
 # ── create ──────────────────────────────────────────────────────────────────
 
 
-def source_service_state(name: str) -> str:
-    """Only exactly ``active`` or exactly ``inactive`` are valid source states."""
-    res = run([_cmd("systemctl"), "is-active", name])
-    state = res.stdout.strip()
-    if res.returncode not in (0, 3):
-        die(f"systemctl is-active {name} failed (rc={res.returncode}); failing closed")
-    if state not in ("active", "inactive"):
-        die(f"source service {name} is in unexpected state {state!r}; failing closed before archive creation")
-    return state
-
-
 def cmd_create(args: argparse.Namespace) -> int:
+    # create is sg01 source-side and supports only systemd: an explicit
+    # box-persist selection fails before bundle creation, any controller
+    # call, source stop, or archive write.
+    if args.service_controller != "systemd":
+        die(
+            "create is sg01 source-side and supports only --service-controller systemd; "
+            "box-persist is invalid for create"
+        )
     require_attestation(args)
     if not str(args.archive).endswith(".portfolio-lab-recovery.tar"):
         die("archive path must end with .portfolio-lab-recovery.tar")
@@ -991,11 +1712,31 @@ def cmd_create(args: argparse.Namespace) -> int:
     # Source-side validation happens entirely before the tasker stop.
     check_clean_enough(source)
     check_config_secrets(config_file)
+
+    mat_flag = getattr(args, "materialize_generations_current", False)
+    allowed_dir_symlink: Path | None = None
+    gen_snapshot: tuple[str, Path, list[dict[str, Any]]] | None = None
+
+    if mat_flag:
+        gen_dir = data_dir / "generations"
+        if not gen_dir.exists() or not gen_dir.is_dir() or gen_dir.is_symlink():
+            die(f"generations directory missing or is a symlink: {gen_dir}")
+        curr_link = gen_dir / "current"
+        if not curr_link.is_symlink():
+            die(f"generations/current missing or is not a symlink: {curr_link}")
+        try:
+            raw_link = os.readlink(curr_link)
+        except OSError as exc:
+            die(f"cannot readlink generations/current: {exc}")
+        target_path, target_rel, entries = inspect_generation_target(gen_dir, raw_link)
+        allowed_dir_symlink = curr_link
+        gen_snapshot = (raw_link, target_path, entries)
+
     # Symlinked directories under an archived tree are refused before the
     # source service is quiesced: member collection must never follow links
     # out of the archived tree, and a refusal must never drain Tasker or
     # write an archive.
-    check_no_symlinked_dirs(data_dir, "runtime/data")
+    check_no_symlinked_dirs(data_dir, "runtime/data", allowed_dir_symlink=allowed_dir_symlink)
     check_no_symlinked_dirs(web_root, "static/web")
 
     service_name = args.tasker_service
@@ -1017,6 +1758,7 @@ def cmd_create(args: argparse.Namespace) -> int:
         die(f"managed Caddy block not found in {caddy_config}; refusing to create archive without it")
 
     _check_root()
+    controller = get_service_controller("systemd")
     tmp = Path(tempfile.mkdtemp(prefix="pl-recovery-create-"))
     initially_active = False
     stopped = False
@@ -1030,15 +1772,21 @@ def cmd_create(args: argparse.Namespace) -> int:
         if source_sha not in heads.stdout.split():
             die("bundle preflight failed: recorded source revision not in bundle heads")
 
-        initially_active = source_service_state(service_name) == "active"
+        initially_active = controller.status(service_name, "production", source, web_root)["state"] == "active"
         if initially_active:
-            stop_res = run([_cmd("systemctl"), "stop", service_name])
-            if stop_res.returncode != 0:
-                die(
-                    f"systemctl stop {service_name} failed: "
-                    f"{(stop_res.stderr or stop_res.stdout).strip()}"
-                )
+            controller.stop(service_name, "production", source, web_root)
             stopped = True
+
+        # Re-read and re-validate generation link and target snapshot post-stop, before staging
+        if mat_flag:
+            assert gen_snapshot is not None
+            expected_link, expected_target, expected_entries = gen_snapshot
+            validate_generation_snapshot(
+                data_dir / "generations",
+                expected_link,
+                expected_target,
+                expected_entries,
+            )
 
         staging = tmp / "staging"
         staging.mkdir()
@@ -1057,8 +1805,27 @@ def cmd_create(args: argparse.Namespace) -> int:
                 "tasker_service": service_name,
             },
         )
-        data_members = iter_tree_files(data_dir, "runtime/data")
+        data_members = iter_tree_files(data_dir, "runtime/data", allowed_dir_symlink=allowed_dir_symlink)
         copy_members_to_staging(data_members, data_dir, staging, "runtime/data")
+
+        # Materialize generations/current in staging if requested
+        mat_members: list[str] = []
+        if mat_flag:
+            assert gen_snapshot is not None
+            expected_link, expected_target, expected_entries = gen_snapshot
+            for entry in expected_entries:
+                rel_f = entry["rel_path"]
+                src_f = expected_target / rel_f
+                dst_f = staging / GENERATION_ARCHIVE_PATH / rel_f
+                dst_f.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_f, dst_f)
+                mat_members.append(f"{GENERATION_ARCHIVE_PATH}/{rel_f}")
+            # Validate staged trees against snapshot and each other before tar
+            try:
+                validate_staged_generation_trees(staging, expected_link, expected_entries)
+            except (OSError, PermissionError):
+                die("cannot validate staged generation trees")
+
         web_members = iter_tree_files(web_root, "static/web")
         copy_members_to_staging(web_members, web_root, staging, "static/web")
         (staging / "config").mkdir()
@@ -1096,11 +1863,12 @@ def cmd_create(args: argparse.Namespace) -> int:
                 CREATED_MEMBER,
                 TOOLS_MEMBER,
                 *data_members,
+                *mat_members,
                 *web_members,
                 *optional_members,
             ]
         )
-        embedded = {
+        embedded: dict[str, Any] = {
             "schema_version": SCHEMA_VERSION,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "source": {
@@ -1115,52 +1883,77 @@ def cmd_create(args: argparse.Namespace) -> int:
             "storage_encryption_attested": True,
             "members": member_entries([m for m in member_list if m != MANIFEST_MEMBER], staging),
         }
+        if mat_flag:
+            assert gen_snapshot is not None
+            expected_link, _, _ = gen_snapshot
+            embedded["generation_materialization"] = {
+                "schema_version": GENERATION_MATERIALIZATION_SCHEMA,
+                "link_path": GENERATION_LINK_PATH,
+                "original_link": expected_link,
+                "target_path": f"data/generations/{expected_link}",
+                "archive_path": GENERATION_ARCHIVE_PATH,
+            }
         _write_staging_json(staging, MANIFEST_MEMBER, embedded)
         all_members = sorted([*member_list, MANIFEST_MEMBER])
 
         # COPYFILE_DISABLE keeps macOS tar from embedding AppleDouble "._*"
         # metadata members; the archive member set must be exactly the
         # validated member list.
-        tar_res = run(
-            [_cmd("tar"), "-cf", str(archive), "-C", str(staging), *all_members],
-            env={"COPYFILE_DISABLE": "1"},
-        )
-        if tar_res.returncode != 0:
-            die(f"tar create failed: {(tar_res.stderr or tar_res.stdout).strip()}")
-
         sidecar = Path(str(archive) + ".sha256")
-        sidecar.write_text(f"{sha256_file(archive)}  {archive.name}\n", encoding="utf-8")
-        archive.chmod(0o600)
-        sidecar.chmod(0o600)
+        try:
+            tar_res = run(
+                [_cmd("tar"), "-cf", str(archive), "-C", str(staging), *all_members],
+                env={"COPYFILE_DISABLE": "1"},
+            )
+            if tar_res.returncode != 0:
+                die(f"tar create failed: {(tar_res.stderr or tar_res.stdout).strip()}")
 
-        ok, vreport = verify_archive(archive, sidecar)
+            sidecar.write_text(f"{sha256_file(archive)}  {archive.name}\n", encoding="utf-8")
+            archive.chmod(0o600)
+            sidecar.chmod(0o600)
+
+            ok, vreport = verify_archive(archive, sidecar)
+        except (Exception, SystemExit):
+            if mat_flag:
+                archive.unlink(missing_ok=True)
+                sidecar.unlink(missing_ok=True)
+            raise
+
         report = dict(vreport)
         report["command"] = "create"
         report["service_name"] = service_name
+        report["service_controller"] = controller.name
         report["initially_active"] = initially_active
         report["service_stopped"] = stopped
         report["service_started"] = False
         report["storage_encryption_attested"] = True
         report["member_count"] = len(all_members)
         if not ok:
+            if mat_flag:
+                archive.unlink(missing_ok=True)
+                sidecar.unlink(missing_ok=True)
             print_failed_verify(report, "create")
 
         if initially_active:
-            start_res = run([_cmd("systemctl"), "start", service_name])
-            if start_res.returncode != 0:
+            try:
+                controller.start(service_name, "production", source, web_root)
+            except SystemExit:
+                # Backward-compatible: the archive exists and was verified, so
+                # a failed restart still emits the create report (ok false,
+                # service_started false, archive fields) before stderr reports
+                # the failure; the finally-block fallback start still runs.
                 report["ok"] = False
                 print(json.dumps(report, indent=2, sort_keys=True))
-                die(
-                    f"systemctl start {service_name} failed: "
-                    f"{(start_res.stderr or start_res.stdout).strip()}"
-                )
+                raise
             restarted = True
             report["service_started"] = True
         report["ok"] = True
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
     finally:
-        # If the drain phase was entered, always attempt the source restart.
+        # The drain phase, once entered, always attempts the source restart;
+        # deliberately a plain run() (never controller.start) so a failed
+        # restart attempt cannot mask the original error.
         if initially_active and not restarted:
             run([_cmd("systemctl"), "start", service_name])
         shutil.rmtree(tmp, ignore_errors=True)
@@ -1195,6 +1988,8 @@ def _copy_tree_members(src_root: Path, dst_root: Path) -> None:
         target = dst_root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)
+        # Restore original mode from source file
+        os.chmod(target, path.stat().st_mode & 0o7777)
 
 
 def rollback_existing(path: Path) -> Path | None:
@@ -1211,10 +2006,47 @@ def rollback_existing(path: Path) -> Path | None:
     return rollback
 
 
+def _tracked_symlink_ok(checkout: Path, rel: str) -> bool:
+    """Tracked symlink (git mode 120000) restore contract: raw target must
+    be a non-empty relative path that resolves strictly inside the checkout
+    to an ordinary non-symlink regular file, with no symlinked component in
+    the raw target path (no chains, no directory targets, no broken
+    targets)."""
+    path = checkout / rel
+    try:
+        raw = os.readlink(path)
+    except OSError:
+        return False
+    if not raw or os.path.isabs(raw):
+        return False
+    try:
+        root = checkout.resolve(strict=True)
+    except OSError:
+        return False
+    target = (path.parent / raw).resolve(strict=False)
+    if not target.is_relative_to(root) or target == root:
+        return False
+    cursor = path.parent
+    try:
+        for part in Path(raw).parts:
+            cursor = cursor / part
+            if cursor.is_symlink():
+                return False
+        if cursor.is_symlink() or not cursor.is_file():
+            return False
+    except OSError:
+        return False
+    return True
+
+
 def scan_checkout_unsafe(checkout: Path) -> list[str]:
-    """Reject symlinks, gitlinks, and hardlinked regular files in the staged
-    source checkout before any recovery content is copied through them."""
+    """Reject gitlinks, hardlinked regular files, untracked symlinks, and
+    tracked symlinks that violate the file-symlink contract in the staged
+    source checkout before any recovery content is copied through them.
+    Tracked symlinks proven safe by _tracked_symlink_ok are allowed (the
+    authoritative repo legitimately contains AGENTS.md -> CLAUDE.md)."""
     bad: list[str] = []
+    tracked_symlinks: set[str] = set()
     res = run([_cmd("git"), "-C", str(checkout), "ls-files", "-s"])
     if res.returncode != 0:
         die(f"git ls-files failed in staged checkout: {(res.stderr or res.stdout).strip()}")
@@ -1224,8 +2056,13 @@ def scan_checkout_unsafe(checkout: Path) -> list[str]:
             continue
         mode = fields[0].split()[0] if fields[0].split() else ""
         rel = fields[1]
-        if mode in ("120000", "160000"):
-            bad.append(f"{rel} (git mode {mode})")
+        if mode == "120000":
+            tracked_symlinks.add(rel)
+            if not _tracked_symlink_ok(checkout, rel):
+                bad.append(f"{rel} (tracked symlink, git mode 120000)")
+            continue
+        if mode == "160000":
+            bad.append(f"{rel} (gitlink, git mode 160000)")
             continue
         path = checkout / rel
         if path.is_symlink():
@@ -1242,7 +2079,10 @@ def scan_checkout_unsafe(checkout: Path) -> list[str]:
         if ".git" in path.parts:
             continue
         if path.is_symlink():
-            bad.append(f"{path.relative_to(checkout)} (untracked symlink)")
+            rel = path.relative_to(checkout).as_posix()
+            if rel in tracked_symlinks:
+                continue
+            bad.append(f"{rel} (untracked symlink)")
     return bad
 
 
@@ -1307,6 +2147,12 @@ def cmd_restore(args: argparse.Namespace) -> int:
     if raw_web_root.is_symlink():
         die(f"restore target is a symlink: {raw_web_root}")
 
+    # Explicit controller selection; box-persist targets must sit under the
+    # box-persist root, rejected before any target mutation or controller call.
+    controller = get_service_controller(args.service_controller)
+    if args.service_controller == "box-persist":
+        validate_box_persist_targets(app_dir, web_root)
+
     # Verify fully before any target mutation.
     ok, report = verify_archive(archive, sidecar)
     if not ok:
@@ -1359,13 +2205,19 @@ def cmd_restore(args: argparse.Namespace) -> int:
                     f"--tasker-service {args.tasker_service!r} does not match the archived source service "
                     f"{archived_service!r}"
                 )
-            _check_root()
-            target_state = run([_cmd("systemctl"), "is-active", archived_service])
-            if target_state.stdout.strip() != "inactive":
-                die(
-                    f"target service {archived_service} must be inactive before production restore "
-                    f"(state: {target_state.stdout.strip() or 'unknown'})"
-                )
+            if args.service_controller == "systemd":
+                _check_root()
+                target_status = controller.status(archived_service, "production", app_dir, web_root)
+                if target_status["state"] != "inactive":
+                    die(
+                        f"target service {archived_service} must be inactive before production restore "
+                        f"(state: {target_status['state'] or 'unknown'})"
+                    )
+            else:
+                # box-persist prod staging preflights the target production
+                # status before any mutation; it remains staged only.
+                target_status = controller.status(archived_service, "production", app_dir, web_root)
+                require_prod_inactive_status(target_status, archived_service, "before production restore")
 
         # Dev API identity is validated before any target mutation: it must be
         # a distinct unit name, never the archived/production service.
@@ -1408,6 +2260,133 @@ def cmd_restore(args: argparse.Namespace) -> int:
         # any target.
         staging_app = checkout
         _copy_tree_members(extracted / "runtime" / "data", staging_app / "data")
+
+        # Generation link materialization reconstruction
+        gen_mat = manifest.get("generation_materialization")
+        if gen_mat is not None:
+            mat_ok, orig_link, mat_err = parse_and_validate_generation_metadata(gen_mat)
+            if not mat_ok:
+                die(f"restore manifest validation failed: {mat_err}")
+            assert orig_link is not None
+
+            staged_generations = staging_app / "data" / "generations"
+            staged_target = staged_generations / orig_link
+            staged_current = staged_generations / "current"
+
+            # Validate both staged target and staged current against manifest member sets
+            target_prefix = f"runtime/data/generations/{orig_link}/"
+            curr_prefix = f"{GENERATION_ARCHIVE_PATH}/"
+            manifest_members = manifest.get("members") or []
+            entries_by_path = {str(entry.get("path")): entry for entry in manifest_members}
+            expected_target_files = {
+                p[len(target_prefix):]: entries_by_path[p]
+                for p in entries_by_path
+                if p.startswith(target_prefix)
+            }
+            expected_curr_files = {
+                p[len(curr_prefix):]: entries_by_path[p]
+                for p in entries_by_path
+                if p.startswith(curr_prefix)
+            }
+
+            if not expected_target_files or not expected_curr_files:
+                die("manifest generation member sets must be non-empty")
+
+            # 2. Prove staged target is an ordinary non-symlink directory beneath staged generations
+            try:
+                if staged_generations.is_symlink() or not staged_generations.is_dir():
+                    die("staged generations dir is not an ordinary directory")
+                # Explicitly validate every intermediate component from staged_generations through staged_target
+                walk_comp = staged_generations
+                for part in Path(orig_link).parts:
+                    walk_comp = walk_comp / part
+                    if walk_comp.is_symlink() or not walk_comp.is_dir():
+                        die("staged generation target component is not an ordinary directory")
+                if staged_target.is_symlink() or not staged_target.is_dir():
+                    die("staged generation target is not an ordinary directory")
+                if not staged_target.resolve().is_relative_to(staged_generations.resolve()):
+                    die("staged generation target escapes generations directory")
+
+                # Validate files in staged_target
+                for p in staged_target.rglob("*"):
+                    if p.is_symlink():
+                        die("symlink found inside staged generation target")
+                    st = p.lstat()
+                    if stat.S_ISDIR(st.st_mode):
+                        continue
+                    if not stat.S_ISREG(st.st_mode):
+                        die("non-regular file found inside staged generation target")
+
+                staged_target_map = {
+                    p.relative_to(staged_target).as_posix(): p
+                    for p in staged_target.rglob("*")
+                    if p.is_file()
+                }
+                if set(staged_target_map.keys()) != set(expected_target_files.keys()):
+                    die("staged generation target files do not match manifest")
+                for rel_f, exp_entry in expected_target_files.items():
+                    p = staged_target_map[rel_f]
+                    st = p.stat()
+                    exp_mode = exp_entry.get("mode")
+                    # When extracted into staging checkout from tar via extractfile,
+                    # restore applies manifest mode to match archived mode.
+                    os.chmod(p, exp_mode)
+                    if (
+                        sha256_file(p) != exp_entry.get("sha256")
+                        or st.st_size != exp_entry.get("bytes")
+                        or (p.stat().st_mode & 0o7777) != exp_mode
+                    ):
+                        die("staged generation target file metadata does not match manifest")
+
+                # 3. Prove staged current is an ordinary non-symlink directory
+                if staged_current.is_symlink() or not staged_current.is_dir():
+                    die("staged generations/current is not an ordinary directory")
+                for p in staged_current.rglob("*"):
+                    if p.is_symlink():
+                        die("symlink found inside staged generations/current")
+                    st = p.lstat()
+                    if stat.S_ISDIR(st.st_mode):
+                        continue
+                    if not stat.S_ISREG(st.st_mode):
+                        die("non-regular file found inside staged generations/current")
+
+                staged_current_map = {
+                    p.relative_to(staged_current).as_posix(): p
+                    for p in staged_current.rglob("*")
+                    if p.is_file()
+                }
+                if set(staged_current_map.keys()) != set(expected_curr_files.keys()):
+                    die("staged generations/current files do not match manifest")
+                for rel_f, exp_entry in expected_curr_files.items():
+                    p = staged_current_map[rel_f]
+                    st = p.stat()
+                    exp_mode = exp_entry.get("mode")
+                    os.chmod(p, exp_mode)
+                    if (
+                        sha256_file(p) != exp_entry.get("sha256")
+                        or st.st_size != exp_entry.get("bytes")
+                        or (p.stat().st_mode & 0o7777) != exp_mode
+                    ):
+                        die("staged generations/current file metadata does not match manifest")
+
+                # 4. Remove only the staged ordinary current directory
+                shutil.rmtree(staged_current)
+
+                # 5. Recreate staged current as a relative symlink with exact original_link
+                os.symlink(orig_link, staged_current)
+
+                # 6. Prove reconstructed link resolves to staged target beneath generations
+                if not staged_current.is_symlink():
+                    die("failed to create staged generations/current symlink")
+                if os.readlink(staged_current) != orig_link:
+                    die("staged generations/current raw link mismatch")
+                if staged_current.resolve() != staged_target.resolve():
+                    die("staged generations/current does not resolve to target")
+                if not staged_current.resolve().is_relative_to(staged_generations.resolve()):
+                    die("staged generations/current resolved target escapes generations directory")
+            except OSError:
+                die("failed to reconstruct staged generations/current symlink")
+
         config_restored = False
         if args.target_mode == "prod" and (extracted / CONFIG_MEMBER).is_file():
             (staging_app / "config").mkdir(parents=True, exist_ok=True)
@@ -1474,6 +2453,7 @@ def cmd_restore(args: argparse.Namespace) -> int:
         )
 
         report["command"] = "restore"
+        report["service_controller"] = controller.name
         report["staged"] = True
         report["app_dir"] = str(app_dir)
         report["web_root"] = str(web_root)
@@ -1486,6 +2466,8 @@ def cmd_restore(args: argparse.Namespace) -> int:
         report["rollback_web_root"] = str(rollback_web) if rollback_web else None
         if args.target_mode == "prod":
             report["activation_note"] = "staged only; production activation is a separate activate-prod step"
+            if args.service_controller == "box-persist":
+                report["controller_status"] = normalized_status(target_status)
             report["ok"] = True
             print(json.dumps(report, indent=2, sort_keys=True))
             return 0
@@ -1495,18 +2477,29 @@ def cmd_restore(args: argparse.Namespace) -> int:
             "non-secret config separately"
         )
         if args.start_dev_api:
-            _check_root()
             assert dev_name is not None
-            unit_dir = Path(os.environ.get("PLR_SYSTEMD_UNIT_DIR", "/etc/systemd/system"))
-            unit_dir.mkdir(parents=True, exist_ok=True)
-            unit_path = unit_dir / f"{dev_name}.service"
-            unit_path.write_text(_dev_api_unit(app_dir, web_root), encoding="utf-8")
-            run_checked([_cmd("systemctl"), "daemon-reload"], "systemctl daemon-reload")
-            run_checked([_cmd("systemctl"), "enable", dev_name], f"systemctl enable {dev_name}")
-            run_checked([_cmd("systemctl"), "restart", dev_name], f"systemctl restart {dev_name}")
-            report["service_started"] = True
-            report["service_name"] = dev_name
-            report["dev_api_unit"] = str(unit_path)
+            if args.service_controller == "systemd":
+                _check_root()
+                unit_dir = Path(os.environ.get("PLR_SYSTEMD_UNIT_DIR", "/etc/systemd/system"))
+                unit_dir.mkdir(parents=True, exist_ok=True)
+                unit_path = unit_dir / f"{dev_name}.service"
+                unit_path.write_text(_dev_api_unit(app_dir, web_root), encoding="utf-8")
+                run_checked([_cmd("systemctl"), "daemon-reload"], "systemctl daemon-reload")
+                run_checked([_cmd("systemctl"), "enable", dev_name], f"systemctl enable {dev_name}")
+                run_checked([_cmd("systemctl"), "restart", dev_name], f"systemctl restart {dev_name}")
+                report["service_started"] = True
+                report["service_name"] = dev_name
+                report["dev_api_unit"] = str(unit_path)
+            else:
+                # box-persist dev: delegate to start-candidate (no systemd
+                # unit write, daemon-reload, enable, or restart) and require
+                # the returned active/disabled/zero-instance/exact/PID status.
+                started = controller.start(dev_name, "candidate", app_dir, web_root)
+                require_candidate_started(started, dev_name)
+                report["service_started"] = True
+                report["service_name"] = dev_name
+                report["dev_api_unit"] = None
+                report["controller_status"] = normalized_status(started)
         report["ok"] = True
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
@@ -1528,6 +2521,9 @@ def cmd_activate(args: argparse.Namespace) -> int:
         die("activate-prod --app-dir and --web-root must be absolute paths")
     app_dir = raw_app_dir.resolve()
     web_root = raw_web_root.resolve()
+    controller = get_service_controller(args.service_controller)
+    if args.service_controller == "box-persist":
+        validate_box_persist_targets(app_dir, web_root)
     service_name = args.tasker_service
     validate_service_name(service_name)
 
@@ -1642,39 +2638,8 @@ def cmd_activate(args: argparse.Namespace) -> int:
     if not (app_dir / ".env.local").is_file():
         die("restored app dir has no .env.local; provision secrets before activation")
 
-    # All gates above pass before any target mutation.
-    _check_root()
-    is_active = run([_cmd("systemctl"), "is-active", service_name])
-    if is_active.stdout.strip() != "inactive":
-        die(
-            f"target service {service_name} must be inactive before activation "
-            f"(state: {is_active.stdout.strip() or 'unknown'})"
-        )
-
-    unit_src = state_dir / "metadata" / "tasker-unit.txt"
-    if not unit_src.is_file():
-        die("restored state missing metadata/tasker-unit.txt; activation requires the archived unit")
-    # Re-bind the restored unit to the verified archive manifest and re-run
-    # the secret scan before any systemd mutation; the manifest itself was
-    # proven byte-identical to the verified archive above.
-    unit_sha: str | None = None
-    for entry in members:
-        if str(entry.get("path")) == UNIT_MEMBER:
-            candidate = entry.get("sha256")
-            if isinstance(candidate, str) and len(candidate) == 64:
-                unit_sha = candidate
-            break
-    if unit_sha is None or sha256_file(unit_src) != unit_sha:
-        die("restored tasker unit does not match the verified archive manifest; refusing activation")
-    check_text_secrets(unit_src.read_text(encoding="utf-8", errors="replace"), "tasker unit")
-    unit_dir = Path(os.environ.get("PLR_SYSTEMD_UNIT_DIR", "/etc/systemd/system"))
-    unit_dir.mkdir(parents=True, exist_ok=True)
-    unit_path = unit_dir / f"{service_name}.service"
-    shutil.copy2(unit_src, unit_path)
-    run_checked([_cmd("systemctl"), "daemon-reload"], "systemctl daemon-reload")
-    run_checked([_cmd("systemctl"), "enable", service_name], f"systemctl enable {service_name}")
-    run_checked([_cmd("systemctl"), "start", service_name], f"systemctl start {service_name}")
-
+    # All gates above pass before any target mutation or controller call.
+    label = args.former_authority_confirmed_stopped.strip()
     report = {
         "command": "activate-prod",
         "schema_version": SCHEMA_VERSION,
@@ -1682,14 +2647,14 @@ def cmd_activate(args: argparse.Namespace) -> int:
         "app_dir": str(app_dir),
         "web_root": str(web_root),
         "service_name": service_name,
-        "unit_installed": True,
-        "unit_path": str(unit_path),
+        "service_controller": controller.name,
+        "unit_installed": False,
         "service_started": True,
         "source_sha": source_sha,
         "generator_git_sha": generator_sha,
         "archive_sha256": fresh.get("archive_sha256"),
         "manifest_sha256": fresh.get("manifest_sha256"),
-        "former_authority_confirmed_stopped": args.former_authority_confirmed_stopped.strip(),
+        "former_authority_confirmed_stopped": label,
         "dns_caddy_unchanged": True,
         "post_activation_acceptance": [
             "desktop and mobile site load",
@@ -1703,6 +2668,50 @@ def cmd_activate(args: argparse.Namespace) -> int:
             "expected kill/halt condition",
         ],
     }
+    if args.service_controller == "systemd":
+        _check_root()
+        target_status = controller.status(service_name, "production", app_dir, web_root)
+        if target_status["state"] != "inactive":
+            die(
+                f"target service {service_name} must be inactive before activation "
+                f"(state: {target_status['state'] or 'unknown'})"
+            )
+
+        unit_src = state_dir / "metadata" / "tasker-unit.txt"
+        if not unit_src.is_file():
+            die("restored state missing metadata/tasker-unit.txt; activation requires the archived unit")
+        # Re-bind the restored unit to the verified archive manifest and re-run
+        # the secret scan before any systemd mutation; the manifest itself was
+        # proven byte-identical to the verified archive above.
+        unit_sha: str | None = None
+        for entry in members:
+            if str(entry.get("path")) == UNIT_MEMBER:
+                candidate = entry.get("sha256")
+                if isinstance(candidate, str) and len(candidate) == 64:
+                    unit_sha = candidate
+                break
+        if unit_sha is None or sha256_file(unit_src) != unit_sha:
+            die("restored tasker unit does not match the verified archive manifest; refusing activation")
+        check_text_secrets(unit_src.read_text(encoding="utf-8", errors="replace"), "tasker unit")
+        unit_dir = Path(os.environ.get("PLR_SYSTEMD_UNIT_DIR", "/etc/systemd/system"))
+        unit_dir.mkdir(parents=True, exist_ok=True)
+        unit_path = unit_dir / f"{service_name}.service"
+        shutil.copy2(unit_src, unit_path)
+        run_checked([_cmd("systemctl"), "daemon-reload"], "systemctl daemon-reload")
+        run_checked([_cmd("systemctl"), "enable", service_name], f"systemctl enable {service_name}")
+        run_checked([_cmd("systemctl"), "start", service_name], f"systemctl start {service_name}")
+        report["unit_installed"] = True
+        report["unit_path"] = str(unit_path)
+    else:
+        # box-persist: preflight the production status before any controller
+        # activation call; the returned status is the explicit
+        # second-scheduler prevention gate. No systemd units are written.
+        preflight = controller.status(service_name, "production", app_dir, web_root)
+        require_prod_inactive_status(preflight, service_name, "before activation")
+        activated = controller.activate(service_name, app_dir, web_root, label)
+        require_activation_status(activated, service_name)
+        report["controller_preflight_status"] = normalized_status(preflight)
+        report["controller_activation_status"] = normalized_status(activated)
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0
 
@@ -1720,6 +2729,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_create.add_argument("--tasker-service", required=True, help="tasker systemd unit name")
     p_create.add_argument("--archive", required=True, help="explicit absolute <name>.portfolio-lab-recovery.tar path")
     p_create.add_argument("--storage-encryption-attested", action="store_true", help="attest storage-layer encryption")
+    p_create.add_argument(
+        "--service-controller",
+        choices=("systemd", "box-persist"),
+        default="systemd",
+        help="service controller (create is sg01 source-side: systemd only)",
+    )
+    p_create.add_argument(
+        "--materialize-generations-current",
+        action="store_true",
+        default=False,
+        help="materialize data/generations/current directory symlink in recovery archive",
+    )
 
     p_verify = sub.add_parser("verify", help="verify an archive against its sidecar")
     p_verify.add_argument("--archive", required=True)
@@ -1732,6 +2753,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_restore.add_argument("--allow-production-paths", action="store_true", help="prod: allow production paths")
     p_restore.add_argument("--start-dev-api", action="store_true", help="dev: start distinct no-scheduler tasker unit")
     p_restore.add_argument("--tasker-service", default=None, help="dev API unit name (default: portfolio-lab-tasker-recovery-dev)")
+    p_restore.add_argument(
+        "--service-controller",
+        choices=("systemd", "box-persist"),
+        default="systemd",
+        help="service controller (box-persist only for cursor-box targets)",
+    )
 
     p_activate = sub.add_parser("activate-prod", help="promote a staged prod restore (separate from restore)")
     p_activate.add_argument("--app-dir", required=True)
@@ -1742,6 +2769,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--former-authority-confirmed-stopped",
         default="",
         help="label of the former authority confirmed stopped",
+    )
+    p_activate.add_argument(
+        "--service-controller",
+        choices=("systemd", "box-persist"),
+        default="systemd",
+        help="service controller (box-persist only for cursor-box targets)",
     )
     return parser
 

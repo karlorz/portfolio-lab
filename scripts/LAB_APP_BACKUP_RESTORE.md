@@ -46,6 +46,25 @@ sidecars, manifests, or secrets in the repository or SkillWiki vault.
   approved equivalent wrapper); the recovery CLI invokes `systemctl` directly
   and does not elevate with `sudo`.
 
+## Service controller and generation symlink options
+
+The recovery CLI supports `--service-controller systemd|box-persist` (default `systemd`).
+The `create` command remains source-side on sg01 and requires `systemd`; it rejects
+`box-persist`. The `box-persist` controller option is valid only on restore targets
+(both `dev` and `prod` targets, as well as `activate-prod`) where native supervisor
+processes manage the Tasker lifecycle without systemd. In `dev` mode with `box-persist`,
+Tasker runs in API-only shadow mode with dual scheduler-disable controls (`TASKER_DISABLE_SCHEDULER=1`
+and `--no-scheduler`). In `prod` mode, staging proves the service is inactive, and
+`activate-prod` requires explicit former-authority shutdown proof and enforces the
+strict one-scheduler invariant. For full cursor-box host procedures, see the separate
+runbook `scripts/PORTFOLIO_LAB_CURSOR_BOX_MIGRATION.md`.
+
+When creating recovery archives where runtime data includes generation directories,
+pass `--materialize-generations-current`. This option permits only the exact relative
+directory symlink at `data/generations/current`, duplicates ordinary target file bytes
+into the archive member tree, verifies metadata and member parity before creation, and
+reconstructs the exact relative link during restore.
+
 ## Create and verify a recovery point
 
 ```bash
@@ -57,7 +76,9 @@ scripts/python_runtime.sh scripts/portfolio_lab_recovery.py create \
   --web-root /var/www/portfolio-lab \
   --tasker-service portfolio-lab-tasker \
   --archive "$ARCHIVE" \
-  --storage-encryption-attested
+  --storage-encryption-attested \
+  --service-controller systemd \
+  --materialize-generations-current
 
 scripts/python_runtime.sh scripts/portfolio_lab_recovery.py verify \
   --archive "$ARCHIVE"
@@ -188,5 +209,6 @@ making another backup attempt.
 ## Related documents
 
 - `scripts/LAB_APP_DEPLOY.md` — normal host-native deployment and Tasker drain.
+- `scripts/PORTFOLIO_LAB_CURSOR_BOX_MIGRATION.md` — cursor-box host-specific migration and shadow dry-run runbook.
 - `projects/portfolio-lab/work/2026-08-14-portfolio-lab-backup-restore/` in
   the SkillWiki vault — planned implementation and attended drill evidence.
