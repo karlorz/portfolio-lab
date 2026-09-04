@@ -77,7 +77,7 @@ Post-cutover: the one-scheduler invariant applies to the current authority
   `--materialize-generations-current` so the `data/generations/current`
   relative symlink is preserved as ordinary bytes with metadata/member parity;
   restore reconstructs the exact relative link.
-- Seed and candidate verification gates: after restore, verify archive
+- Historical dry-run guidance: after restore, verify archive
   sidecar, Git bundle commit, SQLite integrity, static manifest
   `_release.json.source_git_sha`, scheduler disable controls, and loopback
   bindings before treating the candidate as dry-run ready.
@@ -102,12 +102,11 @@ python3 scripts/portfolio_lab_migration_compare.py \
 - Differences are classified as: `expected`, `explained`,
   `blocking`, or `unavailable`.
 - Terminal statements: on pass,
-  `Dry run passed; cutover approval required.`; on blocked,
+  `Comparison passed; attended operational gates remain required.`; on blocked,
   `Dry run blocked` followed by the failed check IDs and
   `Read-only comparison: this tool did not change authority or scheduler state.`
-  The comparison tool is read-only: it never changes — and therefore never
-  asserts anything about — who holds authority or whether any scheduler is
-  disabled.
+  The comparison tool is read-only: it never changes authority or scheduler
+  state.
 
 ## Browser verification
 

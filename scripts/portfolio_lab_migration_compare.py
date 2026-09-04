@@ -28,6 +28,7 @@ SCHEMA_EVIDENCE = "portfolio-lab-migration-evidence/v1"
 SCHEMA_EXPLANATIONS = "portfolio-lab-migration-explanations/v1"
 SCHEMA_COMPARISON = "portfolio-lab-migration-comparison/v1"
 SCHEMA_RELEASE = "portfolio-lab-static-release/v1"
+PASS_TERMINAL_STATEMENT = "Comparison passed; attended operational gates remain required."
 
 HEX_40_RE = re.compile(r"^[0-9a-f]{40}$")
 HEX_64_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -1441,7 +1442,7 @@ def run_comparison(
 
     if counts["blocking"] == 0 and counts["unavailable"] == 0:
         verdict = "pass"
-        terminal_stmt = "Dry run passed; cutover approval required."
+        terminal_stmt = PASS_TERMINAL_STATEMENT
         exit_code = 0
     else:
         verdict = "blocked"
@@ -1522,7 +1523,7 @@ def run_comparison(
 
     md_lines.append("## Terminal Status\n")
     if verdict == "pass":
-        md_lines.append("Dry run passed; cutover approval required.")
+        md_lines.append(PASS_TERMINAL_STATEMENT)
     else:
         failed_ids = [d["check_id"] for d in differences if d["classification"] in ("blocking", "unavailable")]
         md_lines.append("Dry run blocked")
