@@ -34,6 +34,11 @@ Beat 12: CLI ``--help`` smoke (session-a / session-b / idle-decode) + OPEN>=1
 brainstorm/search_plan spy (recount-only; callback never called). Proof:
 pytest ``-k beat12``.
 
+Beat 13: Queue markdown round-trip (parse → serialize/write → parse) preserves
+six fields + ready-for-implement for OPEN; Session A stub append id stability
+(empty→Q1; after ship/clear→new id no collide; two_open first-OPEN unchanged).
+Proof: pytest ``-k beat13``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

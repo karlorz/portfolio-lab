@@ -186,6 +186,65 @@ def format_queue_item(
     return "\n".join(lines)
 
 
+def serialize_queue_item(item: QueueItem) -> str:
+    """Serialize one parsed ``QueueItem`` back to six-field markdown."""
+    return format_queue_item(
+        item_id=item.item_id,
+        heading=item.heading or item.title or item.item_id,
+        title=item.title,
+        acceptance=item.acceptance,
+        risks=item.risks,
+        file_touch=item.file_touch,
+        breaking_change=item.breaking_change,
+        redeploy_notes=item.redeploy_notes,
+        status=item.status if item.status != "" else "OPEN",
+        ready_for_implement=(
+            item.ready_for_implement if item.ready_for_implement != "" else "yes"
+        ),
+    )
+
+
+def serialize_queue_items(items: Iterable[QueueItem]) -> str:
+    """Serialize Queue items as a section body (no ``## Queue`` heading)."""
+    parts: list[str] = []
+    for item in items:
+        block = serialize_queue_item(item)
+        parts.append(block if block.endswith("\n") else block + "\n")
+    return "".join(parts)
+
+
+def write_queue_section(
+    markdown: str, items: Iterable[QueueItem] | None = None
+) -> str:
+    """Replace ``## Queue`` body with serialized items (parse → serialize → write).
+
+    When ``items`` is None, re-serialize currently parsed Queue items (identity
+    round-trip). Other sections (Watch / Project Work / Heartbeat) are preserved.
+    Passing an empty iterable clears Queue item rows while keeping the section.
+    """
+    item_list = list(parse_queue_items(markdown) if items is None else items)
+    body = serialize_queue_items(item_list)
+    matches = list(_SECTION_RE.finditer(markdown))
+    queue_idx = None
+    for idx, match in enumerate(matches):
+        if match.group(1).strip().lower() == "queue":
+            queue_idx = idx
+            break
+    if queue_idx is None:
+        block = body if body.endswith("\n") or not body else body + "\n"
+        suffix = "" if markdown.endswith("\n") or not markdown else "\n"
+        return f"{markdown}{suffix}\n## Queue\n\n{block}"
+
+    start = matches[queue_idx].end()
+    end = matches[queue_idx + 1].start() if queue_idx + 1 < len(matches) else len(markdown)
+    before = markdown[:start].rstrip() + "\n\n"
+    after = markdown[end:]
+    insert = body if body.endswith("\n") or not body else body + "\n"
+    if not insert.strip():
+        insert = "\n"
+    return before + insert + ("" if after.startswith("\n") or not after else "\n") + after
+
+
 def append_queue_item(markdown: str, item_markdown: str) -> str:
     """Insert ``item_markdown`` at the end of the ``## Queue`` section."""
     matches = list(_SECTION_RE.finditer(markdown))

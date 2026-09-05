@@ -23,6 +23,11 @@ Beat 12: CLI ``--help`` smoke (session-a / session-b / idle-decode mention
 JSON / dry-run / idle fire as appropriate) and OPEN>=1 brainstorm/search_plan
 spy (recount-only; custom callback never called). Proof: pytest ``-k beat12``.
 
+Beat 13: Queue markdown round-trip (parse → serialize/write → parse preserves
+six fields + ready-for-implement for OPEN items) and Session A stub append id
+stability (empty→Q1; after ship/clear→new id no collide; two_open first-OPEN
+unchanged). Proof: pytest ``-k beat13``.
+
 JSON: ``SessionResult.to_dict()`` (aliases ``to_json_dict`` / ``session_b_result_dict``)
 is the shared Session B ``--json`` / test contract for idle / decode_only / dry_run /
 shipped. Session A: ``SessionAResult.to_dict()`` (aliases ``to_json_dict`` /
@@ -43,8 +48,12 @@ from src.research_implement.queue import (
     is_b_pickable,
     is_complete_six_field,
     is_open_status,
+    next_queue_id,
     parse_queue_items,
     render_queue_count,
+    serialize_queue_item,
+    serialize_queue_items,
+    write_queue_section,
 )
 from src.research_implement.session_a import (
     SESSION_A_RESULT_JSON_KEYS,
@@ -89,6 +98,10 @@ __all__ = [
     "count_open",
     "first_b_pick",
     "format_queue_item",
+    "next_queue_id",
+    "serialize_queue_item",
+    "serialize_queue_items",
+    "write_queue_section",
     "is_b_pickable",
     "is_complete_six_field",
     "is_open_status",

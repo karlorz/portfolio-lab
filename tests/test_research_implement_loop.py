@@ -22,8 +22,13 @@ from src.research_implement.queue import (
     is_b_pickable,
     is_complete_six_field,
     is_open_status,
+    is_ready_yes,
+    next_queue_id,
     parse_queue_items,
     render_queue_count,
+    serialize_queue_item,
+    serialize_queue_items,
+    write_queue_section,
 )
 from src.research_implement.session_a import (
     SESSION_A_RESULT_JSON_KEYS,
@@ -1971,3 +1976,152 @@ def test_beat12_brainstorm_spy_open_ge1_search_plan_not_called(tmp_path: Path):
     assert light["verdict"] == "light"
     assert light["wrote_item"] is False
 
+
+
+# --- Beat 13: Queue markdown round-trip + Session A stub append id stability ---
+
+
+def test_beat13_queue_markdown_roundtrip_preserves_six_fields_and_ready():
+    """Beat 13: parse → serialize/write → parse preserves six fields + ready for OPEN.
+
+    Covers one_open_ready and two_open_ready fixtures via write_queue_section
+    (items=None identity path and explicit items path).
+    """
+    for name in ("one_open_ready.md", "two_open_ready.md"):
+        src = _load(name)
+        items = parse_queue_items(src)
+        assert items
+        open_items = [i for i in items if is_open_status(i.status)]
+        assert open_items
+        for item in open_items:
+            assert is_complete_six_field(item)
+            assert item.ready_for_implement.strip().lower() == "yes"
+
+        # Identity write (items=None) and explicit write both round-trip.
+        for written in (
+            write_queue_section(src),
+            write_queue_section(src, items),
+            write_queue_section(src, list(items)),
+        ):
+            assert "## Watch" in written or "## Heartbeat" in written
+            again = parse_queue_items(written)
+            assert [i.item_id for i in again] == [i.item_id for i in items]
+            for before, after in zip(items, again, strict=True):
+                if not is_open_status(before.status):
+                    continue
+                assert after.item_id == before.item_id
+                assert after.heading == before.heading
+                for field in REQUIRED_FIELDS:
+                    assert after.field_map()[field] == before.field_map()[field]
+                assert after.status.split(None, 1)[0].upper() == "OPEN"
+                assert is_ready_yes(after.ready_for_implement)
+                assert is_complete_six_field(after)
+                assert is_b_pickable(after)
+
+        # serialize_queue_item alone preserves fields when re-parsed as fragment.
+        for item in open_items:
+            block = serialize_queue_item(item)
+            assert "ready-for-implement: yes" in block.lower()
+            for i, field in enumerate(REQUIRED_FIELDS, start=1):
+                assert f"{i}. **{field}**:" in block
+            frag_items = parse_queue_items(block)
+            assert len(frag_items) == 1
+            got = frag_items[0]
+            assert got.item_id == item.item_id
+            for field in REQUIRED_FIELDS:
+                assert got.field_map()[field] == item.field_map()[field]
+            assert got.ready_for_implement.strip().lower() == "yes"
+
+
+def test_beat13_append_id_stability_empty_ship_clear_two_open(tmp_path: Path):
+    """Beat 13: stub append ids stable/new without collide; two_open first-OPEN unchanged.
+
+    - empty → Session A stub → Q1 (stable first id)
+    - ship Q1 → Session A stub again → Q2 (new, no collide with shipped Q1)
+    - clear Queue rows → Session A stub → Q1 again (stable after clear)
+    - two_open_ready: first-OPEN pick remains Q1 (unchanged by id helpers)
+    """
+    # --- empty → stub append → Q1 ---
+    empty = _load("empty_queue.md")
+    plan = tmp_path / "id_stability.md"
+    plan.write_text(empty, encoding="utf-8")
+    assert count_open(parse_queue_items(plan.read_text(encoding="utf-8"))) == 0
+    assert next_queue_id(parse_queue_items(plan.read_text(encoding="utf-8"))) == "Q1"
+
+    a1 = run_session_a_path(plan, brainstorm=stub_brainstorm, write=True)
+    assert a1.ok and a1.verdict == "queued" and a1.wrote_item
+    items1 = parse_queue_items(plan.read_text(encoding="utf-8"))
+    assert [i.item_id for i in items1] == ["Q1"]
+    assert count_open(items1) == 1
+    assert first_b_pick(items1).item_id == "Q1"
+
+    # --- ship Q1 → stub append → Q2 (no collide) ---
+    ship_fn = make_fixture_ship_implement("beat13cafe", note="beat13 ship Q1")
+    shipped = run_session_b_path(plan, implement=ship_fn, write=True)
+    assert shipped.ok and shipped.verdict == "shipped"
+    after_ship = parse_queue_items(plan.read_text(encoding="utf-8"))
+    assert count_open(after_ship) == 0
+    assert after_ship[0].item_id == "Q1"
+    assert after_ship[0].status.upper().startswith("SHIPPED")
+    assert next_queue_id(after_ship) == "Q2"
+
+    a2 = run_session_a_path(plan, brainstorm=stub_brainstorm, write=True)
+    assert a2.ok and a2.verdict == "queued" and a2.wrote_item
+    items2 = parse_queue_items(plan.read_text(encoding="utf-8"))
+    ids2 = [i.item_id for i in items2]
+    assert "Q1" in ids2 and "Q2" in ids2
+    assert len(ids2) == len(set(ids2))  # no collide
+    open2 = [i for i in items2 if is_b_pickable(i)]
+    assert len(open2) == 1 and open2[0].item_id == "Q2"
+    assert first_b_pick(items2).item_id == "Q2"
+
+    # --- clear Queue rows → stub append → Q1 stable again ---
+    cleared_md = write_queue_section(plan.read_text(encoding="utf-8"), [])
+    plan.write_text(cleared_md, encoding="utf-8")
+    cleared_items = parse_queue_items(plan.read_text(encoding="utf-8"))
+    assert cleared_items == []
+    assert count_open(cleared_items) == 0
+    assert next_queue_id(cleared_items) == "Q1"
+
+    a3 = run_session_a_path(plan, brainstorm=stub_brainstorm, write=True)
+    assert a3.ok and a3.verdict == "queued"
+    items3 = parse_queue_items(plan.read_text(encoding="utf-8"))
+    assert [i.item_id for i in items3] == ["Q1"]
+    assert first_b_pick(items3).item_id == "Q1"
+
+    # --- two_open_ready: first-OPEN pick unchanged (Q1) ---
+    two = _load("two_open_ready.md")
+    two_items = parse_queue_items(two)
+    assert [i.item_id for i in two_items] == ["Q1", "Q2"]
+    assert first_b_pick(two_items).item_id == "Q1"
+    # Round-trip write must not change first-OPEN pick.
+    two_written = write_queue_section(two, two_items)
+    two_again = parse_queue_items(two_written)
+    assert [i.item_id for i in two_again] == ["Q1", "Q2"]
+    assert first_b_pick(two_again).item_id == "Q1"
+    assert count_open(two_again) == 2
+    # next id after two open is Q3 (no collide); first-OPEN still Q1
+    assert next_queue_id(two_again) == "Q3"
+    assert first_b_pick(two_again).item_id == "Q1"
+    # Session A on two_open is recount-only — does not append, pick unchanged
+    light = run_session_a(two_written, brainstorm=stub_brainstorm)
+    assert light.ok and light.verdict == "light" and light.wrote_item is False
+    light_items = parse_queue_items(light.plan_text)
+    assert first_b_pick(light_items).item_id == "Q1"
+    assert [i.item_id for i in light_items] == ["Q1", "Q2"]
+
+
+def test_beat13_serialize_queue_items_body_then_parse():
+    """Beat 13: serialize_queue_items body re-parses with six fields + ready."""
+    src = _load("two_open_ready.md")
+    items = parse_queue_items(src)
+    body = serialize_queue_items(items)
+    assert body.count("### Q") == 2
+    again = parse_queue_items("## Queue\n\n" + body)
+    assert len(again) == 2
+    for before, after in zip(items, again, strict=True):
+        for field in REQUIRED_FIELDS:
+            assert after.field_map()[field] == before.field_map()[field]
+        assert after.ready_for_implement.strip().lower() == "yes"
+        assert is_b_pickable(after)
+    assert first_b_pick(again).item_id == "Q1"

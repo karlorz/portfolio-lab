@@ -979,13 +979,15 @@ research-implement-e2e-dry-run:
 # Proof: pytest -k beat11_full_pipeline (fixture_ship is test-double only).
 # Beat 12: CLI --help smoke (session-a/b/idle-decode) + brainstorm spy OPEN>=1 recount-only.
 # Proof: pytest -k beat12
+# Beat 13: Queue markdown round-trip + Session A stub append id stability.
+# Proof: pytest -k beat13
 .PHONY: research-implement-e2e-pipeline
 research-implement-e2e-pipeline:
 	@echo "Beat 11 full pipeline (tmp_path via pytest; side-dev only):"
 	@echo "  A stub → B dry_run JSON → B fixture_ship → A light (OPEN>=1) and/or B idle"
 	@echo "  dry_run never ships; fixture_ship ships on tmp_path only; never scheduler_delete"
 	@echo "Run: PORTFOLIO_LAB_ENABLE_ML=0 <RI_PYTHON> -m pytest tests/test_research_implement_loop.py -q -k beat11_full_pipeline"
-	@echo "Or:  make test-research-implement   # full A/B suite incl. beat10/beat11/beat12"
+	@echo "Or:  make test-research-implement   # full A/B suite incl. beat10/beat11/beat12/beat13"
 
 # Side-dev only (no Tasker / no LLM / no 8000/8001): A/B loop + contract
 # fixture tests + optional host contract (skip-if-missing).
