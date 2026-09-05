@@ -53,6 +53,11 @@ dry_run_implement, fixture_ship, incomplete_candidate_reasons, …) and Makefile
 help/echo listing ``test-research-implement``, ``e2e-dry-run``, ``e2e-pipeline``.
 Proof: pytest ``-k beat18``.
 
+Beat 19: When rewriting ``## Queue`` (append / ship / serialize via
+``write_queue_section``), preserve other markdown sections (Watch / Project
+Work / Heartbeat). Fixture ``watch_queue_heartbeat*.md`` + pytest ``-k beat19``:
+A append or B ship updates Queue while non-Queue markers stay present.
+
 JSON: ``SessionResult.to_dict()`` (aliases ``to_json_dict`` / ``session_b_result_dict``)
 is the shared Session B ``--json`` / test contract for idle / decode_only / dry_run /
 shipped. Session A: ``SessionAResult.to_dict()`` (aliases ``to_json_dict`` /

@@ -29,6 +29,7 @@ from src.research_implement.queue import (
     serialize_queue_item,
     serialize_queue_items,
     write_queue_section,
+    mark_item_shipped,
 )
 from src.research_implement.session_a import (
     SESSION_A_RESULT_JSON_KEYS,
@@ -3107,3 +3108,110 @@ def test_beat18_makefile_lists_research_implement_targets():
     assert "test-research-implement" in pipe
     assert "e2e" in pipe.lower() or "pipeline" in pipe.lower()
     assert "beat18" in pipe.lower() or "beat11" in pipe.lower()
+
+
+# --- Beat 19: Queue rewrite preserves Watch / Project Work / Heartbeat ---
+
+_BEAT19_MARKERS = (
+    "BEAT19_WATCH_MARKER",
+    "BEAT19_PROJECT_MARKER",
+    "BEAT19_HEARTBEAT_MARKER",
+)
+_BEAT19_SECTIONS = ("## Watch", "## Project Work", "## Heartbeat")
+
+
+def _assert_beat19_non_queue_preserved(text: str) -> None:
+    """Non-Queue section headings + distinctive markers must survive Queue rewrite."""
+    for heading in _BEAT19_SECTIONS:
+        assert heading in text, f"missing section {heading}"
+    for marker in _BEAT19_MARKERS:
+        assert marker in text, f"missing marker {marker}"
+    # Marker order: Watch body before Project Work before Heartbeat.
+    assert text.index("BEAT19_WATCH_MARKER") < text.index("## Project Work")
+    assert text.index("BEAT19_PROJECT_MARKER") < text.index("## Heartbeat")
+    assert text.index("BEAT19_HEARTBEAT_MARKER") > text.index("## Heartbeat")
+
+
+def test_beat19_serialize_write_preserves_watch_project_heartbeat():
+    """Beat 19: serialize / write_queue_section keeps Watch+Project Work+Heartbeat."""
+    src = _load("watch_queue_heartbeat.md")
+    _assert_beat19_non_queue_preserved(src)
+    items = parse_queue_items(src)
+    assert len(items) == 1 and is_b_pickable(items[0])
+
+    for written in (
+        write_queue_section(src),
+        write_queue_section(src, items),
+        write_queue_section(src, list(items)),
+    ):
+        _assert_beat19_non_queue_preserved(written)
+        assert "## Queue" in written
+        again = parse_queue_items(written)
+        assert len(again) == 1
+        assert again[0].item_id == "Q1"
+        assert is_b_pickable(again[0])
+        assert again[0].title == "Beat19 shippable preserve item"
+        # Queue still precedes Watch in the living-plan layout.
+        assert written.index("## Queue") < written.index("## Watch")
+
+
+def test_beat19_a_append_preserves_non_queue_sections(tmp_path: Path):
+    """Beat 19: Session A append updates Queue; Watch/Project/Heartbeat stay."""
+    src = _load("watch_queue_heartbeat_empty.md")
+    _assert_beat19_non_queue_preserved(src)
+    assert count_open(parse_queue_items(src)) == 0
+
+    plan = tmp_path / "beat19_append.md"
+    plan.write_text(src, encoding="utf-8")
+    result = run_session_a_path(plan, brainstorm=stub_brainstorm, write=True)
+    assert result.ok and result.verdict == "queued" and result.wrote_item
+
+    updated = plan.read_text(encoding="utf-8")
+    _assert_beat19_non_queue_preserved(updated)
+    assert updated == result.plan_text
+    items = parse_queue_items(updated)
+    assert len(items) == 1
+    assert items[0].item_id == "Q1"
+    assert is_b_pickable(items[0])
+    assert count_open(items) == 1
+    # Append also preserves via in-memory helper (no path write).
+    mem = run_session_a(src, brainstorm=stub_brainstorm)
+    assert mem.ok and mem.wrote_item
+    _assert_beat19_non_queue_preserved(mem.plan_text)
+    assert count_open(parse_queue_items(mem.plan_text)) == 1
+
+
+def test_beat19_b_ship_preserves_non_queue_sections(tmp_path: Path):
+    """Beat 19: Session B fixture ship updates Queue; non-Queue sections remain."""
+    src = _load("watch_queue_heartbeat.md")
+    _assert_beat19_non_queue_preserved(src)
+    assert count_open(parse_queue_items(src)) == 1
+
+    plan = tmp_path / "beat19_ship.md"
+    plan.write_text(src, encoding="utf-8")
+    ship_fn = make_fixture_ship_implement("beat19cafe", note="beat19 preserve ship")
+    shipped = run_session_b_path(
+        plan, implement=ship_fn, decode_only=False, write=True
+    )
+    assert shipped.ok and shipped.verdict == "shipped"
+    assert shipped.shipped is True
+
+    updated = plan.read_text(encoding="utf-8")
+    _assert_beat19_non_queue_preserved(updated)
+    assert updated == shipped.plan_text
+    assert "SHIPPED `beat19cafe`" in updated
+    items = parse_queue_items(updated)
+    assert len(items) == 1
+    assert items[0].item_id == "Q1"
+    assert items[0].status.upper().startswith("SHIPPED")
+    assert count_open(items) == 0
+    assert not is_b_pickable(items[0])
+    # Direct mark_item_shipped / in-memory B ship also preserve.
+    marked = mark_item_shipped(src, "Q1", "dead19", note="direct")
+    _assert_beat19_non_queue_preserved(marked)
+    assert "SHIPPED `dead19`" in marked
+    mem = run_session_b(
+        src, implement=make_fixture_ship_implement("mem19"), decode_only=False
+    )
+    assert mem.verdict == "shipped"
+    _assert_beat19_non_queue_preserved(mem.plan_text)

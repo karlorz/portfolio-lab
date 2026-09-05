@@ -246,7 +246,11 @@ def write_queue_section(
 
 
 def append_queue_item(markdown: str, item_markdown: str) -> str:
-    """Insert ``item_markdown`` at the end of the ``## Queue`` section."""
+    """Insert ``item_markdown`` at the end of the ``## Queue`` section.
+
+    Only the Queue body grows; Watch / Project Work / Heartbeat (and any other
+    ``##`` sections) are preserved in place.
+    """
     matches = list(_SECTION_RE.finditer(markdown))
     queue_idx = None
     for idx, match in enumerate(matches):
@@ -268,40 +272,40 @@ def append_queue_item(markdown: str, item_markdown: str) -> str:
 
 
 def mark_item_shipped(markdown: str, item_id: str, sha: str, note: str = "") -> str:
-    """Flip ``status:`` on the named Queue item to SHIPPED (Session B plan write)."""
+    """Flip ``status:`` on the named Queue item to SHIPPED (Session B plan write).
+
+    Rewrites only the ``## Queue`` section via serialize → ``write_queue_section``.
+    Other markdown sections (Watch / Project Work / Heartbeat) are preserved.
+    """
     items = parse_queue_items(markdown)
-    target = next((i for i in items if i.item_id.upper() == item_id.upper()), None)
-    if target is None:
-        raise KeyError(f"Queue item not found: {item_id}")
-    old_status_line = None
-    for line in target.raw.splitlines():
-        if _STATUS_RE.match(line):
-            old_status_line = line
-            break
-    shipped = f"status: SHIPPED `{sha}`"
-    if note:
-        shipped = f"{shipped} — {note}"
-    if old_status_line is None:
-        raise ValueError(f"{item_id} has no status: line")
-    # Replace only within the item's raw block occurrence after its heading.
-    heading_pat = re.compile(
-        rf"(?m)^(###[ \t]+{re.escape(item_id)}\.\s*.*?$)(.*?)(?=^###[ \t]+Q\d+\.|^##[ \t]|\Z)",
-        flags=re.S,
+    target_idx = next(
+        (i for i, it in enumerate(items) if it.item_id.upper() == item_id.upper()),
+        None,
     )
-
-    def _sub(match: re.Match[str]) -> str:
-        body = match.group(2)
-        new_body, n = _STATUS_RE.subn(shipped, body, count=1)
-        if n != 1:
-            raise ValueError(f"failed to rewrite status for {item_id}")
-        # shipped items are no longer ready
-        new_body, _ = _READY_RE.subn("ready-for-implement: no", new_body, count=1)
-        return match.group(1) + new_body
-
-    new_md, n = heading_pat.subn(_sub, markdown, count=1)
-    if n != 1:
-        raise ValueError(f"failed to locate Queue heading for {item_id}")
-    return new_md
+    if target_idx is None:
+        raise KeyError(f"Queue item not found: {item_id}")
+    target = items[target_idx]
+    if not _STATUS_RE.search(target.raw) and not str(target.status).strip():
+        raise ValueError(f"{item_id} has no status: line")
+    shipped_status = f"SHIPPED `{sha}`"
+    if note:
+        shipped_status = f"{shipped_status} — {note}"
+    updated = QueueItem(
+        item_id=target.item_id,
+        heading=target.heading,
+        title=target.title,
+        acceptance=target.acceptance,
+        risks=target.risks,
+        file_touch=target.file_touch,
+        breaking_change=target.breaking_change,
+        redeploy_notes=target.redeploy_notes,
+        status=shipped_status,
+        ready_for_implement="no",
+        raw="",
+    )
+    new_items = list(items)
+    new_items[target_idx] = updated
+    return write_queue_section(markdown, new_items)
 
 
 def queue_item_from_fields(

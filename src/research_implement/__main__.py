@@ -60,6 +60,9 @@ Beat 17: Session B default/CLI decode-only never invokes implement callback
 only when ``decode_only=False`` + ``implement=`` passed (never CLI default).
 Proof: pytest ``-k beat17``.
 
+Beat 19: Queue rewrite (append/ship/serialize) preserves Watch / Project
+Work / Heartbeat. Proof: pytest ``-k beat19``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never
