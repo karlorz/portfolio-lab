@@ -98,21 +98,8 @@ def _run_session_b(
         result = run_session_b_path(plan, decode_only=True, write=False)
     assert result.keep_schedule and not result.scheduler_delete_called
     if as_json:
-        payload = {
-            "ok": result.ok,
-            "verdict": result.verdict,
-            "open_count": result.open_count,
-            "queue": result.queue_label,
-            "keep_schedule": result.keep_schedule,
-            "scheduler_delete_called": result.scheduler_delete_called,
-            "item": None,
-            "implement_result": result.implement_result,
-        }
-        if result.item is not None:
-            from src.research_implement.session_b import decode_fields
-
-            payload["item"] = decode_fields(result.item)
-        print(json.dumps(payload, indent=2, sort_keys=True))
+        # Single shared SessionResult.to_dict shape (idle / decode_only / dry_run / shipped).
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
     else:
         print(result.message)
         if result.decode_report and result.verdict in {"picked", "dry_run"}:

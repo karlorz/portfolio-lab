@@ -15,6 +15,9 @@ implement stays unwired.
 
 CLI: ``python -m src.research_implement {session-a|session-b|idle-decode}``.
 E2E dry-run (tmp plan): see module ``__main__`` examples / ``make research-implement-e2e-dry-run``.
+
+JSON: ``SessionResult.to_dict()`` (aliases ``to_json_dict`` / ``session_b_result_dict``)
+is the shared ``--json`` / test contract for idle / decode_only / dry_run / shipped.
 """
 
 from __future__ import annotations
@@ -41,7 +44,10 @@ from src.research_implement.session_a import (
     stub_search_plan,
 )
 from src.research_implement.session_b import (
+    SESSION_B_RESULT_KEYS,
+    SESSION_RESULT_JSON_KEYS,
     SessionBResult,
+    SessionResult,
     decode_fields,
     default_implement,
     dry_run_implement,
@@ -50,6 +56,7 @@ from src.research_implement.session_b import (
     make_fixture_ship_implement,
     run_session_b,
     scheduler_delete,
+    session_b_result_dict,
 )
 
 __all__ = [
@@ -58,6 +65,10 @@ __all__ = [
     "QueueItem",
     "SessionAResult",
     "SessionBResult",
+    "SessionResult",
+    "SESSION_RESULT_JSON_KEYS",
+    "SESSION_B_RESULT_KEYS",
+    "session_b_result_dict",
     "append_queue_item",
     "count_open",
     "first_b_pick",

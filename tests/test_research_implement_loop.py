@@ -6,6 +6,7 @@ contract tests in ``test_research_implement_loop_contract.py`` remain unchanged.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,6 +21,7 @@ from src.research_implement.queue import (
     format_queue_item,
     is_b_pickable,
     is_complete_six_field,
+    is_open_status,
     parse_queue_items,
     render_queue_count,
 )
@@ -30,7 +32,10 @@ from src.research_implement.session_a import (
     stub_brainstorm,
 )
 from src.research_implement.session_b import (
+    SESSION_B_RESULT_KEYS,
+    SESSION_RESULT_JSON_KEYS,
     SchedulerDeleteForbidden,
+    SessionResult,
     decode_fields,
     default_implement,
     dry_run_implement,
@@ -40,6 +45,7 @@ from src.research_implement.session_b import (
     run_session_b,
     run_session_b_path,
     scheduler_delete,
+    session_b_result_dict,
 )
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "research_implement"
@@ -304,6 +310,10 @@ def test_modules_are_distinct_from_legacy_research_agent():
     assert "default_implement" in dir(loop)
     assert "fixture_ship_implement" in dir(loop)
     assert "make_fixture_ship_implement" in dir(loop)
+    assert "SessionResult" in dir(loop)
+    assert "SESSION_RESULT_JSON_KEYS" in dir(loop)
+    assert "SESSION_B_RESULT_KEYS" in dir(loop)
+    assert "session_b_result_dict" in dir(loop)
 
 
 def test_stub_brainstorm_fills_six_fields():
@@ -875,3 +885,331 @@ def test_beat5_fixture_open_complete_not_ready_is_idle():
     assert shipped.ok and shipped.verdict == "idle"
     assert shipped.implement_result is None
     assert "SHIPPED" not in shipped.plan_text
+
+
+def _assert_session_result_json_shape(payload: dict) -> None:
+    """CLI ``--json`` and ``SessionResult.to_dict`` / ``to_json_dict`` share one key set."""
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+    assert set(payload.keys()) == set(SESSION_B_RESULT_KEYS)
+    assert isinstance(payload["ok"], bool)
+    assert isinstance(payload["verdict"], str)
+    assert isinstance(payload["open_count"], int)
+    assert isinstance(payload["queue"], str)
+    assert payload["queue"].startswith("queue ")
+    assert isinstance(payload["keep_schedule"], bool)
+    assert isinstance(payload["scheduler_delete_called"], bool)
+    assert "item" in payload
+    assert "implement_result" in payload
+    assert isinstance(payload["wrote_files"], bool)
+    assert isinstance(payload["shipped"], bool)
+    # Round-trip like CLI consumers.
+    roundtrip = json.loads(json.dumps(payload, sort_keys=True))
+    assert set(roundtrip.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+
+def test_beat6_session_result_json_idle_fire_keys():
+    """Beat 6: idle fire JSON — queue 0/10, keep_schedule, shared SessionResult keys."""
+    result = run_session_b(_load("empty_queue.md"), decode_only=True)
+    assert isinstance(result, SessionResult)
+    payload = result.to_json_dict()
+    _assert_session_result_json_shape(payload)
+    assert payload["ok"] is True
+    assert payload["verdict"] == "idle"
+    assert payload["queue"] == "queue 0/10"
+    assert payload["open_count"] == 0
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert payload["item"] is None
+    assert payload["implement_result"] is None
+    assert payload["wrote_files"] is False
+    assert payload["shipped"] is False
+    assert "keep_schedule" in result.message
+    assert "queue 0/10" in result.message
+
+
+def test_beat6_session_result_json_dry_run_wrote_files_false_not_shipped(tmp_path: Path):
+    """Beat 6: dry_run JSON — wrote_files false, shipped false, plan not SHIPPED."""
+    plan = tmp_path / "plan.md"
+    plan.write_text(_load("one_open_ready.md"), encoding="utf-8")
+    result = run_session_b_path(
+        plan, implement=dry_run_implement, decode_only=False, write=True
+    )
+    payload = result.to_json_dict()
+    _assert_session_result_json_shape(payload)
+    assert payload["verdict"] == "dry_run"
+    assert payload["wrote_files"] is False
+    assert payload["shipped"] is False
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert payload["item"] is not None
+    assert payload["item"]["item_id"] == "Q1"
+    assert payload["implement_result"] is not None
+    assert payload["implement_result"]["wrote_files"] is False
+    assert payload["implement_result"]["dry_run"] is True
+    assert payload["implement_result"]["sha"] is None
+    assert "SHIPPED" not in plan.read_text(encoding="utf-8")
+    assert "SHIPPED" not in result.plan_text
+
+
+def test_beat6_session_result_json_fixture_ship_tmp_path(tmp_path: Path):
+    """Beat 6: fixture ship JSON — shipped true on tmp_path; SHIPPED in plan text."""
+    plan = tmp_path / "plan.md"
+    plan.write_text(_load("one_open_ready.md"), encoding="utf-8")
+    ship_fn = make_fixture_ship_implement("beat6cafe", note="beat6 ship")
+    result = run_session_b_path(
+        plan, implement=ship_fn, decode_only=False, write=True
+    )
+    payload = result.to_json_dict()
+    _assert_session_result_json_shape(payload)
+    assert payload["verdict"] == "shipped"
+    assert payload["shipped"] is True
+    assert payload["wrote_files"] is False  # fixture double does not write repo files
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert payload["implement_result"] is not None
+    assert payload["implement_result"]["sha"] == "beat6cafe"
+    assert payload["implement_result"]["dry_run"] is False
+    assert "SHIPPED `beat6cafe`" in result.plan_text
+    on_disk = plan.read_text(encoding="utf-8")
+    assert "SHIPPED `beat6cafe`" in on_disk
+    assert payload["queue"] == "queue 0/10"
+    assert payload["open_count"] == 0
+
+
+def test_beat6_session_result_json_decode_only_picked_keys(tmp_path: Path, capsys):
+    """Beat 6: decode_only (verdict picked) shares the same SessionResult JSON keys."""
+    plan = tmp_path / "one.md"
+    plan.write_text(_load("one_open_ready.md"), encoding="utf-8")
+    result = run_session_b_path(plan, decode_only=True, write=False)
+    payload = result.to_json_dict()
+    _assert_session_result_json_shape(payload)
+    assert payload["verdict"] == "picked"
+    assert payload["shipped"] is False
+    assert payload["wrote_files"] is False
+    assert payload["implement_result"] is None
+    assert payload["item"]["item_id"] == "Q1"
+    assert payload["keep_schedule"] is True
+
+    # CLI --json must emit the identical shape (shared to_json_dict).
+    from src.research_implement.__main__ import main
+
+    rc = main(["session-b", "--plan", str(plan), "--json"])
+    assert rc == 0
+    cli_payload = json.loads(capsys.readouterr().out)
+    _assert_session_result_json_shape(cli_payload)
+    assert cli_payload == payload
+
+
+def test_beat6_cli_json_idle_and_dry_run_share_shape(tmp_path: Path, capsys):
+    """Beat 6: CLI --json idle + dry_run both use SessionResult key set."""
+    from src.research_implement.__main__ import main
+
+    empty = tmp_path / "empty.md"
+    empty.write_text(_load("empty_queue.md"), encoding="utf-8")
+    rc = main(["idle-decode", "--plan", str(empty), "--json"])
+    assert rc == 0
+    idle_payload = json.loads(capsys.readouterr().out)
+    _assert_session_result_json_shape(idle_payload)
+    assert idle_payload["verdict"] == "idle"
+    assert idle_payload["queue"] == "queue 0/10"
+    assert idle_payload["keep_schedule"] is True
+    assert idle_payload["wrote_files"] is False
+    assert idle_payload["shipped"] is False
+
+    one = tmp_path / "one.md"
+    one.write_text(_load("one_open_ready.md"), encoding="utf-8")
+    rc = main(["session-b", "--plan", str(one), "--dry-run", "--json"])
+    assert rc == 0
+    dry_payload = json.loads(capsys.readouterr().out)
+    _assert_session_result_json_shape(dry_payload)
+    assert dry_payload["verdict"] == "dry_run"
+    assert dry_payload["wrote_files"] is False
+    assert dry_payload["shipped"] is False
+    assert dry_payload["implement_result"]["wrote_files"] is False
+
+
+
+def test_beat7_two_open_ready_first_open_pick_order_second_remains_open(tmp_path: Path, capsys):
+    """Beat 7: with two_open_ready.md always pick first complete ready OPEN; Q2 stays OPEN."""
+    src = _load("two_open_ready.md")
+    items = parse_queue_items(src)
+    assert [i.item_id for i in items] == ["Q1", "Q2"]
+    assert all(is_b_pickable(i) for i in items)
+    assert count_open(items) == 2
+    assert first_b_pick(items).item_id == "Q1"
+    assert first_b_pick(items).title == "First ready complete item"
+
+    plan = tmp_path / "two.md"
+    plan.write_text(src, encoding="utf-8")
+
+    # Decode-only: first OPEN only; plan unchanged so second remains OPEN.
+    decoded = run_session_b_path(plan, decode_only=True, write=False)
+    assert decoded.ok and decoded.verdict == "picked"
+    assert decoded.item is not None and decoded.item.item_id == "Q1"
+    assert decoded.open_count == 2
+    assert decoded.queue_label == "queue 2/10"
+    on_disk = plan.read_text(encoding="utf-8")
+    after = parse_queue_items(on_disk)
+    assert [i.item_id for i in after if is_b_pickable(i)] == ["Q1", "Q2"]
+    assert after[1].item_id == "Q2" and is_open_status(after[1].status)
+    assert "SHIPPED" not in on_disk
+
+    # Dry-run: still first OPEN; never ships; second remains OPEN ready.
+    dry = run_session_b_path(
+        plan, implement=dry_run_implement, decode_only=False, write=True
+    )
+    assert dry.verdict == "dry_run"
+    assert dry.item is not None and dry.item.item_id == "Q1"
+    assert dry.open_count == 2
+    assert dry.wrote_files is False and dry.shipped is False
+    on_disk = plan.read_text(encoding="utf-8")
+    after = parse_queue_items(on_disk)
+    assert count_open(after) == 2
+    assert first_b_pick(after).item_id == "Q1"
+    q2 = next(i for i in after if i.item_id == "Q2")
+    assert is_b_pickable(q2)
+    assert q2.title == "Second ready complete item"
+    assert "SHIPPED" not in on_disk
+
+    # Repeated dry-run still picks Q1 (non-mutating); Q2 never consumed.
+    dry2 = run_session_b_path(
+        plan, implement=dry_run_implement, decode_only=False, write=True
+    )
+    assert dry2.item is not None and dry2.item.item_id == "Q1"
+    assert count_open(parse_queue_items(plan.read_text(encoding="utf-8"))) == 2
+
+    # CLI --json decode also reports Q1 first-OPEN pick.
+    from src.research_implement.__main__ import main
+
+    rc = main(["session-b", "--plan", str(plan), "--json"])
+    assert rc == 0
+    cli_payload = json.loads(capsys.readouterr().out)
+    _assert_session_result_json_shape(cli_payload)
+    assert cli_payload["verdict"] == "picked"
+    assert cli_payload["item"]["item_id"] == "Q1"
+    assert cli_payload["open_count"] == 2
+    assert cli_payload == decoded.to_dict()
+
+
+def test_beat7_open_complete_not_ready_idle_not_ready_for_implement(tmp_path: Path, capsys):
+    """Beat 7: open_complete_not_ready.md → idle (complete but not ready-for-implement)."""
+    plan_text = _load("open_complete_not_ready.md")
+    items = parse_queue_items(plan_text)
+    assert len(items) == 1
+    assert is_complete_six_field(items[0])
+    assert is_open_status(items[0].status)
+    assert items[0].ready_for_implement.strip().lower() == "no"
+    assert not is_b_pickable(items[0])
+    assert first_b_pick(items) is None
+    assert count_open(items) == 0
+
+    for kwargs in (
+        {"decode_only": True},
+        {"implement": dry_run_implement, "decode_only": False},
+        {
+            "implement": make_fixture_ship_implement("must-not-run"),
+            "decode_only": False,
+        },
+    ):
+        result = run_session_b(plan_text, **kwargs)
+        assert result.ok and result.verdict == "idle"
+        assert result.item is None
+        assert result.implement_result is None
+        assert result.open_count == 0
+        assert result.queue_label == "queue 0/10"
+        assert result.keep_schedule is True
+        assert result.scheduler_delete_called is False
+        assert result.wrote_files is False
+        assert result.shipped is False
+        assert "SHIPPED" not in result.plan_text
+        payload = result.to_dict()
+        _assert_session_result_json_shape(payload)
+        assert payload["verdict"] == "idle"
+        assert payload["item"] is None
+        assert payload["implement_result"] is None
+
+    from src.research_implement.__main__ import main
+
+    p = tmp_path / "not_ready.md"
+    p.write_text(plan_text, encoding="utf-8")
+    rc = main(["session-b", "--plan", str(p), "--json"])
+    assert rc == 0
+    cli_payload = json.loads(capsys.readouterr().out)
+    _assert_session_result_json_shape(cli_payload)
+    assert cli_payload["verdict"] == "idle"
+    assert cli_payload["queue"] == "queue 0/10"
+    assert cli_payload["shipped"] is False
+    assert cli_payload["wrote_files"] is False
+
+
+def test_beat7_session_result_to_dict_key_stability_all_verdicts(tmp_path: Path, capsys):
+    """Beat 7: shared SessionResult.to_dict used by CLI --json; keys stable across verdicts."""
+    from src.research_implement.__main__ import main
+
+    assert SESSION_B_RESULT_KEYS == SESSION_RESULT_JSON_KEYS
+
+    # idle
+    empty = tmp_path / "empty.md"
+    empty.write_text(_load("empty_queue.md"), encoding="utf-8")
+    idle = run_session_b_path(empty, decode_only=True)
+    idle_dict = idle.to_dict()
+    assert idle.to_json_dict() == idle_dict == session_b_result_dict(idle)
+    _assert_session_result_json_shape(idle_dict)
+    assert idle_dict["verdict"] == "idle"
+
+    rc = main(["idle-decode", "--plan", str(empty), "--json"])
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == idle_dict
+
+    # decode_only / picked
+    one = tmp_path / "one.md"
+    one.write_text(_load("one_open_ready.md"), encoding="utf-8")
+    picked = run_session_b_path(one, decode_only=True, write=False)
+    picked_dict = picked.to_dict()
+    assert picked.to_json_dict() == picked_dict == session_b_result_dict(picked)
+    _assert_session_result_json_shape(picked_dict)
+    assert picked_dict["verdict"] == "picked"
+    assert picked_dict["item"]["item_id"] == "Q1"
+    assert picked_dict["implement_result"] is None
+    assert picked_dict["wrote_files"] is False
+    assert picked_dict["shipped"] is False
+
+    rc = main(["session-b", "--plan", str(one), "--json"])
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == picked_dict
+
+    # dry_run
+    dry = run_session_b_path(
+        one, implement=dry_run_implement, decode_only=False, write=False
+    )
+    dry_dict = dry.to_dict()
+    assert dry.to_json_dict() == dry_dict == session_b_result_dict(dry)
+    _assert_session_result_json_shape(dry_dict)
+    assert dry_dict["verdict"] == "dry_run"
+    assert dry_dict["wrote_files"] is False
+    assert dry_dict["shipped"] is False
+    assert dry_dict["implement_result"]["dry_run"] is True
+
+    rc = main(["session-b", "--plan", str(one), "--dry-run", "--json"])
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == dry_dict
+
+    # shipped (fixture double on tmp_path only)
+    ship_plan = tmp_path / "ship.md"
+    ship_plan.write_text(_load("one_open_ready.md"), encoding="utf-8")
+    ship_fn = make_fixture_ship_implement("beat7cafe", note="beat7 ship")
+    shipped = run_session_b_path(
+        ship_plan, implement=ship_fn, decode_only=False, write=True
+    )
+    shipped_dict = shipped.to_dict()
+    assert shipped.to_json_dict() == shipped_dict == session_b_result_dict(shipped)
+    _assert_session_result_json_shape(shipped_dict)
+    assert shipped_dict["verdict"] == "shipped"
+    assert shipped_dict["shipped"] is True
+    assert shipped_dict["wrote_files"] is False
+    assert shipped_dict["implement_result"]["sha"] == "beat7cafe"
+    assert "SHIPPED `beat7cafe`" in ship_plan.read_text(encoding="utf-8")
+
+    # Key sets identical across all four verdicts (stability).
+    for payload in (idle_dict, picked_dict, dry_dict, shipped_dict):
+        assert tuple(sorted(payload.keys())) == tuple(sorted(SESSION_RESULT_JSON_KEYS))

@@ -13,9 +13,9 @@ explicitly (test double only; never the default). CLI defaults to decode-only;
 pass ``--dry-run`` to exercise the dry-run implement path. Live implement to
 prod stays unwired.
 
-JSON contract: ``SessionBResult.to_json_dict()`` / ``SessionResult`` is the
-single shape for CLI ``--json`` and fixture tests (idle / decode_only /
-dry_run / shipped).
+JSON contract: ``SessionResult.to_dict()`` (aliases ``to_json_dict`` /
+``session_b_result_dict``) is the single shared shape for CLI ``--json`` and
+fixture tests (idle / decode_only / dry_run / shipped).
 """
 
 from __future__ import annotations
@@ -152,6 +152,9 @@ SESSION_RESULT_JSON_KEYS: tuple[str, ...] = (
     "shipped",
 )
 
+# Alias kept for callers that prefer the Session-B-named constant.
+SESSION_B_RESULT_KEYS: tuple[str, ...] = SESSION_RESULT_JSON_KEYS
+
 
 @dataclass(frozen=True)
 class SessionBResult:
@@ -187,32 +190,47 @@ class SessionBResult:
     def shipped(self) -> bool:
         return self.verdict == "shipped"
 
-    def to_json_dict(self) -> dict[str, Any]:
-        """Stable SessionResult JSON shape shared by CLI ``--json`` and tests.
+    def to_dict(self) -> dict[str, Any]:
+        """Shared SessionResult dict for CLI ``--json`` and fixture tests.
 
-        Present for every verdict (idle / picked=decode_only / dry_run / shipped):
-        ``ok``, ``verdict``, ``open_count``, ``queue``, ``keep_schedule``,
-        ``scheduler_delete_called``, ``item``, ``implement_result``,
-        ``wrote_files``, ``shipped``.
+        One shape for idle / decode_only (verdict picked) / dry_run / shipped.
+        Keys are exactly ``SESSION_RESULT_JSON_KEYS`` / ``SESSION_B_RESULT_KEYS``.
         """
-        item_payload = decode_fields(self.item) if self.item is not None else None
-        impl = dict(self.implement_result) if self.implement_result is not None else None
-        return {
-            "ok": self.ok,
-            "verdict": self.verdict,
-            "open_count": self.open_count,
-            "queue": self.queue_label,
-            "keep_schedule": self.keep_schedule,
-            "scheduler_delete_called": self.scheduler_delete_called,
-            "item": item_payload,
-            "implement_result": impl,
-            "wrote_files": self.wrote_files,
-            "shipped": self.shipped,
-        }
+        return session_b_result_dict(self)
+
+    def to_json_dict(self) -> dict[str, Any]:
+        """Alias of ``to_dict`` (stable JSON contract name)."""
+        return self.to_dict()
+
+
+def session_b_result_dict(result: SessionBResult) -> dict[str, Any]:
+    """Build the shared Session B / SessionResult dict (CLI ``--json`` + tests).
+
+    One shape for all verdicts:
+    - idle: item=None, implement_result=None, wrote_files=False, shipped=False
+    - picked (decode_only): item=decode fields, implement_result=None
+    - dry_run: item=decode fields, implement_result dry_run payload, shipped=False
+    - shipped: item=decode fields, implement_result ship payload, shipped=True
+    """
+    item_payload = decode_fields(result.item) if result.item is not None else None
+    impl = dict(result.implement_result) if result.implement_result is not None else None
+    return {
+        "ok": result.ok,
+        "verdict": result.verdict,
+        "open_count": result.open_count,
+        "queue": result.queue_label,
+        "keep_schedule": result.keep_schedule,
+        "scheduler_delete_called": result.scheduler_delete_called,
+        "item": item_payload,
+        "implement_result": impl,
+        "wrote_files": result.wrote_files,
+        "shipped": result.shipped,
+    }
 
 
 # Public alias: CLI / tests talk about SessionResult JSON contract.
 SessionResult = SessionBResult
+
 
 
 def run_session_b(
