@@ -30,3 +30,7 @@ Common flags: `--plan` / `--log`, `--json`, `--dry-run`, `--stub` (A), `--candid
 - `make research-implement-e2e-pipeline` — echo Beat 11 pipeline / pytest hint
 
 Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -q -k 'beat21 or beat22'`
+
+## Errors
+
+- Missing `--plan`/`--log` path → non-zero exit (`file not found`); the CLI does not create the file.
