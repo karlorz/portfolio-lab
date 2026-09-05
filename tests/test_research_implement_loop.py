@@ -3578,3 +3578,27 @@ def test_beat21_session_b_failed_no_plan_mutation(tmp_path: Path):
     assert on_disk == src
     _assert_beat21_two_queue_content_intact(on_disk)
     assert "SHIPPED" not in on_disk
+
+# --- Beat 22: side-dev doc (CLI flags + make targets) ---------------------
+
+
+def test_beat22_doc_mentions_cli_and_make_targets():
+    """Beat 22: docs/research-implement-ab-side-dev.md lists CLI + make targets."""
+    root = Path(__file__).resolve().parents[1]
+    doc = root / "docs" / "research-implement-ab-side-dev.md"
+    assert doc.is_file(), f"missing {doc}"
+    body = doc.read_text(encoding="utf-8")
+    for needle in (
+        "session-a",
+        "session-b",
+        "idle-decode",
+        "--json",
+        "--dry-run",
+        "--candidate-json",
+        "queue 0/10",
+        "scheduler_delete",
+        "test-research-implement",
+        "research-implement-e2e-dry-run",
+        "research-implement-e2e-pipeline",
+    ):
+        assert needle in body, f"doc missing {needle!r}"

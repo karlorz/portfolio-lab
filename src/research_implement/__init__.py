@@ -74,6 +74,9 @@ is the shared Session B ``--json`` / test contract for idle / decode_only / dry_
 shipped. Session A: ``SessionAResult.to_dict()`` (aliases ``to_json_dict`` /
 ``session_a_result_dict``) covers append/queued vs recount-only/light for
 ``session-a --json``.
+
+
+Beat 22: see ``docs/research-implement-ab-side-dev.md`` for side-dev CLI/make notes.
 """
 
 from __future__ import annotations
