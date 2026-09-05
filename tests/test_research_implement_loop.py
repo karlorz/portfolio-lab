@@ -2355,3 +2355,208 @@ def test_beat14_empty_plus_complete_stub_still_queues(tmp_path: Path, capsys):
     assert cli_payload["wrote_item"] is True
     assert cli_payload["ok"] is True
     assert count_open(parse_queue_items(plan2.read_text(encoding="utf-8"))) == 1
+
+
+# --- Beat 15: CLI session-a --candidate-json dict/list when OPEN=0 ---
+
+
+def test_beat15_complete_candidate_json_queues_one_open(tmp_path: Path, capsys):
+    """Beat 15: complete --candidate-json on empty Queue queues one OPEN (not stub)."""
+    from src.research_implement.__main__ import _load_candidate, main
+
+    fixture = FIXTURES / "complete_candidate.json"
+    assert fixture.is_file()
+    cand = _load_candidate(fixture)
+    assert isinstance(cand, dict)
+    assert incomplete_candidate_reasons(cand) == []
+    assert cand["title"] == "Complete candidate fixture"
+
+    empty = _load("empty_queue.md")
+    plan = tmp_path / "complete_json.md"
+    plan.write_text(empty, encoding="utf-8")
+    assert count_open(parse_queue_items(plan.read_text(encoding="utf-8"))) == 0
+
+    rc = main(
+        [
+            "session-a",
+            "--plan",
+            str(plan),
+            "--candidate-json",
+            str(fixture),
+            "--json",
+        ]
+    )
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    _assert_session_a_result_json_shape(payload)
+    assert payload["ok"] is True
+    assert payload["verdict"] == "queued"
+    assert payload["wrote_item"] is True
+    assert payload["open_count"] == 1
+    assert payload["queue"] == "queue 1/10"
+    assert payload["title"] == "Complete candidate fixture"
+    assert payload["b_pick_title"] == "Complete candidate fixture"
+
+    on_disk = plan.read_text(encoding="utf-8")
+    items = parse_queue_items(on_disk)
+    assert len(items) == 1
+    assert count_open(items) == 1
+    assert items[0].title == "Complete candidate fixture"
+    assert is_complete_six_field(items[0])
+    assert is_ready_yes(items[0].ready_for_implement)
+    assert is_b_pickable(items[0])
+    # Must be the candidate-json title, not the stub default.
+    assert "Stub shippable change" not in on_disk
+    assert "ready-for-implement: yes" in on_disk
+
+
+def test_beat15_complete_candidate_json_list_queues_first_dict(tmp_path: Path, capsys):
+    """Beat 15: --candidate-json list uses first dict element as brainstorm candidate."""
+    from src.research_implement.__main__ import _load_candidate, main
+
+    fixture = FIXTURES / "complete_candidate_list.json"
+    cand = _load_candidate(fixture)
+    assert isinstance(cand, dict)
+    assert cand["title"] == "Complete list candidate"
+    assert incomplete_candidate_reasons(cand) == []
+
+    plan = tmp_path / "list_json.md"
+    plan.write_text(_load("empty_queue.md"), encoding="utf-8")
+    rc = main(
+        [
+            "session-a",
+            "--plan",
+            str(plan),
+            "--candidate-json",
+            str(fixture),
+            "--json",
+        ]
+    )
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    _assert_session_a_result_json_shape(payload)
+    assert payload["verdict"] == "queued"
+    assert payload["wrote_item"] is True
+    assert payload["title"] == "Complete list candidate"
+    assert count_open(parse_queue_items(plan.read_text(encoding="utf-8"))) == 1
+    assert "Complete list candidate" in plan.read_text(encoding="utf-8")
+    assert "Second ignored" not in plan.read_text(encoding="utf-8")
+
+
+def test_beat15_incomplete_candidate_json_fails_no_partial_append(tmp_path: Path, capsys):
+    """Beat 15: incomplete --candidate-json fail-closes; plan unchanged; no partial OPEN."""
+    from src.research_implement.__main__ import _load_candidate, main
+
+    fixture = FIXTURES / "incomplete_candidate.json"
+    cand = _load_candidate(fixture)
+    assert isinstance(cand, dict)
+    reasons = incomplete_candidate_reasons(cand)
+    assert reasons
+    assert "acceptance" in reasons or "ready_for_implement" in reasons
+
+    empty = _load("empty_queue.md")
+    plan = tmp_path / "incomplete_json.md"
+    plan.write_text(empty, encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+
+    rc = main(
+        [
+            "session-a",
+            "--plan",
+            str(plan),
+            "--candidate-json",
+            str(fixture),
+            "--json",
+        ]
+    )
+    assert rc != 0
+    payload = json.loads(capsys.readouterr().out)
+    _assert_session_a_result_json_shape(payload)
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["wrote_item"] is False
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert plan.read_text(encoding="utf-8") == before
+    assert count_open(parse_queue_items(plan.read_text(encoding="utf-8"))) == 0
+    assert parse_queue_items(plan.read_text(encoding="utf-8")) == []
+    # No partial OPEN heading appended.
+    assert "### Q" not in plan.read_text(encoding="utf-8")
+
+
+def test_beat15_open_ge1_recount_only_ignores_candidate_json(tmp_path: Path, capsys):
+    """Beat 15: OPEN>=1 → recount-only light; --candidate-json ignored (no append)."""
+    from src.research_implement.__main__ import main
+
+    fixture = FIXTURES / "complete_candidate.json"
+    src = _load("one_open_ready.md")
+    assert count_open(parse_queue_items(src)) >= 1
+
+    plan = tmp_path / "open_ge1.md"
+    plan.write_text(src, encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    open_before = count_open(parse_queue_items(before))
+    items_before = parse_queue_items(before)
+
+    rc = main(
+        [
+            "session-a",
+            "--plan",
+            str(plan),
+            "--candidate-json",
+            str(fixture),
+            "--json",
+        ]
+    )
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    _assert_session_a_result_json_shape(payload)
+    assert payload["ok"] is True
+    assert payload["verdict"] == "light"
+    assert payload["wrote_item"] is False
+    assert payload["open_count"] == open_before
+    assert payload["title"] is None
+    assert payload["queue"] == render_queue_count(open_before)
+
+    on_disk = plan.read_text(encoding="utf-8")
+    assert on_disk == before
+    assert parse_queue_items(on_disk) == items_before
+    assert count_open(parse_queue_items(on_disk)) == open_before
+    # Candidate-json title must not appear (callback never applied).
+    assert "Complete candidate fixture" not in on_disk
+
+    # two_open also recount-only with candidate-json present
+    two = tmp_path / "two.md"
+    two_src = _load("two_open_ready.md")
+    two.write_text(two_src, encoding="utf-8")
+    rc2 = main(
+        [
+            "session-a",
+            "--plan",
+            str(two),
+            "--candidate-json",
+            str(fixture),
+            "--json",
+        ]
+    )
+    assert rc2 == 0
+    payload2 = json.loads(capsys.readouterr().out)
+    assert payload2["verdict"] == "light"
+    assert payload2["wrote_item"] is False
+    assert payload2["open_count"] == 2
+    assert two.read_text(encoding="utf-8") == two_src
+    assert "Complete candidate fixture" not in two.read_text(encoding="utf-8")
+
+
+def test_beat15_load_candidate_dict_or_list_helpers():
+    """Beat 15: _load_candidate normalizes dict and list; empty list → None."""
+    from src.research_implement.__main__ import _load_candidate
+
+    d = _load_candidate(FIXTURES / "complete_candidate.json")
+    assert d["title"] == "Complete candidate fixture"
+    lst = _load_candidate(FIXTURES / "complete_candidate_list.json")
+    assert lst["title"] == "Complete list candidate"
+    incomplete = _load_candidate(FIXTURES / "incomplete_candidate.json")
+    assert "acceptance" not in incomplete or incomplete.get("acceptance") in (None, "")
+    assert incomplete_candidate_reasons(incomplete)
+

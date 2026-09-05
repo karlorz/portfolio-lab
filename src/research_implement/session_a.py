@@ -11,6 +11,10 @@ Fail-closed (Beat 14): an incomplete brainstorm/search_plan candidate
 yields verdict ``failed``, ``wrote_item=False``, plan text unchanged, and
 never a partial OPEN append.
 
+CLI ``session-a --candidate-json`` (Beat 15) supplies the brainstorm candidate
+when OPEN=0 (dict or first dict in a JSON list); incomplete candidates still
+fail-closed here (Beat 14).
+
 JSON contract: ``SessionAResult.to_dict()`` (aliases ``to_json_dict`` /
 ``session_a_result_dict``) is the shared shape for CLI ``session-a --json``
 and fixture tests (append/queued vs recount-only/light vs failed).

@@ -44,6 +44,12 @@ Beat 14: Session A fail-closed on incomplete brainstorm/search_plan candidate
 no partial OPEN append; empty + complete stub still queues. Proof: pytest
 ``-k beat14``.
 
+Beat 15: CLI ``session-a --candidate-json <path>`` loads a candidate dict (or
+first dict in a JSON list) as the brainstorm callback when OPEN=0 (instead of
+stub). Incomplete JSON still fail-closes (Beat 14); complete candidate queues
+one OPEN; OPEN>=1 remains recount-only and ignores candidate-json. Proof:
+pytest ``-k beat15``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never
@@ -67,9 +73,26 @@ from src.research_implement.session_b import dry_run_implement, run_session_b_pa
 
 
 def _load_candidate(path: Path | None) -> dict | None:
+    """Load a Session A brainstorm candidate from JSON (dict or list).
+
+    Beat 15: ``session-a --candidate-json`` accepts either a single candidate
+    object or a JSON list; a list uses the first dict element. Incomplete
+    candidates still fail-closed in Session A (Beat 14). Returns None when
+    path is omitted or the list has no dict element.
+    """
     if path is None:
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                return item
+        return None
+    raise SystemExit(
+        f"--candidate-json must be a JSON object or list of objects, got {type(raw).__name__}"
+    )
 
 
 def _resolve_plan(args: argparse.Namespace) -> Path:
@@ -154,7 +177,10 @@ def main(argv: list[str] | None = None) -> int:
         "--candidate-json",
         type=Path,
         default=None,
-        help="Six-field candidate JSON used when OPEN is 0 (overrides --stub)",
+        help=(
+            "Candidate JSON (object or list of objects) loaded when OPEN is 0 "
+            "(overrides --stub); incomplete fail-closes; ignored on OPEN>=1 recount-only"
+        ),
     )
     a.add_argument(
         "--stub",
@@ -230,10 +256,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "session-a":
         plan = _resolve_plan(args)
-        candidate = _load_candidate(args.candidate_json)
-        if candidate is not None:
-            def _brainstorm(_items):
-                return candidate
+        # Beat 15: --candidate-json supplies brainstorm when OPEN==0. Load is
+        # deferred inside the callback so OPEN>=1 recount-only never reads or
+        # appends the candidate. Empty/non-dict JSON → None → failed fire (no stub).
+        if args.candidate_json is not None:
+            cand_path = args.candidate_json
+
+            def _brainstorm(_items, _path=cand_path):
+                return _load_candidate(_path)
 
             brainstorm = _brainstorm
         elif args.no_stub:

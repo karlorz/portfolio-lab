@@ -33,6 +33,10 @@ Beat 14: Session A fail-closed on incomplete brainstorm/search_plan candidate
 wrote_item=False, plan unchanged, no partial OPEN append. Complete stub on
 empty Queue still queues. Proof: pytest ``-k beat14``.
 
+Beat 15: CLI ``session-a --candidate-json`` loads dict/list candidate for
+brainstorm when OPEN=0; incomplete fail-closes; complete queues one OPEN;
+OPEN>=1 recount-only ignores candidate-json. Proof: pytest ``-k beat15``.
+
 JSON: ``SessionResult.to_dict()`` (aliases ``to_json_dict`` / ``session_b_result_dict``)
 is the shared Session B ``--json`` / test contract for idle / decode_only / dry_run /
 shipped. Session A: ``SessionAResult.to_dict()`` (aliases ``to_json_dict`` /
