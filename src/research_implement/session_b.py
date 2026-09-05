@@ -34,7 +34,9 @@ def dry_run_implement(item: QueueItem) -> dict[str, Any]:
     """Default implement: record intended file_touch / acceptance; write nothing.
 
     Side-dev / fixture hook — does not mutate the repo, does not mark SHIPPED,
-    and never touches kill_switch / order_router / live authority paths.
+    does not delete Queue rows, and never touches kill_switch / order_router /
+    live authority paths. Non-mutating: a later Session B fire may pick the
+    same OPEN item again (not idle).
     """
     return {
         "dry_run": True,
@@ -136,8 +138,8 @@ def run_session_b(
     When no B-pickable OPEN item exists, return idle success with ``queue 0/10``
     and ``keep_schedule=True`` without calling ``scheduler_delete``.
 
-    When ``decode_only`` is False and ``implement`` is provided (default side-dev
-    hook: ``dry_run_implement``), the callback runs. Dry-run records intended
+    When ``decode_only`` is False, the pluggable ``implement`` callback runs
+    (defaults to ``dry_run_implement`` when omitted). Dry-run records intended
     ``file_touch`` / ``acceptance`` and never writes the repo or marks SHIPPED.
     """
     # Defense in depth: bind local name so tests can assert we never call it.

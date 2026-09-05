@@ -5,7 +5,12 @@ Session A accepts a pluggable search/plan callback (default: ``stub_brainstorm``
 Session B accepts a pluggable implement callback (default: ``dry_run_implement``).
 Empty Queue is an idle fire (``queue 0/10``); never ``scheduler_delete``.
 
+Dry-run contract: ``dry_run_implement`` is non-mutating — it never marks
+SHIPPED, never deletes Queue rows, and never calls ``scheduler_delete``.
+A second Session B fire therefore picks the same OPEN again (not idle).
+
 CLI: ``python -m src.research_implement {session-a|session-b|idle-decode}``.
+E2E dry-run (tmp plan): see module ``__main__`` examples / ``make research-implement-e2e-dry-run``.
 """
 
 from __future__ import annotations

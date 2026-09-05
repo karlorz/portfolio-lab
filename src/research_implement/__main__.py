@@ -11,6 +11,17 @@ Examples (fixture or --log path)::
     python -m src.research_implement session-b --plan tests/fixtures/research_implement/one_open_ready.md --dry-run --json
     python -m src.research_implement idle-decode --plan tests/fixtures/research_implement/empty_queue.md
 
+E2E dry-run on a temp plan (A stub → B dry-run → B again; OPEN stays OPEN)::
+
+    cp tests/fixtures/research_implement/empty_queue.md /tmp/ri-plan.md
+    python -m src.research_implement session-a --plan /tmp/ri-plan.md --stub
+    python -m src.research_implement session-b --plan /tmp/ri-plan.md --dry-run --json
+    python -m src.research_implement session-b --plan /tmp/ri-plan.md --dry-run --json
+
+Dry-run contract: non-mutating — never marks SHIPPED, never deletes Queue
+rows, never ``scheduler_delete``. Second B therefore picks the same OPEN
+again (not idle ``queue 0/10``). Or: ``make research-implement-e2e-dry-run``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

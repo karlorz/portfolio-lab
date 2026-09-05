@@ -953,3 +953,16 @@ fetch-trends:
 s3-archive:
 	@echo "=== SeaweedFS S3 Daily Archive: $$(date) ==="; \
 	timeout 2400 $(PROJECT_DIR)/scripts/cron/portfolio-lab-s3-archive.sh
+
+# ── Research-implement A/B side-dev (tmp dry-run; no Tasker / no LLM) ──
+# Dry-run is non-mutating: never SHIPPED / never scheduler_delete; second B
+# picks the same OPEN again. Fixture proof: pytest -k e2e_a_stub_then_b_dry_run
+
+.PHONY: research-implement-e2e-dry-run
+research-implement-e2e-dry-run:
+	@echo "E2E dry-run (copy empty fixture to a temp plan, then):"
+	@echo "  python -m src.research_implement session-a --plan /tmp/ri-plan.md --stub"
+	@echo "  python -m src.research_implement session-b --plan /tmp/ri-plan.md --dry-run --json"
+	@echo "  python -m src.research_implement session-b --plan /tmp/ri-plan.md --dry-run --json"
+	@echo "(second B still dry_run on same OPEN — dry-run never ships)"
+	@echo "Or: PYTHONPATH=. pytest tests/test_research_implement_loop.py -q -k e2e"

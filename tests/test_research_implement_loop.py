@@ -26,6 +26,7 @@ from src.research_implement.queue import (
 from src.research_implement.session_a import (
     default_search_plan,
     run_session_a,
+    run_session_a_path,
     stub_brainstorm,
 )
 from src.research_implement.session_b import (
@@ -35,6 +36,7 @@ from src.research_implement.session_b import (
     dry_run_implement,
     format_decode_report,
     run_session_b,
+    run_session_b_path,
     scheduler_delete,
 )
 
@@ -534,3 +536,113 @@ def test_cli_session_b_default_remains_decode_only(tmp_path: Path, capsys):
     assert payload["verdict"] == "picked"
     assert payload["implement_result"] is None
 
+def test_e2e_a_stub_then_b_dry_run_never_ships_tmp_path(tmp_path: Path):
+    """A→B dry-run on tmp_path only: dry-run never ships / never deletes.
+
+    Contract: ``dry_run_implement`` is non-mutating — it does not mark SHIPPED,
+    does not rewrite the plan, and never calls ``scheduler_delete``. A second
+    Session B fire therefore picks the same OPEN again (not idle queue 0/10).
+    """
+    plan = tmp_path / "plan.md"
+    plan.write_text(_load("empty_queue.md"), encoding="utf-8")
+    assert count_open(parse_queue_items(plan.read_text(encoding="utf-8"))) == 0
+
+    # Session A: stub_brainstorm on empty temp plan → one OPEN item.
+    a = run_session_a_path(plan, brainstorm=stub_brainstorm, write=True)
+    assert a.ok
+    assert a.verdict == "queued"
+    assert a.open_count == 1
+    assert a.wrote_item
+    after_a = plan.read_text(encoding="utf-8")
+    items_a = parse_queue_items(after_a)
+    assert count_open(items_a) == 1
+    assert is_b_pickable(items_a[0])
+    assert "SHIPPED" not in after_a
+
+    calls = {"n": 0}
+
+    def _spy(*_a, **_k):
+        calls["n"] += 1
+        raise SchedulerDeleteForbidden("spy")
+
+    # Session B #1: dry_run_implement → decode + dry-run implement report.
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        b1 = run_session_b_path(
+            plan,
+            implement=dry_run_implement,
+            decode_only=False,
+            write=False,
+        )
+    assert b1.ok
+    assert b1.verdict == "dry_run"
+    assert b1.item is not None
+    assert b1.item.item_id == items_a[0].item_id
+    assert b1.decode_report is not None
+    assert f"decode pick {b1.item.item_id}:" in b1.decode_report
+    assert b1.implement_result is not None
+    assert b1.implement_result["dry_run"] is True
+    assert b1.implement_result["wrote_files"] is False
+    assert b1.implement_result["sha"] is None
+    assert b1.implement_result["file_touch"] == b1.item.file_touch
+    assert b1.implement_result["acceptance"] == b1.item.acceptance
+    assert "no repo write" in b1.message
+    assert b1.keep_schedule is True
+    assert b1.scheduler_delete_called is False
+    assert calls["n"] == 0
+    # Dry-run never ships / never deletes the OPEN row.
+    after_b1 = plan.read_text(encoding="utf-8")
+    assert after_b1 == after_a
+    assert count_open(parse_queue_items(after_b1)) == 1
+    assert "SHIPPED" not in after_b1
+
+    # Session B #2: same OPEN still pickable (not idle 0/10).
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        b2 = run_session_b_path(
+            plan,
+            implement=dry_run_implement,
+            decode_only=False,
+            write=False,
+        )
+    assert b2.ok
+    assert b2.verdict == "dry_run"  # not idle — dry-run left OPEN in place
+    assert b2.item is not None
+    assert b2.item.item_id == b1.item.item_id
+    assert b2.open_count == 1
+    assert "queue 1/10" in b2.message or b2.queue_label == "queue 1/10"
+    assert b2.keep_schedule is True
+    assert b2.scheduler_delete_called is False
+    assert calls["n"] == 0
+    assert plan.read_text(encoding="utf-8") == after_a
+
+
+def test_e2e_cli_a_stub_then_b_dry_run_tmp_path(tmp_path: Path, capsys):
+    """CLI sequence: session-a --stub then session-b --dry-run twice on tmp plan."""
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "plan.md"
+    plan.write_text(_load("empty_queue.md"), encoding="utf-8")
+
+    rc_a = main(["session-a", "--plan", str(plan), "--stub"])
+    assert rc_a == 0
+    out_a = capsys.readouterr().out
+    assert "queued" in out_a
+    assert count_open(parse_queue_items(plan.read_text(encoding="utf-8"))) == 1
+
+    rc_b1 = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+    assert rc_b1 == 0
+    payload1 = __import__("json").loads(capsys.readouterr().out)
+    assert payload1["verdict"] == "dry_run"
+    assert payload1["item"]["item_id"]
+    assert payload1["implement_result"]["dry_run"] is True
+    assert payload1["keep_schedule"] is True
+    assert payload1["scheduler_delete_called"] is False
+    assert "SHIPPED" not in plan.read_text(encoding="utf-8")
+
+    # Second B: still dry_run on same OPEN (non-mutating contract).
+    rc_b2 = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+    assert rc_b2 == 0
+    payload2 = __import__("json").loads(capsys.readouterr().out)
+    assert payload2["verdict"] == "dry_run"
+    assert payload2["item"]["item_id"] == payload1["item"]["item_id"]
+    assert payload2["open_count"] == 1
+    assert payload2["scheduler_delete_called"] is False
