@@ -15,8 +15,13 @@ implement stays unwired.
 
 CLI: ``python -m src.research_implement {session-a|session-b|idle-decode}``.
 E2E dry-run (tmp plan): see module ``__main__`` examples / ``make research-implement-e2e-dry-run``.
-Full pipeline (Beat 11): A stub → B dry_run → A recount light → B fixture_ship → B idle
-on tmp_path — ``make research-implement-e2e-pipeline`` / pytest ``-k beat11``.
+Full pipeline (Beat 11): A stub append → B dry_run (JSON) → B fixture_ship → then
+A light recount (while OPEN>=1, mid-pipeline) and/or B idle — on tmp_path only;
+``make research-implement-e2e-pipeline`` / pytest ``-k beat11``.
+
+Beat 12: CLI ``--help`` smoke (session-a / session-b / idle-decode mention
+JSON / dry-run / idle fire as appropriate) and OPEN>=1 brainstorm/search_plan
+spy (recount-only; custom callback never called). Proof: pytest ``-k beat12``.
 
 JSON: ``SessionResult.to_dict()`` (aliases ``to_json_dict`` / ``session_b_result_dict``)
 is the shared Session B ``--json`` / test contract for idle / decode_only / dry_run /

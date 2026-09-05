@@ -24,10 +24,15 @@ again (not idle ``queue 0/10``). Or: ``make research-implement-e2e-dry-run``.
 
 Full pipeline (Beat 11, tmp_path / test double only)::
 
-    A stub append → B dry_run --json → A recount light → B fixture_ship → B idle
+    A stub append → B dry_run --json → B fixture_ship → A light (OPEN>=1) and/or B idle
 
-Dry-run never ships; ``fixture_ship_implement`` ships on tmp_path only (never CLI
-default). Proof: ``make research-implement-e2e-pipeline`` / pytest ``-k beat11``.
+Light recount runs mid-pipeline while OPEN>=1 (after dry_run, before ship). Dry-run
+never ships; ``fixture_ship_implement`` ships on tmp_path only (never CLI default).
+Proof: ``make research-implement-e2e-pipeline`` / pytest ``-k beat11``.
+
+Beat 12: CLI ``--help`` smoke (session-a / session-b / idle-decode) + OPEN>=1
+brainstorm/search_plan spy (recount-only; callback never called). Proof:
+pytest ``-k beat12``.
 
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
@@ -192,8 +197,12 @@ def main(argv: list[str] | None = None) -> int:
     idle = sub.add_parser(
         "idle-decode",
         help=(
-            "Decode-only Session B alias: idle when empty/not-ready; "
+            "Decode-only Session B alias: idle fire when empty/not-ready; "
             "picked decode_only when OPEN ready; never scheduler_delete"
+        ),
+        description=(
+            "Decode-only Session B alias. Idle fire when Queue empty/not-ready; "
+            "picked decode_only when OPEN ready. Never scheduler_delete."
         ),
     )
     _add_plan_log(idle)

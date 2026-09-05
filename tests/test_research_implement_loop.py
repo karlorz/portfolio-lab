@@ -1685,10 +1685,10 @@ def test_beat11_full_pipeline_e2e_stub_dry_run_ship_recount_idle(tmp_path: Path,
     Sequence:
       1. Session A stub append (empty → queued; SessionA JSON shape)
       2. Session B dry_run JSON (never ships; plan unchanged; SessionB JSON)
-      3. Session A recount light (OPEN still 1; no second append)
+      3. Session A recount light (OPEN still 1 mid-pipeline; no second append)
       4. Session B fixture_ship (SHIPPED on tmp_path; dry_run never did)
-      5. Session B idle (queue 0/10) + Session A would be empty-side
-         (post-ship OPEN=0); assert idle JSON + never scheduler_delete
+      5. Session B idle (queue 0/10 after ship); assert idle JSON + never
+         scheduler_delete (A light requires OPEN>=1 so it is step 3, not post-ship)
 
     Live prod implement / CLI stub-ship stay unwired. No Tasker / no LLM.
     """
@@ -1877,3 +1877,97 @@ def test_beat11_full_pipeline_e2e_stub_dry_run_ship_recount_idle(tmp_path: Path,
         assert tuple(sorted(payload.keys())) == tuple(sorted(SESSION_RESULT_JSON_KEYS))
     for payload in (a1_dict, light_dict):
         assert tuple(sorted(payload.keys())) == tuple(sorted(SESSION_A_RESULT_JSON_KEYS))
+
+# --- Beat 12: CLI --help smoke + brainstorm/search_plan spy (OPEN>=1 recount-only) ---
+
+
+def test_beat12_cli_help_smoke_session_a_b_idle_decode(capsys):
+    """Beat 12: session-a / session-b / idle-decode ``--help`` exit 0 + flag mentions.
+
+    - session-a: help mentions ``json`` and ``dry-run``
+    - session-b: help mentions ``json`` and ``dry-run``
+    - idle-decode: help mentions ``json`` and ``idle`` (decode-only alias; no dry-run flag)
+    """
+    from src.research_implement.__main__ import main
+
+    with pytest.raises(SystemExit) as ei_a:
+        main(["session-a", "--help"])
+    assert ei_a.value.code == 0
+    help_a = capsys.readouterr().out.lower()
+    assert "json" in help_a
+    assert "dry-run" in help_a or "dry run" in help_a
+
+    with pytest.raises(SystemExit) as ei_b:
+        main(["session-b", "--help"])
+    assert ei_b.value.code == 0
+    help_b = capsys.readouterr().out.lower()
+    assert "json" in help_b
+    assert "dry-run" in help_b or "dry run" in help_b
+
+    with pytest.raises(SystemExit) as ei_idle:
+        main(["idle-decode", "--help"])
+    assert ei_idle.value.code == 0
+    help_idle = capsys.readouterr().out.lower()
+    assert "json" in help_idle
+    assert "idle" in help_idle
+    # Subparser description + --json help mention idle fire / idle.
+    assert "idle fire" in help_idle or "idle |" in help_idle or "idle when" in help_idle
+
+
+def test_beat12_brainstorm_spy_open_ge1_search_plan_not_called(tmp_path: Path):
+    """Beat 12: OPEN>=1 → custom ``search_plan`` / ``brainstorm`` NOT called (recount-only).
+
+    Spy both kwarg names; neither may fire when Queue already has OPEN items.
+    """
+    src = _load("one_open_ready.md")
+    assert count_open(parse_queue_items(src)) >= 1
+
+    plan = tmp_path / "open_ge1.md"
+    plan.write_text(src, encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    open_before = count_open(parse_queue_items(before))
+    assert open_before >= 1
+
+    spy = {"brainstorm": 0, "search_plan": 0}
+
+    def boom_brainstorm(_items):
+        spy["brainstorm"] += 1
+        raise AssertionError("brainstorm must not be called when OPEN>=1")
+
+    def boom_search_plan(_items):
+        spy["search_plan"] += 1
+        raise AssertionError("search_plan must not be called when OPEN>=1")
+
+    # brainstorm= kwarg path
+    r1 = run_session_a_path(plan, brainstorm=boom_brainstorm, write=True)
+    assert r1.ok and r1.verdict == "light"
+    assert r1.wrote_item is False
+    assert r1.open_count == open_before
+    assert spy["brainstorm"] == 0
+    assert "recount only" in r1.message
+    assert plan.read_text(encoding="utf-8") == before
+
+    # search_plan= kwarg path (preferred alias; wins if both passed)
+    r2 = run_session_a(
+        before,
+        brainstorm=boom_brainstorm,
+        search_plan=boom_search_plan,
+    )
+    assert r2.ok and r2.verdict == "light"
+    assert r2.wrote_item is False
+    assert r2.open_count == open_before
+    assert spy["brainstorm"] == 0
+    assert spy["search_plan"] == 0
+    assert "recount only" in r2.message
+
+    # two_open fixture still recount-only; neither callback fires.
+    two = _load("two_open_ready.md")
+    assert count_open(parse_queue_items(two)) >= 2
+    r3 = run_session_a(two, search_plan=boom_search_plan)
+    assert r3.ok and r3.verdict == "light"
+    assert r3.open_count >= 2
+    assert spy["search_plan"] == 0
+    light = r3.to_dict()
+    assert light["verdict"] == "light"
+    assert light["wrote_item"] is False
+
