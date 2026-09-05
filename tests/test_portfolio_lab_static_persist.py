@@ -20,6 +20,7 @@ Tests exercise:
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import stat
@@ -1352,3 +1353,28 @@ def test_empty_path_execution(layout: dict[str, Path]) -> None:
     assert res.returncode == 0, res.stderr
     data = json.loads(res.stdout)
     assert data["state"] == "inactive"
+
+
+# ── 13. Shipped executable determinism (direct execution, PATH without python3) ─
+
+
+def test_shipped_executable_uses_user_owned_python_entrypoint_directly() -> None:
+    """Direct execution of the installed controller at CONTROLLER_INSTALL_PATH must
+    stay deterministic even when PATH lacks python3: the shipped script's shebang
+    must invoke the user-owned cursor-box python3 entrypoint (same .local/bin dir
+    as the controller) directly, never /usr/bin/env python3, which resolves
+    python3 through PATH and fails on a bare Alpine host with no system python."""
+    spec = importlib.util.spec_from_file_location("plsp_shipped_cli", PERSIST_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    # Derive the production install path from the shipped module itself so the
+    # shebang cannot drift from the path the controller self-reports.
+    installed = Path(mod.CONTROLLER_INSTALL_PATH)
+    assert os.path.isabs(str(installed))
+
+    first_line = PERSIST_SCRIPT.read_text(encoding="utf-8").splitlines()[0]
+    assert first_line == f"#!{installed.parent / 'python3'}"
+    assert first_line == "#!/home/box/.local/bin/python3"
+    assert not first_line.startswith("#!/usr/bin/env")
