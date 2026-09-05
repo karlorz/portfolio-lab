@@ -54,6 +54,7 @@ help:
 	@echo "  make test-ml-extract  Run extracted ML-kernel tests (safe: ML disabled)"
 	@echo "  make test-ml      Run full test suite including ML (requires torch/sklearn)"
 	@echo "  make test-isolation  Run top-20 failing files individually (bypasses pollution)"
+	@echo "  make test-research-implement  Side-dev A/B loop + contract fixture tests (no Tasker)"
 	@echo "  make data         Fetch Yahoo Finance market data"
 	@echo "  make dashboard    Regenerate dashboard JSON files"
 	@echo "  make health       Generate public/data/health.json system health monitor"
@@ -971,3 +972,23 @@ research-implement-e2e-dry-run:
 	@echo "Optional ship (test double / tmp_path only; not wired to CLI):"
 	@echo "  PYTHONPATH=. pytest tests/test_research_implement_loop.py -q -k beat5"
 	@echo "(ship is callback-only — no CLI stub-ship; prefer pytest tmp_path doubles)"
+
+# Side-dev only (no Tasker): A/B fixture unit + optional host contract.
+# Interpreter: scripts/python_runtime.sh (PYTHON_RUNTIME). When the side
+# .venv is broken on cursor-box, override with a working musl-wrapped
+# interpreter, e.g.:
+#   RI_PYTHON="/home/box/.local/share/portfolio-lab/toolchain/alpine-build-root/lib/ld-musl-x86_64.so.1 --library-path $$LD_LIBRARY_PATH /home/box/.local/share/portfolio-lab/app/.venv/bin/python"
+#   (export LD_LIBRARY_PATH as in scripts/python_runtime.sh) then:
+#   make test-research-implement RI_PYTHON="$$MUSL --library-path $$LIBS $$APP_PY"
+# Or run the documented one-liner in the recipe comment below.
+RI_PYTHON ?= $(PYTHON_RUNTIME)
+
+.PHONY: test-research-implement
+test-research-implement:
+	@echo "=== test-research-implement (side-dev; no Tasker) ==="; \
+	cd $(PROJECT_DIR) && \
+	PORTFOLIO_LAB_ENABLE_ML=0 $(RI_PYTHON) -m pytest \
+	  tests/test_research_implement_loop.py \
+	  tests/test_research_implement_loop_contract_fixture.py \
+	  tests/test_research_implement_loop_contract.py \
+	  -q --tb=short -p no:cacheprovider
