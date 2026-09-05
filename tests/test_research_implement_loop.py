@@ -3058,10 +3058,15 @@ def test_beat18_public_api_exports_smoke():
 
 
 def test_beat18_makefile_lists_research_implement_targets():
-    """Makefile documents the side-dev research-implement Make targets."""
-    makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text(
-        encoding="utf-8"
-    )
+    """Makefile help / echo lists research-implement side-dev targets.
+
+    Doc-assert the Makefile text, then smoke ``make help`` and the two
+    e2e echo targets (recipes are echo-only; no Tasker / no pytest spawn).
+    """
+    import subprocess
+
+    root = Path(__file__).resolve().parents[1]
+    makefile = (root / "Makefile").read_text(encoding="utf-8")
     for target in (
         "test-research-implement",
         "research-implement-e2e-dry-run",
@@ -3070,3 +3075,35 @@ def test_beat18_makefile_lists_research_implement_targets():
         assert target in makefile, f"Makefile missing target mention: {target}"
         # Recipe / .PHONY lines use ``target:`` form.
         assert f"{target}:" in makefile or f"make {target}" in makefile
+
+    # ``make help`` mentions the suite target.
+    help_out = subprocess.run(
+        ["make", "help"],
+        cwd=str(root),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "test-research-implement" in help_out
+
+    # Echo-only e2e targets mention dry-run / pipeline / suite target.
+    dry = subprocess.run(
+        ["make", "research-implement-e2e-dry-run"],
+        cwd=str(root),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.lower()
+    assert "dry-run" in dry or "dry_run" in dry
+    assert "e2e" in dry or "pytest" in dry
+
+    pipe = subprocess.run(
+        ["make", "research-implement-e2e-pipeline"],
+        cwd=str(root),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "test-research-implement" in pipe
+    assert "e2e" in pipe.lower() or "pipeline" in pipe.lower()
+    assert "beat18" in pipe.lower() or "beat11" in pipe.lower()

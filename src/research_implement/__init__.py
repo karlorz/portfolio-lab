@@ -47,6 +47,12 @@ Beat 17: Session B decode_only default / CLI session-b never calls implement;
 only when opted in (``decode_only=False`` + ``fixture_ship_implement``).
 Proof: pytest ``-k beat17``.
 
+Beat 18: Public API export smoke (``import src.research_implement`` + key
+``__all__`` / getattr names: SessionAResult, SessionResult, queue helpers,
+dry_run_implement, fixture_ship, incomplete_candidate_reasons, …) and Makefile
+help/echo listing ``test-research-implement``, ``e2e-dry-run``, ``e2e-pipeline``.
+Proof: pytest ``-k beat18``.
+
 JSON: ``SessionResult.to_dict()`` (aliases ``to_json_dict`` / ``session_b_result_dict``)
 is the shared Session B ``--json`` / test contract for idle / decode_only / dry_run /
 shipped. Session A: ``SessionAResult.to_dict()`` (aliases ``to_json_dict`` /
