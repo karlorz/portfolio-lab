@@ -5,9 +5,11 @@ Ignores ## Watch and ## Project Work. Empty Queue is an idle fire
 (``nothing to implement; … queue 0/10``) — keep the schedule; never
 ``scheduler_delete``.
 
-Decode path reports the picked Q id and six fields. Optional ``implement``
-callback stays optional — CLI defaults to decode-only and does not wire live
-implement to prod.
+Decode path reports the picked Q id and six fields. Pluggable ``implement``
+callback defaults to ``dry_run_implement`` / ``default_implement`` (records
+intended ``file_touch`` / ``acceptance`` without writing the repo). CLI
+defaults to decode-only; pass ``--dry-run`` to exercise the dry-run implement
+path. Live implement to prod stays unwired.
 """
 
 from __future__ import annotations
@@ -26,6 +28,27 @@ from src.research_implement.queue import (
 )
 
 ImplementFn = Callable[[QueueItem], dict[str, Any] | None]
+
+
+def dry_run_implement(item: QueueItem) -> dict[str, Any]:
+    """Default implement: record intended file_touch / acceptance; write nothing.
+
+    Side-dev / fixture hook — does not mutate the repo, does not mark SHIPPED,
+    and never touches kill_switch / order_router / live authority paths.
+    """
+    return {
+        "dry_run": True,
+        "item_id": item.item_id,
+        "title": item.title,
+        "file_touch": item.file_touch,
+        "acceptance": item.acceptance,
+        "wrote_files": False,
+        "sha": None,
+    }
+
+
+# Public alias for the pluggable implement hook default.
+default_implement = dry_run_implement
 
 
 class SchedulerDeleteForbidden(RuntimeError):
@@ -77,7 +100,7 @@ def format_decode_report(item: QueueItem) -> str:
 @dataclass(frozen=True)
 class SessionBResult:
     ok: bool
-    verdict: str  # idle | picked | shipped | refused
+    verdict: str  # idle | picked | dry_run | shipped | refused
     open_count: int
     item: QueueItem | None
     message: str
@@ -112,6 +135,10 @@ def run_session_b(
     Decode always uses ``## Queue`` only (Watch / Project Work ignored by parser).
     When no B-pickable OPEN item exists, return idle success with ``queue 0/10``
     and ``keep_schedule=True`` without calling ``scheduler_delete``.
+
+    When ``decode_only`` is False and ``implement`` is provided (default side-dev
+    hook: ``dry_run_implement``), the callback runs. Dry-run records intended
+    ``file_touch`` / ``acceptance`` and never writes the repo or marks SHIPPED.
     """
     # Defense in depth: bind local name so tests can assert we never call it.
     _delete = scheduler_delete  # noqa: F841
@@ -140,8 +167,10 @@ def run_session_b(
             implement_result=None,
         )
 
-    if decode_only or implement is None:
-        # Decode path: report Q id + fields; optional implement stays unwired.
+    if decode_only:
+        # Decode path: report Q id + fields. CLI defaults here. Pass
+        # decode_only=False (optionally with implement=) to exercise the
+        # pluggable implement hook; implement defaults to dry_run_implement.
         report = format_decode_report(pick)
         msg = (
             f"picked; {pick.item_id} {pick.title}; "
@@ -160,11 +189,15 @@ def run_session_b(
             implement_result=None,
         )
 
-    result = implement(pick) or {}
+    # Pluggable implement — default dry_run_implement records intent only.
+    fn = implement if implement is not None else default_implement
+    result = fn(pick) or {}
     new_text = plan_markdown
     verdict = "picked"
     sha = ship_sha or result.get("sha")
-    if sha:
+    is_dry = bool(result.get("dry_run")) and not sha
+
+    if sha and not is_dry:
         new_text = mark_item_shipped(
             plan_markdown,
             pick.item_id,
@@ -175,11 +208,24 @@ def run_session_b(
             Path(plan_path).write_text(new_text, encoding="utf-8")
         verdict = "shipped"
         open_n = count_open(parse_queue_items(new_text))
+        msg = (
+            f"{verdict}; {pick.item_id} sha={sha or '-'}; "
+            f"{render_queue_count(open_n)}; plan {path_label}"
+        )
+    elif is_dry:
+        # Dry-run: record intended file_touch / acceptance; never write repo/plan.
+        verdict = "dry_run"
+        msg = (
+            f"dry-run; {pick.item_id}; file_touch={pick.file_touch}; "
+            f"acceptance={pick.acceptance}; {render_queue_count(open_n)}; "
+            f"plan {path_label}; no repo write"
+        )
+    else:
+        msg = (
+            f"{verdict}; {pick.item_id} sha={sha or '-'}; "
+            f"{render_queue_count(open_n)}; plan {path_label}"
+        )
 
-    msg = (
-        f"{verdict}; {pick.item_id} sha={sha or '-'}; "
-        f"{render_queue_count(open_n)}; plan {path_label}"
-    )
     return SessionBResult(
         ok=True,
         verdict=verdict,

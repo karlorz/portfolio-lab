@@ -2,6 +2,7 @@
 
 Distinct from ``src.research.agent`` / ``make research`` (regime crystallizer).
 Session A accepts a pluggable search/plan callback (default: ``stub_brainstorm``).
+Session B accepts a pluggable implement callback (default: ``dry_run_implement``).
 Empty Queue is an idle fire (``queue 0/10``); never ``scheduler_delete``.
 
 CLI: ``python -m src.research_implement {session-a|session-b|idle-decode}``.
@@ -33,6 +34,8 @@ from src.research_implement.session_a import (
 from src.research_implement.session_b import (
     SessionBResult,
     decode_fields,
+    default_implement,
+    dry_run_implement,
     format_decode_report,
     run_session_b,
     scheduler_delete,
@@ -61,4 +64,6 @@ __all__ = [
     "decode_fields",
     "format_decode_report",
     "scheduler_delete",
+    "dry_run_implement",
+    "default_implement",
 ]

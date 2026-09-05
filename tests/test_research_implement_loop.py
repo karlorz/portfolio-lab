@@ -31,6 +31,8 @@ from src.research_implement.session_a import (
 from src.research_implement.session_b import (
     SchedulerDeleteForbidden,
     decode_fields,
+    default_implement,
+    dry_run_implement,
     format_decode_report,
     run_session_b,
     scheduler_delete,
@@ -287,6 +289,8 @@ def test_modules_are_distinct_from_legacy_research_agent():
     assert "format_decode_report" in dir(loop)
     assert "stub_brainstorm" in dir(loop)
     assert "default_search_plan" in dir(loop)
+    assert "dry_run_implement" in dir(loop)
+    assert "default_implement" in dir(loop)
 
 
 def test_stub_brainstorm_fills_six_fields():
@@ -386,3 +390,147 @@ def test_cli_session_b_log_alias_decode(tmp_path: Path):
     plan.write_text(_load("one_open_ready.md"), encoding="utf-8")
     rc = main(["session-b", "--log", str(plan), "--json"])
     assert rc == 0
+
+def test_dry_run_implement_records_file_touch_and_acceptance():
+    assert dry_run_implement is default_implement
+    items = parse_queue_items(_load("one_open_ready.md"))
+    item = items[0]
+    recorded = dry_run_implement(item)
+    assert recorded["dry_run"] is True
+    assert recorded["wrote_files"] is False
+    assert recorded["sha"] is None
+    assert recorded["item_id"] == "Q1"
+    assert recorded["file_touch"] == item.file_touch
+    assert recorded["acceptance"] == item.acceptance
+    assert "test_research_implement_loop.py" in recorded["file_touch"]
+
+
+def test_session_b_dry_run_implement_one_open_ready_no_repo_mutation(tmp_path: Path):
+    """Dry-run implement on one OPEN ready: record intent; no real file writes."""
+    plan_src = _load("one_open_ready.md")
+    plan = tmp_path / "plan.md"
+    plan.write_text(plan_src, encoding="utf-8")
+
+    # Sentinel: a path named in file_touch that must not be mutated.
+    touched_target = Path(__file__).resolve()
+    before_bytes = touched_target.read_bytes()
+    before_mtime = touched_target.stat().st_mtime_ns
+
+    # Extra sentinel outside temp/fixture logs.
+    repo_sentinel = Path(__file__).resolve().parents[1] / "src" / "research_implement" / "queue.py"
+    sentinel_before = repo_sentinel.read_bytes()
+
+    calls = {"n": 0}
+
+    def _spy(*_a, **_k):
+        calls["n"] += 1
+        raise SchedulerDeleteForbidden("spy")
+
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        result = run_session_b(
+            plan_src,
+            implement=dry_run_implement,
+            decode_only=False,
+            plan_path=plan,
+            write_path=True,  # even if asked to write, dry-run must not ship/mark
+        )
+
+    assert result.ok
+    assert result.verdict == "dry_run"
+    assert result.item is not None
+    assert result.item.item_id == "Q1"
+    assert result.keep_schedule is True
+    assert result.scheduler_delete_called is False
+    assert calls["n"] == 0
+    assert result.implement_result is not None
+    assert result.implement_result["dry_run"] is True
+    assert result.implement_result["file_touch"] == result.item.file_touch
+    assert result.implement_result["acceptance"] == result.item.acceptance
+    assert "file_touch=" in result.message
+    assert "no repo write" in result.message
+    # Plan text unchanged (not SHIPPED); OPEN still 1.
+    assert count_open(parse_queue_items(result.plan_text)) == 1
+    assert "SHIPPED" not in result.plan_text
+    # write_path=True must not rewrite plan for dry-run.
+    assert plan.read_text(encoding="utf-8") == plan_src
+    # No real file mutations outside temp/fixture logs.
+    assert touched_target.read_bytes() == before_bytes
+    assert touched_target.stat().st_mtime_ns == before_mtime
+    assert repo_sentinel.read_bytes() == sentinel_before
+
+
+def test_session_b_dry_run_idle_on_empty_never_deletes():
+    result = run_session_b(
+        _load("empty_queue.md"),
+        implement=dry_run_implement,
+        decode_only=False,
+    )
+    assert result.ok
+    assert result.verdict == "idle"
+    assert result.implement_result is None
+    assert result.keep_schedule
+    assert not result.scheduler_delete_called
+    assert "queue 0/10" in result.message
+
+
+def test_cli_session_b_dry_run_one_open(tmp_path: Path, capsys):
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "one.md"
+    plan.write_text(_load("one_open_ready.md"), encoding="utf-8")
+    # Snapshot fixture + a repo file that file_touch mentions.
+    loop_test = Path(__file__).resolve()
+    before = loop_test.read_bytes()
+
+    rc = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    payload = __import__("json").loads(out)
+    assert payload["verdict"] == "dry_run"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert payload["implement_result"]["dry_run"] is True
+    assert payload["implement_result"]["file_touch"]
+    assert payload["implement_result"]["acceptance"]
+    assert payload["item"]["item_id"] == "Q1"
+    # Plan on disk unchanged; no repo mutation.
+    assert "SHIPPED" not in plan.read_text(encoding="utf-8")
+    assert loop_test.read_bytes() == before
+
+
+def test_cli_session_b_dry_run_empty_idle(tmp_path: Path, capsys):
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "empty.md"
+    plan.write_text(_load("empty_queue.md"), encoding="utf-8")
+    rc = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+    assert rc == 0
+    payload = __import__("json").loads(capsys.readouterr().out)
+    assert payload["verdict"] == "idle"
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert payload["implement_result"] is None
+
+def test_session_b_default_implement_when_not_decode_only():
+    """decode_only=False with implement=None uses dry_run_implement."""
+    result = run_session_b(_load("one_open_ready.md"), decode_only=False)
+    assert result.ok
+    assert result.verdict == "dry_run"
+    assert result.implement_result is not None
+    assert result.implement_result["dry_run"] is True
+    assert result.keep_schedule
+    assert not result.scheduler_delete_called
+
+
+def test_cli_session_b_default_remains_decode_only(tmp_path: Path, capsys):
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "one.md"
+    plan.write_text(_load("one_open_ready.md"), encoding="utf-8")
+    rc = main(["session-b", "--plan", str(plan), "--json"])
+    assert rc == 0
+    payload = __import__("json").loads(capsys.readouterr().out)
+    assert payload["verdict"] == "picked"
+    assert payload["implement_result"] is None
+

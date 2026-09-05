@@ -8,12 +8,14 @@ Examples (fixture or --log path)::
 
     python -m src.research_implement session-a --plan tests/fixtures/research_implement/empty_queue.md --stub --dry-run
     python -m src.research_implement session-b --log logs/research-implement.md --json
+    python -m src.research_implement session-b --plan tests/fixtures/research_implement/one_open_ready.md --dry-run --json
     python -m src.research_implement idle-decode --plan tests/fixtures/research_implement/empty_queue.md
 
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never
-``scheduler_delete``.
+``scheduler_delete``. Session B ``--dry-run`` exercises the default dry-run
+implement callback (records file_touch / acceptance; no repo write).
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ import sys
 from pathlib import Path
 
 from src.research_implement.session_a import run_session_a_path, stub_brainstorm
-from src.research_implement.session_b import run_session_b_path
+from src.research_implement.session_b import dry_run_implement, run_session_b_path
 
 
 def _load_candidate(path: Path | None) -> dict | None:
@@ -58,9 +60,27 @@ def _add_plan_log(p: argparse.ArgumentParser) -> None:
     )
 
 
-def _run_session_b_decode(plan: Path, *, as_json: bool) -> int:
-    # Decode-only: pick Q id / idle; never implement; never delete schedule.
-    result = run_session_b_path(plan, decode_only=True, write=False)
+def _run_session_b(
+    plan: Path,
+    *,
+    as_json: bool,
+    dry_run: bool = False,
+) -> int:
+    """Session B CLI: decode-only by default; ``dry_run`` uses dry_run_implement.
+
+    Empty Queue still idle-fires (queue 0/10). Never ``scheduler_delete``.
+    Dry-run records intended file_touch / acceptance and never writes the repo.
+    """
+    if dry_run:
+        result = run_session_b_path(
+            plan,
+            implement=dry_run_implement,
+            decode_only=False,
+            write=False,
+        )
+    else:
+        # Decode-only: pick Q id / idle; never implement; never delete schedule.
+        result = run_session_b_path(plan, decode_only=True, write=False)
     assert result.keep_schedule and not result.scheduler_delete_called
     if as_json:
         payload = {
@@ -71,6 +91,7 @@ def _run_session_b_decode(plan: Path, *, as_json: bool) -> int:
             "keep_schedule": result.keep_schedule,
             "scheduler_delete_called": result.scheduler_delete_called,
             "item": None,
+            "implement_result": result.implement_result,
         }
         if result.item is not None:
             from src.research_implement.session_b import decode_fields
@@ -79,7 +100,7 @@ def _run_session_b_decode(plan: Path, *, as_json: bool) -> int:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
         print(result.message)
-        if result.decode_report and result.verdict == "picked":
+        if result.decode_report and result.verdict in {"picked", "dry_run"}:
             if result.item is not None and f"decode pick {result.item.item_id}" not in result.message:
                 print(result.decode_report)
     return 0 if result.ok else 1
@@ -93,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
             "Side-dev only — no Tasker yaml on prod ports, no live LLM."
         ),
         epilog=(
-            "Subcommands: session-a (producer), session-b (decode consumer), "
+            "Subcommands: session-a (producer), session-b (decode / optional --dry-run implement), "
             "idle-decode (alias of session-b decode; idle fire on empty Queue)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -137,6 +158,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         default=True,
         help="Decode/pick only (default); never implements code / no prod wire-up",
+    )
+    b.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Run pluggable dry-run implement (record file_touch / acceptance; "
+            "no repo write). Still idle-fires on empty Queue; never scheduler_delete."
+        ),
     )
     b.add_argument(
         "--json",
@@ -184,7 +213,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd in {"session-b", "idle-decode"}:
         plan = _resolve_plan(args)
         as_json = bool(getattr(args, "as_json", False))
-        return _run_session_b_decode(plan, as_json=as_json)
+        dry_run = bool(getattr(args, "dry_run", False))
+        # idle-decode stays decode-only; session-b may opt into --dry-run implement.
+        return _run_session_b(plan, as_json=as_json, dry_run=dry_run)
 
     parser.error(f"unknown command {args.cmd}")
     return 2
