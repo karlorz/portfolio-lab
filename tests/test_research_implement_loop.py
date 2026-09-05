@@ -3611,25 +3611,58 @@ def test_beat23_missing_plan_path_fails_all_cmds(tmp_path: Path, capsys):
     missing = tmp_path / "no-such-plan.md"
     assert not missing.exists()
     for cmd in ("session-a", "session-b", "idle-decode"):
+        for flag in ("--plan", "--log"):
+            with pytest.raises(SystemExit) as ei:
+                main([cmd, flag, str(missing), "--json"])
+            msg = str(ei.value)
+            assert ei.value.code != 0
+            assert "not found" in msg.lower()
+            assert "--plan" in msg or "--log" in msg
+            assert not missing.exists()
+            out = capsys.readouterr().out
+            assert out.strip() == "" or "queued" not in out
+
+
+def test_beat23_omitted_plan_flag_fails_all_cmds(capsys):
+    """Beat 23: omitting --plan/--log → argparse SystemExit non-zero."""
+    from src.research_implement.__main__ import main
+
+    for cmd in ("session-a", "session-b", "idle-decode"):
         with pytest.raises(SystemExit) as ei:
-            main([cmd, "--plan", str(missing), "--json"])
-        msg = str(ei.value)
-        assert ei.value.code not in (0, None) or "not found" in msg.lower()
-        assert "not found" in msg.lower()
-        assert not missing.exists()
+            main([cmd, "--json"])
+        assert ei.value.code != 0
+        err = capsys.readouterr().err
+        assert "--plan" in err or "--log" in err or "required" in err.lower()
 
 
 def test_beat23_existing_plan_still_works(tmp_path: Path, capsys):
-    """Beat 23: existing fixture plan still runs session-b idle-decode."""
+    """Beat 23: existing plan still works for session-a / session-b / idle-decode."""
     from src.research_implement.__main__ import main
 
     src = FIXTURES / "empty_queue.md"
     plan = tmp_path / "plan.md"
     plan.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
-    rc = main(["idle-decode", "--plan", str(plan), "--json"])
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "idle" in out or "queue" in out
+    before = plan.read_text(encoding="utf-8")
+
+    rc_idle = main(["idle-decode", "--plan", str(plan), "--json"])
+    assert rc_idle == 0
+    out_idle = capsys.readouterr().out
+    assert "idle" in out_idle or "queue" in out_idle
+    assert plan.read_text(encoding="utf-8") == before
+
+    rc_b = main(["session-b", "--plan", str(plan), "--json"])
+    assert rc_b == 0
+    out_b = capsys.readouterr().out
+    assert "idle" in out_b or "queue" in out_b
+    assert plan.read_text(encoding="utf-8") == before
+
+    rc_a = main(["session-a", "--plan", str(plan), "--stub", "--dry-run", "--json"])
+    assert rc_a == 0
+    out_a = capsys.readouterr().out
+    assert "queued" in out_a or '"verdict"' in out_a
+    # dry-run must not create/mutate the plan file contents
+    assert plan.read_text(encoding="utf-8") == before
+    assert plan.is_file()
 
 
 def test_beat24_plan_and_log_together_fails(tmp_path: Path, capsys):
@@ -3662,4 +3695,55 @@ def test_beat24_log_alias_works_like_plan(tmp_path: Path, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "idle" in out or "queue" in out
+
+
+def test_beat25_stub_and_no_stub_together_fails(tmp_path: Path):
+    """Beat 25: --stub + --no-stub → SystemExit; plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    src = FIXTURES / "empty_queue.md"
+    plan = tmp_path / "plan.md"
+    plan.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    with pytest.raises(SystemExit) as ei:
+        main(["session-a", "--plan", str(plan), "--stub", "--no-stub", "--json"])
+    msg = str(ei.value).lower()
+    assert "only one" in msg and "--stub" in msg
+    assert plan.read_text(encoding="utf-8") == before
+
+
+def test_beat25_candidate_json_overrides_stub(tmp_path: Path, capsys):
+    """Beat 25: --candidate-json wins over --stub when OPEN=0 (queues candidate title)."""
+    import json
+    from src.research_implement.__main__ import main
+
+    src = FIXTURES / "empty_queue.md"
+    plan = tmp_path / "plan.md"
+    plan.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    cand = FIXTURES / "complete_candidate.json"
+    cand_title = str(
+        json.loads(cand.read_text(encoding="utf-8")).get("title")
+        or json.loads(cand.read_text(encoding="utf-8")).get("heading")
+    )
+    rc = main(
+        [
+            "session-a",
+            "--plan",
+            str(plan),
+            "--stub",
+            "--candidate-json",
+            str(cand),
+            "--json",
+        ]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out.lower()
+    assert '"ok": true' in out or "queued" in out
+    body = plan.read_text(encoding="utf-8")
+    assert cand_title in body
+    # Stub default title must not appear when candidate overrides.
+    from src.research_implement.session_a import STUB_TITLE
+
+    if cand_title != STUB_TITLE:
+        assert STUB_TITLE not in body
 

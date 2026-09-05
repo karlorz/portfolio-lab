@@ -29,9 +29,11 @@ Common flags: `--plan` / `--log`, `--json`, `--dry-run`, `--stub` (A), `--candid
 - `make research-implement-e2e-dry-run` — echo recipe for A stub → B dry-run
 - `make research-implement-e2e-pipeline` — echo Beat 11 pipeline / pytest hint
 
-Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -q -k 'beat21 or beat22'`
+Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -q -k 'beat22 or beat23'`
 
 ## Errors
 
 - Missing `--plan`/`--log` path → non-zero exit (`file not found`); the CLI does not create the file.
 - Pass only one of `--plan` / `--log` (alias); both together → non-zero exit.
+- Pass only one of `--stub` / `--no-stub`; both together → non-zero exit.
+- `--candidate-json` overrides `--stub` when OPEN is 0.

@@ -77,6 +77,11 @@ shipped. Session A: ``SessionAResult.to_dict()`` (aliases ``to_json_dict`` /
 
 
 Beat 22: see ``docs/research-implement-ab-side-dev.md`` for side-dev CLI/make notes.
+
+Beat 23: CLI ``session-a`` / ``session-b`` / ``idle-decode`` with missing
+``--plan`` / ``--log`` path → clear non-zero ``SystemExit`` (``file not found``);
+does not create the plan file. Existing plan path still works. Proof: pytest
+``-k beat23``. Prior beat22 stays green.
 """
 
 from __future__ import annotations

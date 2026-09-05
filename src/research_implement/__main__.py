@@ -70,6 +70,14 @@ empty file creates Queue. Proof: pytest ``-k beat20``.
 Beat 21: More than one ``## Queue`` → fail-closed (``AmbiguousQueueError`` /
 Session A/B failed); plan unchanged. Proof: pytest ``-k beat21``.
 
+Beat 23: Missing ``--plan`` / ``--log`` path (or omitted flag) → clear
+non-zero failure (``SystemExit``); CLI does not create random plan files.
+Existing plan still works. Proof: pytest ``-k beat23``.
+
+Beat 24: Passing both ``--plan`` and ``--log`` → argparse mutually exclusive exit 2; ``--log`` alone aliases ``--plan``. Proof: pytest ``-k beat24``.
+
+Beat 25: Passing both ``--stub`` and ``--no-stub`` → clear ``SystemExit``; plan unchanged. ``--candidate-json`` still overrides stub when OPEN=0. Proof: pytest ``-k beat25``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never
@@ -291,6 +299,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "session-a":
         plan = _resolve_plan(args)
+        # Beat 25: --stub and --no-stub are mutually exclusive.
+        if getattr(args, "stub", False) and getattr(args, "no_stub", False):
+            raise SystemExit("pass only one of --stub / --no-stub")
         # Beat 15: --candidate-json supplies brainstorm when OPEN==0. Load is
         # deferred inside the callback so OPEN>=1 recount-only never reads or
         # appends the candidate. Empty/non-dict JSON → None → failed fire (no stub).
