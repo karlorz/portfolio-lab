@@ -2924,14 +2924,22 @@ def test_beat17_dry_run_calls_implement_spy(tmp_path: Path, capsys):
     assert r2.implement_result["dry_run"] is True
     assert "SHIPPED" not in r2.plan_text
 
-    # CLI --dry-run exercises dry_run_implement path.
+    # CLI --dry-run exercises dry_run_implement path (spy proves call).
     from src.research_implement.__main__ import main
 
     plan = tmp_path / "cli_dry.md"
     plan.write_text(plan_md, encoding="utf-8")
     before = plan.read_text(encoding="utf-8")
-    rc = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+    cli_spy = {"n": 0}
+
+    def counting_dry(item):
+        cli_spy["n"] += 1
+        return dry_run_implement(item)
+
+    with patch("src.research_implement.__main__.dry_run_implement", counting_dry):
+        rc = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
     assert rc == 0
+    assert cli_spy["n"] == 1
     payload = json.loads(capsys.readouterr().out)
     _assert_session_result_json_shape(payload)
     assert payload["verdict"] == "dry_run"
@@ -2995,3 +3003,70 @@ def test_beat17_fixture_ship_only_when_opted_in(tmp_path: Path):
     # Convenience alias is ship double, never the default.
     assert fixture_ship_implement is not dry_run_implement
     assert default_implement is dry_run_implement
+
+
+# --- Beat 18: public API export smoke + Makefile target listing -----------------
+
+
+def test_beat18_public_api_exports_smoke():
+    """Package ``src.research_implement`` exposes the Session A/B public surface.
+
+    Import the package and assert ``__all__`` + ``getattr`` for the names
+    callers / Makefile e2e docs rely on (results, dry-run/ship doubles,
+    incomplete-candidate helper, queue parse).
+    """
+    import src.research_implement as ri
+
+    assert hasattr(ri, "__all__")
+    assert isinstance(ri.__all__, list)
+    assert len(ri.__all__) >= 1
+
+    required = (
+        "SessionAResult",
+        "SessionResult",
+        "SessionBResult",
+        "dry_run_implement",
+        "default_implement",
+        "make_fixture_ship_implement",
+        "fixture_ship_implement",
+        "incomplete_candidate_reasons",
+        "parse_queue_items",
+        "run_session_a",
+        "run_session_b",
+        "QueueItem",
+        "stub_brainstorm",
+        "scheduler_delete",
+    )
+    for name in required:
+        assert name in ri.__all__, f"{name} missing from __all__"
+        obj = getattr(ri, name, None)
+        assert obj is not None, f"{name} not importable via getattr"
+        assert getattr(ri, name) is obj
+
+    # Aliases stay wired: SessionResult is SessionBResult; default is dry_run.
+    assert ri.SessionResult is ri.SessionBResult
+    assert ri.default_implement is ri.dry_run_implement
+    assert ri.fixture_ship_implement is not ri.dry_run_implement
+    assert callable(ri.make_fixture_ship_implement)
+    assert callable(ri.incomplete_candidate_reasons)
+    assert callable(ri.parse_queue_items)
+
+    # Every __all__ entry resolves (no dangling export names).
+    for name in ri.__all__:
+        assert hasattr(ri, name), f"__all__ lists {name} but getattr fails"
+        assert getattr(ri, name) is not None or name in ri.__all__
+
+
+def test_beat18_makefile_lists_research_implement_targets():
+    """Makefile documents the side-dev research-implement Make targets."""
+    makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text(
+        encoding="utf-8"
+    )
+    for target in (
+        "test-research-implement",
+        "research-implement-e2e-dry-run",
+        "research-implement-e2e-pipeline",
+    ):
+        assert target in makefile, f"Makefile missing target mention: {target}"
+        # Recipe / .PHONY lines use ``target:`` form.
+        assert f"{target}:" in makefile or f"make {target}" in makefile
