@@ -184,14 +184,20 @@ def main(argv: list[str] | None = None) -> int:
 
     idle = sub.add_parser(
         "idle-decode",
-        help="Decode-only Session B alias (idle fire queue 0/10 on empty; keep_schedule)",
+        help=(
+            "Decode-only Session B alias: idle when empty/not-ready; "
+            "picked decode_only when OPEN ready; never scheduler_delete"
+        ),
     )
     _add_plan_log(idle)
     idle.add_argument(
         "--json",
         action="store_true",
         dest="as_json",
-        help="Emit JSON payload (idle or picked)",
+        help=(
+            "Emit shared SessionResult.to_dict JSON "
+            "(idle | picked decode_only; same keys as session-b --json)"
+        ),
     )
 
     args = parser.parse_args(argv)

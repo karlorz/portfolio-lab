@@ -973,14 +973,15 @@ research-implement-e2e-dry-run:
 	@echo "  PYTHONPATH=. pytest tests/test_research_implement_loop.py -q -k beat5"
 	@echo "(ship is callback-only — no CLI stub-ship; prefer pytest tmp_path doubles)"
 
-# Side-dev only (no Tasker): A/B fixture unit + optional host contract.
-# Interpreter: scripts/python_runtime.sh (PYTHON_RUNTIME). When the side
-# .venv is broken on cursor-box, override with a working musl-wrapped
-# interpreter, e.g.:
-#   RI_PYTHON="/home/box/.local/share/portfolio-lab/toolchain/alpine-build-root/lib/ld-musl-x86_64.so.1 --library-path $$LD_LIBRARY_PATH /home/box/.local/share/portfolio-lab/app/.venv/bin/python"
-#   (export LD_LIBRARY_PATH as in scripts/python_runtime.sh) then:
-#   make test-research-implement RI_PYTHON="$$MUSL --library-path $$LIBS $$APP_PY"
-# Or run the documented one-liner in the recipe comment below.
+# Side-dev only (no Tasker / no LLM / no 8000/8001): A/B loop + contract
+# fixture tests + optional host contract (skip-if-missing).
+# Documented runtime: scripts/python_runtime.sh (PYTHON_RUNTIME).
+# On cursor-box the side .venv can be broken; override RI_PYTHON with the
+# musl-wrapped app interpreter (same loader path PYTHON_RUNTIME uses):
+#   MUSL=/home/box/.local/share/portfolio-lab/toolchain/alpine-build-root/lib/ld-musl-x86_64.so.1
+#   APP_PY=/home/box/.local/share/portfolio-lab/app/.venv/bin/python
+#   LIBS=$$(scripts/python_runtime.sh -c 'import os; print(os.environ["LD_LIBRARY_PATH"])' 2>/dev/null || true)
+#   make test-research-implement RI_PYTHON="$$MUSL --library-path $$LD_LIBRARY_PATH $$APP_PY"
 RI_PYTHON ?= $(PYTHON_RUNTIME)
 
 .PHONY: test-research-implement

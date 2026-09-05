@@ -1394,3 +1394,283 @@ def test_beat8_session_a_one_open_ready_recount_and_failed_json_keys(tmp_path: P
     rc = main(["session-a", "--plan", str(one), "--stub", "--json"])
     assert rc == 0
     assert json.loads(capsys.readouterr().out) == light_dict
+
+
+# --- Beat 10: idle-decode --json shared Session B shape + malformed fixtures ---
+
+
+def test_beat10_idle_decode_json_empty_idle_shared_shape(tmp_path: Path, capsys):
+    """Beat 10: idle-decode --json on empty Queue → idle shared Session B JSON."""
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "empty.md"
+    plan.write_text(_load("empty_queue.md"), encoding="utf-8")
+    expected = run_session_b_path(plan, decode_only=True, write=False).to_dict()
+    _assert_session_result_json_shape(expected)
+    assert expected["verdict"] == "idle"
+    assert expected["item"] is None
+    assert expected["implement_result"] is None
+    assert expected["queue"] == "queue 0/10"
+    assert expected["keep_schedule"] is True
+    assert expected["scheduler_delete_called"] is False
+    assert expected["wrote_files"] is False
+    assert expected["shipped"] is False
+
+    rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    _assert_session_result_json_shape(payload)
+    assert payload == expected
+    assert payload == session_b_result_dict(
+        run_session_b_path(plan, decode_only=True, write=False)
+    )
+
+
+def test_beat10_idle_decode_json_not_ready_idle_shared_shape(tmp_path: Path, capsys):
+    """Beat 10: idle-decode --json on complete-but-not-ready → idle shared shape."""
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "not_ready.md"
+    plan.write_text(_load("open_complete_not_ready.md"), encoding="utf-8")
+    result = run_session_b_path(plan, decode_only=True, write=False)
+    assert result.verdict == "idle"
+    expected = result.to_json_dict()
+    _assert_session_result_json_shape(expected)
+    assert expected["ok"] is True
+    assert expected["verdict"] == "idle"
+    assert expected["open_count"] == 0
+    assert expected["queue"] == "queue 0/10"
+    assert expected["item"] is None
+    assert expected["keep_schedule"] is True
+    assert expected["scheduler_delete_called"] is False
+
+    rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    _assert_session_result_json_shape(payload)
+    assert payload == expected
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS) == set(SESSION_B_RESULT_KEYS)
+
+
+def test_beat10_idle_decode_json_open_ready_picked_decode_only(tmp_path: Path, capsys):
+    """Beat 10: idle-decode --json on OPEN ready → picked decode_only shared shape."""
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "one.md"
+    plan.write_text(_load("one_open_ready.md"), encoding="utf-8")
+    result = run_session_b_path(plan, decode_only=True, write=False)
+    assert result.verdict == "picked"
+    expected = result.to_dict()
+    _assert_session_result_json_shape(expected)
+    assert expected["ok"] is True
+    assert expected["verdict"] == "picked"
+    assert expected["open_count"] == 1
+    assert expected["queue"] == "queue 1/10"
+    assert expected["item"] is not None
+    assert expected["item"]["item_id"] == "Q1"
+    assert expected["item"]["ready_for_implement"].lower() == "yes"
+    assert expected["implement_result"] is None  # decode_only
+    assert expected["wrote_files"] is False
+    assert expected["shipped"] is False
+    assert expected["keep_schedule"] is True
+    assert expected["scheduler_delete_called"] is False
+
+    rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    _assert_session_result_json_shape(payload)
+    assert payload == expected
+    # idle-decode and session-b --json share the same decode_only shape.
+    rc = main(["session-b", "--plan", str(plan), "--json"])
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == payload
+
+
+def test_beat10_malformed_incomplete_missing_fields_idle_never_delete():
+    """Beat 10: incomplete / missing fields → idle; never scheduler_delete; no crash."""
+    calls = {"n": 0}
+
+    def _spy(*_a, **_k):
+        calls["n"] += 1
+        raise SchedulerDeleteForbidden("spy")
+
+    plan = _load("incomplete_open.md")
+    items = parse_queue_items(plan)
+    assert len(items) == 1
+    assert not is_complete_six_field(items[0])
+    assert not is_b_pickable(items[0])
+    assert first_b_pick(items) is None
+    assert count_open(items) == 0
+
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        result = run_session_b(plan, decode_only=True)
+    assert result.ok and result.verdict == "idle"
+    assert result.item is None
+    assert result.keep_schedule is True
+    assert result.scheduler_delete_called is False
+    assert calls["n"] == 0
+    payload = result.to_dict()
+    _assert_session_result_json_shape(payload)
+    assert payload["verdict"] == "idle"
+    assert payload["scheduler_delete_called"] is False
+
+
+def test_beat10_malformed_watch_lookalike_skip_or_idle_never_delete(tmp_path: Path, capsys):
+    """Beat 10: Watch lookalike rows skipped; Queue-only pick or idle; never delete."""
+    from src.research_implement.__main__ import main
+
+    calls = {"n": 0}
+
+    def _spy(*_a, **_k):
+        calls["n"] += 1
+        raise SchedulerDeleteForbidden("spy")
+
+    # watch_lookalike.md: real Queue Q3 pickable; Watch Fake.* ignored.
+    lookalike = _load("watch_lookalike.md")
+    items = parse_queue_items(lookalike)
+    assert [i.item_id for i in items] == ["Q3"]
+    assert all("Watch lookalike" not in i.title for i in items)
+    assert first_b_pick(items) is not None
+    assert first_b_pick(items).title == "Real ready Queue item"
+
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        picked = run_session_b(lookalike, decode_only=True)
+    assert picked.ok and picked.verdict == "picked"
+    assert picked.item is not None and picked.item.item_id == "Q3"
+    assert picked.scheduler_delete_called is False
+    assert calls["n"] == 0
+    _assert_session_result_json_shape(picked.to_dict())
+
+    # watch_only_lookalike.md: empty Queue + Watch Q99-looking row → idle.
+    watch_only = _load("watch_only_lookalike.md")
+    only_items = parse_queue_items(watch_only)
+    assert only_items == []
+    assert first_b_pick(only_items) is None
+
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        idle = run_session_b(watch_only, decode_only=True)
+    assert idle.ok and idle.verdict == "idle"
+    assert idle.keep_schedule is True
+    assert idle.scheduler_delete_called is False
+    assert calls["n"] == 0
+    _assert_session_result_json_shape(idle.to_dict())
+
+    plan = tmp_path / "watch_only.md"
+    plan.write_text(watch_only, encoding="utf-8")
+    rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    _assert_session_result_json_shape(payload)
+    assert payload["verdict"] == "idle"
+    assert payload["scheduler_delete_called"] is False
+    assert payload["item"] is None
+
+
+def test_beat10_malformed_broken_ready_flag_idle_never_delete(tmp_path: Path, capsys):
+    """Beat 10: broken ready-for-implement values → not pickable / idle; never delete."""
+    from src.research_implement.__main__ import main
+
+    calls = {"n": 0}
+
+    def _spy(*_a, **_k):
+        calls["n"] += 1
+        raise SchedulerDeleteForbidden("spy")
+
+    plan_text = _load("broken_ready_flag.md")
+    items = parse_queue_items(plan_text)
+    assert len(items) == 2
+    for item in items:
+        assert is_open_status(item.status)
+        assert is_complete_six_field(item)
+        assert not is_b_pickable(item)  # broken ready flag → skip-not-pickable
+    assert first_b_pick(items) is None
+    assert count_open(items) == 0
+
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        result = run_session_b(plan_text, decode_only=True)
+    assert result.ok and result.verdict == "idle"
+    assert result.item is None
+    assert result.keep_schedule is True
+    assert result.scheduler_delete_called is False
+    assert calls["n"] == 0
+    payload = result.to_dict()
+    _assert_session_result_json_shape(payload)
+    assert payload["verdict"] == "idle"
+    assert payload["queue"] == "queue 0/10"
+
+    plan = tmp_path / "broken.md"
+    plan.write_text(plan_text, encoding="utf-8")
+    rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    assert rc == 0
+    cli = json.loads(capsys.readouterr().out)
+    _assert_session_result_json_shape(cli)
+    assert cli == payload
+    assert cli["scheduler_delete_called"] is False
+
+
+def test_beat10_malformed_mixed_priority_skips_incomplete_picks_ready():
+    """Beat 10: skip-not-pickable incomplete/Watch; pick first complete ready OPEN."""
+    calls = {"n": 0}
+
+    def _spy(*_a, **_k):
+        calls["n"] += 1
+        raise SchedulerDeleteForbidden("spy")
+
+    plan = _load("mixed_priority.md")
+    items = parse_queue_items(plan)
+    assert [i.item_id for i in items] == ["Q1", "Q2"]
+    assert not is_b_pickable(items[0])  # incomplete / missing acceptance
+    assert is_b_pickable(items[1])
+    assert first_b_pick(items) is items[1]
+    assert all("Watch lookalike" not in i.title for i in items)
+
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        result = run_session_b(plan, decode_only=True)
+    assert result.ok and result.verdict == "picked"
+    assert result.item is not None
+    assert result.item.item_id == "Q2"
+    assert result.item.title == "Second ready complete item"
+    assert result.scheduler_delete_called is False
+    assert calls["n"] == 0
+    payload = result.to_dict()
+    _assert_session_result_json_shape(payload)
+    assert payload["verdict"] == "picked"
+    assert payload["item"]["item_id"] == "Q2"
+    assert payload["implement_result"] is None
+
+
+def test_beat10_malformed_fixtures_idle_decode_json_never_crash(tmp_path: Path, capsys):
+    """Beat 10: idle-decode --json on malformed fixtures never crashes / never deletes."""
+    from src.research_implement.__main__ import main
+
+    cases = [
+        ("incomplete_open.md", "idle"),
+        ("open_complete_not_ready.md", "idle"),
+        ("broken_ready_flag.md", "idle"),
+        ("watch_only_lookalike.md", "idle"),
+        ("shipped_only.md", "idle"),
+        ("empty_queue.md", "idle"),
+        ("watch_lookalike.md", "picked"),
+        ("mixed_priority.md", "picked"),
+        ("one_open_ready.md", "picked"),
+    ]
+    for name, expect_verdict in cases:
+        plan = tmp_path / name
+        plan.write_text(_load(name), encoding="utf-8")
+        rc = main(["idle-decode", "--plan", str(plan), "--json"])
+        assert rc == 0, f"{name} should exit 0"
+        payload = json.loads(capsys.readouterr().out)
+        _assert_session_result_json_shape(payload)
+        assert payload["ok"] is True
+        assert payload["verdict"] == expect_verdict, name
+        assert payload["keep_schedule"] is True
+        assert payload["scheduler_delete_called"] is False
+        if expect_verdict == "idle":
+            assert payload["item"] is None
+            assert payload["implement_result"] is None
+            assert payload["shipped"] is False
+            assert payload["wrote_files"] is False
+        else:
+            assert payload["item"] is not None
+            assert payload["implement_result"] is None  # decode_only
+            assert payload["shipped"] is False
