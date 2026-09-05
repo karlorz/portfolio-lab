@@ -15,23 +15,43 @@ Probes (read-only, nothing else)
     answer for the desired state: stdout exactly ``inactive\\n`` with exit 3,
     or stdout exactly ``disabled\\n`` with exit 1.
 
+Missing units (explicit policy)
+    An absent unit file is NOT accepted as "not enabled". The answer systemd
+    gives for a missing unit is not stable across versions (``not-found`` on
+    stdout with exit 1, 4 or 5, or an error line on stderr with empty stdout),
+    so no single (token, exit) pair can be pinned as canonical without
+    probing the host itself, which this attended tool must not broaden.
+    Decommissioning therefore keeps both unit files present and disabled; a
+    genuinely absent unit fails closed and is an attended gate documented in
+    ``PORTFOLIO_LAB_CURSOR_BOX_RECYCLE.md``.
+
 Fail-closed contract
     Missing/unusable ssh, probe timeout, bounded-read overrun, any nonzero or
-    unexpected exit code, any unexpected or malformed token, or any active or
-    enabled state means: no new proof, the existing proof preserved
-    byte-for-byte, temporary files cleaned, empty stdout, one static
-    sanitized line on stderr, exit 1. Nothing is ever written on failure and
-    no remote output, host, or path is echoed.
+    unexpected exit code, any unexpected or malformed token, any active or
+    enabled state, an unusable config value (relative/symlinked paths, an ssh
+    override that is not absolute, a non-sg01 host, an out-of-range timeout, a
+    naive or unconvertible ``--now``), a probe lifecycle error (fcntl/poll/kill)
+    or a closed reporting pipe means: no new proof, the existing proof
+    preserved byte-for-byte, temporary files cleaned, child processes reaped and
+    their pipes closed, empty stdout, one static sanitized line on stderr, exit
+    1. Nothing is ever written on failure and no remote output, host, or path
+    is echoed.
 
 Output (success only)
     ``PROOF`` holds exactly the ``portfolio-lab-former-authority-proof/v1``
     object ``{schema, host_label, collected_at, tasker, archive_timer}`` with
     ``host_label`` ``sg01``, an aware UTC ``collected_at``, and all four nested
-    booleans ``false``. The file is written atomically (unique temp in the
-    target directory, mode 0600 before replace) and re-verified as a regular
-    non-symlink file owned by the running uid at exactly mode 0600. Under a
-    pinned ``--now`` reruns are byte-identical. Exactly one compact,
-    secret-free JSON summary line goes to stdout.
+    booleans ``false``. The file is committed atomically: a unique temp in the
+    target directory (the directory is never created) is written, chmod'ed
+    0600, and verified as a regular non-symlink file owned by the running uid
+    at exactly mode 0600 and the exact size *before* the rename, so a failed
+    verification can never displace an existing proof. The committed target is
+    then confirmed; a mismatch is reported statically and never deletes an
+    artifact (the collector independently rejects a non-conforming proof).
+    Under a pinned ``--now`` reruns are byte-identical. Exactly one compact,
+    secret-free JSON summary line goes to stdout; if that pipe is already
+    closed the CLI still exits 1 with one static stderr line and no
+    interpreter-shutdown noise, leaving the already-committed proof in place.
 
 Exit codes
     0  proof refreshed (summary on stdout)
@@ -39,10 +59,11 @@ Exit codes
 
 Overrides (flag > env > default)
     --proof              PLSPR_PROOF              <root>/run/former-authority-proof.json
-    --ssh                PLSPR_SSH                ssh (overrides must be absolute)
+    --ssh                PLSPR_SSH                ssh (any override must be absolute)
     --host               PLSPR_HOST               sg01 (fixed; no other host is accepted)
     --connect-timeout    PLSPR_CONNECT_TIMEOUT    10 (whole seconds, 1..30)
-    --now                PLSPR_NOW                (actual time; ISO-8601, any zone -> UTC)
+    --now                PLSPR_NOW                (actual time; ISO-8601 with a UTC
+                                                   offset or Z; naive input rejected)
 """
 
 from __future__ import annotations
@@ -95,6 +116,9 @@ def die(message: str) -> None:
 
 def emit(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, separators=(",", ":"), sort_keys=True))
+    # Flush now so a closed reporting pipe raises here instead of producing an
+    # "Exception ignored" message and exit code 120 at interpreter shutdown.
+    sys.stdout.flush()
 
 
 # ── config ────────────────────────────────────────────────────────────────
@@ -137,22 +161,32 @@ def _bounded_timeout(raw: str, what: str) -> float:
 
 
 def _parse_now(raw: str) -> datetime:
+    """Aware UTC-offset input only. A naive timestamp has no defined zone for
+    this contract and is rejected; extreme aware dates can overflow during
+    conversion, which is also a static config failure."""
     text = raw.strip()
     try:
         dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         die(f"{_ENV_PREFIX}NOW must be an ISO-8601 timestamp with a UTC offset or Z")
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        die(f"{_ENV_PREFIX}NOW must be an ISO-8601 timestamp with a UTC offset or Z")
+    try:
+        return dt.astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        die(f"{_ENV_PREFIX}NOW is outside the representable UTC range")
 
 
 class Config:
     def __init__(self, args: argparse.Namespace) -> None:
-        ssh_raw = _opt(args.ssh, "SSH", DEFAULT_SSH)
-        # The bare default resolves through PATH like any ssh; overrides are
-        # explicit absolute paths (test fakes, pinned production binaries).
-        self.ssh = DEFAULT_SSH if ssh_raw == DEFAULT_SSH else str(_abs(ssh_raw, "SSH"))
+        # The default is used only when no override is supplied. Any override
+        # — including one that repeats the default name — must be absolute, so
+        # PATH resolution can never be smuggled in through a flag or the env.
+        if args.ssh is not None:
+            self.ssh = str(_abs(args.ssh, "SSH"))
+        else:
+            env_ssh = os.environ.get(f"{_ENV_PREFIX}SSH", "").strip()
+            self.ssh = str(_abs(env_ssh, "SSH")) if env_ssh else DEFAULT_SSH
         self.proof = _abs(_opt(args.proof, "PROOF", str(DEFAULT_PROOF)), "PROOF")
         host = _opt(args.host, "HOST", DEFAULT_HOST)
         if host != DEFAULT_HOST:
@@ -205,7 +239,25 @@ def probe_argv(cfg: Config, subcommand: str, unit: str) -> list[str]:
     ]
 
 
-def run_probe(cfg: Config, subcommand: str, unit: str) -> tuple[int, str]:
+def _reap_probe(proc: subprocess.Popen[bytes]) -> None:
+    """Best-effort kill, reap and stream close; never raises, so a poll/kill
+    race can neither leak a child nor leak a pipe fd."""
+    try:
+        proc.kill()
+    except OSError:
+        pass
+    try:
+        proc.wait(timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    for stream in (proc.stdout, proc.stderr):
+        try:
+            stream.close()
+        except OSError:
+            pass
+
+
+def run_probe(cfg: Config, subcommand: str, unit: str) -> tuple[int | None, str]:
     """One bounded probe: capped non-blocking reads, hard wall deadline,
     kill-and-reap. Static failure exits only; remote bytes are never echoed."""
     try:
@@ -217,55 +269,53 @@ def run_probe(cfg: Config, subcommand: str, unit: str) -> tuple[int, str]:
         )
     except OSError:
         die("ssh is not available")
-    for stream in (proc.stdout, proc.stderr):
-        flags = fcntl.fcntl(stream.fileno(), fcntl.F_GETFL)
-        fcntl.fcntl(stream.fileno(), fcntl.F_SETFL, flags | os.O_NONBLOCK)
-    deadline = time.monotonic() + cfg.connect_timeout + PROBE_WALL_GRACE
     chunks: list[bytes] = []
-    totals = {"out": 0, "err": 0}
-    eof = {"out": False, "err": False}
     exceeded = False
     timed_out = False
-    streams = (("out", proc.stdout), ("err", proc.stderr))
-    while not exceeded and not timed_out:
-        if time.monotonic() >= deadline:
-            timed_out = True
-            break
-        if proc.poll() is not None and all(eof.values()):
-            break
-        drained = True
-        for name, stream in streams:
-            if eof[name]:
-                continue
-            try:
-                chunk = os.read(stream.fileno(), 65536)
-            except BlockingIOError:
-                continue  # nothing buffered yet
-            except OSError as exc:
-                if exc.errno == errno.EINTR:
+    still_running = False
+    try:
+        for stream in (proc.stdout, proc.stderr):
+            flags = fcntl.fcntl(stream.fileno(), fcntl.F_GETFL)
+            fcntl.fcntl(stream.fileno(), fcntl.F_SETFL, flags | os.O_NONBLOCK)
+        deadline = time.monotonic() + cfg.connect_timeout + PROBE_WALL_GRACE
+        totals = {"out": 0, "err": 0}
+        eof = {"out": False, "err": False}
+        streams = (("out", proc.stdout), ("err", proc.stderr))
+        while not exceeded and not timed_out:
+            if time.monotonic() >= deadline:
+                timed_out = True
+                break
+            if proc.poll() is not None and all(eof.values()):
+                break
+            drained = True
+            for name, stream in streams:
+                if eof[name]:
                     continue
-                chunk = b""  # broken stream: treat as closed
-            if chunk:
-                drained = False
-                totals[name] += len(chunk)
-                if name == "out":
-                    chunks.append(chunk)
-                if totals[name] > MAX_PROBE_BYTES:
-                    exceeded = True
-            else:
-                eof[name] = True
-        if drained and proc.poll() is None:
-            # Idle live child: never busy-spin the poll loop to the deadline.
-            time.sleep(0.01)
-    still_running = proc.poll() is None
-    if still_running:
-        proc.kill()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.poll()
-    proc.stdout.close()
-    proc.stderr.close()
+                try:
+                    chunk = os.read(stream.fileno(), 65536)
+                except BlockingIOError:
+                    continue  # nothing buffered yet
+                except OSError as exc:
+                    if exc.errno == errno.EINTR:
+                        continue
+                    chunk = b""  # broken stream: treat as closed
+                if chunk:
+                    drained = False
+                    totals[name] += len(chunk)
+                    if name == "out":
+                        chunks.append(chunk)
+                    if totals[name] > MAX_PROBE_BYTES:
+                        exceeded = True
+                else:
+                    eof[name] = True
+            if drained and proc.poll() is None:
+                # Idle live child: never busy-spin the poll loop to the deadline.
+                time.sleep(0.01)
+        still_running = proc.poll() is None
+    except OSError:
+        _reap_probe(proc)
+        die("probe failed")
+    _reap_probe(proc)
     if exceeded:
         die("probe output exceeded the bounded read")
     if timed_out or still_running:
@@ -296,14 +346,31 @@ def build_proof(cfg: Config) -> bytes:
     return json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 
+def verify_artifact(path_str: str, expected_size: int) -> None:
+    """Strict shape check for a proof artifact: regular, non-symlink, owned by
+    the running uid, exactly mode 0600, exact size. Raises OSError otherwise,
+    so an unverified temp is never renamed into place."""
+    st = os.lstat(path_str)
+    if (
+        stat.S_ISLNK(st.st_mode)
+        or not stat.S_ISREG(st.st_mode)
+        or st.st_uid != os.getuid()
+        or stat.S_IMODE(st.st_mode) != 0o600
+        or st.st_size != expected_size
+    ):
+        raise OSError("proof artifact does not match the required shape")
+
+
 def replace_proof(path: Path, data: bytes) -> None:
-    """Atomic replace: unique temp in the target directory (never created),
-    mode 0600 set before the rename, temp removed on any failure."""
+    """Atomic commit: unique temp in the target directory (never created),
+    mode 0600 set and verified before the rename, temp removed on any failure,
+    so an existing proof survives every unsuccessful write byte-for-byte."""
     fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=".pspr-")
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
         os.chmod(tmp_name, 0o600)
+        verify_artifact(tmp_name, len(data))
         os.replace(tmp_name, path)
     except BaseException:
         try:
@@ -313,9 +380,10 @@ def replace_proof(path: Path, data: bytes) -> None:
         raise
 
 
-def verify_proof(path: Path) -> None:
-    """Final artifact must be a regular non-symlink file owned by the running
-    uid at exactly mode 0600; anything else is removed and fails closed."""
+def verify_committed(path: Path, expected_size: int) -> None:
+    """Confirm the committed target. A mismatch is reported statically and
+    never deletes: an existing proof artifact is never destroyed here, and the
+    collector independently rejects a non-conforming proof."""
     try:
         st = os.lstat(path)
     except OSError:
@@ -324,13 +392,14 @@ def verify_proof(path: Path) -> None:
         stat.S_ISLNK(st.st_mode)
         or not stat.S_ISREG(st.st_mode)
         or st.st_uid != os.getuid()
-        or stat.S_IMODE(st.st_mode) != 0o600
     ):
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
         die("failed to write proof")
+    if stat.S_IMODE(st.st_mode) != 0o600 or st.st_size != expected_size:
+        try:
+            os.chmod(path, 0o600)  # safe: regular, owned, non-symlink
+            verify_artifact(str(path), expected_size)
+        except OSError:
+            die("failed to write proof")
 
 
 # ── main ──────────────────────────────────────────────────────────────────
@@ -349,7 +418,7 @@ def main(argv: list[str] | None = None) -> int:
         replace_proof(cfg.proof, data)
     except OSError:
         die("failed to write proof")
-    verify_proof(cfg.proof)
+    verify_committed(cfg.proof, len(data))
 
     emit(
         {
@@ -365,5 +434,52 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _silence_broken_stdout() -> None:
+    """Redirect stdout to devnull, but only when stdout is the broken stream:
+    shutdown would otherwise re-raise the error ('Exception ignored', exit
+    120). A broken stderr must never make this touch a healthy stdout fd."""
+    try:
+        sys.stdout.flush()
+        return
+    except BrokenPipeError:
+        pass
+    except (OSError, ValueError):
+        return
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+    except OSError:
+        return
+    try:
+        os.dup2(devnull, sys.stdout.fileno())
+    except (OSError, ValueError):
+        pass
+    finally:
+        os.close(devnull)
+
+
+def _static_stderr(reason: str) -> None:
+    """One static line on stderr; a closed stderr cannot be reported on."""
+    try:
+        print(f"ERROR: {reason}", file=sys.stderr)
+    except (OSError, ValueError):
+        pass
+
+
+def run(argv: list[str] | None = None) -> int:
+    """Top level for the documented static-error contract: reachable failures
+    are one static stderr line, empty stdout, exit 1. SystemExit (including
+    die()) and KeyboardInterrupt are never intercepted; only unexpected OS
+    errors and a closed reporting pipe are translated here."""
+    try:
+        return main(argv)
+    except BrokenPipeError:
+        _silence_broken_stdout()
+        _static_stderr("stdout is closed")
+        return 1
+    except OSError:
+        _static_stderr("operation failed")
+        return 1
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run())

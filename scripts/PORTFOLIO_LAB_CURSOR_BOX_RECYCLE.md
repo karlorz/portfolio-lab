@@ -106,6 +106,15 @@ PID/state records and never mutates services.
    disabled; `--now` pins `collected_at` so reruns are byte-identical). The
    collector run that consumes it must use a pinned `--now` on the current
    UTC day no earlier than the proof's `collected_at`.
+   **Missing-unit gate (attended):** an absent unit file is *not* accepted as
+   "not enabled" — `systemctl is-enabled` answers `not-found` with a
+   version-dependent exit code (1/4/5), or an error line with empty stdout —
+   so no canonical pair can be pinned without probing the host, and the
+   refresh fails closed. Decommissioning must therefore leave both unit files
+   present and disabled. If a probe reports a missing unit: restore the
+   disabled unit files under separate attended approval, or record the
+   judgment in timestamped operator notes outside the evidence root. Never
+   hand-write or fabricate the proof.
 5. **Exact one scheduler.** Tasker controller reports `scheduler_instances: 1`:
    `/home/box/.local/bin/portfolio-lab-box-persist status --read-only --mode production --app-dir /home/box/.local/share/portfolio-lab/app --web-root /home/box/.local/share/portfolio-lab/www --service-name portfolio-lab-tasker`
    (`portfolio-lab-box-persist/v1`).
