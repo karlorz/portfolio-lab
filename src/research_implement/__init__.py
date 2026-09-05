@@ -17,7 +17,10 @@ CLI: ``python -m src.research_implement {session-a|session-b|idle-decode}``.
 E2E dry-run (tmp plan): see module ``__main__`` examples / ``make research-implement-e2e-dry-run``.
 
 JSON: ``SessionResult.to_dict()`` (aliases ``to_json_dict`` / ``session_b_result_dict``)
-is the shared ``--json`` / test contract for idle / decode_only / dry_run / shipped.
+is the shared Session B ``--json`` / test contract for idle / decode_only / dry_run /
+shipped. Session A: ``SessionAResult.to_dict()`` (aliases ``to_json_dict`` /
+``session_a_result_dict``) covers append/queued vs recount-only/light for
+``session-a --json``.
 """
 
 from __future__ import annotations
@@ -37,9 +40,12 @@ from src.research_implement.queue import (
     render_queue_count,
 )
 from src.research_implement.session_a import (
+    SESSION_A_RESULT_JSON_KEYS,
+    SESSION_A_RESULT_KEYS,
     SessionAResult,
     default_search_plan,
     run_session_a,
+    session_a_result_dict,
     stub_brainstorm,
     stub_search_plan,
 )
@@ -66,8 +72,11 @@ __all__ = [
     "SessionAResult",
     "SessionBResult",
     "SessionResult",
+    "SESSION_A_RESULT_JSON_KEYS",
+    "SESSION_A_RESULT_KEYS",
     "SESSION_RESULT_JSON_KEYS",
     "SESSION_B_RESULT_KEYS",
+    "session_a_result_dict",
     "session_b_result_dict",
     "append_queue_item",
     "count_open",

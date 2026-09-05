@@ -6,7 +6,7 @@ prod ports (8000/8001/18000), and does not call external LLMs / Hermes /
 
 Examples (fixture or --log path)::
 
-    python -m src.research_implement session-a --plan tests/fixtures/research_implement/empty_queue.md --stub --dry-run
+    python -m src.research_implement session-a --plan tests/fixtures/research_implement/empty_queue.md --stub --dry-run --json
     python -m src.research_implement session-b --log logs/research-implement.md --json
     python -m src.research_implement session-b --plan tests/fixtures/research_implement/one_open_ready.md --dry-run --json
     python -m src.research_implement idle-decode --plan tests/fixtures/research_implement/empty_queue.md
@@ -149,6 +149,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Do not write the plan file",
     )
+    a.add_argument(
+        "--json",
+        action="store_true",
+        dest="as_json",
+        help="Emit SessionAResult.to_dict JSON (append/queued vs recount-only/light)",
+    )
 
     b = sub.add_parser(
         "session-b",
@@ -209,7 +215,11 @@ def main(argv: list[str] | None = None) -> int:
             brainstorm=brainstorm,
             write=not args.dry_run,
         )
-        print(result.message)
+        if getattr(args, "as_json", False):
+            # Single shared SessionAResult.to_dict shape (queued / light / failed).
+            print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+        else:
+            print(result.message)
         return 0 if result.ok else 1
 
     if args.cmd in {"session-b", "idle-decode"}:

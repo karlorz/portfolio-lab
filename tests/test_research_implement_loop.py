@@ -26,9 +26,13 @@ from src.research_implement.queue import (
     render_queue_count,
 )
 from src.research_implement.session_a import (
+    SESSION_A_RESULT_JSON_KEYS,
+    SESSION_A_RESULT_KEYS,
+    SessionAResult,
     default_search_plan,
     run_session_a,
     run_session_a_path,
+    session_a_result_dict,
     stub_brainstorm,
 )
 from src.research_implement.session_b import (
@@ -1213,3 +1217,180 @@ def test_beat7_session_result_to_dict_key_stability_all_verdicts(tmp_path: Path,
     # Key sets identical across all four verdicts (stability).
     for payload in (idle_dict, picked_dict, dry_dict, shipped_dict):
         assert tuple(sorted(payload.keys())) == tuple(sorted(SESSION_RESULT_JSON_KEYS))
+
+
+def _assert_session_a_result_json_shape(payload: dict) -> None:
+    """CLI ``session-a --json`` and ``SessionAResult.to_dict`` / ``to_json_dict`` share one key set."""
+    assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
+    assert set(payload.keys()) == set(SESSION_A_RESULT_KEYS)
+    assert isinstance(payload["ok"], bool)
+    assert isinstance(payload["verdict"], str)
+    assert isinstance(payload["open_count"], int)
+    assert isinstance(payload["queue"], str)
+    assert payload["queue"].startswith("queue ")
+    assert "b_pick_title" in payload
+    assert "title" in payload
+    assert isinstance(payload["wrote_item"], bool)
+    roundtrip = json.loads(json.dumps(payload, sort_keys=True))
+    assert set(roundtrip.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
+
+
+def test_beat8_session_a_empty_stub_appends_one_open_json_shape(tmp_path: Path, capsys):
+    """Beat 8: empty plan + stub → append one OPEN; shared SessionAResult JSON shape."""
+    plan = tmp_path / "empty.md"
+    plan.write_text(_load("empty_queue.md"), encoding="utf-8")
+    before = count_open(parse_queue_items(plan.read_text(encoding="utf-8")))
+    assert before == 0
+
+    result = run_session_a_path(plan, brainstorm=stub_brainstorm, write=True)
+    assert isinstance(result, SessionAResult)
+    assert result.ok and result.verdict == "queued"
+    assert result.wrote_item is True
+    assert result.open_count == 1
+    assert result.title == "Stub shippable change"
+    assert result.b_pick_title == "Stub shippable change"
+    assert result.queue_label == "queue 1/10"
+
+    on_disk = plan.read_text(encoding="utf-8")
+    items = parse_queue_items(on_disk)
+    assert count_open(items) == 1
+    assert len(items) == 1
+    assert items[0].status.upper().startswith("OPEN")
+    assert "ready-for-implement: yes" in on_disk
+    assert "Stub shippable change" in on_disk
+
+    payload = result.to_json_dict()
+    assert payload == result.to_dict() == session_a_result_dict(result)
+    _assert_session_a_result_json_shape(payload)
+    assert payload["ok"] is True
+    assert payload["verdict"] == "queued"
+    assert payload["open_count"] == 1
+    assert payload["queue"] == "queue 1/10"
+    assert payload["wrote_item"] is True
+    assert payload["title"] == "Stub shippable change"
+    assert payload["b_pick_title"] == "Stub shippable change"
+
+    from src.research_implement.__main__ import main
+
+    # CLI --json must emit the identical shape (shared to_json_dict).
+    # Plan already has OPEN=1, so a second stub fire would be recount-only;
+    # use a fresh empty copy for CLI append+json.
+    empty2 = tmp_path / "empty2.md"
+    empty2.write_text(_load("empty_queue.md"), encoding="utf-8")
+    rc = main(["session-a", "--plan", str(empty2), "--stub", "--json"])
+    assert rc == 0
+    cli_payload = json.loads(capsys.readouterr().out)
+    _assert_session_a_result_json_shape(cli_payload)
+    assert cli_payload["verdict"] == "queued"
+    assert cli_payload["wrote_item"] is True
+    assert cli_payload["open_count"] == 1
+    assert count_open(parse_queue_items(empty2.read_text(encoding="utf-8"))) == 1
+
+
+def test_beat8_session_a_two_open_ready_recount_only_no_second_append(tmp_path: Path, capsys):
+    """Beat 8: two_open_ready / OPEN>=1 → recount-only light; no second append."""
+    src = _load("two_open_ready.md")
+    items_before = parse_queue_items(src)
+    assert count_open(items_before) == 2
+    assert len(items_before) == 2
+
+    plan = tmp_path / "two.md"
+    plan.write_text(src, encoding="utf-8")
+
+    called = {"n": 0}
+
+    def tracking(_items):
+        called["n"] += 1
+        return stub_brainstorm(_items)
+
+    result = run_session_a_path(plan, brainstorm=tracking, write=True)
+    assert isinstance(result, SessionAResult)
+    assert result.ok and result.verdict == "light"
+    assert result.wrote_item is False
+    assert result.open_count == 2
+    assert result.title is None
+    assert called["n"] == 0  # must not call brainstorm when OPEN >= 1
+    assert "recount only" in result.message
+
+    on_disk = plan.read_text(encoding="utf-8")
+    assert on_disk == src  # plan unchanged
+    after = parse_queue_items(on_disk)
+    assert count_open(after) == 2
+    assert len(after) == 2
+    assert [i.item_id for i in after] == ["Q1", "Q2"]
+
+    payload = result.to_json_dict()
+    assert payload == result.to_dict() == session_a_result_dict(result)
+    _assert_session_a_result_json_shape(payload)
+    assert payload["ok"] is True
+    assert payload["verdict"] == "light"
+    assert payload["open_count"] == 2
+    assert payload["queue"] == "queue 2/10"
+    assert payload["wrote_item"] is False
+    assert payload["title"] is None
+    assert payload["b_pick_title"] == "First ready complete item"
+
+    # Second fire still recount-only; still no append.
+    result2 = run_session_a_path(plan, brainstorm=tracking, write=True)
+    assert result2.verdict == "light"
+    assert result2.wrote_item is False
+    assert result2.open_count == 2
+    assert called["n"] == 0
+    assert count_open(parse_queue_items(plan.read_text(encoding="utf-8"))) == 2
+    assert plan.read_text(encoding="utf-8") == src
+
+    from src.research_implement.__main__ import main
+
+    rc = main(["session-a", "--plan", str(plan), "--stub", "--json"])
+    assert rc == 0
+    cli_payload = json.loads(capsys.readouterr().out)
+    _assert_session_a_result_json_shape(cli_payload)
+    assert cli_payload == payload
+    assert cli_payload["verdict"] == "light"
+    assert cli_payload["wrote_item"] is False
+    assert cli_payload["open_count"] == 2
+    # Still exactly two OPEN after CLI recount-only.
+    assert count_open(parse_queue_items(plan.read_text(encoding="utf-8"))) == 2
+    assert plan.read_text(encoding="utf-8") == src
+
+
+def test_beat8_session_a_one_open_ready_recount_and_failed_json_keys(tmp_path: Path, capsys):
+    """Beat 8: OPEN>=1 recount + failed fire share SessionAResult key set with queued."""
+    one = tmp_path / "one.md"
+    one.write_text(_load("one_open_ready.md"), encoding="utf-8")
+    light = run_session_a_path(one, brainstorm=stub_brainstorm, write=True)
+    light_dict = light.to_dict()
+    assert light.to_json_dict() == light_dict == session_a_result_dict(light)
+    _assert_session_a_result_json_shape(light_dict)
+    assert light_dict["verdict"] == "light"
+    assert light_dict["wrote_item"] is False
+    assert light_dict["open_count"] == 1
+    assert one.read_text(encoding="utf-8") == _load("one_open_ready.md")
+
+    empty = tmp_path / "empty.md"
+    empty.write_text(_load("empty_queue.md"), encoding="utf-8")
+    queued = run_session_a_path(empty, brainstorm=stub_brainstorm, write=True)
+    queued_dict = queued.to_dict()
+    _assert_session_a_result_json_shape(queued_dict)
+    assert queued_dict["verdict"] == "queued"
+    assert queued_dict["wrote_item"] is True
+
+    failed = run_session_a(_load("empty_queue.md"), brainstorm=None)
+    failed_dict = failed.to_dict()
+    _assert_session_a_result_json_shape(failed_dict)
+    assert failed_dict["ok"] is False
+    assert failed_dict["verdict"] == "failed"
+    assert failed_dict["wrote_item"] is False
+    assert failed_dict["open_count"] == 0
+    assert failed_dict["queue"] == "queue 0/10"
+
+    # Key sets identical across queued / light / failed (stability).
+    for payload in (queued_dict, light_dict, failed_dict):
+        assert tuple(sorted(payload.keys())) == tuple(sorted(SESSION_A_RESULT_JSON_KEYS))
+        assert SESSION_A_RESULT_KEYS == SESSION_A_RESULT_JSON_KEYS
+
+    from src.research_implement.__main__ import main
+
+    rc = main(["session-a", "--plan", str(one), "--stub", "--json"])
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == light_dict

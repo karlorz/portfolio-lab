@@ -5,13 +5,17 @@ and append at most one ready six-field OPEN Queue item. The default side-dev
 hook is ``stub_brainstorm`` / ``default_search_plan`` (deterministic; no LLM).
 When OPEN >= 1, recount only (light exit) and do not call the callback.
 Empty Queue + no new item = failed fire.
+
+JSON contract: ``SessionAResult.to_dict()`` (aliases ``to_json_dict`` /
+``session_a_result_dict``) is the shared shape for CLI ``session-a --json``
+and fixture tests (append/queued vs recount-only/light vs failed).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from src.research_implement.queue import (
     first_b_pick,
@@ -55,6 +59,21 @@ default_search_plan = stub_brainstorm
 stub_search_plan = stub_brainstorm
 
 
+# Stable CLI ``session-a --json`` / test contract keys (queued | light | failed).
+SESSION_A_RESULT_JSON_KEYS: tuple[str, ...] = (
+    "ok",
+    "verdict",
+    "open_count",
+    "queue",
+    "b_pick_title",
+    "title",
+    "wrote_item",
+)
+
+# Alias kept for callers that prefer the Session-A-named constant.
+SESSION_A_RESULT_KEYS: tuple[str, ...] = SESSION_A_RESULT_JSON_KEYS
+
+
 @dataclass(frozen=True)
 class SessionAResult:
     ok: bool
@@ -69,6 +88,37 @@ class SessionAResult:
     @property
     def queue_label(self) -> str:
         return render_queue_count(self.open_count)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Shared SessionAResult dict for CLI ``session-a --json`` and fixture tests.
+
+        One shape for append (verdict queued) / recount-only (verdict light) / failed.
+        Keys are exactly ``SESSION_A_RESULT_JSON_KEYS`` / ``SESSION_A_RESULT_KEYS``.
+        """
+        return session_a_result_dict(self)
+
+    def to_json_dict(self) -> dict[str, Any]:
+        """Alias of ``to_dict`` (stable JSON contract name)."""
+        return self.to_dict()
+
+
+def session_a_result_dict(result: SessionAResult) -> dict[str, Any]:
+    """Build the shared Session A dict (CLI ``session-a --json`` + tests).
+
+    One shape for all verdicts:
+    - queued (append): wrote_item=True, title set, open_count after append
+    - light (recount-only): wrote_item=False, title=None, open_count unchanged
+    - failed: wrote_item=False, ok=False
+    """
+    return {
+        "ok": result.ok,
+        "verdict": result.verdict,
+        "open_count": result.open_count,
+        "queue": result.queue_label,
+        "b_pick_title": result.b_pick_title,
+        "title": result.title,
+        "wrote_item": result.wrote_item,
+    }
 
 
 def _coerce_candidate(raw: QueueItem | dict, *, item_id: str) -> QueueItem:
