@@ -22,6 +22,13 @@ Dry-run contract: non-mutating — never marks SHIPPED, never deletes Queue
 rows, never ``scheduler_delete``. Second B therefore picks the same OPEN
 again (not idle ``queue 0/10``). Or: ``make research-implement-e2e-dry-run``.
 
+Full pipeline (Beat 11, tmp_path / test double only)::
+
+    A stub append → B dry_run --json → A recount light → B fixture_ship → B idle
+
+Dry-run never ships; ``fixture_ship_implement`` ships on tmp_path only (never CLI
+default). Proof: ``make research-implement-e2e-pipeline`` / pytest ``-k beat11``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

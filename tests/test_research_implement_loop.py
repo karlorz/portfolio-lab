@@ -1674,3 +1674,206 @@ def test_beat10_malformed_fixtures_idle_decode_json_never_crash(tmp_path: Path, 
             assert payload["item"] is not None
             assert payload["implement_result"] is None  # decode_only
             assert payload["shipped"] is False
+
+
+# --- Beat 11: full pipeline e2e on tmp_path (A stub → B dry_run → B ship → A light / B idle) ---
+
+
+def test_beat11_full_pipeline_e2e_stub_dry_run_ship_recount_idle(tmp_path: Path, capsys):
+    """Beat 11: full A/B pipeline on tmp_path only.
+
+    Sequence:
+      1. Session A stub append (empty → queued; SessionA JSON shape)
+      2. Session B dry_run JSON (never ships; plan unchanged; SessionB JSON)
+      3. Session A recount light (OPEN still 1; no second append)
+      4. Session B fixture_ship (SHIPPED on tmp_path; dry_run never did)
+      5. Session B idle (queue 0/10) + Session A would be empty-side
+         (post-ship OPEN=0); assert idle JSON + never scheduler_delete
+
+    Live prod implement / CLI stub-ship stay unwired. No Tasker / no LLM.
+    """
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "pipeline.md"
+    plan.write_text(_load("empty_queue.md"), encoding="utf-8")
+    assert count_open(parse_queue_items(plan.read_text(encoding="utf-8"))) == 0
+
+    repo_sentinel = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "research_implement"
+        / "queue.py"
+    )
+    sentinel_before = repo_sentinel.read_bytes()
+
+    calls = {"n": 0}
+
+    def _spy(*_a, **_k):
+        calls["n"] += 1
+        raise SchedulerDeleteForbidden("spy")
+
+    # --- 1. Session A stub append ---
+    a1 = run_session_a_path(plan, brainstorm=stub_brainstorm, write=True)
+    assert isinstance(a1, SessionAResult)
+    assert a1.ok and a1.verdict == "queued"
+    assert a1.wrote_item is True
+    assert a1.open_count == 1
+    a1_dict = a1.to_dict()
+    assert a1_dict == a1.to_json_dict() == session_a_result_dict(a1)
+    _assert_session_a_result_json_shape(a1_dict)
+    assert a1_dict["verdict"] == "queued"
+    assert a1_dict["wrote_item"] is True
+    assert a1_dict["open_count"] == 1
+    assert a1_dict["queue"] == "queue 1/10"
+    after_a1 = plan.read_text(encoding="utf-8")
+    items_a1 = parse_queue_items(after_a1)
+    assert count_open(items_a1) == 1
+    assert is_b_pickable(items_a1[0])
+    assert "SHIPPED" not in after_a1
+    item_id = items_a1[0].item_id
+
+    # CLI session-a --json on a fresh empty copy shares the same shape.
+    empty_cli = tmp_path / "empty_cli.md"
+    empty_cli.write_text(_load("empty_queue.md"), encoding="utf-8")
+    rc_a = main(["session-a", "--plan", str(empty_cli), "--stub", "--json"])
+    assert rc_a == 0
+    cli_a = json.loads(capsys.readouterr().out)
+    _assert_session_a_result_json_shape(cli_a)
+    assert cli_a["verdict"] == "queued"
+    assert cli_a["wrote_item"] is True
+
+    # --- 2. Session B dry_run (JSON) — never ships ---
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        b_dry = run_session_b_path(
+            plan,
+            implement=dry_run_implement,
+            decode_only=False,
+            write=True,  # even with write=True dry-run must not rewrite
+        )
+    assert b_dry.ok and b_dry.verdict == "dry_run"
+    dry_dict = b_dry.to_dict()
+    assert dry_dict == b_dry.to_json_dict() == session_b_result_dict(b_dry)
+    _assert_session_result_json_shape(dry_dict)
+    assert dry_dict["verdict"] == "dry_run"
+    assert dry_dict["ok"] is True
+    assert dry_dict["open_count"] == 1
+    assert dry_dict["queue"] == "queue 1/10"
+    assert dry_dict["keep_schedule"] is True
+    assert dry_dict["scheduler_delete_called"] is False
+    assert dry_dict["shipped"] is False
+    assert dry_dict["wrote_files"] is False
+    assert dry_dict["item"] is not None
+    assert dry_dict["item"]["item_id"] == item_id
+    assert dry_dict["implement_result"] is not None
+    _assert_dry_run_implement_schema(dry_dict["implement_result"])
+    assert plan.read_text(encoding="utf-8") == after_a1
+    assert "SHIPPED" not in plan.read_text(encoding="utf-8")
+    assert calls["n"] == 0
+
+    # CLI session-b --dry-run --json shares the same Session B shape.
+    rc_dry = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+    assert rc_dry == 0
+    cli_dry = json.loads(capsys.readouterr().out)
+    _assert_session_result_json_shape(cli_dry)
+    assert cli_dry["verdict"] == "dry_run"
+    assert cli_dry["shipped"] is False
+    assert cli_dry["implement_result"]["dry_run"] is True
+    assert cli_dry["scheduler_delete_called"] is False
+    assert plan.read_text(encoding="utf-8") == after_a1  # still never shipped
+
+    # --- 3. Session A recount light (OPEN still present; no second append) ---
+    called = {"n": 0}
+
+    def tracking(_items):
+        called["n"] += 1
+        return stub_brainstorm(_items)
+
+    a_light = run_session_a_path(plan, brainstorm=tracking, write=True)
+    assert a_light.ok and a_light.verdict == "light"
+    assert a_light.wrote_item is False
+    assert a_light.open_count == 1
+    assert called["n"] == 0
+    assert "recount only" in a_light.message
+    light_dict = a_light.to_dict()
+    _assert_session_a_result_json_shape(light_dict)
+    assert light_dict["verdict"] == "light"
+    assert light_dict["wrote_item"] is False
+    assert light_dict["open_count"] == 1
+    assert plan.read_text(encoding="utf-8") == after_a1
+    assert count_open(parse_queue_items(plan.read_text(encoding="utf-8"))) == 1
+
+    rc_light = main(["session-a", "--plan", str(plan), "--stub", "--json"])
+    assert rc_light == 0
+    cli_light = json.loads(capsys.readouterr().out)
+    _assert_session_a_result_json_shape(cli_light)
+    assert cli_light["verdict"] == "light"
+    assert cli_light["wrote_item"] is False
+    assert plan.read_text(encoding="utf-8") == after_a1
+
+    # --- 4. Session B fixture_ship — ships on tmp_path only ---
+    ship_fn = make_fixture_ship_implement("beat11cafe", note="beat11 pipeline ship")
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        b_ship = run_session_b_path(
+            plan,
+            implement=ship_fn,
+            decode_only=False,
+            write=True,
+        )
+    assert b_ship.ok and b_ship.verdict == "shipped"
+    ship_dict = b_ship.to_dict()
+    _assert_session_result_json_shape(ship_dict)
+    assert ship_dict["verdict"] == "shipped"
+    assert ship_dict["shipped"] is True
+    assert ship_dict["wrote_files"] is False
+    assert ship_dict["keep_schedule"] is True
+    assert ship_dict["scheduler_delete_called"] is False
+    assert ship_dict["open_count"] == 0
+    assert ship_dict["queue"] == "queue 0/10"
+    assert ship_dict["item"] is not None
+    assert ship_dict["item"]["item_id"] == item_id
+    assert ship_dict["implement_result"] is not None
+    _assert_shipped_implement_schema(ship_dict["implement_result"])
+    assert ship_dict["implement_result"]["sha"] == "beat11cafe"
+    assert ship_dict["implement_result"]["dry_run"] is False
+    on_disk = plan.read_text(encoding="utf-8")
+    assert "SHIPPED `beat11cafe`" in on_disk
+    assert count_open(parse_queue_items(on_disk)) == 0
+    assert calls["n"] == 0
+    # Contrast: dry_run never shipped; fixture_ship did (tmp_path only).
+    assert dry_dict["shipped"] is False
+    assert ship_dict["shipped"] is True
+    assert "SHIPPED" not in after_a1
+    assert repo_sentinel.read_bytes() == sentinel_before
+
+    # --- 5. Session B idle after ship; Session A on shipped plan ---
+    # After ship OPEN=0: A with stub would append again; recount-light is the
+    # mid-pipeline (step 3) contract. Post-ship consumer is idle.
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        b_idle = run_session_b_path(plan, decode_only=False, write=False)
+    assert b_idle.ok and b_idle.verdict == "idle"
+    idle_dict = b_idle.to_dict()
+    _assert_session_result_json_shape(idle_dict)
+    assert idle_dict["verdict"] == "idle"
+    assert idle_dict["queue"] == "queue 0/10"
+    assert idle_dict["open_count"] == 0
+    assert idle_dict["item"] is None
+    assert idle_dict["implement_result"] is None
+    assert idle_dict["shipped"] is False
+    assert idle_dict["wrote_files"] is False
+    assert idle_dict["keep_schedule"] is True
+    assert idle_dict["scheduler_delete_called"] is False
+    assert calls["n"] == 0
+    assert "queue 0/10" in b_idle.message
+
+    rc_idle = main(["idle-decode", "--plan", str(plan), "--json"])
+    assert rc_idle == 0
+    cli_idle = json.loads(capsys.readouterr().out)
+    _assert_session_result_json_shape(cli_idle)
+    assert cli_idle == idle_dict
+    assert cli_idle["scheduler_delete_called"] is False
+
+    # Key stability across pipeline Session B verdicts.
+    for payload in (dry_dict, ship_dict, idle_dict):
+        assert tuple(sorted(payload.keys())) == tuple(sorted(SESSION_RESULT_JSON_KEYS))
+    for payload in (a1_dict, light_dict):
+        assert tuple(sorted(payload.keys())) == tuple(sorted(SESSION_A_RESULT_JSON_KEYS))

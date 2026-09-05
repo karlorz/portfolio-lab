@@ -973,6 +973,17 @@ research-implement-e2e-dry-run:
 	@echo "  PYTHONPATH=. pytest tests/test_research_implement_loop.py -q -k beat5"
 	@echo "(ship is callback-only — no CLI stub-ship; prefer pytest tmp_path doubles)"
 
+# Beat 11 full pipeline (side-dev / tmp_path only; no Tasker / no LLM / no prod):
+#   A stub append → B dry_run (JSON) → A recount light → B fixture_ship → B idle
+# Proof: pytest -k beat11_full_pipeline (fixture_ship is test-double only).
+.PHONY: research-implement-e2e-pipeline
+research-implement-e2e-pipeline:
+	@echo "Beat 11 full pipeline (tmp_path via pytest; side-dev only):"
+	@echo "  A stub append → B dry_run JSON → A recount light → B fixture_ship → B idle"
+	@echo "  dry_run never ships; fixture_ship ships on tmp_path only; never scheduler_delete"
+	@echo "Run: PORTFOLIO_LAB_ENABLE_ML=0 <RI_PYTHON> -m pytest tests/test_research_implement_loop.py -q -k beat11_full_pipeline"
+	@echo "Or:  make test-research-implement   # full A/B suite incl. beat10/beat11"
+
 # Side-dev only (no Tasker / no LLM / no 8000/8001): A/B loop + contract
 # fixture tests + optional host contract (skip-if-missing).
 # Documented runtime: scripts/python_runtime.sh (PYTHON_RUNTIME).

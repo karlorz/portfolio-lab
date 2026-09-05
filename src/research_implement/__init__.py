@@ -15,6 +15,8 @@ implement stays unwired.
 
 CLI: ``python -m src.research_implement {session-a|session-b|idle-decode}``.
 E2E dry-run (tmp plan): see module ``__main__`` examples / ``make research-implement-e2e-dry-run``.
+Full pipeline (Beat 11): A stub → B dry_run → A recount light → B fixture_ship → B idle
+on tmp_path — ``make research-implement-e2e-pipeline`` / pytest ``-k beat11``.
 
 JSON: ``SessionResult.to_dict()`` (aliases ``to_json_dict`` / ``session_b_result_dict``)
 is the shared Session B ``--json`` / test contract for idle / decode_only / dry_run /
