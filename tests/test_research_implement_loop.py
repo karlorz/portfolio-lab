@@ -3631,3 +3631,35 @@ def test_beat23_existing_plan_still_works(tmp_path: Path, capsys):
     out = capsys.readouterr().out
     assert "idle" in out or "queue" in out
 
+
+def test_beat24_plan_and_log_together_fails(tmp_path: Path, capsys):
+    """Beat 24: passing both --plan and --log → SystemExit; files unchanged."""
+    from src.research_implement.__main__ import main
+
+    src = FIXTURES / "empty_queue.md"
+    plan = tmp_path / "plan.md"
+    plan.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    log = tmp_path / "also.md"
+    log.write_text(before, encoding="utf-8")
+    with pytest.raises(SystemExit) as ei:
+        main(["idle-decode", "--plan", str(plan), "--log", str(log), "--json"])
+    assert ei.value.code == 2
+    err = capsys.readouterr().err.lower()
+    assert "not allowed" in err and "--plan" in err
+    assert plan.read_text(encoding="utf-8") == before
+    assert log.read_text(encoding="utf-8") == before
+
+
+def test_beat24_log_alias_works_like_plan(tmp_path: Path, capsys):
+    """Beat 24: --log alone still resolves like --plan."""
+    from src.research_implement.__main__ import main
+
+    src = FIXTURES / "empty_queue.md"
+    plan = tmp_path / "plan.md"
+    plan.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    rc = main(["idle-decode", "--log", str(plan), "--json"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "idle" in out or "queue" in out
+

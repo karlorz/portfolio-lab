@@ -34,3 +34,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 ## Errors
 
 - Missing `--plan`/`--log` path → non-zero exit (`file not found`); the CLI does not create the file.
+- Pass only one of `--plan` / `--log` (alias); both together → non-zero exit.
