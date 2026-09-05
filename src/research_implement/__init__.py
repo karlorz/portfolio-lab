@@ -9,6 +9,10 @@ Dry-run contract: ``dry_run_implement`` is non-mutating — it never marks
 SHIPPED, never deletes Queue rows, and never calls ``scheduler_delete``.
 A second Session B fire therefore picks the same OPEN again (not idle).
 
+Optional ship path (test double only): pass ``fixture_ship_implement`` /
+``make_fixture_ship_implement`` explicitly — never the default. Live prod
+implement stays unwired.
+
 CLI: ``python -m src.research_implement {session-a|session-b|idle-decode}``.
 E2E dry-run (tmp plan): see module ``__main__`` examples / ``make research-implement-e2e-dry-run``.
 """
@@ -41,7 +45,9 @@ from src.research_implement.session_b import (
     decode_fields,
     default_implement,
     dry_run_implement,
+    fixture_ship_implement,
     format_decode_report,
+    make_fixture_ship_implement,
     run_session_b,
     scheduler_delete,
 )
@@ -71,4 +77,6 @@ __all__ = [
     "scheduler_delete",
     "dry_run_implement",
     "default_implement",
+    "fixture_ship_implement",
+    "make_fixture_ship_implement",
 ]

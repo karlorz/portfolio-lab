@@ -957,6 +957,8 @@ s3-archive:
 # ── Research-implement A/B side-dev (tmp dry-run; no Tasker / no LLM) ──
 # Dry-run is non-mutating: never SHIPPED / never scheduler_delete; second B
 # picks the same OPEN again. Fixture proof: pytest -k e2e_a_stub_then_b_dry_run
+# Optional SHIPPED path is test-double only (fixture_ship_implement); never CLI
+# default / never live prod. Proof: pytest -k beat5_dry_run_never_ships
 
 .PHONY: research-implement-e2e-dry-run
 research-implement-e2e-dry-run:
@@ -966,3 +968,5 @@ research-implement-e2e-dry-run:
 	@echo "  python -m src.research_implement session-b --plan /tmp/ri-plan.md --dry-run --json"
 	@echo "(second B still dry_run on same OPEN — dry-run never ships)"
 	@echo "Or: PYTHONPATH=. pytest tests/test_research_implement_loop.py -q -k e2e"
+	@echo "Optional ship (test double / tmp_path only; not wired to CLI):"
+	@echo "  PYTHONPATH=. pytest tests/test_research_implement_loop.py -q -k beat5_dry_run_never_ships"

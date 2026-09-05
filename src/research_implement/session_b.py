@@ -7,9 +7,11 @@ Ignores ## Watch and ## Project Work. Empty Queue is an idle fire
 
 Decode path reports the picked Q id and six fields. Pluggable ``implement``
 callback defaults to ``dry_run_implement`` / ``default_implement`` (records
-intended ``file_touch`` / ``acceptance`` without writing the repo). CLI
-defaults to decode-only; pass ``--dry-run`` to exercise the dry-run implement
-path. Live implement to prod stays unwired.
+intended ``file_touch`` / ``acceptance`` without writing the repo). Optional
+SHIPPED path: pass ``fixture_ship_implement`` / ``make_fixture_ship_implement``
+explicitly (test double only; never the default). CLI defaults to decode-only;
+pass ``--dry-run`` to exercise the dry-run implement path. Live implement to
+prod stays unwired.
 """
 
 from __future__ import annotations
@@ -51,6 +53,39 @@ def dry_run_implement(item: QueueItem) -> dict[str, Any]:
 
 # Public alias for the pluggable implement hook default.
 default_implement = dry_run_implement
+
+
+def make_fixture_ship_implement(
+    sha: str = "fixturedeadbeef",
+    *,
+    note: str = "fixture ship (test double)",
+) -> ImplementFn:
+    """Return a test-double implement that can mark SHIPPED when explicitly passed.
+
+    Never the default — ``default_implement`` remains ``dry_run_implement``.
+    Not wired to CLI or live prod. Intended for tmp_path fixture plans only:
+    pass ``implement=make_fixture_ship_implement(...)`` (and optionally
+    ``write_path=True``) so Session B rewrites status to SHIPPED in memory /
+    on the temp plan. Does not touch kill_switch / order_router / live authority.
+    """
+
+    def _ship(item: QueueItem) -> dict[str, Any]:
+        return {
+            "dry_run": False,
+            "item_id": item.item_id,
+            "title": item.title,
+            "file_touch": item.file_touch,
+            "acceptance": item.acceptance,
+            "wrote_files": False,
+            "sha": sha,
+            "note": note,
+        }
+
+    return _ship
+
+
+# Convenience alias: fixed-sha test double (still never the default).
+fixture_ship_implement = make_fixture_ship_implement()
 
 
 class SchedulerDeleteForbidden(RuntimeError):

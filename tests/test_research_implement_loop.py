@@ -34,7 +34,9 @@ from src.research_implement.session_b import (
     decode_fields,
     default_implement,
     dry_run_implement,
+    fixture_ship_implement,
     format_decode_report,
+    make_fixture_ship_implement,
     run_session_b,
     run_session_b_path,
     scheduler_delete,
@@ -253,21 +255,28 @@ def test_session_b_refuses_incomplete_open_as_idle():
 
 
 def test_session_b_implement_callback_can_ship_optional(tmp_path: Path):
+    """Explicit fixture_ship_implement marks SHIPPED; default never does."""
     plan = _load("one_open_ready.md")
-    seen: list[str] = []
+    # Default / dry_run must not ship.
+    dry = run_session_b(plan, decode_only=False)
+    assert dry.verdict == "dry_run"
+    assert "SHIPPED" not in dry.plan_text
+    assert count_open(parse_queue_items(dry.plan_text)) == 1
 
-    def implement(item):
-        seen.append(item.item_id)
-        return {"sha": "deadbeef", "note": "fixture ship"}
-
-    result = run_session_b(plan, implement=implement, decode_only=False, ship_sha="deadbeef")
+    ship_fn = make_fixture_ship_implement("deadbeef", note="fixture ship")
+    result = run_session_b(plan, implement=ship_fn, decode_only=False)
     assert result.ok
     assert result.verdict == "shipped"
-    assert seen == ["Q1"]
+    assert result.implement_result is not None
+    assert result.implement_result["sha"] == "deadbeef"
+    assert result.implement_result["dry_run"] is False
     assert count_open(parse_queue_items(result.plan_text)) == 0
     assert "SHIPPED `deadbeef`" in result.plan_text
     assert result.keep_schedule
     assert not result.scheduler_delete_called
+    # Convenience alias is also a ship double, never the default.
+    assert fixture_ship_implement is not dry_run_implement
+    assert default_implement is dry_run_implement
 
 
 def test_session_b_cli_decode_json_path(tmp_path: Path):
@@ -293,6 +302,8 @@ def test_modules_are_distinct_from_legacy_research_agent():
     assert "default_search_plan" in dir(loop)
     assert "dry_run_implement" in dir(loop)
     assert "default_implement" in dir(loop)
+    assert "fixture_ship_implement" in dir(loop)
+    assert "make_fixture_ship_implement" in dir(loop)
 
 
 def test_stub_brainstorm_fills_six_fields():
@@ -646,3 +657,72 @@ def test_e2e_cli_a_stub_then_b_dry_run_tmp_path(tmp_path: Path, capsys):
     assert payload2["item"]["item_id"] == payload1["item"]["item_id"]
     assert payload2["open_count"] == 1
     assert payload2["scheduler_delete_called"] is False
+
+def test_beat5_dry_run_never_ships_fixture_ship_writes_tmp_path_only(tmp_path: Path):
+    """Beat 5: dry_run never ships; custom implement can ship on tmp_path only.
+
+    Live prod implement stays unwired — only the explicit test double ships.
+    Idle / keep_schedule / no scheduler_delete remain true on both paths.
+    """
+    plan = tmp_path / "plan.md"
+    plan.write_text(_load("one_open_ready.md"), encoding="utf-8")
+    repo_sentinel = Path(__file__).resolve().parents[1] / "src" / "research_implement" / "queue.py"
+    sentinel_before = repo_sentinel.read_bytes()
+
+    calls = {"n": 0}
+
+    def _spy(*_a, **_k):
+        calls["n"] += 1
+        raise SchedulerDeleteForbidden("spy")
+
+    # Path A: dry_run_implement — never SHIPPED, plan on disk unchanged.
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        dry = run_session_b_path(
+            plan,
+            implement=dry_run_implement,
+            decode_only=False,
+            write=True,  # even with write=True dry-run must not rewrite
+        )
+    assert dry.ok
+    assert dry.verdict == "dry_run"
+    assert dry.keep_schedule is True
+    assert dry.scheduler_delete_called is False
+    assert calls["n"] == 0
+    assert "SHIPPED" not in dry.plan_text
+    assert count_open(parse_queue_items(dry.plan_text)) == 1
+    assert plan.read_text(encoding="utf-8") == _load("one_open_ready.md")
+
+    # Path B: explicit fixture_ship_implement — SHIPPED on tmp_path plan only.
+    ship_fn = make_fixture_ship_implement("cafef00d", note="beat5 tmp ship")
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        shipped = run_session_b_path(
+            plan,
+            implement=ship_fn,
+            decode_only=False,
+            write=True,
+        )
+    assert shipped.ok
+    assert shipped.verdict == "shipped"
+    assert shipped.implement_result is not None
+    assert shipped.implement_result["sha"] == "cafef00d"
+    assert shipped.implement_result["dry_run"] is False
+    assert shipped.keep_schedule is True
+    assert shipped.scheduler_delete_called is False
+    assert calls["n"] == 0
+    assert count_open(parse_queue_items(shipped.plan_text)) == 0
+    assert "SHIPPED `cafef00d`" in shipped.plan_text
+    on_disk = plan.read_text(encoding="utf-8")
+    assert "SHIPPED `cafef00d`" in on_disk
+    assert count_open(parse_queue_items(on_disk)) == 0
+    # Repo source untouched (tmp_path only).
+    assert repo_sentinel.read_bytes() == sentinel_before
+
+    # After ship, next B is idle (queue 0/10) and still never deletes schedule.
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        idle = run_session_b_path(plan, decode_only=False, write=False)
+    assert idle.ok
+    assert idle.verdict == "idle"
+    assert "queue 0/10" in idle.message
+    assert idle.keep_schedule is True
+    assert idle.scheduler_delete_called is False
+    assert calls["n"] == 0
