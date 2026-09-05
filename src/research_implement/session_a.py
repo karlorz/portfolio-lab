@@ -1,0 +1,217 @@
+"""Session A — research/plan producer (never implements).
+
+When OPEN count is 0, brainstorm and append at most one ready Queue item.
+When OPEN >= 1, recount only (light exit). Empty Queue + no new item = failed fire.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
+
+from src.research_implement.queue import (
+    first_b_pick,
+    QueueItem,
+    append_queue_item,
+    count_open,
+    format_queue_item,
+    next_queue_id,
+    parse_queue_items,
+    queue_item_from_fields,
+    render_queue_count,
+)
+
+BrainstormFn = Callable[[list[QueueItem]], QueueItem | dict | None]
+
+
+@dataclass(frozen=True)
+class SessionAResult:
+    ok: bool
+    verdict: str  # queued | light | failed
+    open_count: int
+    b_pick_title: str | None
+    title: str | None
+    plan_text: str
+    message: str
+    wrote_item: bool = False
+
+    @property
+    def queue_label(self) -> str:
+        return render_queue_count(self.open_count)
+
+
+def _coerce_candidate(raw: QueueItem | dict, *, item_id: str) -> QueueItem:
+    if isinstance(raw, QueueItem):
+        if raw.item_id and raw.item_id != item_id:
+            # Keep caller id if already set; otherwise stamp next id.
+            item_id = raw.item_id
+        return queue_item_from_fields(
+            item_id=item_id,
+            heading=raw.heading or raw.title or item_id,
+            title=raw.title,
+            acceptance=raw.acceptance,
+            risks=raw.risks,
+            file_touch=raw.file_touch,
+            breaking_change=raw.breaking_change,
+            redeploy_notes=raw.redeploy_notes,
+            status=raw.status or "OPEN",
+            ready_for_implement=raw.ready_for_implement or "yes",
+        )
+    if not isinstance(raw, dict):
+        raise TypeError("brainstorm must return QueueItem, dict, or None")
+    heading = str(raw.get("heading") or raw.get("title") or item_id)
+    return queue_item_from_fields(
+        item_id=str(raw.get("item_id") or item_id),
+        heading=heading,
+        title=str(raw.get("title") or ""),
+        acceptance=str(raw.get("acceptance") or ""),
+        risks=str(raw.get("risks") or ""),
+        file_touch=str(raw.get("file_touch") or ""),
+        breaking_change=raw.get("breaking_change", "false"),
+        redeploy_notes=str(raw.get("redeploy_notes") or "none"),
+        status=str(raw.get("status") or "OPEN"),
+        ready_for_implement=str(raw.get("ready_for_implement") or "yes"),
+    )
+
+
+def run_session_a(
+    plan_markdown: str,
+    *,
+    brainstorm: BrainstormFn | None = None,
+    plan_path: str | Path | None = None,
+    write_path: bool = False,
+) -> SessionAResult:
+    """Run one Session A fire against living-plan markdown.
+
+    ``brainstorm`` is only consulted when OPEN == 0. It must not implement code;
+    it returns at most one six-field candidate (or None → failed fire).
+    """
+    items = parse_queue_items(plan_markdown)
+    open_n = count_open(items)
+    first = next((i for i in items if i.status and i.status.upper().startswith("OPEN")), None)
+    # Prefer B-pickable title for heartbeat; else first OPEN heading.
+
+    pick = first_b_pick(items)
+    b_title = (pick.title if pick else None) or (first.title if first else None)
+
+    if open_n >= 1:
+        msg = (
+            f"light; title none; {render_queue_count(open_n)}; "
+            f"B pick = {pick.title if pick else 'STANDBY'}; recount only"
+        )
+        return SessionAResult(
+            ok=True,
+            verdict="light",
+            open_count=open_n,
+            b_pick_title=pick.title if pick else None,
+            title=None,
+            plan_text=plan_markdown,
+            message=msg,
+            wrote_item=False,
+        )
+
+    if brainstorm is None:
+        msg = (
+            f"failed; Empty Queue + no new item = failed fire; "
+            f"{render_queue_count(0)}; B pick = STANDBY"
+        )
+        return SessionAResult(
+            ok=False,
+            verdict="failed",
+            open_count=0,
+            b_pick_title=None,
+            title=None,
+            plan_text=plan_markdown,
+            message=msg,
+            wrote_item=False,
+        )
+
+    candidate = brainstorm(items)
+    if candidate is None:
+        msg = (
+            f"failed; Empty Queue + no new item = failed fire; "
+            f"{render_queue_count(0)}; B pick = STANDBY"
+        )
+        return SessionAResult(
+            ok=False,
+            verdict="failed",
+            open_count=0,
+            b_pick_title=None,
+            title=None,
+            plan_text=plan_markdown,
+            message=msg,
+            wrote_item=False,
+        )
+
+    qid = next_queue_id(items)
+    item = _coerce_candidate(candidate, item_id=qid)
+    # Force producer contract: OPEN + ready-for-implement: yes
+    item_md = format_queue_item(
+        item_id=item.item_id,
+        heading=item.heading or item.title or item.item_id,
+        title=item.title,
+        acceptance=item.acceptance,
+        risks=item.risks,
+        file_touch=item.file_touch,
+        breaking_change=item.breaking_change,
+        redeploy_notes=item.redeploy_notes,
+        status="OPEN",
+        ready_for_implement="yes",
+    )
+    # Validate six fields before write
+    missing = [
+        name
+        for name in (
+            "title",
+            "acceptance",
+            "risks",
+            "file_touch",
+            "breaking_change",
+            "redeploy_notes",
+        )
+        if not str(getattr(item, name, "")).strip()
+    ]
+    if missing:
+        msg = f"failed; incomplete candidate missing {missing}; {render_queue_count(0)}"
+        return SessionAResult(
+            ok=False,
+            verdict="failed",
+            open_count=0,
+            b_pick_title=None,
+            title=item.title or None,
+            plan_text=plan_markdown,
+            message=msg,
+            wrote_item=False,
+        )
+
+    new_text = append_queue_item(plan_markdown, item_md)
+    new_open = count_open(parse_queue_items(new_text))
+    if write_path and plan_path is not None:
+        Path(plan_path).write_text(new_text, encoding="utf-8")
+
+    msg = (
+        f"queued; title {item.title}; {render_queue_count(new_open)}; "
+        f"B pick = {item.title}; plan {plan_path or '-'}"
+    )
+    return SessionAResult(
+        ok=True,
+        verdict="queued",
+        open_count=new_open,
+        b_pick_title=item.title,
+        title=item.title,
+        plan_text=new_text,
+        message=msg,
+        wrote_item=True,
+    )
+
+
+def run_session_a_path(
+    plan_path: str | Path,
+    *,
+    brainstorm: BrainstormFn | None = None,
+    write: bool = True,
+) -> SessionAResult:
+    path = Path(plan_path)
+    text = path.read_text(encoding="utf-8") if path.exists() else "# Session A plan\n\n## Queue\n\n"
+    return run_session_a(text, brainstorm=brainstorm, plan_path=path, write_path=write)
