@@ -67,6 +67,9 @@ Beat 20: Missing ``## Queue`` → Session A append / ``write_queue_section``
 creates the section without destroying Watch / Heartbeat / front matter;
 empty file creates Queue. Proof: pytest ``-k beat20``.
 
+Beat 21: More than one ``## Queue`` → fail-closed (``AmbiguousQueueError`` /
+Session A/B failed); plan unchanged. Proof: pytest ``-k beat21``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

@@ -19,6 +19,9 @@ may call ``dry_run_implement``. ``fixture_ship_implement`` runs only when
 ``decode_only=False`` **and** ``implement=`` is explicitly passed. Proof:
 pytest ``-k beat17``.
 
+Beat 21: more than one ``## Queue`` heading → verdict ``failed`` / refused,
+``ok=False``, plan unchanged (fail-closed; never silent merge or ship).
+
 JSON contract: ``SessionResult.to_dict()`` (aliases ``to_json_dict`` /
 ``session_b_result_dict``) is the single shared shape for CLI ``--json`` and
 fixture tests (idle / decode_only / dry_run / shipped).
@@ -31,6 +34,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from src.research_implement.queue import (
+    AmbiguousQueueError,
     QueueItem,
     count_open,
     first_b_pick,
@@ -165,7 +169,7 @@ SESSION_B_RESULT_KEYS: tuple[str, ...] = SESSION_RESULT_JSON_KEYS
 @dataclass(frozen=True)
 class SessionBResult:
     ok: bool
-    verdict: str  # idle | picked | dry_run | shipped | refused
+    verdict: str  # idle | picked | dry_run | shipped | refused | failed
     open_count: int
     item: QueueItem | None
     message: str
@@ -265,10 +269,27 @@ def run_session_b(
     # Defense in depth: bind local name so tests can assert we never call it.
     _delete = scheduler_delete  # noqa: F841
 
-    items = parse_queue_items(plan_markdown)
+    path_label = str(plan_path) if plan_path is not None else "<memory>"
+    try:
+        items = parse_queue_items(plan_markdown)
+    except AmbiguousQueueError as exc:
+        msg = (
+            f"failed; {exc}; plan {path_label}; "
+            f"{render_queue_count(0)}; keep_schedule"
+        )
+        return SessionBResult(
+            ok=False,
+            verdict="failed",
+            open_count=0,
+            item=None,
+            message=msg,
+            plan_text=plan_markdown,
+            keep_schedule=True,
+            scheduler_delete_called=False,
+            implement_result=None,
+        )
     open_n = count_open(items)
     pick = first_b_pick(items)
-    path_label = str(plan_path) if plan_path is not None else "<memory>"
 
     if pick is None:
         # Idle fire — success, keep schedule. NEVER scheduler_delete.

@@ -15,9 +15,11 @@ import pytest
 from src.research_implement.queue import (
     QUEUE_CAPACITY,
     REQUIRED_FIELDS,
+    AmbiguousQueueError,
     QueueItem,
     append_queue_item,
     count_open,
+    count_queue_headings,
     first_b_pick,
     format_queue_item,
     is_b_pickable,
@@ -27,6 +29,7 @@ from src.research_implement.queue import (
     next_queue_id,
     parse_queue_items,
     render_queue_count,
+    require_unique_queue_section,
     serialize_queue_item,
     serialize_queue_items,
     write_queue_section,
@@ -3435,3 +3438,143 @@ def test_beat20_write_queue_section_creates_when_missing():
     # Newly created Queue follows existing non-Queue sections.
     assert created.index("## Watch") < created.index("## Heartbeat")
     assert created.index("## Heartbeat") < created.index("## Queue")
+
+
+# --- Beat 21: more than one ## Queue → fail-closed; never silent merge ---
+
+_BEAT21_MARKERS = (
+    "BEAT21_WATCH_MARKER",
+    "BEAT21_HEARTBEAT_MARKER",
+    "Beat21 first queue item",
+    "Beat21 second queue item",
+)
+_BEAT21_FRONT_KEYS = ("title: beat21-two-queue", "status: living")
+
+
+def _assert_beat21_two_queue_content_intact(text: str) -> None:
+    """Both Queue bodies + Watch/Heartbeat/front matter must survive refuse."""
+    assert text.lstrip().startswith("---"), "YAML front matter missing"
+    for key in _BEAT21_FRONT_KEYS:
+        assert key in text, f"missing front-matter key {key}"
+    assert count_queue_headings(text) == 2
+    assert text.count("## Queue") == 2  # no prose duplicates of the heading token
+    assert "## Watch" in text and "## Heartbeat" in text
+    for marker in _BEAT21_MARKERS:
+        assert marker in text, f"missing marker {marker}"
+    assert "### Q1." in text and "### Q9." in text
+
+
+def test_beat21_parse_write_append_refuse_two_queue_sections():
+    """Beat 21: fixture with two ## Queue → parse/write/append raise; content intact."""
+    src = _load("two_queue_sections.md")
+    _assert_beat21_two_queue_content_intact(src)
+    assert count_queue_headings(src) == 2
+    with pytest.raises(AmbiguousQueueError) as ei:
+        require_unique_queue_section(src)
+    assert ei.value.count == 2
+    assert "ambiguous ## Queue" in str(ei.value).lower() or "refuse" in str(ei.value).lower()
+
+    with pytest.raises(AmbiguousQueueError):
+        parse_queue_items(src)
+
+    item = QueueItem(
+        item_id="Q99",
+        heading="must not append",
+        title="must not append",
+        acceptance="pytest EXIT=0",
+        risks="none",
+        file_touch="tests/test_research_implement_loop.py",
+        breaking_change="no",
+        redeploy_notes="none",
+        status="OPEN",
+        ready_for_implement="yes",
+    )
+    with pytest.raises(AmbiguousQueueError):
+        write_queue_section(src, [item])
+    with pytest.raises(AmbiguousQueueError):
+        write_queue_section(src)
+    with pytest.raises(AmbiguousQueueError):
+        append_queue_item(src, format_queue_item(
+            item_id="Q99",
+            heading="must not append",
+            title="must not append",
+            acceptance="pytest EXIT=0",
+            risks="none",
+            file_touch="tests/test_research_implement_loop.py",
+            breaking_change="false",
+            redeploy_notes="none",
+        ))
+    with pytest.raises(AmbiguousQueueError):
+        mark_item_shipped(src, "Q1", "dead21")
+
+    # Source fixture file on disk unchanged by pure functions (sanity).
+    disk = _load("two_queue_sections.md")
+    assert disk == src
+    _assert_beat21_two_queue_content_intact(disk)
+
+
+def test_beat21_session_a_failed_no_plan_mutation(tmp_path: Path):
+    """Beat 21: Session A returns failed; wrote_item=False; plan file untouched."""
+    src = _load("two_queue_sections.md")
+    _assert_beat21_two_queue_content_intact(src)
+    plan = tmp_path / "beat21_two_queue_a.md"
+    plan.write_text(src, encoding="utf-8")
+
+    result = run_session_a_path(plan, brainstorm=stub_brainstorm, write=True)
+    assert result.ok is False
+    assert result.verdict == "failed"
+    assert result.wrote_item is False
+    assert result.plan_text == src
+    assert "ambiguous" in result.message.lower() or "refuse" in result.message.lower()
+    assert "## Queue" in result.message or "Queue" in result.message
+
+    on_disk = plan.read_text(encoding="utf-8")
+    assert on_disk == src
+    _assert_beat21_two_queue_content_intact(on_disk)
+    assert "must not append" not in on_disk
+    assert "Stub shippable change" not in on_disk
+
+    mem = run_session_a(src, brainstorm=stub_brainstorm)
+    assert mem.ok is False and mem.verdict == "failed" and mem.wrote_item is False
+    assert mem.plan_text == src
+    _assert_beat21_two_queue_content_intact(mem.plan_text)
+
+
+def test_beat21_session_b_failed_no_plan_mutation(tmp_path: Path):
+    """Beat 21: Session B returns failed; never ships; plan file untouched."""
+    src = _load("two_queue_sections.md")
+    _assert_beat21_two_queue_content_intact(src)
+    plan = tmp_path / "beat21_two_queue_b.md"
+    plan.write_text(src, encoding="utf-8")
+
+    calls = {"n": 0}
+
+    def _spy(*_a, **_k):
+        calls["n"] += 1
+        raise SchedulerDeleteForbidden("spy")
+
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        decode = run_session_b_path(plan, decode_only=True, write=False)
+        dry = run_session_b_path(
+            plan, implement=dry_run_implement, decode_only=False, write=False
+        )
+        shipped = run_session_b_path(
+            plan,
+            implement=make_fixture_ship_implement("beat21dead"),
+            decode_only=False,
+            write=True,
+        )
+    assert calls["n"] == 0
+    for result, label in ((decode, "decode"), (dry, "dry"), (shipped, "ship")):
+        assert result.ok is False, label
+        assert result.verdict == "failed", label
+        assert result.shipped is False, label
+        assert result.scheduler_delete_called is False, label
+        assert result.keep_schedule is True, label
+        assert result.plan_text == src, label
+        assert "ambiguous" in result.message.lower() or "refuse" in result.message.lower()
+
+    on_disk = plan.read_text(encoding="utf-8")
+    assert on_disk == src
+    _assert_beat21_two_queue_content_intact(on_disk)
+    assert "SHIPPED" not in on_disk

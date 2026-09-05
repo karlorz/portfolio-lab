@@ -64,6 +64,11 @@ YAML front matter. Fixture ``watch_heartbeat_no_queue.md`` + empty file:
 A stub append → ``## Queue`` with one OPEN; prior beat19 stays green.
 Proof: pytest ``-k beat20``.
 
+Beat 21: More than one ``## Queue`` heading is fail-closed
+(``AmbiguousQueueError``): parse / write / append raise; Session A/B return
+failed results without mutating the plan (no silent merge). Fixture
+``two_queue_sections.md`` + pytest ``-k beat21``. Prior beat20 stays green.
+
 JSON: ``SessionResult.to_dict()`` (aliases ``to_json_dict`` / ``session_b_result_dict``)
 is the shared Session B ``--json`` / test contract for idle / decode_only / dry_run /
 shipped. Session A: ``SessionAResult.to_dict()`` (aliases ``to_json_dict`` /
@@ -76,9 +81,11 @@ from __future__ import annotations
 from src.research_implement.queue import (
     QUEUE_CAPACITY,
     REQUIRED_FIELDS,
+    AmbiguousQueueError,
     QueueItem,
     append_queue_item,
     count_open,
+    count_queue_headings,
     first_b_pick,
     format_queue_item,
     is_b_pickable,
@@ -87,6 +94,7 @@ from src.research_implement.queue import (
     next_queue_id,
     parse_queue_items,
     render_queue_count,
+    require_unique_queue_section,
     serialize_queue_item,
     serialize_queue_items,
     write_queue_section,
@@ -121,6 +129,7 @@ from src.research_implement.session_b import (
 __all__ = [
     "QUEUE_CAPACITY",
     "REQUIRED_FIELDS",
+    "AmbiguousQueueError",
     "QueueItem",
     "SessionAResult",
     "SessionBResult",
@@ -133,6 +142,7 @@ __all__ = [
     "session_b_result_dict",
     "append_queue_item",
     "count_open",
+    "count_queue_headings",
     "first_b_pick",
     "format_queue_item",
     "next_queue_id",
@@ -143,6 +153,7 @@ __all__ = [
     "is_complete_six_field",
     "is_open_status",
     "parse_queue_items",
+    "require_unique_queue_section",
     "render_queue_count",
     "default_search_plan",
     "run_session_a",

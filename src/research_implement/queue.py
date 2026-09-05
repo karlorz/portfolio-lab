@@ -2,6 +2,10 @@
 
 A B-pickable item is OPEN with all six fields and ``ready-for-implement: yes``.
 SHIPPED does not count as OPEN. Watch / Project Work are outside this parser.
+
+Beat 21: more than one ``## Queue`` heading is fail-closed via
+``AmbiguousQueueError`` — parse / write / append refuse (no silent merge).
+Session A/B return failed results without mutating the plan.
 """
 
 from __future__ import annotations
@@ -27,6 +31,39 @@ _FIELD_RE = re.compile(
 )
 _STATUS_RE = re.compile(r"(?mi)^[ \t]*status[ \t]*:[ \t]*(.*?)[ \t]*$")
 _READY_RE = re.compile(r"(?mi)^[ \t]*ready-for-implement[ \t]*:[ \t]*(.*?)[ \t]*$")
+
+
+class AmbiguousQueueError(ValueError):
+    """More than one ``## Queue`` heading — refuse to parse/write (Beat 21).
+
+    Fail-closed: callers must not silently merge, pick-first, or mutate the plan.
+    Session A/B catch this and return a failed result with plan text unchanged.
+    """
+
+    def __init__(self, count: int, message: str | None = None) -> None:
+        self.count = int(count)
+        if message is None:
+            message = (
+                f"ambiguous ## Queue: found {self.count} headings; "
+                "refuse to parse/write (fail-closed)"
+            )
+        super().__init__(message)
+
+
+def count_queue_headings(markdown: str) -> int:
+    """Count ``## Queue`` section headings (case-insensitive; exact Queue token)."""
+    n = 0
+    for match in _SECTION_RE.finditer(markdown or ""):
+        if match.group(1).strip().lower() == "queue":
+            n += 1
+    return n
+
+
+def require_unique_queue_section(markdown: str) -> None:
+    """Raise ``AmbiguousQueueError`` when markdown has more than one ``## Queue``."""
+    n = count_queue_headings(markdown)
+    if n > 1:
+        raise AmbiguousQueueError(n)
 
 
 @dataclass(frozen=True)
@@ -57,9 +94,15 @@ class QueueItem:
 
 
 def extract_section(markdown: str, heading: str) -> str:
-    """Return body text under ``## {heading}`` until the next ``## `` heading."""
+    """Return body text under ``## {heading}`` until the next ``## `` heading.
+
+    Beat 21: when ``heading`` is Queue and more than one ``## Queue`` exists,
+    raise ``AmbiguousQueueError`` (fail-closed; never silently pick-first).
+    """
     matches = list(_SECTION_RE.finditer(markdown))
     target = heading.strip().lower()
+    if target == "queue":
+        require_unique_queue_section(markdown)
     for idx, match in enumerate(matches):
         if match.group(1).strip().lower() == target:
             start = match.end()
@@ -91,7 +134,12 @@ def _parse_item_block(item_id: str, heading: str, body: str) -> QueueItem:
 
 
 def parse_queue_items(markdown: str) -> list[QueueItem]:
-    """Parse Queue items from a living plan markdown document."""
+    """Parse Queue items from a living plan markdown document.
+
+    Beat 21: raises ``AmbiguousQueueError`` when more than one ``## Queue``
+    heading is present (fail-closed; never silently merge sections).
+    """
+    require_unique_queue_section(markdown)
     section = extract_section(markdown, "Queue")
     if not section.strip():
         # Allow callers to pass a Queue-only fragment.
@@ -240,7 +288,10 @@ def write_queue_section(
 
     Beat 20: if ``## Queue`` is absent, create it (same preserve rules) rather
     than failing or rewriting the whole document.
+
+    Beat 21: more than one ``## Queue`` → ``AmbiguousQueueError`` (no mutate).
     """
+    require_unique_queue_section(markdown)
     item_list = list(parse_queue_items(markdown) if items is None else items)
     body = serialize_queue_items(item_list)
     matches = list(_SECTION_RE.finditer(markdown))
@@ -270,7 +321,10 @@ def append_queue_item(markdown: str, item_markdown: str) -> str:
 
     Beat 20: if ``## Queue`` is missing, create the section (preserving Watch /
     Heartbeat / front matter) and append the item.
+
+    Beat 21: more than one ``## Queue`` → ``AmbiguousQueueError`` (no mutate).
     """
+    require_unique_queue_section(markdown)
     matches = list(_SECTION_RE.finditer(markdown))
     queue_idx = None
     for idx, match in enumerate(matches):
@@ -294,6 +348,8 @@ def mark_item_shipped(markdown: str, item_id: str, sha: str, note: str = "") -> 
 
     Rewrites only the ``## Queue`` section via serialize → ``write_queue_section``.
     Other markdown sections (Watch / Project Work / Heartbeat) are preserved.
+
+    Beat 21: more than one ``## Queue`` → ``AmbiguousQueueError`` (no mutate).
     """
     items = parse_queue_items(markdown)
     target_idx = next(

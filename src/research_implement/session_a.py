@@ -11,6 +11,9 @@ Fail-closed (Beat 14): an incomplete brainstorm/search_plan candidate
 yields verdict ``failed``, ``wrote_item=False``, plan text unchanged, and
 never a partial OPEN append.
 
+Fail-closed (Beat 21): more than one ``## Queue`` heading → verdict
+``failed``, ``wrote_item=False``, plan unchanged (no silent merge).
+
 CLI ``session-a --candidate-json`` (Beat 15) supplies the brainstorm candidate
 when OPEN=0 (dict or first dict in a JSON list); incomplete candidates still
 fail-closed here (Beat 14). Beat 16 covers CLI load error paths (missing file,
@@ -29,6 +32,7 @@ from typing import Any, Callable
 
 from src.research_implement.queue import (
     REQUIRED_FIELDS,
+    AmbiguousQueueError,
     first_b_pick,
     QueueItem,
     append_queue_item,
@@ -226,7 +230,22 @@ def run_session_a(
     """
     if search_plan is not None:
         brainstorm = search_plan
-    items = parse_queue_items(plan_markdown)
+    try:
+        items = parse_queue_items(plan_markdown)
+    except AmbiguousQueueError as exc:
+        msg = (
+            f"failed; {exc}; {render_queue_count(0)}; B pick = STANDBY"
+        )
+        return SessionAResult(
+            ok=False,
+            verdict="failed",
+            open_count=0,
+            b_pick_title=None,
+            title=None,
+            plan_text=plan_markdown,
+            message=msg,
+            wrote_item=False,
+        )
     open_n = count_open(items)
     first = next((i for i in items if i.status and i.status.upper().startswith("OPEN")), None)
     # Prefer B-pickable title for heartbeat; else first OPEN heading.
