@@ -23,7 +23,11 @@ from src.research_implement.queue import (
     parse_queue_items,
     render_queue_count,
 )
-from src.research_implement.session_a import run_session_a
+from src.research_implement.session_a import (
+    default_search_plan,
+    run_session_a,
+    stub_brainstorm,
+)
 from src.research_implement.session_b import (
     SchedulerDeleteForbidden,
     decode_fields,
@@ -281,3 +285,104 @@ def test_modules_are_distinct_from_legacy_research_agent():
     assert "run_session_a" in dir(loop)
     assert "run_session_b" in dir(loop)
     assert "format_decode_report" in dir(loop)
+    assert "stub_brainstorm" in dir(loop)
+    assert "default_search_plan" in dir(loop)
+
+
+def test_stub_brainstorm_fills_six_fields():
+    assert stub_brainstorm is default_search_plan
+    raw = stub_brainstorm([])
+    assert raw == default_search_plan([])
+    for name in REQUIRED_FIELDS:
+        assert name in raw
+    assert raw["title"]
+    assert raw["acceptance"]
+    assert raw["risks"]
+    assert raw["file_touch"]
+    assert raw["redeploy_notes"]
+    # bool False is fine; coerce path in Session A accepts it
+    assert raw["breaking_change"] is False or str(raw["breaking_change"]).strip()
+
+
+def test_session_a_default_stub_queues_when_open_zero():
+    plan = _load("empty_queue.md")
+    result = run_session_a(plan, search_plan=stub_brainstorm)
+    assert result.ok
+    assert result.verdict == "queued"
+    assert result.wrote_item
+    assert result.open_count == 1
+    assert len(parse_queue_items(result.plan_text)) == 1  # append ≤1
+    assert is_complete_six_field(parse_queue_items(result.plan_text)[0])
+    assert "ready-for-implement: yes" in result.plan_text
+
+
+def test_session_a_stub_not_called_when_open_present():
+    called = {"n": 0}
+
+    def tracking(items):
+        called["n"] += 1
+        return stub_brainstorm(items)
+
+    result = run_session_a(_load("one_open_ready.md"), search_plan=tracking)
+    assert result.ok
+    assert result.verdict == "light"
+    assert called["n"] == 0
+    assert not result.wrote_item
+
+
+def test_cli_help_smoke():
+    from src.research_implement.__main__ import main
+
+    with pytest.raises(SystemExit) as ei:
+        main(["--help"])
+    assert ei.value.code == 0
+
+
+def test_cli_session_a_help_and_stub_dry_run(tmp_path: Path, capsys):
+    from src.research_implement.__main__ import main
+
+    with pytest.raises(SystemExit) as ei:
+        main(["session-a", "--help"])
+    assert ei.value.code == 0
+
+    plan = tmp_path / "empty.md"
+    plan.write_text(_load("empty_queue.md"), encoding="utf-8")
+    rc = main(["session-a", "--plan", str(plan), "--stub", "--dry-run"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "queued" in out
+    # dry-run must not write
+    assert count_open(parse_queue_items(plan.read_text(encoding="utf-8"))) == 0
+
+
+def test_cli_session_a_no_stub_fails_on_empty(tmp_path: Path):
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "empty.md"
+    plan.write_text(_load("empty_queue.md"), encoding="utf-8")
+    rc = main(["session-a", "--log", str(plan), "--no-stub", "--dry-run"])
+    assert rc == 1
+
+
+def test_cli_idle_decode_empty_fixture(tmp_path: Path, capsys):
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "empty.md"
+    plan.write_text(_load("empty_queue.md"), encoding="utf-8")
+    rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    payload = __import__("json").loads(out)
+    assert payload["verdict"] == "idle"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert payload["queue"] == "queue 0/10"
+
+
+def test_cli_session_b_log_alias_decode(tmp_path: Path):
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "one.md"
+    plan.write_text(_load("one_open_ready.md"), encoding="utf-8")
+    rc = main(["session-b", "--log", str(plan), "--json"])
+    assert rc == 0

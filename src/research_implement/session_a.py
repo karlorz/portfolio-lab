@@ -1,7 +1,10 @@
 """Session A — research/plan producer (never implements).
 
-When OPEN count is 0, brainstorm and append at most one ready Queue item.
-When OPEN >= 1, recount only (light exit). Empty Queue + no new item = failed fire.
+When OPEN count is 0, consult the pluggable search/plan (brainstorm) callback
+and append at most one ready six-field OPEN Queue item. The default side-dev
+hook is ``stub_brainstorm`` / ``default_search_plan`` (deterministic; no LLM).
+When OPEN >= 1, recount only (light exit) and do not call the callback.
+Empty Queue + no new item = failed fire.
 """
 
 from __future__ import annotations
@@ -23,6 +26,33 @@ from src.research_implement.queue import (
 )
 
 BrainstormFn = Callable[[list[QueueItem]], QueueItem | dict | None]
+# Alias: pluggable search/plan callback (same contract as brainstorm).
+SearchPlanFn = BrainstormFn
+
+STUB_TITLE = "Stub shippable change"
+
+
+def stub_brainstorm(_items: list[QueueItem] | None = None) -> dict:
+    """Deterministic six-field OPEN candidate for side-dev / fixtures.
+
+    No external LLM, Hermes, or ``src.research.agent``. Callers may plug a
+    real search/plan callback in place of this stub. Session A still appends
+    at most one OPEN item and recounts when OPEN >= 1.
+    """
+    return {
+        "heading": STUB_TITLE,
+        "title": STUB_TITLE,
+        "acceptance": "pytest EXIT=0",
+        "risks": "do not touch kill_switch or order_router",
+        "file_touch": "write tests/test_stub_shippable.py",
+        "breaking_change": False,
+        "redeploy_notes": "none",
+    }
+
+
+# Public alias for the pluggable search/plan hook default.
+default_search_plan = stub_brainstorm
+stub_search_plan = stub_brainstorm
 
 
 @dataclass(frozen=True)
@@ -79,14 +109,20 @@ def run_session_a(
     plan_markdown: str,
     *,
     brainstorm: BrainstormFn | None = None,
+    search_plan: SearchPlanFn | None = None,
     plan_path: str | Path | None = None,
     write_path: bool = False,
 ) -> SessionAResult:
     """Run one Session A fire against living-plan markdown.
 
-    ``brainstorm`` is only consulted when OPEN == 0. It must not implement code;
-    it returns at most one six-field candidate (or None → failed fire).
+    ``brainstorm`` / ``search_plan`` is the pluggable search/plan callback,
+    consulted only when OPEN == 0. Prefer ``search_plan`` for new call sites;
+    if both are passed, ``search_plan`` wins. It must not implement code; it
+    returns at most one six-field candidate (or None → failed fire). Pass
+    ``stub_brainstorm`` / ``default_search_plan`` for a deterministic fill.
     """
+    if search_plan is not None:
+        brainstorm = search_plan
     items = parse_queue_items(plan_markdown)
     open_n = count_open(items)
     first = next((i for i in items if i.status and i.status.upper().startswith("OPEN")), None)
@@ -210,8 +246,15 @@ def run_session_a_path(
     plan_path: str | Path,
     *,
     brainstorm: BrainstormFn | None = None,
+    search_plan: SearchPlanFn | None = None,
     write: bool = True,
 ) -> SessionAResult:
     path = Path(plan_path)
     text = path.read_text(encoding="utf-8") if path.exists() else "# Session A plan\n\n## Queue\n\n"
-    return run_session_a(text, brainstorm=brainstorm, plan_path=path, write_path=write)
+    return run_session_a(
+        text,
+        brainstorm=brainstorm,
+        search_plan=search_plan,
+        plan_path=path,
+        write_path=write,
+    )

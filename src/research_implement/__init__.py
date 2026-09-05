@@ -1,7 +1,10 @@
 """Session A/B research-implement loop (Queue producer/consumer).
 
 Distinct from ``src.research.agent`` / ``make research`` (regime crystallizer).
+Session A accepts a pluggable search/plan callback (default: ``stub_brainstorm``).
 Empty Queue is an idle fire (``queue 0/10``); never ``scheduler_delete``.
+
+CLI: ``python -m src.research_implement {session-a|session-b|idle-decode}``.
 """
 
 from __future__ import annotations
@@ -20,7 +23,13 @@ from src.research_implement.queue import (
     parse_queue_items,
     render_queue_count,
 )
-from src.research_implement.session_a import SessionAResult, run_session_a
+from src.research_implement.session_a import (
+    SessionAResult,
+    default_search_plan,
+    run_session_a,
+    stub_brainstorm,
+    stub_search_plan,
+)
 from src.research_implement.session_b import (
     SessionBResult,
     decode_fields,
@@ -44,8 +53,11 @@ __all__ = [
     "is_open_status",
     "parse_queue_items",
     "render_queue_count",
+    "default_search_plan",
     "run_session_a",
     "run_session_b",
+    "stub_brainstorm",
+    "stub_search_plan",
     "decode_fields",
     "format_decode_report",
     "scheduler_delete",
