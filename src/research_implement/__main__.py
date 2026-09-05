@@ -63,6 +63,10 @@ Proof: pytest ``-k beat17``.
 Beat 19: Queue rewrite (append/ship/serialize) preserves Watch / Project
 Work / Heartbeat. Proof: pytest ``-k beat19``.
 
+Beat 20: Missing ``## Queue`` → Session A append / ``write_queue_section``
+creates the section without destroying Watch / Heartbeat / front matter;
+empty file creates Queue. Proof: pytest ``-k beat20``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

@@ -58,6 +58,12 @@ Beat 19: When rewriting ``## Queue`` (append / ship / serialize via
 Work / Heartbeat). Fixture ``watch_queue_heartbeat*.md`` + pytest ``-k beat19``:
 A append or B ship updates Queue while non-Queue markers stay present.
 
+Beat 20: If markdown has no ``## Queue`` section, Session A append /
+``write_queue_section`` creates one without destroying Watch / Heartbeat /
+YAML front matter. Fixture ``watch_heartbeat_no_queue.md`` + empty file:
+A stub append → ``## Queue`` with one OPEN; prior beat19 stays green.
+Proof: pytest ``-k beat20``.
+
 JSON: ``SessionResult.to_dict()`` (aliases ``to_json_dict`` / ``session_b_result_dict``)
 is the shared Session B ``--json`` / test contract for idle / decode_only / dry_run /
 shipped. Session A: ``SessionAResult.to_dict()`` (aliases ``to_json_dict`` /

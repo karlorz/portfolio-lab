@@ -213,14 +213,33 @@ def serialize_queue_items(items: Iterable[QueueItem]) -> str:
     return "".join(parts)
 
 
+def _create_queue_section(markdown: str, body: str) -> str:
+    """Create a missing ``## Queue`` section without destroying other content.
+
+    Beat 20: when the living plan has no ``## Queue`` heading, Session A append
+    / ``write_queue_section`` add one. YAML front matter, Watch, Project Work,
+    Heartbeat, and other ``##`` sections stay intact. Empty / whitespace-only
+    markdown becomes a Queue-only document (no leading blank line).
+    """
+    block = body if body.endswith("\n") or not body else body + "\n"
+    if not str(markdown).strip():
+        return f"## Queue\n\n{block}"
+    suffix = "" if markdown.endswith("\n") else "\n"
+    return f"{markdown}{suffix}\n## Queue\n\n{block}"
+
+
 def write_queue_section(
     markdown: str, items: Iterable[QueueItem] | None = None
 ) -> str:
     """Replace ``## Queue`` body with serialized items (parse → serialize → write).
 
     When ``items`` is None, re-serialize currently parsed Queue items (identity
-    round-trip). Other sections (Watch / Project Work / Heartbeat) are preserved.
-    Passing an empty iterable clears Queue item rows while keeping the section.
+    round-trip). Other sections (Watch / Project Work / Heartbeat) and YAML
+    front matter are preserved. Passing an empty iterable clears Queue item
+    rows while keeping the section.
+
+    Beat 20: if ``## Queue`` is absent, create it (same preserve rules) rather
+    than failing or rewriting the whole document.
     """
     item_list = list(parse_queue_items(markdown) if items is None else items)
     body = serialize_queue_items(item_list)
@@ -231,9 +250,7 @@ def write_queue_section(
             queue_idx = idx
             break
     if queue_idx is None:
-        block = body if body.endswith("\n") or not body else body + "\n"
-        suffix = "" if markdown.endswith("\n") or not markdown else "\n"
-        return f"{markdown}{suffix}\n## Queue\n\n{block}"
+        return _create_queue_section(markdown, body)
 
     start = matches[queue_idx].end()
     end = matches[queue_idx + 1].start() if queue_idx + 1 < len(matches) else len(markdown)
@@ -249,7 +266,10 @@ def append_queue_item(markdown: str, item_markdown: str) -> str:
     """Insert ``item_markdown`` at the end of the ``## Queue`` section.
 
     Only the Queue body grows; Watch / Project Work / Heartbeat (and any other
-    ``##`` sections) are preserved in place.
+    ``##`` sections) plus YAML front matter are preserved in place.
+
+    Beat 20: if ``## Queue`` is missing, create the section (preserving Watch /
+    Heartbeat / front matter) and append the item.
     """
     matches = list(_SECTION_RE.finditer(markdown))
     queue_idx = None
@@ -258,10 +278,8 @@ def append_queue_item(markdown: str, item_markdown: str) -> str:
             queue_idx = idx
             break
     if queue_idx is None:
-        # Create a Queue section at the end.
         block = item_markdown if item_markdown.endswith("\n") else item_markdown + "\n"
-        suffix = "" if markdown.endswith("\n") or not markdown else "\n"
-        return f"{markdown}{suffix}\n## Queue\n\n{block}"
+        return _create_queue_section(markdown, block)
 
     end = matches[queue_idx + 1].start() if queue_idx + 1 < len(matches) else len(markdown)
     insert = item_markdown if item_markdown.endswith("\n") else item_markdown + "\n"

@@ -15,6 +15,7 @@ import pytest
 from src.research_implement.queue import (
     QUEUE_CAPACITY,
     REQUIRED_FIELDS,
+    QueueItem,
     append_queue_item,
     count_open,
     first_b_pick,
@@ -3182,7 +3183,10 @@ def test_beat19_a_append_preserves_non_queue_sections(tmp_path: Path):
 
 
 def test_beat19_b_ship_preserves_non_queue_sections(tmp_path: Path):
-    """Beat 19: Session B fixture ship updates Queue; non-Queue sections remain."""
+    """Beat 19: Session B fixture ship updates Queue; non-Queue sections remain.
+
+    Never calls scheduler_delete (idle/ship keep_schedule path).
+    """
     src = _load("watch_queue_heartbeat.md")
     _assert_beat19_non_queue_preserved(src)
     assert count_open(parse_queue_items(src)) == 1
@@ -3190,11 +3194,21 @@ def test_beat19_b_ship_preserves_non_queue_sections(tmp_path: Path):
     plan = tmp_path / "beat19_ship.md"
     plan.write_text(src, encoding="utf-8")
     ship_fn = make_fixture_ship_implement("beat19cafe", note="beat19 preserve ship")
-    shipped = run_session_b_path(
-        plan, implement=ship_fn, decode_only=False, write=True
-    )
+    calls = {"n": 0}
+
+    def _spy(*_a, **_k):
+        calls["n"] += 1
+        raise SchedulerDeleteForbidden("spy")
+
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        shipped = run_session_b_path(
+            plan, implement=ship_fn, decode_only=False, write=True
+        )
     assert shipped.ok and shipped.verdict == "shipped"
     assert shipped.shipped is True
+    assert shipped.scheduler_delete_called is False
+    assert shipped.keep_schedule is True
+    assert calls["n"] == 0
 
     updated = plan.read_text(encoding="utf-8")
     _assert_beat19_non_queue_preserved(updated)
@@ -3210,8 +3224,214 @@ def test_beat19_b_ship_preserves_non_queue_sections(tmp_path: Path):
     marked = mark_item_shipped(src, "Q1", "dead19", note="direct")
     _assert_beat19_non_queue_preserved(marked)
     assert "SHIPPED `dead19`" in marked
-    mem = run_session_b(
-        src, implement=make_fixture_ship_implement("mem19"), decode_only=False
-    )
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        mem = run_session_b(
+            src, implement=make_fixture_ship_implement("mem19"), decode_only=False
+        )
     assert mem.verdict == "shipped"
+    assert mem.scheduler_delete_called is False
+    assert calls["n"] == 0
     _assert_beat19_non_queue_preserved(mem.plan_text)
+
+
+def _assert_beat19_queue_with_watch_heartbeat_preserved(text: str) -> None:
+    """Preserve helpers for Watch-before-Queue fixture ``queue_with_watch_heartbeat.md``."""
+    for heading in ("## Watch", "## Queue", "## Project Work", "## Heartbeat"):
+        assert heading in text, f"missing section {heading}"
+    assert "beat19-watch-marker" in text
+    assert "beat19-heartbeat-marker" in text
+    assert "raw/transcripts/beat19-preserve.md" in text
+    # Watch intentionally precedes Queue in this fixture.
+    assert text.index("## Watch") < text.index("## Queue")
+    assert text.index("## Queue") < text.index("## Heartbeat")
+    assert text.index("## Project Work") < text.index("## Heartbeat")
+
+
+def test_beat19_queue_with_watch_heartbeat_a_append_and_b_ship(tmp_path: Path):
+    """Beat 19: ``queue_with_watch_heartbeat.md`` A stub append then B fixture_ship.
+
+    Watch-before-Queue layout; Queue updates; Watch/Heartbeat/Project Work stay;
+    never scheduler_delete.
+    """
+    src = _load("queue_with_watch_heartbeat.md")
+    _assert_beat19_queue_with_watch_heartbeat_preserved(src)
+    assert count_open(parse_queue_items(src)) == 0
+
+    # write_queue_section identity / clear path keeps non-Queue sections.
+    written = write_queue_section(src)
+    _assert_beat19_queue_with_watch_heartbeat_preserved(written)
+    cleared = write_queue_section(src, [])
+    _assert_beat19_queue_with_watch_heartbeat_preserved(cleared)
+    assert parse_queue_items(cleared) == []
+
+    plan = tmp_path / "beat19_watch_before_queue.md"
+    plan.write_text(src, encoding="utf-8")
+    a = run_session_a_path(plan, brainstorm=stub_brainstorm, write=True)
+    assert a.ok and a.verdict == "queued" and a.wrote_item
+    after_a = plan.read_text(encoding="utf-8")
+    _assert_beat19_queue_with_watch_heartbeat_preserved(after_a)
+    items_a = parse_queue_items(after_a)
+    assert len(items_a) == 1 and items_a[0].item_id == "Q1"
+    assert is_b_pickable(items_a[0])
+    assert count_open(items_a) == 1
+    # Watch still before Queue after append.
+    assert after_a.index("## Watch") < after_a.index("## Queue")
+    assert after_a.index("### Q1.") < after_a.index("## Heartbeat")
+
+    calls = {"n": 0}
+
+    def _spy(*_a, **_k):
+        calls["n"] += 1
+        raise SchedulerDeleteForbidden("spy")
+
+    ship_fn = make_fixture_ship_implement("beat19wh", note="watch-before-queue ship")
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        b = run_session_b_path(
+            plan, implement=ship_fn, decode_only=False, write=True
+        )
+    assert b.ok and b.verdict == "shipped"
+    assert b.scheduler_delete_called is False
+    assert b.keep_schedule is True
+    assert calls["n"] == 0
+
+    after_b = plan.read_text(encoding="utf-8")
+    _assert_beat19_queue_with_watch_heartbeat_preserved(after_b)
+    assert "SHIPPED `beat19wh`" in after_b
+    items_b = parse_queue_items(after_b)
+    assert len(items_b) == 1
+    assert items_b[0].status.upper().startswith("SHIPPED")
+    assert count_open(items_b) == 0
+    assert after_b.index("## Watch") < after_b.index("## Queue")
+    assert after_b.index("## Queue") < after_b.index("## Heartbeat")
+
+    # Post-ship idle also never scheduler_delete.
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        idle = run_session_b_path(plan)
+    assert idle.ok and idle.verdict == "idle"
+    assert idle.scheduler_delete_called is False
+    assert calls["n"] == 0
+    _assert_beat19_queue_with_watch_heartbeat_preserved(plan.read_text(encoding="utf-8"))
+
+
+# --- Beat 20: missing ## Queue → create without destroying Watch/Heartbeat/front matter ---
+
+_BEAT20_MARKERS = (
+    "BEAT20_WATCH_MARKER",
+    "BEAT20_HEARTBEAT_MARKER",
+)
+_BEAT20_FRONT_KEYS = ("title: beat20-no-queue", "status: living")
+
+
+def _assert_beat20_watch_heartbeat_front_preserved(text: str) -> None:
+    """Watch + Heartbeat + YAML front matter must survive Queue creation."""
+    assert text.lstrip().startswith("---"), "YAML front matter missing"
+    for key in _BEAT20_FRONT_KEYS:
+        assert key in text, f"missing front-matter key {key}"
+    assert "## Watch" in text
+    assert "## Heartbeat" in text
+    for marker in _BEAT20_MARKERS:
+        assert marker in text, f"missing marker {marker}"
+    assert text.index("BEAT20_WATCH_MARKER") < text.index("## Heartbeat")
+    assert text.index("BEAT20_HEARTBEAT_MARKER") > text.index("## Heartbeat")
+    # Front matter precedes Watch.
+    assert text.index("---") < text.index("## Watch")
+
+
+def test_beat20_a_append_creates_queue_preserves_watch_heartbeat(tmp_path: Path):
+    """Beat 20: copy watch-only fixture; Session A stub creates ## Queue + one OPEN.
+
+    BEAT20_WATCH_MARKER / BEAT20_HEARTBEAT_MARKER and front-matter title stay intact.
+    """
+    src = _load("watch_heartbeat_no_queue.md")
+    assert "## Queue" not in src
+    _assert_beat20_watch_heartbeat_front_preserved(src)
+    assert count_open(parse_queue_items(src)) == 0
+
+    plan = tmp_path / "beat20_watch_heartbeat_no_queue.md"
+    plan.write_text(src, encoding="utf-8")
+    result = run_session_a_path(plan, brainstorm=stub_brainstorm, write=True)
+    assert result.ok and result.verdict == "queued" and result.wrote_item
+    assert result.open_count == 1
+
+    updated = plan.read_text(encoding="utf-8")
+    assert updated == result.plan_text
+    assert "## Queue" in updated
+    assert "BEAT20_WATCH_MARKER" in updated
+    assert "BEAT20_HEARTBEAT_MARKER" in updated
+    assert "title: beat20-no-queue" in updated
+    _assert_beat20_watch_heartbeat_front_preserved(updated)
+    items = parse_queue_items(updated)
+    assert len(items) == 1
+    assert items[0].item_id == "Q1"
+    assert is_b_pickable(items[0])
+    assert count_open(items) == 1
+
+    # In-memory run_session_a path matches (stub append).
+    mem = run_session_a(src, brainstorm=stub_brainstorm)
+    assert mem.ok and mem.wrote_item and mem.open_count == 1
+    assert "## Queue" in mem.plan_text
+    assert "BEAT20_WATCH_MARKER" in mem.plan_text
+    assert "BEAT20_HEARTBEAT_MARKER" in mem.plan_text
+    assert "title: beat20-no-queue" in mem.plan_text
+    assert count_open(parse_queue_items(mem.plan_text)) == 1
+
+
+def test_beat20_empty_file_creates_queue_section(tmp_path: Path):
+    """Beat 20: empty plan file + stub append → ## Queue present with one OPEN."""
+    plan = tmp_path / "beat20_empty.md"
+    plan.write_text("", encoding="utf-8")
+    assert plan.exists() and plan.read_text(encoding="utf-8") == ""
+
+    result = run_session_a_path(plan, brainstorm=stub_brainstorm, write=True)
+    assert result.ok and result.verdict == "queued" and result.wrote_item
+    assert result.open_count == 1
+
+    disk = plan.read_text(encoding="utf-8")
+    assert disk.startswith("## Queue") or "## Queue" in disk
+    assert "## Queue" in disk
+    items = parse_queue_items(disk)
+    assert count_open(items) == 1
+    assert is_b_pickable(items[0])
+
+    # Empty-string in-memory stub append likewise creates Queue.
+    mem = run_session_a("", brainstorm=stub_brainstorm)
+    assert mem.ok and mem.verdict == "queued" and mem.wrote_item
+    assert mem.plan_text.startswith("## Queue") or "## Queue" in mem.plan_text
+    assert count_open(parse_queue_items(mem.plan_text)) == 1
+
+
+def test_beat20_write_queue_section_creates_when_missing():
+    """Beat 20: write_queue_section on watch-only md with one QueueItem creates section.
+
+    Watch/Heartbeat markers preserved; front matter title intact.
+    """
+    src = _load("watch_heartbeat_no_queue.md")
+    assert "## Queue" not in src
+    _assert_beat20_watch_heartbeat_front_preserved(src)
+
+    item = QueueItem(
+        item_id="Q1",
+        heading="Beat20 create when missing",
+        title="Beat20 create when missing",
+        acceptance="pytest EXIT=0",
+        risks="none",
+        file_touch="tests/test_research_implement_loop.py",
+        breaking_change="no",
+        redeploy_notes="none",
+        status="OPEN",
+        ready_for_implement="yes",
+    )
+    created = write_queue_section(src, [item])
+    assert "## Queue" in created
+    assert "BEAT20_WATCH_MARKER" in created
+    assert "BEAT20_HEARTBEAT_MARKER" in created
+    assert "title: beat20-no-queue" in created
+    _assert_beat20_watch_heartbeat_front_preserved(created)
+    items = parse_queue_items(created)
+    assert len(items) == 1
+    assert items[0].item_id == "Q1"
+    assert count_open(items) == 1
+    assert is_b_pickable(items[0])
+    # Newly created Queue follows existing non-Queue sections.
+    assert created.index("## Watch") < created.index("## Heartbeat")
+    assert created.index("## Heartbeat") < created.index("## Queue")
