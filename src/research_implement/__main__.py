@@ -39,6 +39,11 @@ six fields + ready-for-implement for OPEN; Session A stub append id stability
 (empty→Q1; after ship/clear→new id no collide; two_open first-OPEN unchanged).
 Proof: pytest ``-k beat13``.
 
+Beat 14: Session A fail-closed on incomplete brainstorm/search_plan candidate
+(missing six fields or ready flag) → failed, wrote_item=False, plan unchanged,
+no partial OPEN append; empty + complete stub still queues. Proof: pytest
+``-k beat14``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

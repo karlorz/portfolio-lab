@@ -35,6 +35,7 @@ from src.research_implement.session_a import (
     SESSION_A_RESULT_KEYS,
     SessionAResult,
     default_search_plan,
+    incomplete_candidate_reasons,
     run_session_a,
     run_session_a_path,
     session_a_result_dict,
@@ -155,6 +156,7 @@ def test_session_a_brainstorms_at_most_one_open_when_empty():
             "file_touch": "write tests/test_new.py",
             "breaking_change": False,
             "redeploy_notes": "none",
+            "ready_for_implement": "yes",
         }
 
     result = run_session_a(plan, brainstorm=brainstorm)
@@ -338,6 +340,8 @@ def test_stub_brainstorm_fills_six_fields():
     assert raw["redeploy_notes"]
     # bool False is fine; coerce path in Session A accepts it
     assert raw["breaking_change"] is False or str(raw["breaking_change"]).strip()
+    assert is_ready_yes(str(raw.get("ready_for_implement") or ""))
+    assert incomplete_candidate_reasons(raw) == []
 
 
 def test_session_a_default_stub_queues_when_open_zero():
@@ -2057,7 +2061,9 @@ def test_beat13_append_id_stability_empty_ship_clear_two_open(tmp_path: Path):
 
     # --- ship Q1 → stub append → Q2 (no collide) ---
     ship_fn = make_fixture_ship_implement("beat13cafe", note="beat13 ship Q1")
-    shipped = run_session_b_path(plan, implement=ship_fn, write=True)
+    shipped = run_session_b_path(
+        plan, implement=ship_fn, decode_only=False, write=True
+    )
     assert shipped.ok and shipped.verdict == "shipped"
     after_ship = parse_queue_items(plan.read_text(encoding="utf-8"))
     assert count_open(after_ship) == 0
@@ -2125,3 +2131,227 @@ def test_beat13_serialize_queue_items_body_then_parse():
         assert after.ready_for_implement.strip().lower() == "yes"
         assert is_b_pickable(after)
     assert first_b_pick(again).item_id == "Q1"
+
+# --- Beat 14: Session A fail-closed on incomplete brainstorm/search_plan ---
+
+
+def _complete_candidate(**overrides):
+    """Complete six-field + ready candidate; overrides may drop keys for fail cases."""
+    base = {
+        "heading": "Complete candidate",
+        "title": "Complete candidate",
+        "acceptance": "pytest EXIT=0",
+        "risks": "do not touch kill_switch",
+        "file_touch": "write tests/test_complete_candidate.py",
+        "breaking_change": False,
+        "redeploy_notes": "none",
+        "ready_for_implement": "yes",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_beat14_fail_closed_missing_six_fields_no_partial_append(tmp_path: Path):
+    """Beat 14: missing required six fields → failed; plan unchanged; no OPEN append."""
+    empty = _load("empty_queue.md")
+    plan = tmp_path / "incomplete_fields.md"
+    plan.write_text(empty, encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+
+    # Missing acceptance + file_touch (and ready left present to isolate six-field path).
+    incomplete = _complete_candidate()
+    del incomplete["acceptance"]
+    del incomplete["file_touch"]
+    assert "acceptance" in incomplete_candidate_reasons(incomplete)
+    assert "file_touch" in incomplete_candidate_reasons(incomplete)
+
+    def search_plan(_items):
+        return incomplete
+
+    result = run_session_a_path(plan, search_plan=search_plan, write=True)
+    assert not result.ok
+    assert result.verdict == "failed"
+    assert result.wrote_item is False
+    assert result.open_count == 0
+    assert result.plan_text == before
+    assert plan.read_text(encoding="utf-8") == before
+    assert count_open(parse_queue_items(result.plan_text)) == 0
+    assert "### Q" not in result.plan_text or count_open(parse_queue_items(result.plan_text)) == 0
+    assert parse_queue_items(result.plan_text) == parse_queue_items(before)
+    assert "incomplete candidate" in result.message
+    assert "acceptance" in result.message
+    assert "file_touch" in result.message
+
+    payload = result.to_dict()
+    assert payload == result.to_json_dict() == session_a_result_dict(result)
+    _assert_session_a_result_json_shape(payload)
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["wrote_item"] is False
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["b_pick_title"] is None
+
+
+def test_beat14_fail_closed_missing_or_bad_ready_flag_no_partial_append(tmp_path: Path):
+    """Beat 14: missing/non-yes ready flag → failed; plan unchanged; no OPEN append."""
+    empty = _load("empty_queue.md")
+    plan = tmp_path / "bad_ready.md"
+    plan.write_text(empty, encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+
+    cases = [
+        ("missing", _complete_candidate()),
+        ("no", _complete_candidate(ready_for_implement="no")),
+        ("garbage", _complete_candidate(ready_for_implement="maybe")),
+        ("empty", _complete_candidate(ready_for_implement="")),
+    ]
+    # missing key
+    missing = _complete_candidate()
+    del missing["ready_for_implement"]
+    cases[0] = ("missing", missing)
+
+    for label, cand in cases:
+        assert "ready_for_implement" in incomplete_candidate_reasons(cand), label
+
+        def search_plan(_items, c=cand):
+            return c
+
+        result = run_session_a(before, search_plan=search_plan)
+        assert not result.ok, label
+        assert result.verdict == "failed", label
+        assert result.wrote_item is False, label
+        assert result.open_count == 0, label
+        assert result.plan_text == before, label
+        assert count_open(parse_queue_items(result.plan_text)) == 0, label
+        assert parse_queue_items(result.plan_text) == [], label
+        assert "incomplete candidate" in result.message, label
+        assert "ready_for_implement" in result.message, label
+
+        payload = result.to_dict()
+        _assert_session_a_result_json_shape(payload)
+        assert payload["ok"] is False
+        assert payload["verdict"] == "failed"
+        assert payload["wrote_item"] is False
+        assert payload["open_count"] == 0
+        assert payload["queue"] == "queue 0/10"
+
+    # Disk unchanged when write_path path used
+    def boom(_items):
+        bad = _complete_candidate(ready_for_implement="no")
+        return bad
+
+    written = run_session_a_path(plan, brainstorm=boom, write=True)
+    assert written.verdict == "failed" and written.wrote_item is False
+    assert plan.read_text(encoding="utf-8") == before
+
+
+def test_beat14_fixture_incomplete_candidate_json_failed_shape(tmp_path: Path, capsys):
+    """Beat 14: fixture incomplete candidate JSON → failed SessionA JSON shape."""
+    fixture = FIXTURES / "incomplete_candidate.json"
+    assert fixture.is_file()
+    cand = json.loads(fixture.read_text(encoding="utf-8"))
+    reasons = incomplete_candidate_reasons(cand)
+    assert reasons  # incomplete by construction
+    assert "acceptance" in reasons or "ready_for_implement" in reasons
+
+    empty = _load("empty_queue.md")
+    plan = tmp_path / "fixture_incomplete.md"
+    plan.write_text(empty, encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+
+    def search_plan(_items):
+        return cand
+
+    result = run_session_a_path(plan, search_plan=search_plan, write=True)
+    assert not result.ok
+    assert result.verdict == "failed"
+    assert result.wrote_item is False
+    assert result.plan_text == before
+    assert plan.read_text(encoding="utf-8") == before
+
+    payload = result.to_dict()
+    _assert_session_a_result_json_shape(payload)
+    assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["wrote_item"] is False
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["title"] is None or isinstance(payload["title"], str)
+
+    # CLI --json failed shape via --candidate-json
+    from src.research_implement.__main__ import main
+
+    rc = main(
+        [
+            "session-a",
+            "--plan",
+            str(plan),
+            "--candidate-json",
+            str(fixture),
+            "--json",
+        ]
+    )
+    assert rc != 0  # failed fire is non-zero
+    cli_payload = json.loads(capsys.readouterr().out)
+    _assert_session_a_result_json_shape(cli_payload)
+    assert cli_payload["verdict"] == "failed"
+    assert cli_payload["wrote_item"] is False
+    assert cli_payload["ok"] is False
+    assert plan.read_text(encoding="utf-8") == before
+
+
+def test_beat14_empty_plus_complete_stub_still_queues(tmp_path: Path, capsys):
+    """Beat 14: empty Queue + complete stub still queues (fail-closed does not break stub)."""
+    empty = _load("empty_queue.md")
+    plan = tmp_path / "stub_ok.md"
+    plan.write_text(empty, encoding="utf-8")
+    assert count_open(parse_queue_items(empty)) == 0
+    assert incomplete_candidate_reasons(stub_brainstorm([])) == []
+
+    # brainstorm= path
+    a1 = run_session_a(empty, brainstorm=stub_brainstorm)
+    assert a1.ok and a1.verdict == "queued" and a1.wrote_item is True
+    assert a1.open_count == 1
+    items1 = parse_queue_items(a1.plan_text)
+    assert len(items1) == 1
+    assert is_complete_six_field(items1[0])
+    assert is_ready_yes(items1[0].ready_for_implement)
+    assert is_b_pickable(items1[0])
+    queued = a1.to_dict()
+    _assert_session_a_result_json_shape(queued)
+    assert queued["verdict"] == "queued"
+    assert queued["wrote_item"] is True
+    assert queued["ok"] is True
+    assert queued["open_count"] == 1
+
+    # search_plan= path + write
+    a2 = run_session_a_path(plan, search_plan=stub_brainstorm, write=True)
+    assert a2.ok and a2.verdict == "queued" and a2.wrote_item is True
+    on_disk = plan.read_text(encoding="utf-8")
+    assert on_disk == a2.plan_text
+    assert count_open(parse_queue_items(on_disk)) == 1
+    assert "ready-for-implement: yes" in on_disk
+    assert is_b_pickable(parse_queue_items(on_disk)[0])
+
+    # Complete candidate via search_plan (non-stub) also queues
+    def complete_plan(_items):
+        return _complete_candidate(title="Beat14 complete", heading="Beat14 complete")
+
+    a3 = run_session_a(empty, search_plan=complete_plan)
+    assert a3.ok and a3.verdict == "queued" and a3.wrote_item is True
+    assert incomplete_candidate_reasons(_complete_candidate()) == []
+
+    from src.research_implement.__main__ import main
+
+    plan2 = tmp_path / "cli_stub.md"
+    plan2.write_text(empty, encoding="utf-8")
+    rc = main(["session-a", "--plan", str(plan2), "--stub", "--json"])
+    assert rc == 0
+    cli_payload = json.loads(capsys.readouterr().out)
+    _assert_session_a_result_json_shape(cli_payload)
+    assert cli_payload["verdict"] == "queued"
+    assert cli_payload["wrote_item"] is True
+    assert cli_payload["ok"] is True
+    assert count_open(parse_queue_items(plan2.read_text(encoding="utf-8"))) == 1

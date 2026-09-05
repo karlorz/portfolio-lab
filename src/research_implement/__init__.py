@@ -28,6 +28,11 @@ six fields + ready-for-implement for OPEN items) and Session A stub append id
 stability (empty→Q1; after ship/clear→new id no collide; two_open first-OPEN
 unchanged). Proof: pytest ``-k beat13``.
 
+Beat 14: Session A fail-closed on incomplete brainstorm/search_plan candidate
+(missing required six fields or ready-for-implement not yes) → verdict failed,
+wrote_item=False, plan unchanged, no partial OPEN append. Complete stub on
+empty Queue still queues. Proof: pytest ``-k beat14``.
+
 JSON: ``SessionResult.to_dict()`` (aliases ``to_json_dict`` / ``session_b_result_dict``)
 is the shared Session B ``--json`` / test contract for idle / decode_only / dry_run /
 shipped. Session A: ``SessionAResult.to_dict()`` (aliases ``to_json_dict`` /
@@ -60,6 +65,7 @@ from src.research_implement.session_a import (
     SESSION_A_RESULT_KEYS,
     SessionAResult,
     default_search_plan,
+    incomplete_candidate_reasons,
     run_session_a,
     session_a_result_dict,
     stub_brainstorm,
@@ -110,6 +116,7 @@ __all__ = [
     "default_search_plan",
     "run_session_a",
     "run_session_b",
+    "incomplete_candidate_reasons",
     "stub_brainstorm",
     "stub_search_plan",
     "decode_fields",
