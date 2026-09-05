@@ -2810,3 +2810,188 @@ def test_beat16_sequential_double_open_ship_then_idle(tmp_path: Path):
     assert "SHIPPED `beat16ship1`" in final
     assert "SHIPPED `beat16ship2`" in final
     assert count_open(parse_queue_items(final)) == 0
+
+
+# --- Beat 17: decode_only default never implement; dry_run + fixture_ship opt-in ---
+
+
+def test_beat17_decode_only_default_never_calls_implement(tmp_path: Path, capsys):
+    """Beat 17: decode_only True / CLI session-b default never invokes implement.
+
+    Spy implement must not fire when decode_only=True or when CLI omits --dry-run.
+    """
+    plan_md = _load("one_open_ready.md")
+    assert first_b_pick(parse_queue_items(plan_md)) is not None
+
+    spy = {"n": 0}
+
+    def boom_implement(item):
+        spy["n"] += 1
+        raise AssertionError(f"implement must not be called in decode_only; got {item.item_id}")
+
+    # API: decode_only=True with explicit spy implement — never called.
+    r = run_session_b(plan_md, implement=boom_implement, decode_only=True)
+    assert r.ok and r.verdict == "picked"
+    assert r.implement_result is None
+    assert r.item is not None and r.item.item_id == "Q1"
+    assert spy["n"] == 0
+    assert "SHIPPED" not in r.plan_text
+    payload = r.to_dict()
+    _assert_session_result_json_shape(payload)
+    assert payload["verdict"] == "picked"
+    assert payload["implement_result"] is None
+    assert payload["shipped"] is False
+
+    # Path helper default is decode_only=True.
+    plan = tmp_path / "decode_default.md"
+    plan.write_text(plan_md, encoding="utf-8")
+    r2 = run_session_b_path(plan, implement=boom_implement)
+    assert r2.ok and r2.verdict == "picked"
+    assert r2.implement_result is None
+    assert spy["n"] == 0
+
+    # CLI session-b default (no --dry-run) is decode-only; spy dry_run_implement.
+    from src.research_implement.__main__ import main
+
+    plan_cli = tmp_path / "cli_decode.md"
+    plan_cli.write_text(plan_md, encoding="utf-8")
+    dry_spy = {"n": 0}
+
+    def boom_dry(item):
+        dry_spy["n"] += 1
+        raise AssertionError(
+            f"CLI decode-only must not call dry_run_implement; {item.item_id}"
+        )
+
+    with patch("src.research_implement.__main__.dry_run_implement", boom_dry), patch(
+        "src.research_implement.session_b.dry_run_implement", boom_dry
+    ), patch(
+        "src.research_implement.session_b.default_implement", boom_dry
+    ):
+        rc = main(["session-b", "--plan", str(plan_cli), "--json"])
+    assert rc == 0
+    cli_payload = json.loads(capsys.readouterr().out)
+    _assert_session_result_json_shape(cli_payload)
+    assert cli_payload["verdict"] == "picked"
+    assert cli_payload["implement_result"] is None
+    assert cli_payload["shipped"] is False
+    assert "SHIPPED" not in plan_cli.read_text(encoding="utf-8")
+    assert spy["n"] == 0
+    assert dry_spy["n"] == 0
+
+    # idle-decode alias also stays decode-only (spy never fires).
+    plan_idle = tmp_path / "cli_idle_decode.md"
+    plan_idle.write_text(plan_md, encoding="utf-8")
+    with patch("src.research_implement.__main__.dry_run_implement", boom_dry), patch(
+        "src.research_implement.session_b.default_implement", boom_dry
+    ):
+        rc2 = main(["idle-decode", "--plan", str(plan_idle), "--json"])
+    assert rc2 == 0
+    idle_payload = json.loads(capsys.readouterr().out)
+    assert idle_payload["verdict"] == "picked"
+    assert idle_payload["implement_result"] is None
+    assert dry_spy["n"] == 0
+
+
+def test_beat17_dry_run_calls_implement_spy(tmp_path: Path, capsys):
+    """Beat 17: decode_only=False / --dry-run calls implement spy once; never ships."""
+    plan_md = _load("one_open_ready.md")
+    spy = {"n": 0, "items": []}
+
+    def spy_dry(item):
+        spy["n"] += 1
+        spy["items"].append(item.item_id)
+        return dry_run_implement(item)
+
+    # Explicit spy wrapping dry_run_implement.
+    r = run_session_b(plan_md, implement=spy_dry, decode_only=False)
+    assert r.ok and r.verdict == "dry_run"
+    assert spy["n"] == 1
+    assert spy["items"] == ["Q1"]
+    assert r.implement_result is not None
+    _assert_dry_run_implement_schema(r.implement_result)
+    assert r.implement_result["dry_run"] is True
+    assert r.implement_result["sha"] is None
+    assert "SHIPPED" not in r.plan_text
+    assert count_open(parse_queue_items(r.plan_text)) == 1
+
+    # implement=None + decode_only=False uses default_implement (== dry_run_implement).
+    assert default_implement is dry_run_implement
+    r2 = run_session_b(plan_md, decode_only=False)
+    assert r2.ok and r2.verdict == "dry_run"
+    assert r2.implement_result is not None
+    _assert_dry_run_implement_schema(r2.implement_result)
+    assert r2.implement_result["dry_run"] is True
+    assert "SHIPPED" not in r2.plan_text
+
+    # CLI --dry-run exercises dry_run_implement path.
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "cli_dry.md"
+    plan.write_text(plan_md, encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    rc = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    _assert_session_result_json_shape(payload)
+    assert payload["verdict"] == "dry_run"
+    assert payload["shipped"] is False
+    assert payload["wrote_files"] is False
+    _assert_dry_run_implement_schema(payload["implement_result"])
+    assert payload["implement_result"]["dry_run"] is True
+    assert plan.read_text(encoding="utf-8") == before
+
+
+def test_beat17_fixture_ship_only_when_opted_in(tmp_path: Path):
+    """Beat 17: ship only with decode_only=False + fixture_ship implement (opt-in).
+
+    decode_only=True ignores fixture_ship; default dry_run never ships; only
+    explicit fixture_ship + decode_only=False marks SHIPPED (tmp_path).
+    """
+    plan_md = _load("one_open_ready.md")
+    ship_fn = make_fixture_ship_implement("beat17cafe", note="beat17 fixture ship")
+
+    # Opted ship callback + decode_only=True → never calls implement, no ship.
+    spy = {"n": 0}
+
+    def ship_spy(item):
+        spy["n"] += 1
+        return ship_fn(item)
+
+    decode = run_session_b(plan_md, implement=ship_spy, decode_only=True)
+    assert decode.ok and decode.verdict == "picked"
+    assert decode.implement_result is None
+    assert spy["n"] == 0
+    assert "SHIPPED" not in decode.plan_text
+    assert count_open(parse_queue_items(decode.plan_text)) == 1
+
+    # decode_only=False without fixture_ship → dry_run, never SHIPPED.
+    dry = run_session_b(plan_md, decode_only=False)
+    assert dry.verdict == "dry_run"
+    assert dry.implement_result is not None
+    assert dry.implement_result["dry_run"] is True
+    assert "SHIPPED" not in dry.plan_text
+    assert count_open(parse_queue_items(dry.plan_text)) == 1
+
+    # Opt-in: decode_only=False + fixture_ship → shipped on tmp_path only.
+    plan = tmp_path / "ship_opt_in.md"
+    plan.write_text(plan_md, encoding="utf-8")
+    shipped = run_session_b_path(
+        plan, implement=ship_fn, decode_only=False, write=True
+    )
+    assert shipped.ok and shipped.verdict == "shipped"
+    assert shipped.implement_result is not None
+    _assert_shipped_implement_schema(shipped.implement_result)
+    assert shipped.implement_result["sha"] == "beat17cafe"
+    assert shipped.implement_result["dry_run"] is False
+    assert "SHIPPED `beat17cafe`" in shipped.plan_text
+    on_disk = plan.read_text(encoding="utf-8")
+    assert "SHIPPED `beat17cafe`" in on_disk
+    assert count_open(parse_queue_items(on_disk)) == 0
+    payload = shipped.to_dict()
+    _assert_session_result_json_shape(payload)
+    assert payload["verdict"] == "shipped"
+    assert payload["shipped"] is True
+    # Convenience alias is ship double, never the default.
+    assert fixture_ship_implement is not dry_run_implement
+    assert default_implement is dry_run_implement

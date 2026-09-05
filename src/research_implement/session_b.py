@@ -13,6 +13,12 @@ explicitly (test double only; never the default). CLI defaults to decode-only;
 pass ``--dry-run`` to exercise the dry-run implement path. Live implement to
 prod stays unwired.
 
+Beat 17: default / CLI decode-only never invokes the implement callback (even
+if one is passed) — spy-proven. The ``--dry-run`` / ``decode_only=False`` path
+may call ``dry_run_implement``. ``fixture_ship_implement`` runs only when
+``decode_only=False`` **and** ``implement=`` is explicitly passed. Proof:
+pytest ``-k beat17``.
+
 JSON contract: ``SessionResult.to_dict()`` (aliases ``to_json_dict`` /
 ``session_b_result_dict``) is the single shared shape for CLI ``--json`` and
 fixture tests (idle / decode_only / dry_run / shipped).
@@ -248,9 +254,13 @@ def run_session_b(
     When no B-pickable OPEN item exists, return idle success with ``queue 0/10``
     and ``keep_schedule=True`` without calling ``scheduler_delete``.
 
-    When ``decode_only`` is False, the pluggable ``implement`` callback runs
-    (defaults to ``dry_run_implement`` when omitted). Dry-run records intended
-    ``file_touch`` / ``acceptance`` and never writes the repo or marks SHIPPED.
+    When ``decode_only`` is True (CLI / ``run_session_b_path`` default), the
+    implement callback is never invoked — Beat 17 spy contract — even if
+    ``implement=`` is passed. When ``decode_only`` is False, the pluggable
+    ``implement`` callback runs (defaults to ``dry_run_implement`` when
+    omitted). Dry-run records intended ``file_touch`` / ``acceptance`` and
+    never writes the repo or marks SHIPPED. ``fixture_ship_implement`` only
+    when ``decode_only=False`` and ``implement=`` is explicitly passed.
     """
     # Defense in depth: bind local name so tests can assert we never call it.
     _delete = scheduler_delete  # noqa: F841
@@ -280,9 +290,11 @@ def run_session_b(
         )
 
     if decode_only:
-        # Decode path: report Q id + fields. CLI defaults here. Pass
-        # decode_only=False (optionally with implement=) to exercise the
-        # pluggable implement hook; implement defaults to dry_run_implement.
+        # Beat 17: decode-only returns here WITHOUT calling implement — even
+        # when ``implement=`` is passed (CLI default / run_session_b_path
+        # default). Spy must observe zero implement invocations.
+        # Pass decode_only=False (optionally with implement=) to exercise the
+        # pluggable hook; omitted implement defaults to dry_run_implement.
         report = format_decode_report(pick)
         msg = (
             f"picked; {pick.item_id} {pick.title}; "
@@ -301,7 +313,9 @@ def run_session_b(
             implement_result=None,
         )
 
-    # Pluggable implement — default dry_run_implement records intent only.
+    # Pluggable implement — only reached when decode_only=False.
+    # Default dry_run_implement records intent only. fixture_ship_implement
+    # runs only when explicitly passed (never the default).
     fn = implement if implement is not None else default_implement
     result = fn(pick) or {}
     new_text = plan_markdown

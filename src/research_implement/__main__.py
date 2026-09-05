@@ -55,6 +55,11 @@ type not object/list) → non-zero exit / clear failure; plan unchanged. Sequent
 double-OPEN ship on tmp_path: two_open_ready → ship first → ship second → idle;
 never ``scheduler_delete``; JSON shapes ok. Proof: pytest ``-k beat16``.
 
+Beat 17: Session B default/CLI decode-only never invokes implement callback
+(spy); ``--dry-run`` may call ``dry_run_implement``; ``fixture_ship_implement``
+only when ``decode_only=False`` + ``implement=`` passed (never CLI default).
+Proof: pytest ``-k beat17``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never
@@ -144,6 +149,9 @@ def _run_session_b(
 
     Empty Queue still idle-fires (queue 0/10). Never ``scheduler_delete``.
     Dry-run records intended file_touch / acceptance and never writes the repo.
+
+    Beat 17: default path never invokes implement (spy-proven); only ``dry_run``
+    passes ``dry_run_implement``. fixture_ship is never CLI-wired.
     """
     if dry_run:
         result = run_session_b_path(
@@ -153,7 +161,7 @@ def _run_session_b(
             write=False,
         )
     else:
-        # Decode-only: pick Q id / idle; never implement; never delete schedule.
+        # Beat 17: decode-only — never pass/call implement; never delete schedule.
         result = run_session_b_path(plan, decode_only=True, write=False)
     assert result.keep_schedule and not result.scheduler_delete_called
     if as_json:

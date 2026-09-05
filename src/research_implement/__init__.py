@@ -42,6 +42,11 @@ type) → clear non-zero failure, no plan mutation; sequential double-OPEN ship
 on tmp_path (ship → ship → idle) never ``scheduler_delete``. Proof: pytest
 ``-k beat16``.
 
+Beat 17: Session B decode_only default / CLI session-b never calls implement;
+``decode_only=False`` dry_run path invokes ``dry_run_implement``; fixture ship
+only when opted in (``decode_only=False`` + ``fixture_ship_implement``).
+Proof: pytest ``-k beat17``.
+
 JSON: ``SessionResult.to_dict()`` (aliases ``to_json_dict`` / ``session_b_result_dict``)
 is the shared Session B ``--json`` / test contract for idle / decode_only / dry_run /
 shipped. Session A: ``SessionAResult.to_dict()`` (aliases ``to_json_dict`` /
