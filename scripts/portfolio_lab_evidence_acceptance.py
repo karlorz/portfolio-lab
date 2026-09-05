@@ -13,24 +13,32 @@ report (mode 0600, outside the evidence root, no Markdown).
 
 Day acceptance
     The window is exactly the seven calendar days ending at ``--end-day``
-    (default: current UTC day). Each day directory must be a non-symlink
-    directory with exactly mode 0700 containing exactly the seven evidence
-    files (tasker, jobs, freshness, archive, resources, authority, summary),
-    each a non-symlink regular file with exactly mode 0600 and at most
-    262144 bytes; extra entries are rejected. Each file must be valid JSON
-    with the daily-evidence v1 schema, a category matching the file name, a
-    UTC-offset ``collected_at`` whose UTC day matches the directory, and a
-    status in pass|warning|fail. The summary must match the six category
-    files (category map, overall envelope/details, notify-on-fail rule,
-    utc day). A day passes when every category is pass and every acceptance
-    criterion holds: tasker/jobs/freshness/resources/authority pass; archive
-    pass with the same UTC day, a 64-hex sha256, and a ``latest_success``
-    timestamp on that UTC day; exactly one scheduler instance from the
-    tasker controller; both controllers active with exact identity; API and
-    static endpoints pass with HTTP 200; every freshness entry pass; disk
-    pass with free space >= 15 GiB; authority proof present/pass with host
+    (default: current UTC day). ``--evidence-root`` must be an absolute
+    non-symlink directory (a symlink or non-directory is rejected as input);
+    its mode is validated (0700) but never mutated. Date-named directories
+    outside the selected window (older or newer evidence days) are tolerated
+    as historical; any other unexpected root entry is investigated. Each day
+    directory must be a non-symlink directory with exactly mode 0700
+    containing exactly the seven evidence files (tasker, jobs, freshness,
+    archive, resources, authority, summary), each a non-symlink regular file
+    with exactly mode 0600 and at most 262144 bytes; extra entries are
+    rejected. Each file must be valid JSON with the daily-evidence v1
+    schema, a category matching the file name, a UTC-offset ``collected_at``
+    whose UTC day matches the directory, and a status in pass|warning|fail.
+    The summary must match the six category files (category map, overall
+    envelope/details, notify-on-fail rule, utc day). A day passes when every
+    category is pass and every acceptance criterion holds:
+    tasker/jobs/freshness/resources/authority pass; archive pass with the
+    same UTC day, a 64-hex sha256, and a ``latest_success`` timestamp on
+    that UTC day; exactly one scheduler instance from the tasker controller
+    (strict integer; bool/float rejected); both controllers active with
+    exact identity; API and static endpoints pass with HTTP 200; every
+    freshness entry pass; disk pass with free space >= 15 GiB (strict
+    integer; bool/float rejected); authority proof present/pass with host
     sg01 and all four former-authority booleans false. Archive sha256 values
-    must be unique across the window.
+    must be unique across the window. Report taxonomy keeps fail-grade
+    ``problems`` and warning-grade ``notices`` separate per day: warning
+    notices never appear in ``blockers``.
 
 Verdicts (report ``verdict`` and exit codes 0/2/1)
     accept                every day passes and the recycle proof is valid
@@ -48,7 +56,8 @@ Verdicts (report ``verdict`` and exit codes 0/2/1)
                           invalid recycle proof, or an unexpected entry in
                           the evidence root
     1                     invalid CLI input or report write failure (stdout
-                          stays empty)
+                          stays empty; the report file is written before
+                          stdout emission)
 
 Recycle proof (attended, optional producer)
     ``<evidence-root>/recycle.json``: one JSON object with schema
@@ -132,13 +141,20 @@ class Config:
     require_recycle_proof: bool
 
 
+def _is_calendar_day(name: str) -> bool:
+    """Strict YYYY-MM-DD calendar name (day directories and dates)."""
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", name):
+        return False
+    try:
+        datetime.strptime(name, "%Y-%m-%d")
+    except ValueError:
+        return False
+    return True
+
+
 def _parse_day(raw: str, what: str) -> str:
     text = raw.strip()
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-        die(f"{what} must be a YYYY-MM-DD calendar date")
-    try:
-        datetime.strptime(text, "%Y-%m-%d")
-    except ValueError:
+    if not _is_calendar_day(text):
         die(f"{what} must be a YYYY-MM-DD calendar date")
     return text
 
@@ -299,8 +315,10 @@ def _criterion_problems(parsed: dict[str, dict[str, Any]], day: str) -> list[str
             or ctrl.get("service_name_exact") is not True
         ):
             found.append(f"{label} controller must be active with exact identity")
-        if label == "tasker" and ctrl.get("scheduler_instances") != 1:
-            found.append("tasker scheduler instance count is not exactly 1")
+        if label == "tasker":
+            instances = ctrl.get("scheduler_instances")
+            if type(instances) is not int or instances != 1:
+                found.append("tasker scheduler instance count is not exactly 1")
         return found
 
     if active("tasker"):
@@ -338,11 +356,12 @@ def _criterion_problems(parsed: dict[str, dict[str, Any]], day: str) -> list[str
     if active("resources"):
         details = parsed["resources.json"]["details"]
         disk = details.get("disk") if isinstance(details, dict) else None
+        free_bytes = disk.get("free_bytes") if isinstance(disk, dict) else None
         if (
             not isinstance(disk, dict)
             or disk.get("status") != "pass"
-            or not isinstance(disk.get("free_bytes"), int)
-            or disk["free_bytes"] < DISK_FREE_MIN
+            or type(free_bytes) is not int
+            or free_bytes < DISK_FREE_MIN
         ):
             problems.append("disk must pass with free space >= 15 GiB")
     if active("authority"):
@@ -370,21 +389,21 @@ def validate_day(root: Path, day: str) -> dict[str, Any]:
     try:
         st = day_path.lstat()
     except FileNotFoundError:
-        return {"day": day, "status": "missing", "reasons": [], "categories": categories, "archive_sha": None}
+        return {"day": day, "status": "missing", "problems": [], "warnings": [], "categories": categories, "archive_sha": None}
     except OSError:
-        return {"day": day, "status": "fail", "reasons": ["day directory unreadable"], "categories": categories, "archive_sha": None}
+        return {"day": day, "status": "fail", "problems": ["day directory unreadable"], "warnings": [], "categories": categories, "archive_sha": None}
     if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
         return {
             "day": day, "status": "fail",
-            "reasons": ["day directory must be a non-symlink directory"],
-            "categories": categories, "archive_sha": None,
+            "problems": ["day directory must be a non-symlink directory"],
+            "warnings": [], "categories": categories, "archive_sha": None,
         }
     if stat.S_IMODE(st.st_mode) != 0o700:
         problems.append("day directory must be exactly mode 0700")
     try:
         entries = set(os.listdir(day_path))
     except OSError:
-        return {"day": day, "status": "fail", "reasons": ["day directory unreadable"], "categories": categories, "archive_sha": None}
+        return {"day": day, "status": "fail", "problems": ["day directory unreadable"], "warnings": [], "categories": categories, "archive_sha": None}
     if entries != set(EXPECTED_FILES):
         problems.append("day directory must contain exactly the seven expected evidence files")
 
@@ -422,7 +441,8 @@ def validate_day(root: Path, day: str) -> dict[str, Any]:
         status = "pass"
     return {
         "day": day, "status": status,
-        "reasons": problems + notices, "categories": categories, "archive_sha": archive_sha,
+        "problems": problems, "warnings": notices,
+        "categories": categories, "archive_sha": archive_sha,
     }
 
 
@@ -519,18 +539,23 @@ def _build_continuity(per_day: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def assemble_report(
-    cfg: Config, per_day: list[dict[str, Any]], recycle: dict[str, Any], extra_root_entries: list[str]
+    cfg: Config,
+    per_day: list[dict[str, Any]],
+    recycle: dict[str, Any],
+    extra_root_entries: list[str],
+    root_blockers: list[str],
 ) -> dict[str, Any]:
     blockers: list[str] = []
     extend_reasons: list[str] = []
     for day_report in per_day:
         day, status = day_report["day"], day_report["status"]
         if status == "fail":
-            blockers.extend(f"day {day}: {reason}" for reason in day_report["reasons"])
-        elif status == "warning":
-            extend_reasons.extend(f"day {day}: {reason}" for reason in day_report["reasons"])
+            blockers.extend(f"day {day}: {problem}" for problem in day_report["problems"])
         elif status == "missing":
             extend_reasons.append(f"day {day} directory missing")
+        if day_report["warnings"]:
+            extend_reasons.extend(f"day {day}: {notice}" for notice in day_report["warnings"])
+    blockers.extend(root_blockers)
     for entry in extra_root_entries:
         blockers.append("unexpected entry in evidence root")
     continuity = _build_continuity(per_day)
@@ -576,7 +601,8 @@ def assemble_report(
             {
                 "day": day_report["day"],
                 "status": day_report["status"],
-                "reasons": day_report["reasons"],
+                "problems": day_report["problems"],
+                "warnings": day_report["warnings"],
                 "categories": day_report["categories"],
             }
             for day_report in per_day
@@ -614,8 +640,8 @@ def write_report(output_json: Path | None, report: dict[str, Any]) -> None:
     data = json.dumps(report, separators=(",", ":"), sort_keys=True).encode("utf-8")
     try:
         atomic_write(output_json, data)
-    except OSError as exc:
-        die(f"failed to write report: {exc}")
+    except OSError:
+        die("failed to write report")  # static diagnostic; never echoes the path
 
 
 # ── main ──────────────────────────────────────────────────────────────────
@@ -629,6 +655,20 @@ def main(argv: list[str] | None = None) -> int:
         (end_date - timedelta(days=offset)).strftime("%Y-%m-%d")
         for offset in range(WINDOW_DAYS - 1, -1, -1)
     ]
+
+    root_blockers: list[str] = []
+    try:
+        root_st = cfg.evidence_root.lstat()
+    except OSError:
+        root_st = None  # not collected yet: day directories report missing -> extend
+    if root_st is not None:
+        if stat.S_ISLNK(root_st.st_mode):
+            die("PLAE_EVIDENCE_ROOT must not be a symlink")
+        if not stat.S_ISDIR(root_st.st_mode):
+            die("PLAE_EVIDENCE_ROOT must be an existing directory")
+        if stat.S_IMODE(root_st.st_mode) != 0o700:
+            root_blockers.append("evidence root must be exactly mode 0700")  # validated, never mutated
+
     per_day = [validate_day(cfg.evidence_root, day) for day in day_names]
 
     extra_root_entries: list[str] = []
@@ -637,13 +677,18 @@ def main(argv: list[str] | None = None) -> int:
     except OSError:
         entries = set()
     if entries:
-        allowed = set(day_names) | {"recycle.json"}
-        extra_root_entries = sorted(entries - allowed)
+        extra_root_entries = sorted(
+            entry
+            for entry in entries
+            if entry != "recycle.json"
+            and entry not in set(day_names)
+            and not _is_calendar_day(entry)  # date-named dirs outside the window are historical
+        )
 
     recycle = validate_recycle(cfg.evidence_root, cfg.start_day, cfg.end_day)
-    report = assemble_report(cfg, per_day, recycle, extra_root_entries)
-    emit(report)
+    report = assemble_report(cfg, per_day, recycle, extra_root_entries, root_blockers)
     write_report(cfg.output_json, report)
+    emit(report)
     return 0 if report["verdict"] in ("accept", "ready_except_recycle") else 2
 
 

@@ -16,7 +16,12 @@ archive sha256, wrong archive utc day / latest_success day / sha format,
 scheduler count != 1, endpoint/freshness/disk/authority criterion violations,
 malformed envelopes (schema/category/status/collected_at/JSON), invalid and
 malformed recycle proofs (investigate); malformed CLI and unsafe output-json
-placement (exit 1); output-json mode 0600 and idempotence.
+placement (exit 1); output-json mode 0600 and idempotence; output write
+failure (exit 1, empty stdout, static stderr, no temp artifacts); symlinked
+or non-directory evidence root (exit 1) and root mode 0700 validated but
+never mutated; historical date-named directories outside the window
+tolerated; strict integer scheduler_instances and disk free_bytes (bools
+and floats rejected).
 """
 
 from __future__ import annotations
@@ -147,6 +152,8 @@ def write_day(
     extra: tuple[str, ...] = (),
 ) -> None:
     payloads = day_payloads(day, statuses=statuses) if payloads is None else payloads
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(root, 0o700)  # evidence root hardened like the collector does
     day_dir = root / day
     day_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     for name, payload in payloads.items():
@@ -216,7 +223,7 @@ def test_accept_seven_days_with_valid_recycle(checker: object, tmp_path: Path, c
     assert report["days_present"] == 7
     assert report["verdict"] == "accept"
     assert [day["status"] for day in report["per_day"]] == ["pass"] * 7
-    assert all(day["reasons"] == [] for day in report["per_day"])
+    assert all(day["problems"] == [] and day["warnings"] == [] for day in report["per_day"])
     assert all(
         day["categories"] == dict.fromkeys(CATEGORIES, "pass") for day in report["per_day"]
     )
@@ -360,6 +367,68 @@ def test_root_extra_entry_investigates(checker: object, tmp_path: Path, capsys: 
     assert "unexpected entry in evidence root" in report["blockers"][0]
 
 
+def test_warning_notices_never_in_fail_blockers(checker: object, tmp_path: Path, capsys: object) -> None:
+    root = tmp_path / "evidence"
+    days = day_span()
+    for day in days[:-1]:
+        write_day(root, day)
+    statuses = dict.fromkeys(CATEGORIES, "pass")
+    statuses["authority"] = "fail"
+    statuses["freshness"] = "warning"
+    write_day(root, days[-1], statuses=statuses)
+    assert run_main(checker, root) == 2
+    report = read_report(capsys)
+    assert report["verdict"] == "investigate"
+    assert any("authority category is fail" in blocker for blocker in report["blockers"])
+    assert all("category is warning" not in blocker for blocker in report["blockers"])
+    assert f"day {days[-1]}: freshness category is warning" in report["warnings"]
+
+
+def test_historical_days_outside_window_allowed(checker: object, tmp_path: Path, capsys: object) -> None:
+    root = tmp_path / "evidence"
+    write_window(root)
+    write_day(root, "2026-08-29")  # older than the selected window
+    write_day(root, "2026-09-06")  # newer than the selected window
+    write_recycle(root)
+    assert run_main(checker, root) == 0
+    report = read_report(capsys)
+    assert report["verdict"] == "accept"
+    assert report["days_present"] == 7
+    assert report["blockers"] == []
+    assert len(report["per_day"]) == 7
+
+
+def test_symlinked_evidence_root_exit_1(checker: object, tmp_path: Path, capsys: object) -> None:
+    real = tmp_path / "real"
+    write_window(real)
+    link = tmp_path / "root-link"
+    os.symlink(real, link)
+    with pytest.raises(SystemExit) as exc:
+        checker.main(["--evidence-root", str(link), "--end-day", END_DAY])
+    assert exc.value.code == 1
+    assert capsys.readouterr().out == ""
+
+
+def test_non_directory_evidence_root_exit_1(checker: object, tmp_path: Path, capsys: object) -> None:
+    root = tmp_path / "evidence"
+    root.write_text("not a directory", encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        checker.main(["--evidence-root", str(root), "--end-day", END_DAY])
+    assert exc.value.code == 1
+    assert capsys.readouterr().out == ""
+
+
+def test_evidence_root_mode_validated_never_mutated(checker: object, tmp_path: Path, capsys: object) -> None:
+    root = tmp_path / "evidence"
+    write_window(root)
+    root.chmod(0o755)
+    assert run_main(checker, root) == 2
+    report = read_report(capsys)
+    assert report["verdict"] == "investigate"
+    assert "evidence root must be exactly mode 0700" in report["blockers"]
+    assert stat.S_IMODE(root.stat().st_mode) == 0o755  # validated, never mutated
+
+
 def test_oversize_evidence_file_investigates(checker: object, tmp_path: Path, capsys: object) -> None:
     root = tmp_path / "evidence"
     write_window(root)
@@ -414,6 +483,8 @@ def test_wrong_archive_day_investigates(
     ("kind", "mutate"),
     [
         ("scheduler-count", lambda d: d["tasker.json"]["details"]["tasker_controller"].update(scheduler_instances=2)),
+        ("scheduler-bool", lambda d: d["tasker.json"]["details"]["tasker_controller"].update(scheduler_instances=True)),
+        ("scheduler-float", lambda d: d["tasker.json"]["details"]["tasker_controller"].update(scheduler_instances=1.0)),
         ("tasker-state", lambda d: d["tasker.json"]["details"]["tasker_controller"].update(state="inactive")),
         ("static-identity", lambda d: d["tasker.json"]["details"]["static_controller"].update(identity_exact=False)),
         ("api-status", lambda d: d["jobs.json"]["details"]["api"].update(status="fail")),
@@ -422,6 +493,7 @@ def test_wrong_archive_day_investigates(
         ("freshness-entry", lambda d: d["freshness.json"]["details"]["files"][0].update(status="fail")),
         ("disk-free", lambda d: d["resources.json"]["details"]["disk"].update(free_bytes=10 * GIB)),
         ("disk-status", lambda d: d["resources.json"]["details"]["disk"].update(status="warning")),
+        ("disk-bool", lambda d: d["resources.json"]["details"]["disk"].update(free_bytes=True)),
         ("authority-present", lambda d: d["authority.json"]["details"].update(present=False)),
         ("authority-host", lambda d: d["authority.json"]["details"].update(host_label="other-host")),
         ("authority-flags", lambda d: d["authority.json"]["details"].update(tasker_active=True)),
@@ -607,3 +679,24 @@ def test_output_json_mode_and_idempotence(checker: object, tmp_path: Path, capsy
     assert run_main(checker, root, "--output-json", str(report_path)) == 0
     assert report_path.read_bytes() == first_bytes
     assert json.loads(first_bytes)["verdict"] == "accept"
+
+
+@pytest.mark.parametrize("kind", ["parent-missing", "path-is-directory"])
+def test_output_write_failure_exit_1_no_stdout_no_temp(
+    checker: object, tmp_path: Path, capsys: object, kind: str
+) -> None:
+    root = tmp_path / "evidence"
+    write_window(root)
+    if kind == "parent-missing":
+        target = tmp_path / "no-such-dir" / "report.json"
+    else:
+        target = tmp_path / "reports"
+        target.mkdir()
+    with pytest.raises(SystemExit) as exc:
+        checker.main(["--evidence-root", str(root), "--end-day", END_DAY, "--output-json", str(target)])
+    assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "ERROR:" in captured.err
+    assert "failed to write report" in captured.err
+    assert list(tmp_path.rglob(".plae-*")) == []  # no temp artifacts left behind
