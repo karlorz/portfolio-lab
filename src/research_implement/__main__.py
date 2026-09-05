@@ -2,7 +2,7 @@
 
 Side-dev entrypoints only. Does not start Tasker or touch production ports.
 Session A requires --candidate-json when OPEN is 0 (no live LLM brainstorm).
-Session B defaults to decode-only (no repo writes).
+Session B defaults to decode-only (no repo writes, no live implement to prod).
 """
 
 from __future__ import annotations
@@ -43,13 +43,22 @@ def main(argv: list[str] | None = None) -> int:
         help="Do not write the plan file",
     )
 
-    b = sub.add_parser("session-b", help="Consumer: decode first OPEN Queue item")
+    b = sub.add_parser(
+        "session-b",
+        help="Consumer: decode first ready OPEN Queue item (decode-only by default)",
+    )
     b.add_argument("--plan", type=Path, required=True, help="Living plan.md path")
     b.add_argument(
         "--decode-only",
         action="store_true",
         default=True,
-        help="Decode/pick only (default); never implements code",
+        help="Decode/pick only (default); never implements code / no prod wire-up",
+    )
+    b.add_argument(
+        "--json",
+        action="store_true",
+        dest="as_json",
+        help="Emit decode fields as JSON (Q id + six fields) when picked",
     )
 
     args = parser.parse_args(argv)
@@ -69,10 +78,32 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if result.ok else 1
 
     if args.cmd == "session-b":
+        # Decode-only path: pick Q id, report fields; implement callback stays optional
+        # and is intentionally not wired here (no live implement to prod).
         result = run_session_b_path(args.plan, decode_only=True, write=False)
-        print(result.message)
         # Idle and picked are both success; never delete schedule.
         assert result.keep_schedule and not result.scheduler_delete_called
+        if args.as_json:
+            payload = {
+                "ok": result.ok,
+                "verdict": result.verdict,
+                "open_count": result.open_count,
+                "queue": result.queue_label,
+                "keep_schedule": result.keep_schedule,
+                "scheduler_delete_called": result.scheduler_delete_called,
+                "item": None,
+            }
+            if result.item is not None:
+                from src.research_implement.session_b import decode_fields
+
+                payload["item"] = decode_fields(result.item)
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(result.message)
+            if result.decode_report and result.verdict == "picked":
+                # message already embeds report; ensure Q id is visible on stdout
+                if f"decode pick {result.item.item_id}" not in result.message:
+                    print(result.decode_report)
         return 0 if result.ok else 1
 
     parser.error(f"unknown command {args.cmd}")

@@ -21,7 +21,13 @@ from src.research_implement.queue import (
     render_queue_count,
 )
 from src.research_implement.session_a import SessionAResult, run_session_a
-from src.research_implement.session_b import SessionBResult, run_session_b
+from src.research_implement.session_b import (
+    SessionBResult,
+    decode_fields,
+    format_decode_report,
+    run_session_b,
+    scheduler_delete,
+)
 
 __all__ = [
     "QUEUE_CAPACITY",
@@ -40,4 +46,7 @@ __all__ = [
     "render_queue_count",
     "run_session_a",
     "run_session_b",
+    "decode_fields",
+    "format_decode_report",
+    "scheduler_delete",
 ]

@@ -4,6 +4,10 @@ Picks the first complete six-field OPEN item with ready-for-implement: yes.
 Ignores ## Watch and ## Project Work. Empty Queue is an idle fire
 (``nothing to implement; … queue 0/10``) — keep the schedule; never
 ``scheduler_delete``.
+
+Decode path reports the picked Q id and six fields. Optional ``implement``
+callback stays optional — CLI defaults to decode-only and does not wire live
+implement to prod.
 """
 
 from __future__ import annotations
@@ -13,7 +17,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 from src.research_implement.queue import (
-    QUEUE_CAPACITY,
     QueueItem,
     count_open,
     first_b_pick,
@@ -37,6 +40,40 @@ def scheduler_delete(*_args: Any, **_kwargs: Any) -> None:
     )
 
 
+def decode_fields(item: QueueItem) -> dict[str, str]:
+    """Return Q id + six required fields for CLI/decode reporting."""
+    fields = item.field_map()
+    return {
+        "item_id": item.item_id,
+        "heading": item.heading,
+        "title": fields["title"],
+        "acceptance": fields["acceptance"],
+        "risks": fields["risks"],
+        "file_touch": fields["file_touch"],
+        "breaking_change": fields["breaking_change"],
+        "redeploy_notes": fields["redeploy_notes"],
+        "status": item.status,
+        "ready_for_implement": item.ready_for_implement,
+    }
+
+
+def format_decode_report(item: QueueItem) -> str:
+    """Human-readable decode dump: pick Q id then six fields (no implement)."""
+    d = decode_fields(item)
+    lines = [
+        f"decode pick {d['item_id']}: {d['title'] or d['heading']}",
+        f"  1. title: {d['title']}",
+        f"  2. acceptance: {d['acceptance']}",
+        f"  3. risks: {d['risks']}",
+        f"  4. file_touch: {d['file_touch']}",
+        f"  5. breaking_change: {d['breaking_change']}",
+        f"  6. redeploy_notes: {d['redeploy_notes']}",
+        f"  status: {d['status']}",
+        f"  ready-for-implement: {d['ready_for_implement']}",
+    ]
+    return "\n".join(lines)
+
+
 @dataclass(frozen=True)
 class SessionBResult:
     ok: bool
@@ -52,6 +89,13 @@ class SessionBResult:
     @property
     def queue_label(self) -> str:
         return render_queue_count(self.open_count)
+
+    @property
+    def decode_report(self) -> str | None:
+        """Structured field dump when a Q item was picked; None on idle."""
+        if self.item is None:
+            return None
+        return format_decode_report(self.item)
 
 
 def run_session_b(
@@ -79,11 +123,15 @@ def run_session_b(
 
     if pick is None:
         # Idle fire — success, keep schedule. NEVER scheduler_delete.
-        msg = f"nothing to implement; plan {path_label} {render_queue_count(0)}"
+        # Empty / incomplete OPEN / SHIPPED-only all land here (queue 0/10).
+        msg = (
+            f"nothing to implement; plan {path_label} "
+            f"{render_queue_count(open_n)}; keep_schedule"
+        )
         return SessionBResult(
             ok=True,
             verdict="idle",
-            open_count=0,
+            open_count=open_n,
             item=None,
             message=msg,
             plan_text=plan_markdown,
@@ -93,9 +141,12 @@ def run_session_b(
         )
 
     if decode_only or implement is None:
+        # Decode path: report Q id + fields; optional implement stays unwired.
+        report = format_decode_report(pick)
         msg = (
             f"picked; {pick.item_id} {pick.title}; "
-            f"{render_queue_count(open_n)}; decode-only; plan {path_label}"
+            f"{render_queue_count(open_n)}; decode-only; plan {path_label}\n"
+            f"{report}"
         )
         return SessionBResult(
             ok=True,
