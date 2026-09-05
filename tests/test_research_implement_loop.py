@@ -3602,3 +3602,32 @@ def test_beat22_doc_mentions_cli_and_make_targets():
         "research-implement-e2e-pipeline",
     ):
         assert needle in body, f"doc missing {needle!r}"
+
+
+def test_beat23_missing_plan_path_fails_all_cmds(tmp_path: Path, capsys):
+    """Beat 23: missing --plan/--log path → SystemExit; no file created."""
+    from src.research_implement.__main__ import main
+
+    missing = tmp_path / "no-such-plan.md"
+    assert not missing.exists()
+    for cmd in ("session-a", "session-b", "idle-decode"):
+        with pytest.raises(SystemExit) as ei:
+            main([cmd, "--plan", str(missing), "--json"])
+        msg = str(ei.value)
+        assert ei.value.code not in (0, None) or "not found" in msg.lower()
+        assert "not found" in msg.lower()
+        assert not missing.exists()
+
+
+def test_beat23_existing_plan_still_works(tmp_path: Path, capsys):
+    """Beat 23: existing fixture plan still runs session-b idle-decode."""
+    from src.research_implement.__main__ import main
+
+    src = FIXTURES / "empty_queue.md"
+    plan = tmp_path / "plan.md"
+    plan.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "idle" in out or "queue" in out
+

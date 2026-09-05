@@ -132,8 +132,11 @@ def _resolve_plan(args: argparse.Namespace) -> Path:
     path = plan or log
     if path is None:
         raise SystemExit("--plan or --log is required")
-    return Path(path)
-
+    resolved = Path(path)
+    # Beat 23: missing plan/log path fail-closed (do not create).
+    if not resolved.is_file():
+        raise SystemExit(f"--plan/--log file not found: {resolved}")
+    return resolved
 
 def _add_plan_log(p: argparse.ArgumentParser) -> None:
     g = p.add_mutually_exclusive_group(required=True)
