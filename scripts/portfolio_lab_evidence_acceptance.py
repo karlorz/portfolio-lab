@@ -17,28 +17,37 @@ Day acceptance
     non-symlink directory (a symlink or non-directory is rejected as input);
     its mode is validated (0700) but never mutated. Date-named directories
     outside the selected window (older or newer evidence days) are tolerated
-    as historical; any other unexpected root entry is investigated. Each day
-    directory must be a non-symlink directory with exactly mode 0700
-    containing exactly the seven evidence files (tasker, jobs, freshness,
-    archive, resources, authority, summary), each a non-symlink regular file
-    with exactly mode 0600 and at most 262144 bytes; extra entries are
-    rejected. Each file must be valid JSON with the daily-evidence v1
-    schema, a category matching the file name, a UTC-offset ``collected_at``
-    whose UTC day matches the directory, and a status in pass|warning|fail.
-    The summary must match the six category files (category map, overall
-    envelope/details, notify-on-fail rule, utc day). A day passes when every
-    category is pass and every acceptance criterion holds:
-    tasker/jobs/freshness/resources/authority pass; archive pass with the
-    same UTC day, a 64-hex sha256, and a ``latest_success`` timestamp on
-    that UTC day; exactly one scheduler instance from the tasker controller
-    (strict integer; bool/float rejected); both controllers active with
-    exact identity; API and static endpoints pass with HTTP 200; every
-    freshness entry pass; disk pass with free space >= 15 GiB (strict
-    integer; bool/float rejected); authority proof present/pass with host
-    sg01 and all four former-authority booleans false. Archive sha256 values
-    must be unique across the window. Report taxonomy keeps fail-grade
-    ``problems`` and warning-grade ``notices`` separate per day: warning
-    notices never appear in ``blockers``.
+    only as real non-symlink directories with exactly mode 0700 (contents are
+    not validated because they are outside the window); date-named
+    files/symlinks/bad modes and any non-date unexpected entry are
+    investigated. Each day directory must be a non-symlink directory with
+    exactly mode 0700 containing exactly the seven evidence files (tasker,
+    jobs, freshness, archive, resources, authority, summary), each a
+    non-symlink regular file with exactly mode 0600 and at most 262144
+    bytes; extra entries are rejected. Each file must be valid JSON with the
+    daily-evidence v1 schema, a category matching the file name, a UTC-offset
+    ``collected_at`` whose UTC day matches the directory, and a status in
+    pass|warning|fail. The summary must match the six category files
+    (category map, overall envelope/details, notify-on-fail rule, utc day).
+    A day passes when every category is pass and every acceptance criterion
+    holds: tasker/jobs/freshness/resources/authority pass; archive pass with
+    the same UTC day, a 64-hex sha256, and a ``latest_success`` timestamp on
+    that UTC day; both controllers pass with state active, mode production,
+    ``identity_exact``/``service_name_exact``/``paths_exact`` true, and
+    exactly one tasker scheduler instance (strict integer; bool/float
+    rejected); API and static endpoints pass with HTTP 200; freshness
+    observes exactly the producer's path set
+    (app/data/signals.json, app/data/tasker_status.json, www/data/signals.json,
+    www/data/tasker_status.json) with no duplicates and every entry pass;
+    disk pass with free space >= 15 GiB (strict integer; bool/float
+    rejected); authority proof nested pass, present, host sg01, ``collected_at``
+    on the evidence day and not future-dated beyond the 300 s collection
+    clock skew (staleness is the daily producer's tier; the checker
+    independently validates the same-day timestamp), and all four
+    former-authority booleans strictly false. Archive sha256 values must be
+    unique across the window. Report taxonomy keeps fail-grade ``problems``
+    and warning-grade ``notices`` separate per day: warning notices never
+    appear in ``blockers``.
 
 Verdicts (report ``verdict`` and exit codes 0/2/1)
     accept                every day passes and the recycle proof is valid
@@ -64,9 +73,12 @@ Recycle proof (attended, optional producer)
     ``portfolio-lab-recycle-proof/v1``, category ``recycle``, status
     ``pass``, and details carrying ``performed_at`` (ISO-8601 with a UTC
     offset, within the seven-day window), plus ``pre_recycle`` and
-    ``post_recycle`` phases each with ``scheduler_instances: 1`` and
-    ``tasker``/``static``/``tunnel``/``api`` all ``pass``. Absent ->
-    unproven; present but invalid -> investigate.
+    ``post_recycle`` phases each with ``scheduler_instances`` strictly the
+    integer 1 (bool/float rejected) and ``tasker``/``static``/``tunnel``/
+    ``api`` all ``pass``. The envelope ``collected_at`` must be present, a
+    UTC-offset ISO-8601 timestamp inside the seven-day window, and on the
+    same UTC day as ``performed_at``. Absent -> unproven; present but
+    invalid -> investigate.
 
 Diagnostics are static, secret-free reason strings (no evidence contents,
 paths, or captured output are echoed).
@@ -98,6 +110,13 @@ CATEGORIES = ("tasker", "jobs", "freshness", "archive", "resources", "authority"
 EXPECTED_FILES = tuple(f"{name}.json" for name in (*CATEGORIES, "summary"))
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 RECYCLE_COMPONENTS = ("tasker", "static", "tunnel", "api")
+AUTHORITY_CLOCK_SKEW_ALLOWANCE = 300.0  # matches the daily producer's proof skew allowance
+FRESHNESS_PATHS = (
+    "app/data/signals.json",
+    "app/data/tasker_status.json",
+    "www/data/signals.json",
+    "www/data/tasker_status.json",
+)
 
 
 def die(message: str) -> None:
@@ -310,11 +329,14 @@ def _criterion_problems(parsed: dict[str, dict[str, Any]], day: str) -> list[str
             return [f"{label} controller details missing"]
         found: list[str] = []
         if (
-            ctrl.get("state") != "active"
+            ctrl.get("status") != "pass"
+            or ctrl.get("state") != "active"
+            or ctrl.get("mode") != "production"
             or ctrl.get("identity_exact") is not True
             or ctrl.get("service_name_exact") is not True
+            or ctrl.get("paths_exact") is not True
         ):
-            found.append(f"{label} controller must be active with exact identity")
+            found.append(f"{label} controller must be pass, active, production with exact identity and exact paths")
         if label == "tasker":
             instances = ctrl.get("scheduler_instances")
             if type(instances) is not int or instances != 1:
@@ -338,10 +360,22 @@ def _criterion_problems(parsed: dict[str, dict[str, Any]], day: str) -> list[str
     if active("freshness"):
         details = parsed["freshness.json"]["details"]
         files = details.get("files") if isinstance(details, dict) else None
-        if not isinstance(files, list) or any(
-            not isinstance(entry, dict) or entry.get("status") != "pass" for entry in files
-        ):
-            problems.append("every freshness entry must be pass")
+        if not isinstance(files, list) or not files:
+            problems.append("freshness must observe the exact producer path set with every entry pass")
+        else:
+            if any(not isinstance(entry, dict) or entry.get("status") != "pass" for entry in files):
+                problems.append("every freshness entry must be pass")
+            observed = [
+                entry["path"]
+                for entry in files
+                if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+            ]
+            if (
+                len(observed) != len(files)
+                or set(observed) != set(FRESHNESS_PATHS)
+                or len(set(observed)) != len(observed)
+            ):
+                problems.append("freshness must observe the exact producer path set with no duplicates")
     if active("archive"):
         details = parsed["archive.json"]["details"]
         archive = details if isinstance(details, dict) else {}
@@ -367,10 +401,25 @@ def _criterion_problems(parsed: dict[str, dict[str, Any]], day: str) -> list[str
     if active("authority"):
         details = parsed["authority.json"]["details"]
         authority = details if isinstance(details, dict) else {}
+        if authority.get("status") != "pass":
+            problems.append("authority proof status must be pass")
         if authority.get("present") is not True:
-            problems.append("authority proof must be present and pass")
+            problems.append("authority proof must be present")
         if authority.get("host_label") != EXPECTED_HOST:
             problems.append("authority host label must be sg01")
+        collected_raw = authority.get("collected_at")
+        collected = _parse_aware_utc(collected_raw) if isinstance(collected_raw, str) else None
+        envelope_raw = parsed["authority.json"].get("collected_at")
+        envelope = _parse_aware_utc(envelope_raw) if isinstance(envelope_raw, str) else None
+        if collected is None:
+            problems.append("authority collected_at must be an ISO-8601 timestamp with a UTC offset")
+        else:
+            if collected.strftime("%Y-%m-%d") != day:
+                problems.append("authority collected_at must be on the evidence day")
+            if envelope is not None and (
+                collected - envelope
+            ).total_seconds() > AUTHORITY_CLOCK_SKEW_ALLOWANCE:
+                problems.append("authority collected_at must not be future-dated beyond the collection clock skew")
         if any(
             authority.get(key) is not False
             for key in ("tasker_active", "tasker_enabled", "archive_timer_active", "archive_timer_enabled")
@@ -461,21 +510,29 @@ def _recycle_problems(obj: dict[str, Any], window_start: str, window_end: str) -
     if not isinstance(details, dict):
         problems.append("recycle proof details missing")
         return problems
+    start_dt = datetime.strptime(window_start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    end_dt = datetime.strptime(window_end, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+    collected_raw = obj.get("collected_at")
+    collected = _parse_aware_utc(collected_raw) if isinstance(collected_raw, str) else None
+    if collected is None:
+        problems.append("recycle collected_at must be an ISO-8601 timestamp with a UTC offset")
+    elif not (start_dt <= collected < end_dt):
+        problems.append("recycle collected_at is outside the seven-day window")
     performed_raw = details.get("performed_at")
     performed = _parse_aware_utc(performed_raw) if isinstance(performed_raw, str) else None
     if performed is None:
         problems.append("recycle performed_at must be an ISO-8601 timestamp with a UTC offset")
-    else:
-        start_dt = datetime.strptime(window_start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        end_dt = datetime.strptime(window_end, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
-        if not (start_dt <= performed < end_dt):
-            problems.append("recycle performed_at is outside the seven-day window")
+    elif not (start_dt <= performed < end_dt):
+        problems.append("recycle performed_at is outside the seven-day window")
+    elif collected is not None and collected.strftime("%Y-%m-%d") != performed.strftime("%Y-%m-%d"):
+        problems.append("recycle collected_at must be on the same UTC day as performed_at")
     for phase in ("pre_recycle", "post_recycle"):
         phase_details = details.get(phase)
         if not isinstance(phase_details, dict):
             problems.append("recycle phase details missing")
             continue
-        if phase_details.get("scheduler_instances") != 1:
+        instances = phase_details.get("scheduler_instances")
+        if type(instances) is not int or instances != 1:
             problems.append("recycle scheduler instance count is not exactly 1")
         if any(phase_details.get(component) != "pass" for component in RECYCLE_COMPONENTS):
             problems.append("recycle component must pass")
@@ -542,7 +599,7 @@ def assemble_report(
     cfg: Config,
     per_day: list[dict[str, Any]],
     recycle: dict[str, Any],
-    extra_root_entries: list[str],
+    root_issues: list[str],
     root_blockers: list[str],
 ) -> dict[str, Any]:
     blockers: list[str] = []
@@ -555,9 +612,8 @@ def assemble_report(
             extend_reasons.append(f"day {day} directory missing")
         if day_report["warnings"]:
             extend_reasons.extend(f"day {day}: {notice}" for notice in day_report["warnings"])
+    blockers.extend(root_issues)
     blockers.extend(root_blockers)
-    for entry in extra_root_entries:
-        blockers.append("unexpected entry in evidence root")
     continuity = _build_continuity(per_day)
     if continuity["duplicate_sha"]:
         blockers.append("duplicate archive sha256 across the window")
@@ -671,22 +727,33 @@ def main(argv: list[str] | None = None) -> int:
 
     per_day = [validate_day(cfg.evidence_root, day) for day in day_names]
 
-    extra_root_entries: list[str] = []
+    root_issues: list[str] = []
     try:
         entries = set(os.listdir(cfg.evidence_root))
     except OSError:
         entries = set()
-    if entries:
-        extra_root_entries = sorted(
-            entry
-            for entry in entries
-            if entry != "recycle.json"
-            and entry not in set(day_names)
-            and not _is_calendar_day(entry)  # date-named dirs outside the window are historical
-        )
+    for entry in sorted(entries):
+        if entry == "recycle.json" or entry in set(day_names):
+            continue
+        if _is_calendar_day(entry):
+            # Date-named dirs outside the window are historical evidence:
+            # tolerated only as real non-symlink 0700 directories; contents
+            # are not validated because they are outside the window.
+            historical_path = cfg.evidence_root / entry
+            try:
+                historical_st = historical_path.lstat()
+            except OSError:
+                root_issues.append("historical day entry must be a regular non-symlink directory")
+                continue
+            if stat.S_ISLNK(historical_st.st_mode) or not stat.S_ISDIR(historical_st.st_mode):
+                root_issues.append("historical day entry must be a regular non-symlink directory")
+            elif stat.S_IMODE(historical_st.st_mode) != 0o700:
+                root_issues.append("historical day entry must be exactly mode 0700")
+            continue
+        root_issues.append("unexpected entry in evidence root")
 
     recycle = validate_recycle(cfg.evidence_root, cfg.start_day, cfg.end_day)
-    report = assemble_report(cfg, per_day, recycle, extra_root_entries, root_blockers)
+    report = assemble_report(cfg, per_day, recycle, root_issues, root_blockers)
     write_report(cfg.output_json, report)
     emit(report)
     return 0 if report["verdict"] in ("accept", "ready_except_recycle") else 2

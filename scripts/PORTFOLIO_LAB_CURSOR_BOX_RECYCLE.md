@@ -5,8 +5,10 @@
 > recycle (host restart) of the cursor-box production host. It authorizes no
 > reboot, no shutdown, no stop/start, no restore, no activation, and no
 > authority change. Most checks below are read-only probes; the only writes
-> are the bounded daily-evidence collector runs and the attended sg01 proof
-> refresh (bounded evidence/proof artifacts, explicitly attended), and the
+> are the bounded daily-evidence collector runs, the attended sg01 proof
+> refresh, and the attended bounded recycle-proof write after the
+> post-recycle checks all pass (bounded evidence/proof artifacts,
+> explicitly attended), and the
 > operator recycle action is the only lifecycle mutation, requiring separate
 > attended confirmation at execution time. This document is not evidence
 > that any recycle occurred; evidence of record is the attended recycle
@@ -49,9 +51,10 @@ Ports: API origin loopback `127.0.0.1:8000`; static origin loopback
 ## Preconditions (all must hold; re-verified in order immediately before stop conditions)
 
 Probes below are read-only. The only writes anywhere in this runbook are the
-bounded daily-evidence collector runs and the attended sg01 proof refresh
-(both explicitly attended). `status --read-only` never cleans stale PID/state
-records and never mutates services.
+bounded daily-evidence collector runs, the attended sg01 proof refresh, and
+the attended bounded recycle-proof write after the post-recycle checks all
+pass (all explicitly attended). `status --read-only` never cleans stale
+PID/state records and never mutates services.
 
 1. **Fresh same-day successful archive + SHA (continuity evidence only).**
    `run/s3-archive-last-utc-day` equals today's `%Y%m%d`; `run/s3-archive.log`
@@ -179,9 +182,12 @@ acceptance checker return `investigate`.
 }
 ```
 
-- Field meaning: `scheduler_instances` is exactly `1` in both phases;
-  `tasker`/`static`/`tunnel`/`api` each carry the attended phase judgment,
-  `pass` only when the corresponding observation in that phase passed.
+- Field meaning: `collected_at` is the proof creation time: ISO-8601 with a
+  UTC offset, inside the seven-day window and on the same UTC day as
+  `performed_at`. `scheduler_instances` is strictly the integer `1` in both
+  phases (bools/floats are not accepted); `tasker`/`static`/`tunnel`/`api`
+  each carry the attended phase judgment, `pass` only when the corresponding
+  observation in that phase passed.
 - Validate read-only before finalizing:
   `python3 app/scripts/portfolio_lab_evidence_acceptance.py --evidence-root /home/box/.local/share/portfolio-lab/evidence --require-recycle-proof`
   must produce verdict `accept` once the proof is complete (phases fill only
@@ -222,8 +228,9 @@ action.
 Bounded means: each probe has a fixed per-attempt timeout (default 10 s,
 matching the collector) and the whole sequence has a fixed total budget
 agreed before the action (default 30 min); on budget exhaustion go to the
-Failure path. All probes read-only; the collector rerun and the attended sg01
-proof refresh (steps 7 and 8) are the only writes.
+Failure path. All probes read-only; the collector rerun, the attended sg01
+proof refresh (steps 7 and 8), and the attended bounded recycle-proof write
+(step 9, only after these checks) are the only writes.
 
 1. **Host reachable.** cursor-box responds to an attended reachability probe
    (e.g. SSH/ICMP, bounded).
@@ -258,6 +265,16 @@ proof refresh (steps 7 and 8) are the only writes.
 
 Only after all eight pass (and a full seven-day `pass` window with the
 written proof) is recycle persistence evidenced.
+
+9. **Write the attended bounded recycle proof** (`recycle.json`, artifact
+   contract above). It is written only here — after all post-recycle checks
+   pass and both phases fully pass — never early or partially: exactly mode
+   0600, at most 262144 bytes, envelope `collected_at` and details
+   `performed_at` inside the window on the same UTC day, both phase
+   `scheduler_instances` strictly the integer `1`, and
+   `tasker`/`static`/`tunnel`/`api` all `pass`. Validate read-only and
+   expect `accept`:
+   `python3 app/scripts/portfolio_lab_evidence_acceptance.py --evidence-root /home/box/.local/share/portfolio-lab/evidence --require-recycle-proof`
 
 ## Failure path
 

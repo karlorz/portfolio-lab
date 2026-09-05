@@ -20,8 +20,14 @@ placement (exit 1); output-json mode 0600 and idempotence; output write
 failure (exit 1, empty stdout, static stderr, no temp artifacts); symlinked
 or non-directory evidence root (exit 1) and root mode 0700 validated but
 never mutated; historical date-named directories outside the window
-tolerated; strict integer scheduler_instances and disk free_bytes (bools
-and floats rejected).
+tolerated only as real non-symlink 0700 directories (date-named
+file/symlink/bad mode investigate); strict integer scheduler_instances and
+disk free_bytes (bools and floats rejected); recycle envelope collected_at
+(present, ISO, within window, same UTC day as performed_at) and strict
+integer phase counts; controller pass/active/production/exact-identity/
+exact-paths criteria; authority nested status/present/host/same-day-
+not-future-beyond-300s/strict bool criteria; freshness exact producer path
+set with no duplicates and every entry pass.
 """
 
 from __future__ import annotations
@@ -181,17 +187,20 @@ def recycle_payload(
     pre_scheduler: int = 1,
     post_scheduler: int = 1,
     components: str = "pass",
+    collected_at: str | None = "2026-09-04T06:00:00+00:00",
 ) -> dict[str, object]:
     comp = {"tasker": components, "static": components, "tunnel": components, "api": components}
-    return {
+    payload: dict[str, object] = {
         "schema": schema, "category": category, "status": status,
-        "collected_at": "2026-09-04T06:00:00+00:00",
         "details": {
             "performed_at": performed_at,
             "pre_recycle": {"scheduler_instances": pre_scheduler, **comp},
             "post_recycle": {"scheduler_instances": post_scheduler, **comp},
         },
     }
+    if collected_at is not None:
+        payload["collected_at"] = collected_at
+    return payload
 
 
 def write_recycle(root: Path, payload: object = None, mode: int = 0o600) -> None:
@@ -384,6 +393,52 @@ def test_warning_notices_never_in_fail_blockers(checker: object, tmp_path: Path,
     assert f"day {days[-1]}: freshness category is warning" in report["warnings"]
 
 
+def test_historical_date_file_investigates(checker: object, tmp_path: Path, capsys: object) -> None:
+    root = tmp_path / "evidence"
+    write_window(root)
+    (root / "2026-08-29").write_text("not a directory", encoding="utf-8")
+    assert run_main(checker, root) == 2
+    report = read_report(capsys)
+    assert report["verdict"] == "investigate"
+    assert "historical day entry must be a regular non-symlink directory" in report["blockers"]
+
+
+def test_historical_date_symlink_investigates(checker: object, tmp_path: Path, capsys: object) -> None:
+    root = tmp_path / "evidence"
+    write_window(root)
+    os.symlink(root / "2026-09-01", root / "2026-08-29")
+    assert run_main(checker, root) == 2
+    report = read_report(capsys)
+    assert report["verdict"] == "investigate"
+    assert "historical day entry must be a regular non-symlink directory" in report["blockers"]
+
+
+def test_historical_date_bad_mode_investigates(checker: object, tmp_path: Path, capsys: object) -> None:
+    root = tmp_path / "evidence"
+    write_window(root)
+    write_day(root, "2026-08-29")
+    os.chmod(root / "2026-08-29", 0o755)
+    assert run_main(checker, root) == 2
+    report = read_report(capsys)
+    assert report["verdict"] == "investigate"
+    assert "historical day entry must be exactly mode 0700" in report["blockers"]
+
+
+def test_authority_collected_at_future_within_skew_accepts(
+    checker: object, tmp_path: Path, capsys: object
+) -> None:
+    root = tmp_path / "evidence"
+    days = day_span()
+    payloads = day_payloads(days[4])
+    payloads["authority.json"]["details"].update(collected_at="2026-09-03T04:05:00+00:00")
+    write_day(root, days[4], payloads)
+    for day in days[:4] + days[5:]:
+        write_day(root, day)
+    write_recycle(root)
+    assert run_main(checker, root) == 0
+    assert read_report(capsys)["verdict"] == "accept"
+
+
 def test_historical_days_outside_window_allowed(checker: object, tmp_path: Path, capsys: object) -> None:
     root = tmp_path / "evidence"
     write_window(root)
@@ -486,17 +541,30 @@ def test_wrong_archive_day_investigates(
         ("scheduler-bool", lambda d: d["tasker.json"]["details"]["tasker_controller"].update(scheduler_instances=True)),
         ("scheduler-float", lambda d: d["tasker.json"]["details"]["tasker_controller"].update(scheduler_instances=1.0)),
         ("tasker-state", lambda d: d["tasker.json"]["details"]["tasker_controller"].update(state="inactive")),
+        ("tasker-mode", lambda d: d["tasker.json"]["details"]["tasker_controller"].update(mode="development")),
+        ("tasker-paths", lambda d: d["tasker.json"]["details"]["tasker_controller"].update(paths_exact=False)),
+        ("tasker-status", lambda d: d["tasker.json"]["details"]["tasker_controller"].update(status="fail")),
         ("static-identity", lambda d: d["tasker.json"]["details"]["static_controller"].update(identity_exact=False)),
+        ("static-paths", lambda d: d["tasker.json"]["details"]["static_controller"].update(paths_exact=False)),
+        ("static-status", lambda d: d["tasker.json"]["details"]["static_controller"].update(status="fail")),
         ("api-status", lambda d: d["jobs.json"]["details"]["api"].update(status="fail")),
         ("api-http", lambda d: d["jobs.json"]["details"]["api"].update(http_status=500)),
         ("static-http", lambda d: d["jobs.json"]["details"]["static_root"].update(http_status=503)),
         ("freshness-entry", lambda d: d["freshness.json"]["details"]["files"][0].update(status="fail")),
+        ("freshness-empty", lambda d: d["freshness.json"]["details"].update(files=[])),
+        ("freshness-missing-path", lambda d: d["freshness.json"]["details"].update(files=d["freshness.json"]["details"]["files"][:3])),
+        ("freshness-duplicate-path", lambda d: d["freshness.json"]["details"].update(files=[d["freshness.json"]["details"]["files"][0]] + d["freshness.json"]["details"]["files"])),
+        ("freshness-wrong-path", lambda d: d["freshness.json"]["details"]["files"][0].update(path="app/data/other.json")),
         ("disk-free", lambda d: d["resources.json"]["details"]["disk"].update(free_bytes=10 * GIB)),
         ("disk-status", lambda d: d["resources.json"]["details"]["disk"].update(status="warning")),
         ("disk-bool", lambda d: d["resources.json"]["details"]["disk"].update(free_bytes=True)),
         ("authority-present", lambda d: d["authority.json"]["details"].update(present=False)),
         ("authority-host", lambda d: d["authority.json"]["details"].update(host_label="other-host")),
         ("authority-flags", lambda d: d["authority.json"]["details"].update(tasker_active=True)),
+        ("authority-status", lambda d: d["authority.json"]["details"].update(status="warning")),
+        ("authority-time-missing", lambda d: d["authority.json"]["details"].update(collected_at=None)),
+        ("authority-time-wrong-day", lambda d: d["authority.json"]["details"].update(collected_at="2026-09-02T03:30:00+00:00")),
+        ("authority-time-future", lambda d: d["authority.json"]["details"].update(collected_at="2026-09-04T04:10:00+00:00")),
     ],
 )
 def test_criterion_violation_investigates(
@@ -585,6 +653,13 @@ def test_recycle_required_absent_extends(checker: object, tmp_path: Path, capsys
         ("post-scheduler", {"post_scheduler": 2}, 0o600),
         ("component", {"components": "fail"}, 0o600),
         ("mode", {}, 0o644),
+        ("missing-collected-at", {"collected_at": None}, 0o600),
+        ("collected-at-naive", {"collected_at": "2026-09-04T06:00:00"}, 0o600),
+        ("collected-at-outside-window", {"collected_at": "2026-08-29T06:00:00+00:00"}, 0o600),
+        ("collected-at-day-mismatch", {"collected_at": "2026-09-03T06:00:00+00:00"}, 0o600),
+        ("pre-scheduler-bool", {"pre_scheduler": True}, 0o600),
+        ("pre-scheduler-float", {"pre_scheduler": 1.0}, 0o600),
+        ("post-scheduler-bool", {"post_scheduler": True}, 0o600),
     ],
 )
 def test_invalid_recycle_investigates(
@@ -624,7 +699,13 @@ def test_recycle_boundary_within_window_still_accepts(
 ) -> None:
     root = tmp_path / "evidence"
     write_window(root)
-    write_recycle(root, recycle_payload(performed_at="2026-08-30T00:00:00+00:00"))
+    write_recycle(
+        root,
+        recycle_payload(
+            performed_at="2026-08-30T00:00:00+00:00",
+            collected_at="2026-08-30T01:00:00+00:00",
+        ),
+    )
     assert run_main(checker, root) == 0
     assert read_report(capsys)["verdict"] == "accept"
 
