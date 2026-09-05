@@ -97,7 +97,13 @@ PID/state records and never mutates services.
    `collected_at` fresh under the freshness max age (default 21600 s) and not
    future-dated, and `tasker.active`, `tasker.enabled`,
    `archive_timer.active`, `archive_timer.enabled` all exactly `false`.
-   Refresh it attended before the recycle; never assume an aged proof. The
+   Refresh it attended before the recycle; never assume an aged proof:
+   `python3 app/scripts/portfolio_lab_sg01_proof_refresh.py --proof /home/box/.local/share/portfolio-lab/run/former-authority-proof.json`
+   (one-shot and attended, never scheduled; read-only `systemctl is-active` /
+   `systemctl is-enabled` probes over explicit-argv SSH with `BatchMode=yes`
+   and a bounded `ConnectTimeout`; fails closed with exit 1, empty stdout and
+   the existing proof preserved unless both units are exactly inactive and
+   disabled; `--now` pins `collected_at` so reruns are byte-identical). The
    collector run that consumes it must use a pinned `--now` on the current
    UTC day no earlier than the proof's `collected_at`.
 5. **Exact one scheduler.** Tasker controller reports `scheduler_instances: 1`:
@@ -254,7 +260,9 @@ proof refresh (steps 7 and 8), and the attended bounded recycle-proof write
    complete and today's evidence must again be overall `pass`.
 8. **sg01 remains disabled via fresh attended proof, then re-collect, in
    this order.** (a) Refresh `run/former-authority-proof.json` attended
-   first: regular non-symlink file owned by the collector uid, exactly mode
+   first with the precondition 4 refresh command
+   (`python3 app/scripts/portfolio_lab_sg01_proof_refresh.py --proof /home/box/.local/share/portfolio-lab/run/former-authority-proof.json`):
+   regular non-symlink file owned by the collector uid, exactly mode
    0600, fresh `collected_at`, all four booleans false, `host_label` `sg01`.
    (b) Choose the current RFC3339 `--now`: on the current UTC day and no
    earlier than the proof's `collected_at` (a `--now` earlier than
@@ -315,7 +323,7 @@ migration, or any authority change. Those remain separate attended gates.
 | `portfolio-lab-daily-evidence/v1` | `scripts/portfolio_lab_daily_evidence.py` (read-only collector) |
 | `portfolio-lab-evidence-acceptance/v1` | `scripts/portfolio_lab_evidence_acceptance.py` (read-only checker; `--require-recycle-proof`) |
 | `portfolio-lab-recycle-proof/v1` | acceptance checker `_recycle_problems`/`validate_recycle` + `tests/test_portfolio_lab_evidence_acceptance.py` |
-| `portfolio-lab-former-authority-proof/v1` | daily evidence `collect_authority` (owner-uid, non-symlink, exact 0600, freshness) |
+| `portfolio-lab-former-authority-proof/v1` | daily evidence `collect_authority` (owner-uid, non-symlink, exact 0600, freshness); attended refresh in `scripts/portfolio_lab_sg01_proof_refresh.py` (read-only systemctl probes over explicit-argv SSH, fails closed) |
 | Daily continuity tar + SHA | `scripts/cron/portfolio-lab-cursor-box-s3-archive.sh`, `scripts/portfolio_lab_s3_archive.py` (evidenced by `archive` category; not a recovery archive) |
 | `portfolio-lab-recovery/v2` create/verify | `scripts/portfolio_lab_recovery.py` (`create --materialize-generations-current`, `verify` derives sidecar at `<archive>.sha256`; schema at `SCHEMA_VERSION`) |
 | Restore/rollback | `scripts/portfolio_lab_recovery.py` (`restore --target-mode prod --service-controller box-persist`; uses the v2 recovery archive) |
