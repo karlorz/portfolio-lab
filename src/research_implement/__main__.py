@@ -27,6 +27,10 @@ Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never
 ``scheduler_delete``. Session B ``--dry-run`` exercises the default dry-run
 implement callback (records file_touch / acceptance; no repo write).
+
+SHIPPED is callback-only: there is no CLI ``--implement stub-ship`` (or similar)
+flag. Prefer pytest with ``make_fixture_ship_implement`` / ``fixture_ship_implement``
+on ``tmp_path`` plans. Live prod implement stays unwired.
 """
 
 from __future__ import annotations

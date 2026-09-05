@@ -12,6 +12,10 @@ SHIPPED path: pass ``fixture_ship_implement`` / ``make_fixture_ship_implement``
 explicitly (test double only; never the default). CLI defaults to decode-only;
 pass ``--dry-run`` to exercise the dry-run implement path. Live implement to
 prod stays unwired.
+
+JSON contract: ``SessionBResult.to_json_dict()`` / ``SessionResult`` is the
+single shape for CLI ``--json`` and fixture tests (idle / decode_only /
+dry_run / shipped).
 """
 
 from __future__ import annotations
@@ -134,6 +138,21 @@ def format_decode_report(item: QueueItem) -> str:
     return "\n".join(lines)
 
 
+# Stable CLI ``--json`` / test contract keys (idle | picked/decode_only | dry_run | shipped).
+SESSION_RESULT_JSON_KEYS: tuple[str, ...] = (
+    "ok",
+    "verdict",
+    "open_count",
+    "queue",
+    "keep_schedule",
+    "scheduler_delete_called",
+    "item",
+    "implement_result",
+    "wrote_files",
+    "shipped",
+)
+
+
 @dataclass(frozen=True)
 class SessionBResult:
     ok: bool
@@ -156,6 +175,44 @@ class SessionBResult:
         if self.item is None:
             return None
         return format_decode_report(self.item)
+
+    @property
+    def wrote_files(self) -> bool:
+        """True only when implement_result claims a real file write (never for dry_run)."""
+        if not self.implement_result:
+            return False
+        return bool(self.implement_result.get("wrote_files"))
+
+    @property
+    def shipped(self) -> bool:
+        return self.verdict == "shipped"
+
+    def to_json_dict(self) -> dict[str, Any]:
+        """Stable SessionResult JSON shape shared by CLI ``--json`` and tests.
+
+        Present for every verdict (idle / picked=decode_only / dry_run / shipped):
+        ``ok``, ``verdict``, ``open_count``, ``queue``, ``keep_schedule``,
+        ``scheduler_delete_called``, ``item``, ``implement_result``,
+        ``wrote_files``, ``shipped``.
+        """
+        item_payload = decode_fields(self.item) if self.item is not None else None
+        impl = dict(self.implement_result) if self.implement_result is not None else None
+        return {
+            "ok": self.ok,
+            "verdict": self.verdict,
+            "open_count": self.open_count,
+            "queue": self.queue_label,
+            "keep_schedule": self.keep_schedule,
+            "scheduler_delete_called": self.scheduler_delete_called,
+            "item": item_payload,
+            "implement_result": impl,
+            "wrote_files": self.wrote_files,
+            "shipped": self.shipped,
+        }
+
+
+# Public alias: CLI / tests talk about SessionResult JSON contract.
+SessionResult = SessionBResult
 
 
 def run_session_b(

@@ -726,3 +726,152 @@ def test_beat5_dry_run_never_ships_fixture_ship_writes_tmp_path_only(tmp_path: P
     assert idle.keep_schedule is True
     assert idle.scheduler_delete_called is False
     assert calls["n"] == 0
+
+
+def _assert_dry_run_implement_schema(payload: dict) -> None:
+    """JSON/dict schema for dry_run_implement results (CLI + API)."""
+    required = {
+        "dry_run",
+        "item_id",
+        "title",
+        "file_touch",
+        "acceptance",
+        "wrote_files",
+        "sha",
+    }
+    assert set(payload) >= required
+    assert payload["dry_run"] is True
+    assert payload["wrote_files"] is False
+    assert payload["sha"] is None
+    assert isinstance(payload["item_id"], str) and payload["item_id"]
+    assert isinstance(payload["title"], str)
+    assert isinstance(payload["file_touch"], str) and payload["file_touch"]
+    assert isinstance(payload["acceptance"], str) and payload["acceptance"]
+    # dry-run must not claim a ship note/sha
+    assert not payload.get("note")
+
+
+def _assert_shipped_implement_schema(payload: dict) -> None:
+    """JSON/dict schema for fixture_ship_implement results (test double only)."""
+    required = {
+        "dry_run",
+        "item_id",
+        "title",
+        "file_touch",
+        "acceptance",
+        "wrote_files",
+        "sha",
+        "note",
+    }
+    assert set(payload) >= required
+    assert payload["dry_run"] is False
+    assert payload["wrote_files"] is False
+    assert isinstance(payload["sha"], str) and payload["sha"]
+    assert isinstance(payload["note"], str)
+    assert isinstance(payload["item_id"], str) and payload["item_id"]
+    assert isinstance(payload["file_touch"], str) and payload["file_touch"]
+    assert isinstance(payload["acceptance"], str) and payload["acceptance"]
+
+
+def test_beat5_implement_result_json_schema_dry_run_vs_shipped():
+    """Beat 5 polish: contrast dry_run vs shipped implement_result schemas."""
+    plan = _load("one_open_ready.md")
+    dry = run_session_b(plan, implement=dry_run_implement, decode_only=False)
+    assert dry.verdict == "dry_run"
+    assert dry.implement_result is not None
+    _assert_dry_run_implement_schema(dry.implement_result)
+    # Round-trip through json like CLI --json consumers.
+    import json
+
+    dry_round = json.loads(json.dumps(dry.implement_result))
+    _assert_dry_run_implement_schema(dry_round)
+
+    ship_fn = make_fixture_ship_implement("schemabeef", note="schema contrast")
+    shipped = run_session_b(plan, implement=ship_fn, decode_only=False)
+    assert shipped.verdict == "shipped"
+    assert shipped.implement_result is not None
+    _assert_shipped_implement_schema(shipped.implement_result)
+    shipped_round = json.loads(json.dumps(shipped.implement_result))
+    _assert_shipped_implement_schema(shipped_round)
+
+    # Explicit contrast: schemas must disagree on dry_run / sha presence.
+    assert dry.implement_result["dry_run"] is True
+    assert shipped.implement_result["dry_run"] is False
+    assert dry.implement_result["sha"] is None
+    assert shipped.implement_result["sha"] == "schemabeef"
+    assert "note" not in dry.implement_result or not dry.implement_result.get("note")
+    assert shipped.implement_result["note"] == "schema contrast"
+
+
+def test_beat5_fixture_two_open_ready_ship_only_first_on_tmp_path(tmp_path: Path):
+    """Fixture edge: two OPEN ready — dry_run ships none; ship double ships Q1 only."""
+    src = _load("two_open_ready.md")
+    items = parse_queue_items(src)
+    assert [i.item_id for i in items] == ["Q1", "Q2"]
+    assert all(is_b_pickable(i) for i in items)
+    assert count_open(items) == 2
+    assert first_b_pick(items).item_id == "Q1"
+
+    plan = tmp_path / "two.md"
+    plan.write_text(src, encoding="utf-8")
+
+    dry = run_session_b_path(
+        plan, implement=dry_run_implement, decode_only=False, write=True
+    )
+    assert dry.verdict == "dry_run"
+    assert dry.item is not None and dry.item.item_id == "Q1"
+    _assert_dry_run_implement_schema(dry.implement_result)
+    assert "SHIPPED" not in plan.read_text(encoding="utf-8")
+    assert count_open(parse_queue_items(plan.read_text(encoding="utf-8"))) == 2
+
+    ship_fn = make_fixture_ship_implement("twoopen01", note="ship Q1 only")
+    shipped = run_session_b_path(
+        plan, implement=ship_fn, decode_only=False, write=True
+    )
+    assert shipped.verdict == "shipped"
+    assert shipped.item is not None and shipped.item.item_id == "Q1"
+    _assert_shipped_implement_schema(shipped.implement_result)
+    on_disk = plan.read_text(encoding="utf-8")
+    assert "SHIPPED `twoopen01`" in on_disk
+    after = parse_queue_items(on_disk)
+    assert count_open(after) == 1
+    pick = first_b_pick(after)
+    assert pick is not None and pick.item_id == "Q2"
+    assert pick.title == "Second ready complete item"
+
+    # Next fire picks Q2 (still OPEN); dry_run still does not ship it.
+    dry2 = run_session_b_path(
+        plan, implement=dry_run_implement, decode_only=False, write=True
+    )
+    assert dry2.verdict == "dry_run"
+    assert dry2.item is not None and dry2.item.item_id == "Q2"
+    assert count_open(parse_queue_items(plan.read_text(encoding="utf-8"))) == 1
+    assert "SHIPPED `twoopen01`" in plan.read_text(encoding="utf-8")
+
+
+def test_beat5_fixture_open_complete_not_ready_is_idle():
+    """Fixture edge: six fields present but ready-for-implement no → idle, no ship."""
+    plan = _load("open_complete_not_ready.md")
+    items = parse_queue_items(plan)
+    assert len(items) == 1
+    assert is_complete_six_field(items[0])
+    assert items[0].status.upper().startswith("OPEN")
+    assert not is_b_pickable(items[0])
+    assert count_open(items) == 0
+    assert first_b_pick(items) is None
+
+    dry = run_session_b(plan, implement=dry_run_implement, decode_only=False)
+    assert dry.ok and dry.verdict == "idle"
+    assert dry.implement_result is None
+    assert "SHIPPED" not in dry.plan_text
+    assert dry.keep_schedule and not dry.scheduler_delete_called
+
+    # Even an explicit ship double cannot ship — nothing is B-pickable.
+    shipped = run_session_b(
+        plan,
+        implement=make_fixture_ship_implement("should-not-run"),
+        decode_only=False,
+    )
+    assert shipped.ok and shipped.verdict == "idle"
+    assert shipped.implement_result is None
+    assert "SHIPPED" not in shipped.plan_text

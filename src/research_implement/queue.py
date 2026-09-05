@@ -25,8 +25,8 @@ _ITEM_HEADING_RE = re.compile(r"(?m)^###[ \t]+(Q\d+)\.\s*(.+?)\s*$")
 _FIELD_RE = re.compile(
     r"(?m)^\s*([1-6])\.\s*\*\*(title|acceptance|risks|file_touch|breaking_change|redeploy_notes)\*\*\s*:\s*(.*)\s*$"
 )
-_STATUS_RE = re.compile(r"(?mi)^\s*status\s*:\s*(.+?)\s*$")
-_READY_RE = re.compile(r"(?mi)^\s*ready-for-implement\s*:\s*(.+?)\s*$")
+_STATUS_RE = re.compile(r"(?mi)^[ \t]*status[ \t]*:[ \t]*(.*?)[ \t]*$")
+_READY_RE = re.compile(r"(?mi)^[ \t]*ready-for-implement[ \t]*:[ \t]*(.*?)[ \t]*$")
 
 
 @dataclass(frozen=True)

@@ -969,4 +969,5 @@ research-implement-e2e-dry-run:
 	@echo "(second B still dry_run on same OPEN — dry-run never ships)"
 	@echo "Or: PYTHONPATH=. pytest tests/test_research_implement_loop.py -q -k e2e"
 	@echo "Optional ship (test double / tmp_path only; not wired to CLI):"
-	@echo "  PYTHONPATH=. pytest tests/test_research_implement_loop.py -q -k beat5_dry_run_never_ships"
+	@echo "  PYTHONPATH=. pytest tests/test_research_implement_loop.py -q -k beat5"
+	@echo "(ship is callback-only — no CLI stub-ship; prefer pytest tmp_path doubles)"
