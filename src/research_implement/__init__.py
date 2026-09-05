@@ -37,6 +37,11 @@ Beat 15: CLI ``session-a --candidate-json`` loads dict/list candidate for
 brainstorm when OPEN=0; incomplete fail-closes; complete queues one OPEN;
 OPEN>=1 recount-only ignores candidate-json. Proof: pytest ``-k beat15``.
 
+Beat 16: CLI ``--candidate-json`` error paths (missing / invalid JSON / wrong
+type) → clear non-zero failure, no plan mutation; sequential double-OPEN ship
+on tmp_path (ship → ship → idle) never ``scheduler_delete``. Proof: pytest
+``-k beat16``.
+
 JSON: ``SessionResult.to_dict()`` (aliases ``to_json_dict`` / ``session_b_result_dict``)
 is the shared Session B ``--json`` / test contract for idle / decode_only / dry_run /
 shipped. Session A: ``SessionAResult.to_dict()`` (aliases ``to_json_dict`` /

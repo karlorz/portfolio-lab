@@ -50,6 +50,11 @@ stub). Incomplete JSON still fail-closes (Beat 14); complete candidate queues
 one OPEN; OPEN>=1 remains recount-only and ignores candidate-json. Proof:
 pytest ``-k beat15``.
 
+Beat 16: CLI ``--candidate-json`` error paths (missing file, invalid JSON, wrong
+type not object/list) → non-zero exit / clear failure; plan unchanged. Sequential
+double-OPEN ship on tmp_path: two_open_ready → ship first → ship second → idle;
+never ``scheduler_delete``; JSON shapes ok. Proof: pytest ``-k beat16``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never
@@ -79,10 +84,19 @@ def _load_candidate(path: Path | None) -> dict | None:
     object or a JSON list; a list uses the first dict element. Incomplete
     candidates still fail-closed in Session A (Beat 14). Returns None when
     path is omitted or the list has no dict element.
+
+    Beat 16: missing file, invalid JSON, or wrong top-level type (not object/list)
+    raise ``SystemExit`` with a clear ``--candidate-json ...`` message (non-zero
+    CLI failure). Callers must not mutate the plan on these paths.
     """
     if path is None:
         return None
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not path.is_file():
+        raise SystemExit(f"--candidate-json file not found: {path}")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as err:
+        raise SystemExit(f"--candidate-json invalid JSON: {err}") from err
     if isinstance(raw, dict):
         return raw
     if isinstance(raw, list):

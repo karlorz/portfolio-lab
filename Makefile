@@ -985,13 +985,15 @@ research-implement-e2e-dry-run:
 # Proof: pytest -k beat14
 # Beat 15: CLI session-a --candidate-json dict/list when OPEN=0; incomplete fail-closes;
 # OPEN>=1 recount-only ignores candidate-json. Proof: pytest -k beat15
+# Beat 16: --candidate-json error paths (missing/invalid/wrong-type) clear fail + no plan
+# mutation; sequential double-OPEN ship → idle never scheduler_delete. Proof: pytest -k beat16
 .PHONY: research-implement-e2e-pipeline
 research-implement-e2e-pipeline:
 	@echo "Beat 11 full pipeline (tmp_path via pytest; side-dev only):"
 	@echo "  A stub → B dry_run JSON → B fixture_ship → A light (OPEN>=1) and/or B idle"
 	@echo "  dry_run never ships; fixture_ship ships on tmp_path only; never scheduler_delete"
 	@echo "Run: PORTFOLIO_LAB_ENABLE_ML=0 <RI_PYTHON> -m pytest tests/test_research_implement_loop.py -q -k beat11_full_pipeline"
-	@echo "Or:  make test-research-implement   # full A/B suite incl. beat10/beat11/beat12/beat13/beat14/beat15"
+	@echo "Or:  make test-research-implement   # full A/B suite incl. beat10/beat11/beat12/beat13/beat14/beat15/beat16"
 
 # Side-dev only (no Tasker / no LLM / no 8000/8001): A/B loop + contract
 # fixture tests + optional host contract (skip-if-missing).

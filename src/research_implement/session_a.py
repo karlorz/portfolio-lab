@@ -13,7 +13,8 @@ never a partial OPEN append.
 
 CLI ``session-a --candidate-json`` (Beat 15) supplies the brainstorm candidate
 when OPEN=0 (dict or first dict in a JSON list); incomplete candidates still
-fail-closed here (Beat 14).
+fail-closed here (Beat 14). Beat 16 covers CLI load error paths (missing file,
+invalid JSON, wrong type) as clear non-zero failures with no plan mutation.
 
 JSON contract: ``SessionAResult.to_dict()`` (aliases ``to_json_dict`` /
 ``session_a_result_dict``) is the shared shape for CLI ``session-a --json``

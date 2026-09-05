@@ -2486,9 +2486,11 @@ def test_beat15_incomplete_candidate_json_fails_no_partial_append(tmp_path: Path
 
 def test_beat15_open_ge1_recount_only_ignores_candidate_json(tmp_path: Path, capsys):
     """Beat 15: OPEN>=1 → recount-only light; --candidate-json ignored (no append)."""
+    from src.research_implement import __main__ as ri_main
     from src.research_implement.__main__ import main
 
     fixture = FIXTURES / "complete_candidate.json"
+    incomplete = FIXTURES / "incomplete_candidate.json"
     src = _load("one_open_ready.md")
     assert count_open(parse_queue_items(src)) >= 1
 
@@ -2498,16 +2500,19 @@ def test_beat15_open_ge1_recount_only_ignores_candidate_json(tmp_path: Path, cap
     open_before = count_open(parse_queue_items(before))
     items_before = parse_queue_items(before)
 
-    rc = main(
-        [
-            "session-a",
-            "--plan",
-            str(plan),
-            "--candidate-json",
-            str(fixture),
-            "--json",
-        ]
-    )
+    # Deferred load: OPEN>=1 must not call _load_candidate at all.
+    with patch.object(ri_main, "_load_candidate", wraps=ri_main._load_candidate) as spy:
+        rc = main(
+            [
+                "session-a",
+                "--plan",
+                str(plan),
+                "--candidate-json",
+                str(fixture),
+                "--json",
+            ]
+        )
+    assert spy.call_count == 0
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     _assert_session_a_result_json_shape(payload)
@@ -2547,6 +2552,28 @@ def test_beat15_open_ge1_recount_only_ignores_candidate_json(tmp_path: Path, cap
     assert two.read_text(encoding="utf-8") == two_src
     assert "Complete candidate fixture" not in two.read_text(encoding="utf-8")
 
+    # Incomplete candidate-json also ignored when OPEN>=1 (light, not failed).
+    plan2 = tmp_path / "open_ge1_incomplete.md"
+    plan2.write_text(src, encoding="utf-8")
+    with patch.object(ri_main, "_load_candidate", wraps=ri_main._load_candidate) as spy2:
+        rc3 = main(
+            [
+                "session-a",
+                "--plan",
+                str(plan2),
+                "--candidate-json",
+                str(incomplete),
+                "--json",
+            ]
+        )
+    assert spy2.call_count == 0
+    assert rc3 == 0
+    payload3 = json.loads(capsys.readouterr().out)
+    assert payload3["verdict"] == "light"
+    assert payload3["wrote_item"] is False
+    assert payload3["ok"] is True
+    assert plan2.read_text(encoding="utf-8") == src
+
 
 def test_beat15_load_candidate_dict_or_list_helpers():
     """Beat 15: _load_candidate normalizes dict and list; empty list → None."""
@@ -2560,3 +2587,226 @@ def test_beat15_load_candidate_dict_or_list_helpers():
     assert "acceptance" not in incomplete or incomplete.get("acceptance") in (None, "")
     assert incomplete_candidate_reasons(incomplete)
 
+
+
+# --- Beat 16: candidate-json CLI error paths + sequential double-OPEN ship ---
+
+
+def test_beat16_candidate_json_missing_file_fails_no_plan_mutation(tmp_path: Path, capsys):
+    """Beat 16: missing --candidate-json file → SystemExit clear fail; plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    empty = _load("empty_queue.md")
+    plan = tmp_path / "missing_cand_plan.md"
+    plan.write_text(empty, encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    missing = tmp_path / "does_not_exist_candidate.json"
+    assert not missing.exists()
+
+    with pytest.raises(SystemExit) as ei:
+        main(
+            [
+                "session-a",
+                "--plan",
+                str(plan),
+                "--candidate-json",
+                str(missing),
+                "--json",
+            ]
+        )
+    assert ei.value.code != 0
+    msg = str(ei.value)
+    assert "--candidate-json" in msg
+    assert "not found" in msg.lower()
+    assert plan.read_text(encoding="utf-8") == before
+    assert count_open(parse_queue_items(plan.read_text(encoding="utf-8"))) == 0
+    assert "### Q" not in plan.read_text(encoding="utf-8")
+    # No Session A JSON success payload on this path.
+    out = capsys.readouterr().out.strip()
+    assert out == "" or "queued" not in out
+
+
+def test_beat16_candidate_json_invalid_json_fails_no_plan_mutation(tmp_path: Path, capsys):
+    """Beat 16: invalid --candidate-json → SystemExit clear fail; plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    empty = _load("empty_queue.md")
+    plan = tmp_path / "invalid_cand_plan.md"
+    plan.write_text(empty, encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    bad = tmp_path / "invalid_candidate.json"
+    bad.write_text("{not valid json", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as ei:
+        main(
+            [
+                "session-a",
+                "--plan",
+                str(plan),
+                "--candidate-json",
+                str(bad),
+                "--json",
+            ]
+        )
+    assert ei.value.code != 0
+    msg = str(ei.value)
+    assert "--candidate-json" in msg
+    assert "invalid JSON" in msg
+    assert plan.read_text(encoding="utf-8") == before
+    assert count_open(parse_queue_items(plan.read_text(encoding="utf-8"))) == 0
+    assert parse_queue_items(plan.read_text(encoding="utf-8")) == []
+    out = capsys.readouterr().out.strip()
+    assert out == "" or "queued" not in out
+
+
+def test_beat16_candidate_json_wrong_type_fails_no_plan_mutation(tmp_path: Path, capsys):
+    """Beat 16: wrong top-level type (not object/list) → SystemExit; plan unchanged."""
+    from src.research_implement.__main__ import _load_candidate, main
+
+    empty = _load("empty_queue.md")
+    plan = tmp_path / "wrong_type_plan.md"
+    plan.write_text(empty, encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+
+    cases = [
+        ("number.json", "42", "int"),
+        ("string.json", '"hello"', "str"),
+        ("null.json", "null", "NoneType"),
+        ("bool.json", "true", "bool"),
+    ]
+    for name, body, typename in cases:
+        cand = tmp_path / name
+        cand.write_text(body, encoding="utf-8")
+        plan.write_text(before, encoding="utf-8")
+
+        with pytest.raises(SystemExit) as ei_load:
+            _load_candidate(cand)
+        assert ei_load.value.code != 0
+        load_msg = str(ei_load.value)
+        assert "--candidate-json" in load_msg
+        assert "object or list" in load_msg
+        assert typename in load_msg
+
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "session-a",
+                    "--plan",
+                    str(plan),
+                    "--candidate-json",
+                    str(cand),
+                    "--json",
+                ]
+            )
+        assert ei.value.code != 0
+        msg = str(ei.value)
+        assert "--candidate-json" in msg
+        assert "object or list" in msg
+        assert typename in msg
+        assert plan.read_text(encoding="utf-8") == before
+        assert count_open(parse_queue_items(plan.read_text(encoding="utf-8"))) == 0
+        assert "### Q" not in plan.read_text(encoding="utf-8")
+        capsys.readouterr()  # drain
+
+
+def test_beat16_sequential_double_open_ship_then_idle(tmp_path: Path):
+    """Beat 16: two_open_ready → ship Q1 → ship Q2 → idle; never scheduler_delete.
+
+    JSON shapes ok on each ship and the final idle. tmp_path / fixture ship only.
+    """
+    src = _load("two_open_ready.md")
+    items = parse_queue_items(src)
+    assert [i.item_id for i in items] == ["Q1", "Q2"]
+    assert count_open(items) == 2
+    assert first_b_pick(items).item_id == "Q1"
+
+    plan = tmp_path / "double_ship.md"
+    plan.write_text(src, encoding="utf-8")
+
+    calls = {"n": 0}
+
+    def _spy(*_a, **_k):
+        calls["n"] += 1
+        raise SchedulerDeleteForbidden("spy")
+
+    # --- ship first OPEN (Q1) ---
+    ship1 = make_fixture_ship_implement("beat16ship1", note="beat16 ship Q1")
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        first = run_session_b_path(
+            plan, implement=ship1, decode_only=False, write=True
+        )
+    assert first.ok and first.verdict == "shipped"
+    assert first.item is not None and first.item.item_id == "Q1"
+    assert first.keep_schedule is True
+    assert first.scheduler_delete_called is False
+    first_dict = first.to_dict()
+    assert first_dict == first.to_json_dict() == session_b_result_dict(first)
+    _assert_session_result_json_shape(first_dict)
+    assert first_dict["verdict"] == "shipped"
+    assert first_dict["shipped"] is True
+    assert first_dict["scheduler_delete_called"] is False
+    assert first_dict["keep_schedule"] is True
+    assert first_dict["open_count"] == 1
+    assert first_dict["queue"] == "queue 1/10"
+    _assert_shipped_implement_schema(first_dict["implement_result"])
+    assert first_dict["implement_result"]["sha"] == "beat16ship1"
+
+    after1 = plan.read_text(encoding="utf-8")
+    assert "SHIPPED `beat16ship1`" in after1
+    items1 = parse_queue_items(after1)
+    assert count_open(items1) == 1
+    pick1 = first_b_pick(items1)
+    assert pick1 is not None and pick1.item_id == "Q2"
+    assert calls["n"] == 0
+
+    # --- ship second OPEN (Q2) ---
+    ship2 = make_fixture_ship_implement("beat16ship2", note="beat16 ship Q2")
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        second = run_session_b_path(
+            plan, implement=ship2, decode_only=False, write=True
+        )
+    assert second.ok and second.verdict == "shipped"
+    assert second.item is not None and second.item.item_id == "Q2"
+    assert second.keep_schedule is True
+    assert second.scheduler_delete_called is False
+    second_dict = second.to_dict()
+    _assert_session_result_json_shape(second_dict)
+    assert second_dict["verdict"] == "shipped"
+    assert second_dict["shipped"] is True
+    assert second_dict["scheduler_delete_called"] is False
+    assert second_dict["open_count"] == 0
+    assert second_dict["queue"] == "queue 0/10"
+    _assert_shipped_implement_schema(second_dict["implement_result"])
+    assert second_dict["implement_result"]["sha"] == "beat16ship2"
+
+    after2 = plan.read_text(encoding="utf-8")
+    assert "SHIPPED `beat16ship1`" in after2
+    assert "SHIPPED `beat16ship2`" in after2
+    items2 = parse_queue_items(after2)
+    assert count_open(items2) == 0
+    assert first_b_pick(items2) is None
+    assert calls["n"] == 0
+
+    # --- idle after both shipped ---
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        idle = run_session_b_path(plan, decode_only=True, write=False)
+    assert idle.ok and idle.verdict == "idle"
+    assert idle.keep_schedule is True
+    assert idle.scheduler_delete_called is False
+    idle_dict = idle.to_dict()
+    _assert_session_result_json_shape(idle_dict)
+    assert idle_dict["verdict"] == "idle"
+    assert idle_dict["ok"] is True
+    assert idle_dict["open_count"] == 0
+    assert idle_dict["queue"] == "queue 0/10"
+    assert idle_dict["shipped"] is False
+    assert idle_dict["item"] is None
+    assert idle_dict["implement_result"] is None
+    assert idle_dict["scheduler_delete_called"] is False
+    assert idle_dict["keep_schedule"] is True
+    assert calls["n"] == 0
+    # Plan still has both SHIPPED markers; no schedule delete ever.
+    final = plan.read_text(encoding="utf-8")
+    assert "SHIPPED `beat16ship1`" in final
+    assert "SHIPPED `beat16ship2`" in final
+    assert count_open(parse_queue_items(final)) == 0
