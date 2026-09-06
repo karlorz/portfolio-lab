@@ -6793,3 +6793,51 @@ def test_beat110_public_api_milestone_exports():
     assert ri.default_search_plan is ri.stub_brainstorm
     assert len(ri.__all__) == len(set(ri.__all__))
 
+def test_beat111_idle_decode_path_queue_zero_ten():
+    """Beat 111: non-pickable fixtures idle with queue 0/10; decode_report None; no scheduler_delete."""
+    idle_fixtures = (
+        "empty_queue.md",
+        "shipped_only.md",
+        "incomplete_open.md",
+        "open_complete_not_ready.md",
+        "broken_ready_flag.md",
+        "watch_only_lookalike.md",
+        "watch_heartbeat_no_queue.md",
+        "watch_queue_heartbeat_empty.md",
+    )
+    for name in idle_fixtures:
+        result = run_session_b(_load(name), decode_only=True)
+        assert result.ok is True, name
+        assert result.verdict == "idle", name
+        assert result.keep_schedule is True, name
+        assert result.scheduler_delete_called is False, name
+        assert result.decode_report is None, name
+        assert result.item is None, name
+        assert result.queue_label == "queue 0/10", name
+        assert "queue 0/10" in result.message, name
+        assert "nothing to implement" in result.message, name
+        assert "keep_schedule" in result.message, name
+        payload = result.to_dict()
+        assert payload["queue"] == "queue 0/10", name
+        assert payload["scheduler_delete_called"] is False, name
+        assert payload["keep_schedule"] is True, name
+
+
+def test_beat111_picked_decode_report_matches_helper():
+    """Beat 111: picked decode_report == format_decode_report(item); helpers stay public."""
+    import src.research_implement as ri
+
+    result = run_session_b(_load("one_open_ready.md"), decode_only=True)
+    assert result.verdict == "picked"
+    assert result.item is not None
+    expected = format_decode_report(result.item)
+    assert result.decode_report == expected
+    assert result.decode_report.startswith("decode pick Q1:")
+    assert expected in result.message
+    assert result.scheduler_delete_called is False
+    assert result.keep_schedule is True
+
+    for name in ("decode_fields", "format_decode_report", "scheduler_delete"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+
