@@ -116,6 +116,8 @@ Beat 43: side-dev guide documents make targets + no CLI ship flag + never ``sche
 
 Beat 44: ``session-b --json`` help matches shared ``SessionResult.to_dict`` (idle | picked | dry_run); dry-run message includes ``decode pick`` six-field report like decode-only. Proof: pytest ``-k beat44``.
 
+Beat 45: ``idle-decode --json`` / ``session-a --json`` help mention shared ``SessionResult.to_dict`` / ``SessionAResult.to_dict``; decode-only ``session-b`` message includes ``decode pick``. Proof: pytest ``-k beat45``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

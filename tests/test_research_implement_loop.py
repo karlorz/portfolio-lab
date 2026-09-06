@@ -4461,3 +4461,32 @@ def test_beat44_dry_run_message_includes_decode_pick():
     assert result.decode_report is not None
     assert "decode pick" in result.decode_report
 
+
+def test_beat45_idle_and_a_json_help_mention_to_dict(capsys):
+    """Beat 45: idle-decode / session-a --json help mention to_dict contracts."""
+    from src.research_implement.__main__ import main
+
+    with pytest.raises(SystemExit) as ei_i:
+        main(["idle-decode", "--help"])
+    assert ei_i.value.code == 0
+    idle = capsys.readouterr().out
+    assert "SessionResult.to_dict" in idle or "to_dict" in idle
+
+    with pytest.raises(SystemExit) as ei_a:
+        main(["session-a", "--help"])
+    assert ei_a.value.code == 0
+    a = capsys.readouterr().out
+    assert "SessionAResult.to_dict" in a or "to_dict" in a
+
+
+def test_beat45_decode_only_message_includes_decode_pick():
+    """Beat 45: session-b decode-only message includes decode pick six-field report."""
+    from src.research_implement.session_b import run_session_b
+
+    plan = (FIXTURES / "one_open_ready.md").read_text(encoding="utf-8")
+    result = run_session_b(plan, decode_only=True)
+    assert result.ok
+    assert result.item is not None
+    assert f"decode pick {result.item.item_id}" in result.message
+    assert result.scheduler_delete_called is False
+

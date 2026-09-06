@@ -70,3 +70,5 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - No CLI `--implement` / stub-ship flag — SHIPPED stays callback-only.
 - `session-b --json` emits shared `SessionResult.to_dict` (idle | picked | dry_run); never `scheduler_delete`.
 - Session B dry-run text includes the same `decode pick` six-field report as decode-only.
+- `--json` help: session-a → `SessionAResult.to_dict`; session-b/idle-decode → `SessionResult.to_dict`.
+- Decode-only and dry-run messages both include `decode pick` six-field report.
