@@ -4560,3 +4560,43 @@ def test_beat47_mixed_priority_cli_picks_first_ready(tmp_path: Path, capsys):
     assert payload.get("scheduler_delete_called") is False
     assert plan.read_text(encoding="utf-8") == src
 
+
+def test_beat48_watch_lookalike_cli_picks_queue_not_watch(tmp_path: Path, capsys):
+    """Beat 48: watch_lookalike → session-b picks Queue Q3, not Watch Fake; plan unchanged."""
+    import json
+    from src.research_implement.__main__ import main
+
+    src = (FIXTURES / "watch_lookalike.md").read_text(encoding="utf-8")
+    plan = tmp_path / "lookalike.md"
+    plan.write_text(src, encoding="utf-8")
+    rc = main(["session-b", "--plan", str(plan), "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("verdict") == "picked"
+    item = payload.get("item") or {}
+    item_id = str(item.get("item_id") or item.get("id") or "")
+    title = str(item.get("title") or "")
+    assert "Q3" in item_id or "Real ready" in title
+    assert "Fake" not in title and "Watch lookalike" not in title
+    assert payload.get("scheduler_delete_called") is False
+    assert plan.read_text(encoding="utf-8") == src
+
+
+def test_beat48_watch_only_cli_idles(tmp_path: Path, capsys):
+    """Beat 48: watch_only_lookalike / watch_heartbeat_no_queue → idle-decode idle."""
+    import json
+    from src.research_implement.__main__ import main
+
+    for name in ("watch_only_lookalike.md", "watch_heartbeat_no_queue.md"):
+        src = (FIXTURES / name).read_text(encoding="utf-8")
+        plan = tmp_path / name
+        plan.write_text(src, encoding="utf-8")
+        rc = main(["idle-decode", "--plan", str(plan), "--json"])
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload.get("verdict") == "idle"
+        assert payload.get("queue") == "queue 0/10"
+        assert payload.get("keep_schedule") is True
+        assert payload.get("scheduler_delete_called") is False
+        assert plan.read_text(encoding="utf-8") == src
+

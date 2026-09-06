@@ -122,6 +122,8 @@ Beat 46: OPEN complete but not ready-for-implement → idle fire (``queue 0/10``
 
 Beat 47: incomplete OPEN / SHIPPED-only → idle CLI JSON; ``mixed_priority`` picks first ready OPEN via ``session-b --json`` (plan unchanged on decode-only). Proof: pytest ``-k beat47``.
 
+Beat 48: Watch lookalike rows are never B-picked; ``watch_lookalike`` CLI picks real Queue OPEN; ``watch_only_lookalike`` / no-Queue watch plans idle. Proof: pytest ``-k beat48``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

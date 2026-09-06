@@ -74,3 +74,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Decode-only and dry-run messages both include `decode pick` six-field report.
 - OPEN complete but not ready-for-implement → idle (`queue 0/10`); plan unchanged.
 - Incomplete OPEN / SHIPPED-only → idle (`queue 0/10`); mixed-priority picks first ready OPEN.
+- Watch lookalike rows are never B-picked; watch-only / no-Queue plans idle.
