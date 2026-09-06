@@ -6246,3 +6246,27 @@ def test_beat92_stub_brainstorm_and_implement_helpers_exported():
         assert hasattr(ri, name), name
         assert name in getattr(ri, "__all__", ()), name
 
+def test_beat93_is_ready_yes_aliases_and_negatives():
+    """Beat 93: is_ready_yes accepts yes/y/true (any case); rejects no/empty/ready."""
+    for token in ("yes", "YES", "Yes", "y", "Y", "true", "TRUE", "True"):
+        assert is_ready_yes(token) is True, token
+    for token in ("no", "n", "", "ready", "maybe", "0"):
+        assert is_ready_yes(token) is False, token
+
+
+def test_beat93_search_plan_aliases_and_result_dicts_exported():
+    """Beat 93: default/stub_search_plan alias stub; session_*_result_dict public."""
+    import src.research_implement as ri
+
+    assert ri.default_search_plan is ri.stub_brainstorm
+    assert ri.stub_search_plan is ri.stub_brainstorm
+    for name in (
+        "default_search_plan",
+        "stub_search_plan",
+        "session_a_result_dict",
+        "session_b_result_dict",
+        "is_ready_yes",
+    ):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+
