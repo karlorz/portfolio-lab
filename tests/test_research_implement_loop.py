@@ -6270,3 +6270,28 @@ def test_beat93_search_plan_aliases_and_result_dicts_exported():
         assert hasattr(ri, name), name
         assert name in getattr(ri, "__all__", ()), name
 
+def test_beat94_result_dict_and_to_dict_match_json_keys():
+    """Beat 94: session_*_result_dict and to_dict keys match SESSION_*_JSON_KEYS."""
+    empty = _load("empty_queue.md")
+    a = run_session_a(empty, brainstorm=stub_brainstorm)
+    da = session_a_result_dict(a)
+    assert tuple(da.keys()) == SESSION_A_RESULT_JSON_KEYS
+    assert a.to_dict() == da
+    assert da["verdict"] == "queued"
+
+    one = _load("one_open_ready.md")
+    b = run_session_b(one, decode_only=True)
+    db = session_b_result_dict(b)
+    assert tuple(db.keys()) == SESSION_RESULT_JSON_KEYS
+    assert b.to_dict() == db
+    assert db["verdict"] == "picked"
+
+
+def test_beat94_path_runners_still_exported():
+    """Beat 94: run_session_a_path / run_session_b_path remain public."""
+    import src.research_implement as ri
+
+    for name in ("run_session_a_path", "run_session_b_path", "session_a_result_dict", "session_b_result_dict"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+

@@ -119,3 +119,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Beat 91: empty Queue append next Q1 pickable; append/format/write helpers remain public.
 - Beat 92: mark_item_shipped clears pick; stub_brainstorm ready yes; stub/dry-run helpers remain public.
 - Beat 93: is_ready_yes aliases; default/stub_search_plan alias stub; session_*_result_dict remain public.
+- Beat 94: session_*_result_dict / to_dict match JSON keys; path runners remain public.
