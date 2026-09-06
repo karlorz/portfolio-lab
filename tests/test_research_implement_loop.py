@@ -7384,3 +7384,80 @@ def test_beat120_public_api_milestone_exports():
     assert ri.default_implement is ri.dry_run_implement
     assert ri.default_search_plan is ri.stub_brainstorm
     assert len(ri.__all__) == len(set(ri.__all__))
+
+
+def test_beat121_session_a_watch_json_queued_keeps_markers_tmp(tmp_path: Path):
+    """Beat 121: session-a --stub --json watch_only/heartbeat_no_queue→queued; markers kept."""
+    from src.research_implement.__main__ import main
+
+    # watch_only_lookalike + --stub --json → queued write; Watch markers still present
+    only_src = _load("watch_only_lookalike.md")
+    only = tmp_path / "watch_only_lookalike.md"
+    only.write_text(only_src, encoding="utf-8")
+    assert "## Watch" in only_src
+    assert "## Heartbeat" in only_src
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(only), "--stub", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "queued"
+    assert payload["wrote_item"] is True
+    assert payload["open_count"] == 1
+    only_after = only.read_text(encoding="utf-8")
+    assert "## Watch" in only_after
+    assert "## Heartbeat" in only_after
+
+    # watch_heartbeat_no_queue + --stub --json → queued write; Watch+Heartbeat markers kept
+    hb_src = _load("watch_heartbeat_no_queue.md")
+    hb = tmp_path / "watch_heartbeat_no_queue.md"
+    hb.write_text(hb_src, encoding="utf-8")
+    assert "BEAT20_WATCH_MARKER" in hb_src
+    assert "BEAT20_HEARTBEAT_MARKER" in hb_src
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(hb), "--stub", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "queued"
+    assert payload["wrote_item"] is True
+    assert payload["open_count"] == 1
+    hb_after = hb.read_text(encoding="utf-8")
+    assert "BEAT20_WATCH_MARKER" in hb_after
+    assert "BEAT20_HEARTBEAT_MARKER" in hb_after
+
+
+def test_beat121_session_a_watch_json_light_and_no_stub_fail_tmp(tmp_path: Path):
+    """Beat 121: session-a watch_lookalike stub→light; watch_only --no-stub→failed; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    # watch_lookalike + --stub --json → light, wrote_item=False, plan unchanged
+    look_src = _load("watch_lookalike.md")
+    look = tmp_path / "watch_lookalike.md"
+    look.write_text(look_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(look), "--stub", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "light"
+    assert payload["wrote_item"] is False
+    assert payload["open_count"] == 1
+    assert look.read_text(encoding="utf-8") == look_src
+
+    # watch_only_lookalike + --no-stub --json → failed, wrote_item=False, plan unchanged
+    only_src = _load("watch_only_lookalike.md")
+    only = tmp_path / "watch_only_no_stub.md"
+    only.write_text(only_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(only), "--no-stub", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["wrote_item"] is False
+    assert only.read_text(encoding="utf-8") == only_src
