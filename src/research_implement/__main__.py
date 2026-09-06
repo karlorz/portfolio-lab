@@ -215,6 +215,7 @@ Beat 105: ``to_json_dict`` aliases ``to_dict``; ``SessionBResult`` is ``SessionR
 Beat 106: idle/picked ``keep_schedule`` True; never ``scheduler_delete_called``. Proof: pytest ``-k beat106``.
 Beat 107: Session A queued/light/failed ``to_dict`` matrix; ``run_session_a`` stays public. Proof: pytest ``-k beat107``.
 Beat 108: Session B idle/picked/failed ``to_dict`` matrix; ``run_session_b`` stays public. Proof: pytest ``-k beat108``.
+Beat 109: ``first_b_pick``/``count_open`` consistent across fixtures; ``__all__`` unique. Proof: pytest ``-k beat109``.
 
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.

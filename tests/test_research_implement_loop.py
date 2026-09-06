@@ -6684,3 +6684,40 @@ def test_beat108_run_session_b_still_exported():
     assert hasattr(ri, "run_session_b")
     assert "run_session_b" in getattr(ri, "__all__", ())
 
+def test_beat109_first_b_pick_matches_count_open():
+    """Beat 109: count_open == pickable count; first_b_pick is first pickable or None."""
+    fixtures = (
+        "empty_queue.md",
+        "one_open_ready.md",
+        "two_open_ready.md",
+        "incomplete_open.md",
+        "shipped_only.md",
+        "open_complete_not_ready.md",
+        "broken_ready_flag.md",
+        "mixed_priority.md",
+        "watch_lookalike.md",
+        "watch_only_lookalike.md",
+    )
+    for name in fixtures:
+        items = parse_queue_items(_load(name))
+        pickable = [i for i in items if is_b_pickable(i)]
+        assert count_open(items) == len(pickable), name
+        pick = first_b_pick(items)
+        if not pickable:
+            assert pick is None, name
+        else:
+            assert pick is not None, name
+            assert pick.item_id == pickable[0].item_id, name
+
+
+def test_beat109_public_all_unique():
+    """Beat 109: package __all__ has unique non-empty names."""
+    import src.research_implement as ri
+
+    assert hasattr(ri, "__all__")
+    names = list(ri.__all__)
+    assert names
+    assert len(names) == len(set(names))
+    for name in names:
+        assert hasattr(ri, name), name
+
