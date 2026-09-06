@@ -176,6 +176,8 @@ Beat 73: ``SessionAResult`` / ``SessionResult`` / ``SessionBResult`` / ``QueueIt
 
 Beat 74: ``QueueItem`` from ``one_open_ready`` is B-pickable; ``format_queue_item`` round-trips via ``parse_queue_items``; ``is_b_pickable`` stays public. Proof: pytest ``-k beat74``.
 
+Beat 75: ``incomplete_open`` / ``shipped_only`` items are not B-pickable; ``count_open`` stays public and returns 0 for those fixtures. Proof: pytest ``-k beat75``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

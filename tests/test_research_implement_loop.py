@@ -5702,3 +5702,22 @@ def test_beat74_is_b_pickable_still_exported():
     assert hasattr(ri, "is_b_pickable")
     assert "is_b_pickable" in getattr(ri, "__all__", ())
 
+
+def test_beat75_incomplete_and_shipped_not_pickable():
+    """Beat 75: incomplete_open / shipped_only → no B-pickable; count_open 0."""
+    from src.research_implement import count_open, first_b_pick, is_b_pickable, parse_queue_items
+
+    for name in ("incomplete_open.md", "shipped_only.md"):
+        items = parse_queue_items((FIXTURES / name).read_text(encoding="utf-8"))
+        assert count_open(items) == 0, name
+        assert first_b_pick(items) is None, name
+        assert not any(is_b_pickable(i) for i in items), name
+
+
+def test_beat75_count_open_still_exported():
+    """Beat 75: count_open remains a public export."""
+    import src.research_implement as ri
+
+    assert hasattr(ri, "count_open")
+    assert "count_open" in getattr(ri, "__all__", ())
+
