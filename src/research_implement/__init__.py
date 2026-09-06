@@ -209,6 +209,7 @@ Beat 133: watch_lookalike cross-CLI --json matrix via tmp_path (real Queue OPEN=
 Beat 134: watch_queue_heartbeat cross-CLI --json matrix via tmp_path (Queue OPEN=Q1; preserve Watch/Heartbeat markers; open_count=1): idle-decode + session-b --decode-only pick Q1; session-b --dry-run→dry_run Q1; session-a --stub→light b_pick_title Beat19 shippable preserve item; plans unchanged. Distinct from Beat 133 + Beats 118/119/123. Proof: pytest ``-k beat134``.
 Beat 135: watch_only_lookalike cross-CLI --json matrix via tmp_path (empty Queue; Watch lookalike never B-picked): B paths idle; session-a --stub queues while keeping Watch/Heartbeat. Idle counterpart to Beat 133 + Beat 134. Proof: pytest ``-k beat135``.
 Beat 136: watch_heartbeat_no_queue cross-CLI --json matrix via tmp_path (no Queue initially; B idle; session-a --stub creates Queue keeping Watch/Heartbeat). Completes Watch idle trilogy with Beat 135. Proof: pytest ``-k beat136``.
+Beat 137: empty_queue cross-CLI --json matrix via tmp_path (foundational baseline after Watch idle trilogy 135/136): B/idle paths idle keep_schedule; session-a --stub→queued write; --no-stub→failed plan unchanged. Proof: pytest ``-k beat137``.
 """
 
 from __future__ import annotations
