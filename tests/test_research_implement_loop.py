@@ -4375,3 +4375,30 @@ def test_beat41_cli_rejects_implement_stub_ship_flags(tmp_path: Path, capsys):
         assert "unrecognized" in err
         assert plan.read_text(encoding="utf-8") == before
 
+
+def test_beat42_makefile_lists_research_implement_targets():
+    """Beat 42: Makefile lists test-research-implement + both e2e targets."""
+    from pathlib import Path as _Path
+
+    text = (_Path(__file__).resolve().parents[1] / "Makefile").read_text(encoding="utf-8")
+    assert "test-research-implement" in text
+    assert "research-implement-e2e-dry-run" in text
+    assert "research-implement-e2e-pipeline" in text
+
+
+def test_beat42_b_and_idle_help_mention_never_scheduler_delete(capsys):
+    """Beat 42: session-b / idle-decode --help mention never scheduler_delete."""
+    from src.research_implement.__main__ import main
+
+    with pytest.raises(SystemExit) as ei_b:
+        main(["session-b", "--help"])
+    assert ei_b.value.code == 0
+    b = capsys.readouterr().out.lower()
+    assert "scheduler_delete" in b or "scheduler delete" in b
+
+    with pytest.raises(SystemExit) as ei_i:
+        main(["idle-decode", "--help"])
+    assert ei_i.value.code == 0
+    idle = capsys.readouterr().out.lower()
+    assert "scheduler_delete" in idle or "scheduler delete" in idle
+

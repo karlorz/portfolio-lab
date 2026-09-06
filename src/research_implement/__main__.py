@@ -110,6 +110,8 @@ Beat 40: top-level ``--help`` lists ``session-a`` / ``session-b`` / ``idle-decod
 
 Beat 41: top-level ``--help`` mentions side-dev / no Tasker / no live LLM; CLI rejects ``--implement`` / stub-ship style flags (SHIPPED remains callback-only). Proof: pytest ``-k beat41``.
 
+Beat 42: Makefile lists ``test-research-implement`` / ``research-implement-e2e-dry-run`` / ``research-implement-e2e-pipeline``; ``session-b`` / ``idle-decode --help`` mention never ``scheduler_delete``. Proof: pytest ``-k beat42``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never
