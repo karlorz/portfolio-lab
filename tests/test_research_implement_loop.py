@@ -9391,3 +9391,100 @@ def test_beat143_broken_ready_flag_dry_run_idle_and_session_a_stub_vs_no_stub_tm
     assert payload["wrote_item"] is False
     assert no_stub.read_text(encoding="utf-8") == src
     assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
+
+
+def test_beat144_open_complete_not_ready_idle_and_session_b_json_idle_tmp(tmp_path: Path):
+    """Beat 144: idle-decode + session-b --decode-only both idle; keep_schedule; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    src = _load("open_complete_not_ready.md")
+
+    # idle-decode --json → idle, open_count=0, queue 0/10; keep_schedule; plan unchanged
+    idle_plan = tmp_path / "ocnr_idle.md"
+    idle_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(idle_plan), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "idle"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert idle_plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    # session-b --decode-only --json → same idle; plan unchanged
+    b_plan = tmp_path / "ocnr_decode.md"
+    b_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(b_plan), "--decode-only", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "idle"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert b_plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+
+def test_beat144_open_complete_not_ready_dry_run_idle_and_session_a_stub_vs_no_stub_tmp(tmp_path: Path):
+    """Beat 144: session-b --dry-run→idle; session-a --stub→queued wrote_item=True; session-a --no-stub→failed plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    src = _load("open_complete_not_ready.md")
+
+    # session-b --dry-run --json → idle (NOT dry_run), open_count=0; plan unchanged
+    dry_plan = tmp_path / "ocnr_dry.md"
+    dry_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(dry_plan), "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "idle"
+    assert payload["verdict"] != "dry_run"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert dry_plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    # session-a --stub --json → queued write; wrote_item=True; open_count=1; queue 1/10; title Stub shippable change
+    a_plan = tmp_path / "ocnr_a_stub.md"
+    a_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(a_plan), "--stub", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "queued"
+    assert payload["wrote_item"] is True
+    assert payload["open_count"] == 1
+    assert payload["queue"] == "queue 1/10"
+    assert payload["title"] == "Stub shippable change"
+    assert a_plan.read_text(encoding="utf-8") != src
+    assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
+
+    # session-a --no-stub --json → rc=1 failed; wrote_item=False; plan unchanged
+    no_stub = tmp_path / "ocnr_a_no_stub.md"
+    no_stub.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(no_stub), "--no-stub", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["wrote_item"] is False
+    assert no_stub.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)

@@ -216,6 +216,7 @@ Beat 140: milestone — CLI help + public API export smoke through beat140. Proo
 Beat 141: shipped_only cross-CLI --json matrix via tmp_path (foundational post-milestone baseline; only SHIPPED; open_count=0): B/idle paths idle keep_schedule; session-a --stub→queued write title Stub shippable change; --no-stub→failed plan unchanged. Proof: pytest ``-k beat141``.
 Beat 142: incomplete_open cross-CLI --json matrix via tmp_path (foundational non-pickable OPEN after shipped_only Beat 141; incomplete OPEN missing fields; open_count=0): B/idle paths idle keep_schedule; session-a --stub→queued write title Stub shippable change Heartbeat kept; --no-stub→failed plan unchanged. Proof: pytest ``-k beat142``.
 Beat 143: broken_ready_flag cross-CLI --json matrix via tmp_path (non-pickable OPEN with broken ready flag after incomplete_open Beat 142; open_count=0): B/idle paths idle keep_schedule; session-a --stub→queued write title Stub shippable change; --no-stub→failed plan unchanged. Proof: pytest ``-k beat143``.
+Beat 144: open_complete_not_ready cross-CLI --json matrix via tmp_path (completes non-pickable foundational quartet after shipped_only/incomplete_open/broken_ready_flag Beats 141–143; complete six-field OPEN but Ready≠yes; open_count=0): B/idle paths idle keep_schedule; session-a --stub→queued write title Stub shippable change; --no-stub→failed plan unchanged. Proof: pytest ``-k beat144``.
 """
 
 from __future__ import annotations
