@@ -6344,3 +6344,27 @@ def test_beat96_decode_helpers_still_exported():
         assert hasattr(ri, name), name
         assert name in getattr(ri, "__all__", ()), name
 
+def test_beat97_next_queue_id_progression():
+    """Beat 97: next_queue_id empty→Q1, one→Q2, two→Q3, watch_lookalike→Q4."""
+    expectations = (
+        ("empty_queue.md", "Q1"),
+        ("one_open_ready.md", "Q2"),
+        ("two_open_ready.md", "Q3"),
+        ("watch_lookalike.md", "Q4"),
+    )
+    for name, expected in expectations:
+        items = parse_queue_items(_load(name))
+        assert next_queue_id(items) == expected, name
+
+
+def test_beat97_require_unique_fail_closed_and_exports():
+    """Beat 97: require_unique ok on one Queue; AmbiguousQueueError on two; exports public."""
+    require_unique_queue_section(_load("one_open_ready.md"))
+    with pytest.raises(AmbiguousQueueError):
+        require_unique_queue_section(_load("two_queue_sections.md"))
+    import src.research_implement as ri
+
+    for name in ("next_queue_id", "require_unique_queue_section", "AmbiguousQueueError"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+

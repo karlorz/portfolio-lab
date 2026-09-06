@@ -122,3 +122,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Beat 94: session_*_result_dict / to_dict match JSON keys; path runners remain public.
 - Beat 95: serialize_queue_item round-trip stays pickable; count_queue_headings fixture contract.
 - Beat 96: decode_fields covers six fields + status/ready; format_decode_report lines 1–6.
+- Beat 97: next_queue_id progression (empty→Q1 … lookalike→Q4); require_unique fail-closed on dual Queue.
