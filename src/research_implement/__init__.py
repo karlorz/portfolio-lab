@@ -144,6 +144,8 @@ Beat 74: QueueItem pickability + format/parse round-trip. Proof: pytest ``-k bea
 Beat 75: incomplete/shipped fixtures never B-pickable; count_open=0. Proof: pytest ``-k beat75``.
 
 Beat 76: not-ready / broken-ready fixtures never pickable. Proof: pytest ``-k beat76``.
+
+Beat 77: mixed_priority first_b_pick skips incomplete. Proof: pytest ``-k beat77``.
 """
 
 from __future__ import annotations

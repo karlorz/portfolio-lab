@@ -180,6 +180,8 @@ Beat 75: ``incomplete_open`` / ``shipped_only`` items are not B-pickable; ``coun
 
 Beat 76: ``open_complete_not_ready`` is not B-pickable (``count_open`` 0); ``broken_ready_flag`` likewise; ``is_ready_yes`` rejects READY/maybe. Proof: pytest ``-k beat76``.
 
+Beat 77: ``mixed_priority`` ``first_b_pick`` skips incomplete rows and returns the first ready OPEN; ``count_open`` counts only pickable items. Proof: pytest ``-k beat77``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

@@ -5750,3 +5750,25 @@ def test_beat76_is_ready_yes_still_exported():
     assert hasattr(ri, "is_ready_yes")
     assert "is_ready_yes" in getattr(ri, "__all__", ())
 
+
+def test_beat77_mixed_priority_first_b_pick_skips_incomplete():
+    """Beat 77: mixed_priority first_b_pick is first ready; count_open matches pickables."""
+    from src.research_implement import count_open, first_b_pick, is_b_pickable, parse_queue_items
+
+    items = parse_queue_items((FIXTURES / "mixed_priority.md").read_text(encoding="utf-8"))
+    pickables = [i for i in items if is_b_pickable(i)]
+    assert pickables
+    assert count_open(items) == len(pickables)
+    pick = first_b_pick(items)
+    assert pick is not None
+    assert pick.item_id == pickables[0].item_id
+    assert is_b_pickable(pick)
+
+
+def test_beat77_first_b_pick_still_exported():
+    """Beat 77: first_b_pick remains a public export."""
+    import src.research_implement as ri
+
+    assert hasattr(ri, "first_b_pick")
+    assert "first_b_pick" in getattr(ri, "__all__", ())
+
