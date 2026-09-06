@@ -117,3 +117,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Beat 89: incomplete_candidate_reasons contract; SESSION_*_JSON_KEYS remain public.
 - Milestone beat90: CLI subcommands + public runners/helpers/guards remain stable; Makefile suite note includes beat90.
 - Beat 91: empty Queue append next Q1 pickable; append/format/write helpers remain public.
+- Beat 92: mark_item_shipped clears pick; stub_brainstorm ready yes; stub/dry-run helpers remain public.

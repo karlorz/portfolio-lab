@@ -6216,3 +6216,33 @@ def test_beat91_append_format_write_still_exported():
         assert hasattr(ri, name), name
         assert name in getattr(ri, "__all__", ()), name
 
+def test_beat92_mark_item_shipped_clears_pick():
+    """Beat 92: mark_item_shipped on one_open → status SHIPPED; first_b_pick None."""
+    src = _load("one_open_ready.md")
+    assert first_b_pick(parse_queue_items(src)) is not None
+    shipped = mark_item_shipped(src, "Q1", "dead92", note="beat92")
+    items = parse_queue_items(shipped)
+    assert count_open(items) == 0
+    assert first_b_pick(items) is None
+    assert items[0].status.startswith("SHIPPED")
+    assert "dead92" in items[0].status
+    assert "beat92" in items[0].status
+
+
+def test_beat92_stub_brainstorm_and_implement_helpers_exported():
+    """Beat 92: stub_brainstorm ready yes; stub/dry-run implement helpers public."""
+    import src.research_implement as ri
+
+    stub = stub_brainstorm()
+    assert stub["ready_for_implement"] == "yes"
+    assert incomplete_candidate_reasons(stub) == []
+    for name in (
+        "stub_brainstorm",
+        "dry_run_implement",
+        "make_fixture_ship_implement",
+        "default_implement",
+        "fixture_ship_implement",
+    ):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+

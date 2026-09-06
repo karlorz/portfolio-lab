@@ -164,6 +164,7 @@ Beat 88: Watch/Heartbeat fixture idle/pick; SESSION_A/B_RESULT_KEYS export. Proo
 Beat 89: incomplete_candidate_reasons contract; SESSION_*_JSON_KEYS export. Proof: pytest ``-k beat89``.
 Beat 90: milestone — CLI help + public API export smoke through beat90. Proof: pytest ``-k beat90``.
 Beat 91: empty append next Q1 pickable; append/format/write exports. Proof: pytest ``-k beat91``.
+Beat 92: mark_item_shipped clears pick; stub_brainstorm + implement helpers export. Proof: pytest ``-k beat92``.
 """
 
 from __future__ import annotations
