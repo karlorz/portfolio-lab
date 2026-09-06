@@ -161,6 +161,7 @@ Beat 86: idle ``queue 0/10`` + ``scheduler_delete`` guard; ``SchedulerDeleteForb
 decode report starts with ``decode pick``. Proof: pytest ``-k beat86``.
 Beat 87: two_queue AmbiguousQueueError + heading count; decode helpers export. Proof: pytest ``-k beat87``.
 Beat 88: Watch/Heartbeat fixture idle/pick; SESSION_A/B_RESULT_KEYS export. Proof: pytest ``-k beat88``.
+Beat 89: incomplete_candidate_reasons contract; SESSION_*_JSON_KEYS export. Proof: pytest ``-k beat89``.
 """
 
 from __future__ import annotations

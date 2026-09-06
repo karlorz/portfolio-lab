@@ -195,6 +195,7 @@ Beat 85: session-a producer help flags; session-b ``--decode-only``; idle-decode
 Beat 86: idle ``queue 0/10`` + ``scheduler_delete`` guard; ``SchedulerDeleteForbidden`` public; decode report ``decode pick``. Proof: pytest ``-k beat86``.
 Beat 87: two_queue ``AmbiguousQueueError`` + heading count=2; ``format_decode_report``/``decode_fields`` stay public. Proof: pytest ``-k beat87``.
 Beat 88: Watch/Heartbeat fixtures idle or pick Q1; ``SESSION_A_RESULT_KEYS`` / ``SESSION_B_RESULT_KEYS`` stay public. Proof: pytest ``-k beat88``.
+Beat 89: ``incomplete_candidate_reasons`` contract; ``SESSION_*_JSON_KEYS`` stay public. Proof: pytest ``-k beat89``.
 
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.

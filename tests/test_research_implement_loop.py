@@ -6096,3 +6096,41 @@ def test_beat88_session_result_keys_still_exported():
         "shipped",
     )
 
+def test_beat89_incomplete_candidate_reasons_contract():
+    """Beat 89: incomplete item lists acceptance; complete empty; bad type candidate_type."""
+    incomplete = parse_queue_items(_load("incomplete_open.md"))[0]
+    complete = parse_queue_items(_load("one_open_ready.md"))[0]
+    assert incomplete_candidate_reasons(incomplete) == ["acceptance"]
+    assert incomplete_candidate_reasons(complete) == []
+    assert incomplete_candidate_reasons(["not", "a", "candidate"]) == ["candidate_type"]
+
+
+def test_beat89_session_json_keys_still_exported():
+    """Beat 89: SESSION_A_RESULT_JSON_KEYS / SESSION_RESULT_JSON_KEYS remain public."""
+    import src.research_implement as ri
+
+    for name in ("SESSION_A_RESULT_JSON_KEYS", "SESSION_RESULT_JSON_KEYS", "incomplete_candidate_reasons"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+    assert ri.SESSION_A_RESULT_JSON_KEYS == (
+        "ok",
+        "verdict",
+        "open_count",
+        "queue",
+        "b_pick_title",
+        "title",
+        "wrote_item",
+    )
+    assert ri.SESSION_RESULT_JSON_KEYS == (
+        "ok",
+        "verdict",
+        "open_count",
+        "queue",
+        "keep_schedule",
+        "scheduler_delete_called",
+        "item",
+        "implement_result",
+        "wrote_files",
+        "shipped",
+    )
+
