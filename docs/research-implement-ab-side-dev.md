@@ -78,3 +78,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Broken / non-yes `ready-for-implement` → idle (`queue 0/10`); never B-picked.
 - `ready-for-implement` aliases: `yes` / `y` / `true` / `1` (case-insensitive); anything else is not B-pickable.
 - Ambiguous dual `## Queue` plans: CLI exits non-zero (`verdict=failed`); never mutates the plan.
+- `watch_queue_heartbeat_empty`: idle B-fire leaves Watch/Project/Heartbeat markers; Session A stub append keeps them.

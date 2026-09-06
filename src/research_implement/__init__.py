@@ -96,6 +96,8 @@ Beat 50: broken ready-for-implement flags idle via CLI; public API exports remai
 Beat 51: ready-for-implement aliases (YES/Y/TRUE/1) remain B-pickable via CLI; non-aliases still idle. Proof: pytest ``-k beat51``.
 
 Beat 52: ambiguous dual-Queue plans fail closed via CLI with plan unchanged. Proof: pytest ``-k beat52``.
+
+Beat 53: empty Queue + Watch/Project/Heartbeat CLI idle/append preserves non-Queue markers. Proof: pytest ``-k beat53``.
 """
 
 from __future__ import annotations

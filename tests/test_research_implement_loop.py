@@ -4754,3 +4754,48 @@ def test_beat52_two_queue_cli_markers_intact(tmp_path: Path, capsys):
     assert "BEAT21_HEARTBEAT_MARKER" in on_disk or "Heartbeat" in on_disk
     assert on_disk.count("## Queue") == 2
 
+
+def test_beat53_watch_queue_empty_cli_idle_preserves(tmp_path: Path, capsys):
+    """Beat 53: watch_queue_heartbeat_empty → idle CLI; markers unchanged."""
+    import json
+    from src.research_implement.__main__ import main
+
+    src = (FIXTURES / "watch_queue_heartbeat_empty.md").read_text(encoding="utf-8")
+    for cmd in ("idle-decode", "session-b"):
+        plan = tmp_path / f"beat53_idle_{cmd}.md"
+        plan.write_text(src, encoding="utf-8")
+        rc = main([cmd, "--plan", str(plan), "--json"])
+        assert rc == 0, cmd
+        payload = json.loads(capsys.readouterr().out)
+        assert payload.get("verdict") == "idle", cmd
+        assert payload.get("queue") == "queue 0/10"
+        assert payload.get("keep_schedule") is True
+        assert payload.get("scheduler_delete_called") is False
+        body = plan.read_text(encoding="utf-8")
+        assert body == src
+        assert "BEAT19_WATCH_MARKER" in body
+        assert "BEAT19_PROJECT_MARKER" in body
+        assert "BEAT19_HEARTBEAT_MARKER" in body
+
+
+def test_beat53_watch_queue_empty_a_append_preserves(tmp_path: Path, capsys):
+    """Beat 53: session-a stub on empty Watch/Heartbeat plan keeps markers."""
+    import json
+    from src.research_implement.__main__ import main
+    from src.research_implement.queue import count_open, parse_queue_items
+
+    src = (FIXTURES / "watch_queue_heartbeat_empty.md").read_text(encoding="utf-8")
+    plan = tmp_path / "beat53_a.md"
+    plan.write_text(src, encoding="utf-8")
+    rc = main(["session-a", "--plan", str(plan), "--stub", "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("verdict") == "queued"
+    assert payload.get("wrote_item") is True
+    body = plan.read_text(encoding="utf-8")
+    assert "BEAT19_WATCH_MARKER" in body
+    assert "BEAT19_PROJECT_MARKER" in body
+    assert "BEAT19_HEARTBEAT_MARKER" in body
+    assert "## Queue" in body
+    assert count_open(parse_queue_items(body)) == 1
+

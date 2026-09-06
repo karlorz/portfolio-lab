@@ -132,6 +132,8 @@ Beat 51: ``ready-for-implement`` accepts case-insensitive aliases (``yes``/``y``
 
 Beat 52: ``two_queue_sections`` CLI (session-a / session-b / idle-decode) → non-zero exit, ``verdict=failed``, plan untouched (ambiguous Queue fail-closed). Proof: pytest ``-k beat52``.
 
+Beat 53: ``watch_queue_heartbeat_empty`` idle-decode/session-b → idle with Watch/Project/Heartbeat markers intact; session-a stub append keeps those sections. Proof: pytest ``-k beat53``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never
