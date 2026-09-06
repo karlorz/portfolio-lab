@@ -4310,3 +4310,36 @@ def test_beat39_session_a_help_mentions_producer_flags(capsys):
     assert "--no-stub" in out
     assert "--candidate-json" in out
 
+
+def test_beat40_top_level_help_lists_subcommands(capsys):
+    """Beat 40: top-level --help lists session-a / session-b / idle-decode."""
+    from src.research_implement.__main__ import main
+
+    with pytest.raises(SystemExit) as ei:
+        main(["--help"])
+    assert ei.value.code == 0
+    out = capsys.readouterr().out.lower()
+    assert "session-a" in out
+    assert "session-b" in out
+    assert "idle-decode" in out
+
+
+def test_beat40_idle_help_no_dry_run_flag_session_b_has_it(capsys):
+    """Beat 40: idle-decode --help usage omits --dry-run; session-b includes it."""
+    from src.research_implement.__main__ import main
+
+    with pytest.raises(SystemExit) as ei_i:
+        main(["idle-decode", "--help"])
+    assert ei_i.value.code == 0
+    idle = capsys.readouterr().out.lower()
+    # usage line for idle must not advertise --dry-run
+    idle_usage = idle.split("options:", 1)[0]
+    assert "--dry-run" not in idle_usage
+    assert "--json" in idle
+
+    with pytest.raises(SystemExit) as ei_b:
+        main(["session-b", "--help"])
+    assert ei_b.value.code == 0
+    b = capsys.readouterr().out.lower()
+    assert "--dry-run" in b
+

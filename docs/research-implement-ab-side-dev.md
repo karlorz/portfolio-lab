@@ -64,3 +64,5 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Top-level JSON `true`/`false` for `--candidate-json` fails closed.
 - `--candidate-json` `{}` fails closed as incomplete candidate (rc=1; plan unchanged).
 - `session-a --help` documents `--stub` / `--no-stub` / `--candidate-json`.
+- Top-level `--help` lists `session-a` / `session-b` / `idle-decode`.
+- `idle-decode --help` has no `--dry-run`; `session-b --help` does.

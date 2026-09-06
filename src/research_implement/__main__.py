@@ -106,6 +106,8 @@ Beat 38: relative ``--candidate-json`` resolves when the file exists in cwd; top
 
 Beat 39: ``--candidate-json`` empty object ``{}`` fail-closes via Session A incomplete candidate (rc=1, plan unchanged); ``session-a --help`` mentions ``--stub`` / ``--no-stub`` / ``--candidate-json``. Proof: pytest ``-k beat39``.
 
+Beat 40: top-level ``--help`` lists ``session-a`` / ``session-b`` / ``idle-decode``; ``idle-decode --help`` usage has no ``--dry-run``; ``session-b --help`` usage includes ``--dry-run``. Proof: pytest ``-k beat40``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

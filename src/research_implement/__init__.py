@@ -82,6 +82,8 @@ Beat 23: CLI ``session-a`` / ``session-b`` / ``idle-decode`` with missing
 ``--plan`` / ``--log`` path → clear non-zero ``SystemExit`` (``file not found``);
 does not create the plan file. Existing plan path still works. Proof: pytest
 ``-k beat23``. Prior beat22 stays green.
+
+Beat 40: CLI help contracts — top-level lists session-a/session-b/idle-decode; idle-decode has no --dry-run; session-b does. Proof: pytest ``-k beat40``.
 """
 
 from __future__ import annotations
