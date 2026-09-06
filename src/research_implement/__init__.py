@@ -218,6 +218,7 @@ Beat 142: incomplete_open cross-CLI --json matrix via tmp_path (foundational non
 Beat 143: broken_ready_flag cross-CLI --json matrix via tmp_path (non-pickable OPEN with broken ready flag after incomplete_open Beat 142; open_count=0): B/idle paths idle keep_schedule; session-a --stub→queued write title Stub shippable change; --no-stub→failed plan unchanged. Proof: pytest ``-k beat143``.
 Beat 144: open_complete_not_ready cross-CLI --json matrix via tmp_path (completes non-pickable foundational quartet after shipped_only/incomplete_open/broken_ready_flag Beats 141–143; complete six-field OPEN but Ready≠yes; open_count=0): B/idle paths idle keep_schedule; session-a --stub→queued write title Stub shippable change; --no-stub→failed plan unchanged. Proof: pytest ``-k beat144``.
 Beat 145: queue_with_watch_heartbeat cross-CLI --json matrix via tmp_path (Watch *before* Queue + Heartbeat; open_count=0 idle baseline; stub queues while keeping Watch/Heartbeat markers): B/idle paths idle keep_schedule Watch/Heartbeat present Watch before Queue; session-a --stub→queued write title Stub shippable change keep markers; --no-stub→failed plan unchanged markers intact. Proof: pytest ``-k beat145``.
+Beat 146: contract_spec cross-CLI --json matrix via tmp_path (foundational contract-plan baseline; open_count=0 idle; stub queues; no-stub fails): B/idle paths idle keep_schedule; session-a --stub→queued write title Stub shippable change; --no-stub→failed plan unchanged. Proof: pytest ``-k beat146``.
 """
 
 from __future__ import annotations
