@@ -128,6 +128,8 @@ Beat 66: --no-stub light/failed CLI paths; implement helper exports. Proof: pyte
 Beat 67: --no-stub --dry-run light/failed; decode helper exports. Proof: pytest ``-k beat67``.
 
 Beat 68: first_b_pick / incomplete_candidate_reasons contracts; idle-decode decode-pick message. Proof: pytest ``-k beat68``.
+
+Beat 69: session_*_result_dict helpers align with CLI --json. Proof: pytest ``-k beat69``.
 """
 
 from __future__ import annotations

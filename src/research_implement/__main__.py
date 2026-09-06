@@ -164,6 +164,8 @@ Beat 67: ``session-a --no-stub --dry-run`` keeps the same light/failed paths wit
 
 Beat 68: ``first_b_pick`` returns the first ready OPEN (None on empty/shipped-only); idle-decode ``--json`` message still includes ``decode pick``; ``incomplete_candidate_reasons({{}})`` lists all six fields + ready. Proof: pytest ``-k beat68``.
 
+Beat 69: CLI ``--json`` matches ``session_a_result_dict`` / ``session_b_result_dict`` for queued/picked; those helpers stay public with ``SESSION_*_RESULT_JSON_KEYS``. Proof: pytest ``-k beat69``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

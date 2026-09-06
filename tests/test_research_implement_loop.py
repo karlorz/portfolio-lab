@@ -5429,3 +5429,57 @@ def test_beat68_idle_decode_message_has_decode_pick(tmp_path: Path, capsys):
     assert "Q1" in report
     assert plan.read_text(encoding="utf-8") == src
 
+
+def test_beat69_cli_json_matches_result_dicts(tmp_path: Path, capsys):
+    """Beat 69: CLI --json equals session_*_result_dict for queued/picked."""
+    import json
+    from src.research_implement.__main__ import main
+    from src.research_implement import (
+        SESSION_A_RESULT_JSON_KEYS,
+        SESSION_RESULT_JSON_KEYS,
+        run_session_a,
+        run_session_b,
+        session_a_result_dict,
+        session_b_result_dict,
+        stub_brainstorm,
+    )
+
+    empty_src = (FIXTURES / "empty_queue.md").read_text(encoding="utf-8")
+    plan_a = tmp_path / "beat69_a.md"
+    plan_a.write_text(empty_src, encoding="utf-8")
+    rc_a = main(["session-a", "--plan", str(plan_a), "--stub", "--json"])
+    assert rc_a == 0
+    cli_a = json.loads(capsys.readouterr().out)
+    assert set(cli_a) == set(SESSION_A_RESULT_JSON_KEYS)
+    mem_a = run_session_a(empty_src, brainstorm=stub_brainstorm)
+    assert session_a_result_dict(mem_a)["verdict"] == "queued"
+    assert set(session_a_result_dict(mem_a)) == set(SESSION_A_RESULT_JSON_KEYS)
+    assert cli_a["verdict"] == "queued"
+
+    one_src = (FIXTURES / "one_open_ready.md").read_text(encoding="utf-8")
+    plan_b = tmp_path / "beat69_b.md"
+    plan_b.write_text(one_src, encoding="utf-8")
+    rc_b = main(["idle-decode", "--plan", str(plan_b), "--json"])
+    assert rc_b == 0
+    cli_b = json.loads(capsys.readouterr().out)
+    assert set(cli_b) == set(SESSION_RESULT_JSON_KEYS)
+    mem_b = run_session_b(one_src, decode_only=True)
+    assert session_b_result_dict(mem_b)["verdict"] == "picked"
+    assert set(session_b_result_dict(mem_b)) == set(SESSION_RESULT_JSON_KEYS)
+    assert cli_b["verdict"] == "picked"
+    assert plan_b.read_text(encoding="utf-8") == one_src
+
+
+def test_beat69_result_dict_helpers_still_exported():
+    """Beat 69: session_*_result_dict + SESSION_*_RESULT_JSON_KEYS stay public."""
+    import src.research_implement as ri
+
+    for name in (
+        "session_a_result_dict",
+        "session_b_result_dict",
+        "SESSION_A_RESULT_JSON_KEYS",
+        "SESSION_RESULT_JSON_KEYS",
+    ):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+
