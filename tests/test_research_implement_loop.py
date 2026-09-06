@@ -4090,3 +4090,39 @@ def test_beat34_session_b_dry_run_json_never_scheduler_delete(tmp_path: Path, ca
     # dry-run must not mutate the plan (OPEN stays).
     assert plan.read_text(encoding="utf-8") == before
 
+
+def test_beat35_session_b_decode_only_json_keeps_schedule(tmp_path: Path, capsys):
+    """Beat 35: session-b default decode-only --json keeps schedule; plan unchanged."""
+    import json
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "one.md"
+    plan.write_text((FIXTURES / "one_open_ready.md").read_text(encoding="utf-8"), encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    rc = main(["session-b", "--plan", str(plan), "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("verdict") == "picked"
+    assert payload.get("keep_schedule") is True
+    assert payload.get("scheduler_delete_called") is False
+    assert payload.get("shipped") is False
+    assert payload.get("implement_result") is None
+    assert plan.read_text(encoding="utf-8") == before
+
+
+def test_beat35_session_a_recount_json_wrote_item_false(tmp_path: Path, capsys):
+    """Beat 35: Session A OPEN>=1 recount-only --json → wrote_item=false; plan unchanged."""
+    import json
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "one.md"
+    plan.write_text((FIXTURES / "one_open_ready.md").read_text(encoding="utf-8"), encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    rc = main(["session-a", "--plan", str(plan), "--stub", "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("wrote_item") is False
+    assert payload.get("verdict") in {"light", "queued"} or payload.get("ok") is True
+    # recount-only: open stays >=1, no new append
+    assert plan.read_text(encoding="utf-8") == before
+

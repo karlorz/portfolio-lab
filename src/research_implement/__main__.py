@@ -96,6 +96,8 @@ Beat 33: empty / whitespace-only ``--plan`` / ``--log`` → clear non-zero exit;
 
 Beat 34: empty / whitespace ``--log`` alias fails like ``--plan``; ``session-b --dry-run --json`` keeps ``keep_schedule=true`` and ``scheduler_delete_called=false``. Proof: pytest ``-k beat34``.
 
+Beat 35: ``session-b`` decode-only ``--json`` (default) keeps ``keep_schedule=true`` / ``scheduler_delete_called=false`` and leaves the plan unchanged; Session A recount-only (OPEN>=1) ``--json`` has ``wrote_item=false``. Proof: pytest ``-k beat35``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

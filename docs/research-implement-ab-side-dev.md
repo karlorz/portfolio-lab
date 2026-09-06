@@ -54,3 +54,5 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Idle `--json` keeps `keep_schedule=true` and `scheduler_delete_called=false`.
 - Empty / whitespace `--log` fails like `--plan`.
 - `session-b --dry-run --json` keeps `keep_schedule=true` / `scheduler_delete_called=false` and does not mutate the plan.
+- `session-b` decode-only `--json` keeps schedule / never `scheduler_delete` / plan unchanged.
+- Session A OPEN>=1 recount-only `--json` has `wrote_item=false`.
