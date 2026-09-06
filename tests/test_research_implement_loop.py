@@ -6368,3 +6368,29 @@ def test_beat97_require_unique_fail_closed_and_exports():
         assert hasattr(ri, name), name
         assert name in getattr(ri, "__all__", ()), name
 
+def test_beat98_is_b_pickable_fixture_matrix():
+    """Beat 98: is_b_pickable true only for complete OPEN ready items."""
+    expectations = (
+        ("one_open_ready.md", [("Q1", True)]),
+        ("two_open_ready.md", [("Q1", True), ("Q2", True)]),
+        ("incomplete_open.md", [("Q2", False)]),
+        ("shipped_only.md", [("Q1", False)]),
+        ("open_complete_not_ready.md", [("Q1", False)]),
+        ("broken_ready_flag.md", [("Q1", False), ("Q2", False)]),
+        ("mixed_priority.md", [("Q1", False), ("Q2", True)]),
+        ("watch_lookalike.md", [("Q3", True)]),
+    )
+    for name, expected in expectations:
+        items = parse_queue_items(_load(name))
+        got = [(i.item_id, is_b_pickable(i)) for i in items]
+        assert got == expected, name
+
+
+def test_beat98_pick_helpers_still_exported():
+    """Beat 98: is_b_pickable / is_complete_six_field / is_open_status / is_ready_yes public."""
+    import src.research_implement as ri
+
+    for name in ("is_b_pickable", "is_complete_six_field", "is_open_status", "is_ready_yes"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+

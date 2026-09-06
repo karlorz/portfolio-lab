@@ -170,6 +170,7 @@ Beat 94: result_dict/to_dict JSON key align; path runners export. Proof: pytest 
 Beat 95: serialize round-trip pickable; count_queue_headings fixtures. Proof: pytest ``-k beat95``.
 Beat 96: decode_fields + format_decode_report line contract. Proof: pytest ``-k beat96``.
 Beat 97: next_queue_id progression; require_unique fail-closed. Proof: pytest ``-k beat97``.
+Beat 98: is_b_pickable fixture matrix; complete/open/ready exports. Proof: pytest ``-k beat98``.
 """
 
 from __future__ import annotations
