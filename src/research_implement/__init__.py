@@ -200,6 +200,7 @@ Beat 124: idle-decode --json non-pickable OPEN CLI matrix via tmp_path (shipped_
 Beat 125: session-b --dry-run --json non-pickable OPEN CLI matrix via tmp_path (shipped_only/incomplete_open/broken_ready_flag/open_complete_not_ready→idle, never dry_run); plan untouched; keep_schedule / no scheduler_delete. Pairs with Beat 124. Proof: pytest ``-k beat125``.
 Beat 126: session-b --json non-pickable OPEN CLI matrix via tmp_path (shipped/incomplete/broken/not_ready→idle, never dry_run). Completes non-pickable trilogy with Beat 124 + Beat 125. Proof: pytest ``-k beat126``.
 Beat 127: session-a --no-stub|--stub --json non-pickable OPEN CLI matrix via tmp_path (non-pickable=OPEN=0: --no-stub→failed; --stub→queued under tmp). Contrast Beats 115 + 124–126. Proof: pytest ``-k beat127``.
+Beat 128: session-a --no-stub|--stub --dry-run --json non-pickable OPEN CLI matrix via tmp_path (--no-stub dry-run→failed; --stub dry-run→queued wrote_item=True but plan unchanged). Contrast Beat 127. Proof: pytest ``-k beat128``.
 """
 
 from __future__ import annotations

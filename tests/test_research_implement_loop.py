@@ -7938,3 +7938,77 @@ def test_beat127_session_a_stub_nonpickable_json_queued_tmp(tmp_path: Path):
     assert payload["open_count"] == 1
     assert nr.read_text(encoding="utf-8") != nr_src
     assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
+
+
+def test_beat128_session_a_no_stub_dry_run_nonpickable_json_fail_tmp(tmp_path: Path):
+    """Beat 128: session-a --no-stub --dry-run --json shipped_only/incomplete_open→failed; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    # shipped_only → OPEN=0; --no-stub --dry-run → failed; plan unchanged
+    shipped_src = _load("shipped_only.md")
+    shipped = tmp_path / "shipped_only.md"
+    shipped.write_text(shipped_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(shipped), "--no-stub", "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["wrote_item"] is False
+    assert payload["open_count"] == 0
+    assert shipped.read_text(encoding="utf-8") == shipped_src
+    assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
+
+    # incomplete_open → OPEN=0; --no-stub --dry-run → failed; plan unchanged
+    inc_src = _load("incomplete_open.md")
+    inc = tmp_path / "incomplete_open.md"
+    inc.write_text(inc_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(inc), "--no-stub", "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["wrote_item"] is False
+    assert payload["open_count"] == 0
+    assert inc.read_text(encoding="utf-8") == inc_src
+    assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
+
+
+def test_beat128_session_a_stub_dry_run_nonpickable_json_queued_tmp(tmp_path: Path):
+    """Beat 128: session-a --stub --dry-run --json broken/not_ready→queued wrote_item=True but plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    # broken_ready_flag → OPEN=0; --stub --dry-run → queued wrote_item=True but plan bytes unchanged
+    broken_src = _load("broken_ready_flag.md")
+    broken = tmp_path / "broken_ready_flag.md"
+    broken.write_text(broken_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(broken), "--stub", "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "queued"
+    assert payload["wrote_item"] is True
+    assert payload["open_count"] == 1
+    assert broken.read_text(encoding="utf-8") == broken_src
+    assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
+
+    # open_complete_not_ready → OPEN=0; --stub --dry-run → queued wrote_item=True but plan bytes unchanged
+    nr_src = _load("open_complete_not_ready.md")
+    nr = tmp_path / "open_complete_not_ready.md"
+    nr.write_text(nr_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(nr), "--stub", "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "queued"
+    assert payload["wrote_item"] is True
+    assert payload["open_count"] == 1
+    assert nr.read_text(encoding="utf-8") == nr_src
+    assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
