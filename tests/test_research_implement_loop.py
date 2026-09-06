@@ -6180,3 +6180,39 @@ def test_beat90_public_api_milestone_exports():
         assert hasattr(ri, name), name
         assert name in getattr(ri, "__all__", ()), name
 
+def test_beat91_empty_append_next_q1_pickable():
+    """Beat 91: empty_queue next_queue_id=Q1; append makes first_b_pick Q1."""
+    empty = _load("empty_queue.md")
+    items = parse_queue_items(empty)
+    assert items == []
+    assert next_queue_id(items) == "Q1"
+    block = format_queue_item(
+        item_id="Q1",
+        heading="Beat91 stub",
+        title="Beat91 stub",
+        acceptance="ok",
+        risks="none",
+        file_touch="t.py",
+        breaking_change="false",
+        redeploy_notes="none",
+        status="OPEN",
+        ready_for_implement="yes",
+    )
+    updated = append_queue_item(empty, block)
+    assert "## Queue" in updated
+    parsed = parse_queue_items(updated)
+    assert count_open(parsed) == 1
+    pick = first_b_pick(parsed)
+    assert pick is not None
+    assert pick.item_id == "Q1"
+    assert pick.title == "Beat91 stub"
+
+
+def test_beat91_append_format_write_still_exported():
+    """Beat 91: append_queue_item / format_queue_item / write_queue_section stay public."""
+    import src.research_implement as ri
+
+    for name in ("append_queue_item", "format_queue_item", "write_queue_section", "next_queue_id"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+
