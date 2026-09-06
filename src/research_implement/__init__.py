@@ -159,6 +159,7 @@ Beat 84: pickable fixtures first_b_pick ids; is_complete_six_field/is_open_statu
 Beat 85: producer/decode help flags + REQUIRED_FIELDS export. Proof: pytest ``-k beat85``.
 Beat 86: idle ``queue 0/10`` + ``scheduler_delete`` guard; ``SchedulerDeleteForbidden`` export;
 decode report starts with ``decode pick``. Proof: pytest ``-k beat86``.
+Beat 87: two_queue AmbiguousQueueError + heading count; decode helpers export. Proof: pytest ``-k beat87``.
 """
 
 from __future__ import annotations

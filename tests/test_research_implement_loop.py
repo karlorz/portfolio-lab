@@ -6023,3 +6023,25 @@ def test_beat86_scheduler_delete_forbidden_exported_and_decode_pick():
     assert report.startswith("decode pick Q1:")
     for n in range(1, 7):
         assert f"  {n}. " in report
+
+def test_beat87_two_queue_ambiguous_and_heading_count():
+    """Beat 87: two_queue_sections headings=2 and require_unique raises AmbiguousQueueError."""
+    src = _load("two_queue_sections.md")
+    assert count_queue_headings(src) == 2
+    with pytest.raises(AmbiguousQueueError) as ei:
+        require_unique_queue_section(src)
+    assert "2 headings" in str(ei.value)
+    assert "fail-closed" in str(ei.value).lower() or "refuse" in str(ei.value).lower()
+
+
+def test_beat87_decode_helpers_still_exported():
+    """Beat 87: format_decode_report / decode_fields remain public; report has decode pick."""
+    import src.research_implement as ri
+
+    for name in ("format_decode_report", "decode_fields", "AmbiguousQueueError"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+    item = parse_queue_items(_load("two_open_ready.md"))[0]
+    report = format_decode_report(item)
+    assert report.startswith("decode pick Q1:")
+
