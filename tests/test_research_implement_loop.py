@@ -5101,3 +5101,33 @@ def test_beat60_watch_lookalike_idle_decode_picks_queue(tmp_path: Path, capsys):
     assert "Watch lookalike" not in str(payload)
     assert plan.read_text(encoding="utf-8") == src
 
+
+def test_beat61_non_pickable_dry_run_idle(tmp_path: Path, capsys):
+    """Beat 61: shipped/incomplete/watch_only --dry-run → idle; plan intact."""
+    import json
+    from src.research_implement.__main__ import main
+
+    for name in ("shipped_only.md", "incomplete_open.md", "watch_only_lookalike.md"):
+        src = (FIXTURES / name).read_text(encoding="utf-8")
+        plan = tmp_path / f"beat61_{name}"
+        plan.write_text(src, encoding="utf-8")
+        rc = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+        assert rc == 0, name
+        payload = json.loads(capsys.readouterr().out)
+        assert payload.get("verdict") == "idle", name
+        assert payload.get("queue") == "queue 0/10", name
+        assert payload.get("keep_schedule") is True, name
+        assert payload.get("scheduler_delete_called") is False, name
+        assert payload.get("implement_result") is None, name
+        assert payload.get("shipped") is False, name
+        assert plan.read_text(encoding="utf-8") == src, name
+
+
+def test_beat61_append_queue_item_still_exported():
+    """Beat 61: append_queue_item / QueueItem remain public exports."""
+    import src.research_implement as ri
+
+    for name in ("append_queue_item", "QueueItem", "mark_item_shipped", "is_ready_yes"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+
