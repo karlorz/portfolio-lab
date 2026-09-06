@@ -6295,3 +6295,27 @@ def test_beat94_path_runners_still_exported():
         assert hasattr(ri, name), name
         assert name in getattr(ri, "__all__", ()), name
 
+def test_beat95_serialize_roundtrip_stays_pickable():
+    """Beat 95: serialize_queue_item → reparse under ## Queue stays B-pickable."""
+    original = parse_queue_items(_load("one_open_ready.md"))[0]
+    block = serialize_queue_item(original)
+    wrapped = "## Queue" + "\n\n" + block + "\n"
+    parsed = parse_queue_items(wrapped)
+    assert len(parsed) == 1
+    assert parsed[0].item_id == original.item_id
+    assert parsed[0].title == original.title
+    assert is_b_pickable(parsed[0]) is True
+    assert first_b_pick(parsed) is not None
+
+
+def test_beat95_count_queue_headings_fixture_contract():
+    """Beat 95: count_queue_headings is 1 for normal plans, 2 for two_queue_sections."""
+    assert count_queue_headings(_load("one_open_ready.md")) == 1
+    assert count_queue_headings(_load("two_open_ready.md")) == 1
+    assert count_queue_headings(_load("empty_queue.md")) == 1
+    assert count_queue_headings(_load("two_queue_sections.md")) == 2
+    import src.research_implement as ri
+
+    assert "count_queue_headings" in getattr(ri, "__all__", ())
+    assert "serialize_queue_item" in getattr(ri, "__all__", ())
+

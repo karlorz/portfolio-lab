@@ -167,6 +167,7 @@ Beat 91: empty append next Q1 pickable; append/format/write exports. Proof: pyte
 Beat 92: mark_item_shipped clears pick; stub_brainstorm + implement helpers export. Proof: pytest ``-k beat92``.
 Beat 93: is_ready_yes aliases; search_plan aliases; session_*_result_dict export. Proof: pytest ``-k beat93``.
 Beat 94: result_dict/to_dict JSON key align; path runners export. Proof: pytest ``-k beat94``.
+Beat 95: serialize round-trip pickable; count_queue_headings fixtures. Proof: pytest ``-k beat95``.
 """
 
 from __future__ import annotations
