@@ -102,6 +102,8 @@ Beat 53: empty Queue + Watch/Project/Heartbeat CLI idle/append preserves non-Que
 Beat 54: OPEN Watch/Heartbeat plan CLI pick/dry-run preserves non-Queue markers. Proof: pytest ``-k beat54``.
 
 Beat 55: no-Queue Watch/Heartbeat plans: B idle CLI; A stub CLI creates Queue without dropping markers. Proof: pytest ``-k beat55``.
+
+Beat 56: light/dry_run/failed CLI JSON key contracts stay locked; Watch-before-Queue A→B CLI preserve. Proof: pytest ``-k beat56``.
 """
 
 from __future__ import annotations

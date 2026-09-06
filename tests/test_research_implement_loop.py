@@ -4890,3 +4890,62 @@ def test_beat55_no_queue_a_stub_creates_queue_preserves(tmp_path: Path, capsys):
     assert body.count("## Queue") == 1
     assert count_open(parse_queue_items(body)) == 1
 
+
+def test_beat56_json_keys_light_dry_run_failed(tmp_path: Path, capsys):
+    """Beat 56: light / dry_run / failed CLI --json keys match Session contracts."""
+    import json
+    from src.research_implement.__main__ import main
+    from src.research_implement.session_a import SESSION_A_RESULT_JSON_KEYS
+    from src.research_implement.session_b import SESSION_RESULT_JSON_KEYS
+
+    one = tmp_path / "one.md"
+    one.write_text((FIXTURES / "one_open_ready.md").read_text(encoding="utf-8"), encoding="utf-8")
+    rc_light = main(["session-a", "--plan", str(one), "--stub", "--json"])
+    assert rc_light == 0
+    light = json.loads(capsys.readouterr().out)
+    assert light.get("verdict") == "light"
+    assert set(light) == set(SESSION_A_RESULT_JSON_KEYS)
+
+    dry_plan = tmp_path / "dry.md"
+    dry_plan.write_text((FIXTURES / "one_open_ready.md").read_text(encoding="utf-8"), encoding="utf-8")
+    rc_dry = main(["session-b", "--plan", str(dry_plan), "--dry-run", "--json"])
+    assert rc_dry == 0
+    dry = json.loads(capsys.readouterr().out)
+    assert dry.get("verdict") == "dry_run"
+    assert set(dry) == set(SESSION_RESULT_JSON_KEYS)
+
+    fail_plan = tmp_path / "fail.md"
+    fail_plan.write_text((FIXTURES / "two_queue_sections.md").read_text(encoding="utf-8"), encoding="utf-8")
+    rc_fail = main(["session-b", "--plan", str(fail_plan), "--json"])
+    assert rc_fail == 1
+    failed = json.loads(capsys.readouterr().out)
+    assert failed.get("verdict") == "failed"
+    assert set(failed) == set(SESSION_RESULT_JSON_KEYS)
+
+
+def test_beat56_queue_with_watch_a_then_b_pick(tmp_path: Path, capsys):
+    """Beat 56: queue_with_watch_heartbeat A-stub then idle-decode pick; Watch stays."""
+    import json
+    from src.research_implement.__main__ import main
+
+    src = (FIXTURES / "queue_with_watch_heartbeat.md").read_text(encoding="utf-8")
+    plan = tmp_path / "beat56_wh.md"
+    plan.write_text(src, encoding="utf-8")
+    rc_a = main(["session-a", "--plan", str(plan), "--stub", "--json"])
+    assert rc_a == 0
+    a_payload = json.loads(capsys.readouterr().out)
+    assert a_payload.get("verdict") in {"queued", "light"}
+    after_a = plan.read_text(encoding="utf-8")
+    assert "beat19-watch-marker" in after_a or "## Watch" in after_a
+    assert "beat19-heartbeat-marker" in after_a or "## Heartbeat" in after_a
+
+    rc_b = main(["idle-decode", "--plan", str(plan), "--json"])
+    assert rc_b == 0
+    b_payload = json.loads(capsys.readouterr().out)
+    assert b_payload.get("verdict") == "picked"
+    assert b_payload.get("keep_schedule") is True
+    after_b = plan.read_text(encoding="utf-8")
+    assert after_b == after_a
+    assert "## Watch" in after_b
+    assert "## Heartbeat" in after_b
+
