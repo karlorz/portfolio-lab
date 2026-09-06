@@ -106,6 +106,8 @@ Beat 55: no-Queue Watch/Heartbeat plans: B idle CLI; A stub CLI creates Queue wi
 Beat 56: light/dry_run/failed CLI JSON key contracts stay locked; Watch-before-Queue A→B CLI preserve. Proof: pytest ``-k beat56``.
 
 Beat 57: Session A failed JSON key contract + AmbiguousQueueError export; dry-run A no write. Proof: pytest ``-k beat57``.
+
+Beat 58: empty-queue ``session-b --dry-run`` stays idle; queue helper exports remain public. Proof: pytest ``-k beat58``.
 """
 
 from __future__ import annotations
@@ -121,6 +123,7 @@ from src.research_implement.queue import (
     first_b_pick,
     format_queue_item,
     is_b_pickable,
+    is_ready_yes,
     is_complete_six_field,
     is_open_status,
     next_queue_id,
@@ -182,6 +185,7 @@ __all__ = [
     "serialize_queue_items",
     "write_queue_section",
     "is_b_pickable",
+    "is_ready_yes",
     "is_complete_six_field",
     "is_open_status",
     "parse_queue_items",

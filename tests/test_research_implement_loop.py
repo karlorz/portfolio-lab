@@ -4989,3 +4989,32 @@ def test_beat57_session_a_dry_run_empty_no_write(tmp_path: Path, capsys):
     assert plan.read_text(encoding="utf-8") == src
     assert "## Queue" in src or "GROUP CHECK" in src or "0 OPEN" in src
 
+
+def test_beat58_dry_run_empty_is_idle(tmp_path: Path, capsys):
+    """Beat 58: session-b --dry-run on empty Queue → idle; plan unchanged."""
+    import json
+    from src.research_implement.__main__ import main
+
+    src = (FIXTURES / "empty_queue.md").read_text(encoding="utf-8")
+    plan = tmp_path / "beat58_idle.md"
+    plan.write_text(src, encoding="utf-8")
+    rc = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("verdict") == "idle"
+    assert payload.get("queue") == "queue 0/10"
+    assert payload.get("keep_schedule") is True
+    assert payload.get("scheduler_delete_called") is False
+    assert payload.get("implement_result") is None
+    assert payload.get("shipped") is False
+    assert plan.read_text(encoding="utf-8") == src
+
+
+def test_beat58_queue_helper_exports_still_public():
+    """Beat 58: is_b_pickable / is_ready_yes / count_open remain public exports."""
+    import src.research_implement as ri
+
+    for name in ("is_b_pickable", "is_ready_yes", "count_open", "parse_queue_items"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+
