@@ -4949,3 +4949,43 @@ def test_beat56_queue_with_watch_a_then_b_pick(tmp_path: Path, capsys):
     assert "## Watch" in after_b
     assert "## Heartbeat" in after_b
 
+
+def test_beat57_session_a_failed_json_keys_and_export(tmp_path: Path, capsys):
+    """Beat 57: session-a dual-Queue failed JSON keys; AmbiguousQueueError exported."""
+    import json
+    import src.research_implement as ri
+    from src.research_implement.__main__ import main
+    from src.research_implement.session_a import SESSION_A_RESULT_JSON_KEYS
+
+    assert hasattr(ri, "AmbiguousQueueError")
+    assert "AmbiguousQueueError" in getattr(ri, "__all__", ())
+
+    plan = tmp_path / "beat57_fail.md"
+    src = (FIXTURES / "two_queue_sections.md").read_text(encoding="utf-8")
+    plan.write_text(src, encoding="utf-8")
+    rc = main(["session-a", "--plan", str(plan), "--stub", "--json"])
+    assert rc == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("verdict") == "failed"
+    assert payload.get("wrote_item") is False
+    assert set(payload) == set(SESSION_A_RESULT_JSON_KEYS)
+    assert plan.read_text(encoding="utf-8") == src
+
+
+def test_beat57_session_a_dry_run_empty_no_write(tmp_path: Path, capsys):
+    """Beat 57: session-a --dry-run --stub on empty Queue does not mutate plan."""
+    import json
+    from src.research_implement.__main__ import main
+
+    src = (FIXTURES / "empty_queue.md").read_text(encoding="utf-8")
+    plan = tmp_path / "beat57_dry.md"
+    plan.write_text(src, encoding="utf-8")
+    rc = main(["session-a", "--plan", str(plan), "--stub", "--dry-run", "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("verdict") == "queued"
+    assert payload.get("ok") is True
+    # JSON may report would-write (wrote_item true); disk must stay unchanged.
+    assert plan.read_text(encoding="utf-8") == src
+    assert "## Queue" in src or "GROUP CHECK" in src or "0 OPEN" in src
+

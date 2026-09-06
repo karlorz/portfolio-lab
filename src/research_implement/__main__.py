@@ -140,6 +140,8 @@ Beat 55: ``watch_heartbeat_no_queue`` idle-decode stays idle with markers intact
 
 Beat 56: CLI ``--json`` for light / dry_run / failed (dual-Queue) still matches ``SESSION_A_RESULT_JSON_KEYS`` / ``SESSION_RESULT_JSON_KEYS``; ``queue_with_watch_heartbeat`` A-stub then idle-decode pick keeps Watch markers. Proof: pytest ``-k beat56``.
 
+Beat 57: ``session-a`` failed (dual-Queue) ``--json`` keys match ``SESSION_A_RESULT_JSON_KEYS``; ``AmbiguousQueueError`` stays public; ``session-a --dry-run`` on empty Queue leaves plan unchanged. Proof: pytest ``-k beat57``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never
