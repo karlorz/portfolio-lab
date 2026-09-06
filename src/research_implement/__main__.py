@@ -78,6 +78,8 @@ Beat 24: Passing both ``--plan`` and ``--log`` → argparse mutually exclusive e
 
 Beat 25: Passing both ``--stub`` and ``--no-stub`` → clear ``SystemExit``; plan unchanged. ``--candidate-json`` still overrides stub when OPEN=0. Proof: pytest ``-k beat25``.
 
+Beat 26: ``idle-decode`` rejects ``--dry-run`` (decode-only alias; use ``session-b --dry-run``). Session A ``--dry-run`` leaves the plan file unchanged. Proof: pytest ``-k beat26``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

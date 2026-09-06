@@ -37,3 +37,5 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Pass only one of `--plan` / `--log` (alias); both together → non-zero exit.
 - Pass only one of `--stub` / `--no-stub`; both together → non-zero exit.
 - `--candidate-json` overrides `--stub` when OPEN is 0.
+- `idle-decode` rejects `--dry-run` (decode-only; use `session-b --dry-run`).
+- Session A `--dry-run` leaves the plan file unchanged.

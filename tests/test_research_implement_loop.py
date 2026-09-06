@@ -3747,3 +3747,34 @@ def test_beat25_candidate_json_overrides_stub(tmp_path: Path, capsys):
     if cand_title != STUB_TITLE:
         assert STUB_TITLE not in body
 
+
+def test_beat26_idle_decode_rejects_dry_run(tmp_path: Path, capsys):
+    """Beat 26: idle-decode is decode-only — --dry-run is rejected; plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    src = FIXTURES / "one_open_ready.md"
+    plan = tmp_path / "plan.md"
+    plan.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    with pytest.raises(SystemExit) as ei:
+        main(["idle-decode", "--plan", str(plan), "--dry-run", "--json"])
+    assert ei.value.code == 2
+    err = capsys.readouterr().err.lower()
+    assert "unrecognized" in err or "dry-run" in err
+    assert plan.read_text(encoding="utf-8") == before
+
+
+def test_beat26_session_a_dry_run_leaves_plan_unchanged(tmp_path: Path, capsys):
+    """Beat 26: session-a --stub --dry-run reports queued but does not write."""
+    from src.research_implement.__main__ import main
+
+    src = FIXTURES / "empty_queue.md"
+    plan = tmp_path / "plan.md"
+    plan.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    rc = main(["session-a", "--plan", str(plan), "--stub", "--dry-run", "--json"])
+    assert rc == 0
+    out = capsys.readouterr().out.lower()
+    assert '"ok": true' in out or "queued" in out or "dry" in out
+    assert plan.read_text(encoding="utf-8") == before
+
