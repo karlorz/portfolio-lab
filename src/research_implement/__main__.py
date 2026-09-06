@@ -80,6 +80,8 @@ Beat 25: Passing both ``--stub`` and ``--no-stub`` → clear ``SystemExit``; pla
 
 Beat 26: ``idle-decode`` rejects ``--dry-run`` (decode-only alias; use ``session-b --dry-run``). Session A ``--dry-run`` leaves the plan file unchanged. Proof: pytest ``-k beat26``.
 
+Beat 27: Producer-only flags (``--stub`` / ``--no-stub`` / ``--candidate-json``) are rejected on ``session-b`` / ``idle-decode``; plan unchanged. Proof: pytest ``-k beat27``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

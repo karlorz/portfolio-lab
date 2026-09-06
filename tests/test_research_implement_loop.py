@@ -3778,3 +3778,46 @@ def test_beat26_session_a_dry_run_leaves_plan_unchanged(tmp_path: Path, capsys):
     assert '"ok": true' in out or "queued" in out or "dry" in out
     assert plan.read_text(encoding="utf-8") == before
 
+
+def test_beat27_session_b_rejects_producer_flags(tmp_path: Path, capsys):
+    """Beat 27: session-b rejects --stub / --candidate-json; plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    src = FIXTURES / "one_open_ready.md"
+    plan = tmp_path / "plan.md"
+    plan.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    cand = FIXTURES / "complete_candidate.json"
+    for extra in (
+        ["--stub"],
+        ["--no-stub"],
+        ["--candidate-json", str(cand)],
+    ):
+        with pytest.raises(SystemExit) as ei:
+            main(["session-b", "--plan", str(plan), *extra, "--json"])
+        assert ei.value.code == 2
+        err = capsys.readouterr().err.lower()
+        assert "unrecognized" in err
+        assert plan.read_text(encoding="utf-8") == before
+
+
+def test_beat27_idle_decode_rejects_producer_flags(tmp_path: Path, capsys):
+    """Beat 27: idle-decode rejects --stub / --candidate-json; plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    src = FIXTURES / "empty_queue.md"
+    plan = tmp_path / "plan.md"
+    plan.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    cand = FIXTURES / "complete_candidate.json"
+    for extra in (
+        ["--stub"],
+        ["--candidate-json", str(cand)],
+    ):
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--plan", str(plan), *extra, "--json"])
+        assert ei.value.code == 2
+        err = capsys.readouterr().err.lower()
+        assert "unrecognized" in err
+        assert plan.read_text(encoding="utf-8") == before
+
