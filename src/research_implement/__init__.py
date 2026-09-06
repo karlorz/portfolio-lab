@@ -92,6 +92,8 @@ Beat 43: side-dev guide pins make/ship contracts; package docs mention Beat 40 h
 Beat 44: Session B dry-run message includes decode-pick six-field report; ``session-b --json`` help matches ``SessionResult.to_dict``. Proof: pytest ``-k beat44``.
 
 Beat 50: broken ready-for-implement flags idle via CLI; public API exports remain stable through A/B side-dev. Proof: pytest ``-k beat50``.
+
+Beat 51: ready-for-implement aliases (YES/Y/TRUE/1) remain B-pickable via CLI; non-aliases still idle. Proof: pytest ``-k beat51``.
 """
 
 from __future__ import annotations

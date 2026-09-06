@@ -4681,3 +4681,31 @@ def test_beat50_public_api_exports_still_stable():
     ):
         assert hasattr(ri, name), name
 
+
+def test_beat51_is_ready_yes_aliases():
+    """Beat 51: is_ready_yes accepts yes/y/true/1 (any case/space); rejects others."""
+    from src.research_implement.queue import is_ready_yes
+
+    for ok in ("yes", "YES", " Yes ", "y", "Y", "true", "TRUE", "1", " 1 "):
+        assert is_ready_yes(ok), ok
+    for bad in ("", "no", "READY", "maybe", "yes!", "0", "false", "ready"):
+        assert not is_ready_yes(bad), bad
+
+
+def test_beat51_ready_alias_cli_pick(tmp_path: Path, capsys):
+    """Beat 51: ready-for-implement YES/TRUE → idle-decode/session-b pick; plan unchanged."""
+    import json
+    from src.research_implement.__main__ import main
+
+    base = (FIXTURES / "one_open_ready.md").read_text(encoding="utf-8")
+    assert "ready-for-implement: yes" in base
+    for alias, cmd in (("YES", "idle-decode"), ("TRUE", "session-b")):
+        plan_text = base.replace("ready-for-implement: yes", f"ready-for-implement: {alias}", 1)
+        plan = tmp_path / f"beat51_{alias}_{cmd}.md"
+        plan.write_text(plan_text, encoding="utf-8")
+        rc = main([cmd, "--plan", str(plan), "--json"])
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload.get("verdict") == "picked", (alias, cmd, payload)
+        assert plan.read_text(encoding="utf-8") == plan_text
+

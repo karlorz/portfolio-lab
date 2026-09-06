@@ -76,3 +76,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Incomplete OPEN / SHIPPED-only → idle (`queue 0/10`); mixed-priority picks first ready OPEN.
 - Watch lookalike rows are never B-picked; watch-only / no-Queue plans idle.
 - Broken / non-yes `ready-for-implement` → idle (`queue 0/10`); never B-picked.
+- `ready-for-implement` aliases: `yes` / `y` / `true` / `1` (case-insensitive); anything else is not B-pickable.
