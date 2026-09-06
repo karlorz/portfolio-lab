@@ -12196,3 +12196,125 @@ def test_beat172_nonpickable_fixtures_session_a_stub_dry_run_json_no_write_tmp(t
             assert "## Heartbeat" in dry_body, name
             assert dry_body.find("## Watch") < dry_body.find("## Queue"), name
         assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
+def test_beat173_pickable_fixtures_session_a_stub_vs_no_stub_json_light_no_write_tmp(tmp_path: Path):
+    """Beat 173: multi-fixture session-a --stub|--no-stub --json (NO dry-run) both light; plans UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        ("watch_lookalike", 1, "queue 1/10", "Real ready Queue item"),
+        ("one_open_ready", 1, "queue 1/10", "Add fixture unit test for queue parser"),
+        ("two_open_ready", 2, "queue 2/10", "First ready complete item"),
+        ("mixed_priority", 1, "queue 1/10", "Second ready complete item"),
+        ("watch_queue_heartbeat", 1, "queue 1/10", "Beat19 shippable preserve item"),
+    )
+    for name, open_count, queue, b_pick_title in cases:
+        src = _load(f"{name}.md")
+
+        # session-a --stub --json (NO --dry-run) → light; wrote_item=False; plan unchanged
+        stub_plan = tmp_path / f"{name}_a_stub_live.md"
+        stub_plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-a", "--plan", str(stub_plan), "--stub", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "light", name
+        assert payload["wrote_item"] is False, name
+        assert payload["open_count"] == open_count, name
+        assert payload["queue"] == queue, name
+        assert payload["b_pick_title"] == b_pick_title, name
+        stub_body = stub_plan.read_text(encoding="utf-8")
+        assert stub_body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in stub_body
+            assert "## Heartbeat" in stub_body
+            assert "BEAT19_WATCH_MARKER" in stub_body
+            assert "BEAT19_HEARTBEAT_MARKER" in stub_body
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+        # session-a --no-stub --json (NO --dry-run) → same light no-write shape; plan unchanged
+        no_stub = tmp_path / f"{name}_a_no_stub_live.md"
+        no_stub.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-a", "--plan", str(no_stub), "--no-stub", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "light", name
+        assert payload["wrote_item"] is False, name
+        assert payload["open_count"] == open_count, name
+        assert payload["queue"] == queue, name
+        assert payload["b_pick_title"] == b_pick_title, name
+        no_body = no_stub.read_text(encoding="utf-8")
+        assert no_body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in no_body
+            assert "## Heartbeat" in no_body
+            assert "BEAT19_WATCH_MARKER" in no_body
+            assert "BEAT19_HEARTBEAT_MARKER" in no_body
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
+def test_beat173_pickable_fixtures_session_a_stub_vs_no_stub_dry_run_json_light_no_write_tmp(tmp_path: Path):
+    """Beat 173: multi-fixture session-a --stub|--no-stub --dry-run --json both light; plans UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        ("watch_lookalike", 1, "queue 1/10", "Real ready Queue item"),
+        ("one_open_ready", 1, "queue 1/10", "Add fixture unit test for queue parser"),
+        ("two_open_ready", 2, "queue 2/10", "First ready complete item"),
+        ("mixed_priority", 1, "queue 1/10", "Second ready complete item"),
+        ("watch_queue_heartbeat", 1, "queue 1/10", "Beat19 shippable preserve item"),
+    )
+    for name, open_count, queue, b_pick_title in cases:
+        src = _load(f"{name}.md")
+
+        # session-a --stub --dry-run --json → light; wrote_item=False; plan unchanged
+        stub_plan = tmp_path / f"{name}_a_stub_dry.md"
+        stub_plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-a", "--plan", str(stub_plan), "--stub", "--dry-run", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "light", name
+        assert payload["wrote_item"] is False, name
+        assert payload["open_count"] == open_count, name
+        assert payload["queue"] == queue, name
+        assert payload["b_pick_title"] == b_pick_title, name
+        stub_body = stub_plan.read_text(encoding="utf-8")
+        assert stub_body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in stub_body
+            assert "## Heartbeat" in stub_body
+            assert "BEAT19_WATCH_MARKER" in stub_body
+            assert "BEAT19_HEARTBEAT_MARKER" in stub_body
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+        # session-a --no-stub --dry-run --json → same light no-write shape; plan unchanged
+        no_stub = tmp_path / f"{name}_a_no_stub_dry.md"
+        no_stub.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-a", "--plan", str(no_stub), "--no-stub", "--dry-run", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "light", name
+        assert payload["wrote_item"] is False, name
+        assert payload["open_count"] == open_count, name
+        assert payload["queue"] == queue, name
+        assert payload["b_pick_title"] == b_pick_title, name
+        no_body = no_stub.read_text(encoding="utf-8")
+        assert no_body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in no_body
+            assert "## Heartbeat" in no_body
+            assert "BEAT19_WATCH_MARKER" in no_body
+            assert "BEAT19_HEARTBEAT_MARKER" in no_body
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
