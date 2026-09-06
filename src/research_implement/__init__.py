@@ -205,6 +205,7 @@ Beat 129: mixed_priority cross-CLI --json matrix via tmp_path (first ready OPEN=
 Beat 130: milestone — CLI help + public API export smoke through beat130. Proof: pytest ``-k beat130``.
 Beat 131: two_open_ready cross-CLI --json matrix via tmp_path (first ready OPEN=Q1; open_count=2): idle-decode + session-b --decode-only pick Q1; session-b --dry-run→dry_run Q1; session-a --stub→light b_pick_title First ready complete item; plans unchanged. Parallel to Beat 129. Proof: pytest ``-k beat131``.
 Beat 132: one_open_ready cross-CLI --json matrix via tmp_path (single ready OPEN=Q1; open_count=1): idle-decode + session-b --decode-only pick Q1; session-b --dry-run→dry_run Q1; session-a --stub→light b_pick_title Add fixture unit test for queue parser; plans unchanged. Completes cross-CLI pick trilogy with Beat 129 + Beat 131. Proof: pytest ``-k beat132``.
+Beat 133: watch_lookalike cross-CLI --json matrix via tmp_path (real Queue OPEN=Q3; never Watch lookalike; open_count=1): idle-decode + session-b --decode-only pick Q3; session-b --dry-run→dry_run Q3; session-a --stub→light b_pick_title Real ready Queue item; plans unchanged. Distinct from Beat 118 + Beats 129/131/132. Proof: pytest ``-k beat133``.
 """
 
 from __future__ import annotations

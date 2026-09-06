@@ -8333,3 +8333,86 @@ def test_beat132_one_open_dry_run_and_session_a_light_tmp(tmp_path: Path):
     assert a_plan.read_text(encoding="utf-8") == src
     assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
 
+
+
+def test_beat133_watch_lookalike_idle_and_session_b_json_pick_q3_tmp(tmp_path: Path):
+    """Beat 133: idle-decode + session-b --decode-only --json both pick Q3 open_count=1; keep_schedule; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    src = _load("watch_lookalike.md")
+
+    # idle-decode --json → picked Q3, open_count=1, queue 1/10; keep_schedule; plan unchanged
+    idle_plan = tmp_path / "watch_lookalike_idle.md"
+    idle_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(idle_plan), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "picked"
+    assert payload["open_count"] == 1
+    assert payload["queue"] == "queue 1/10"
+    assert payload["item"]["item_id"] == "Q3"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert idle_plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    # session-b --decode-only --json → same picked Q3 open_count=1; plan unchanged
+    b_plan = tmp_path / "watch_lookalike_decode.md"
+    b_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(b_plan), "--decode-only", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "picked"
+    assert payload["open_count"] == 1
+    assert payload["queue"] == "queue 1/10"
+    assert payload["item"]["item_id"] == "Q3"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert b_plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+
+def test_beat133_watch_lookalike_dry_run_and_session_a_light_tmp(tmp_path: Path):
+    """Beat 133: session-b --dry-run→dry_run Q3; session-a --stub→light b_pick_title Real ready Queue item; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    src = _load("watch_lookalike.md")
+
+    # session-b --dry-run --json → dry_run Q3, open_count=1; plan unchanged
+    dry_plan = tmp_path / "watch_lookalike_dry.md"
+    dry_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(dry_plan), "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "dry_run"
+    assert payload["open_count"] == 1
+    assert payload["item"]["item_id"] == "Q3"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert dry_plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    # session-a --stub --json → light recount; wrote_item=False; b_pick_title Real ready Queue item
+    a_plan = tmp_path / "watch_lookalike_a.md"
+    a_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(a_plan), "--stub", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "light"
+    assert payload["wrote_item"] is False
+    assert payload["open_count"] == 1
+    assert payload["b_pick_title"] == "Real ready Queue item"
+    assert a_plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
