@@ -187,6 +187,7 @@ Beat 111: idle fixtures queue 0/10 + decode_report None; picked decode_report ==
 Beat 112: path runners A write / B idle no-touch. Proof: pytest ``-k beat112``.
 Beat 113: idle-decode CLI --json idle/picked/failed matrix. Proof: pytest ``-k beat113``.
 Beat 114: session-b --decode-only --json idle/picked/failed matrix. Proof: pytest ``-k beat114``.
+Beat 115: session-a --stub|--no-stub --json CLI matrix (queued/light/failed) via tmp_path. Proof: pytest ``-k beat115``.
 """
 
 from __future__ import annotations

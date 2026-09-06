@@ -140,3 +140,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Beat 112: path runners — Session A empty writes stub; Session B idle leaves plan untouched.
 - Beat 113: idle-decode CLI --json idle/picked/failed matrix (mixed_priority→Q2).
 - Beat 114: session-b --decode-only --json idle/picked/failed matrix; plan untouched.
+- Beat 115: session-a --stub|--no-stub --json CLI matrix via tmp_path (queued/light/failed).

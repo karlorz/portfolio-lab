@@ -7,6 +7,8 @@ contract tests in ``test_research_implement_loop_contract.py`` remain unchanged.
 from __future__ import annotations
 
 import json
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -6929,3 +6931,77 @@ def test_beat114_makefile_echo_mentions_beat114():
     text = Path("Makefile").read_text(encoding="utf-8")
     assert "beat114" in text
 
+
+
+def test_beat115_session_a_stub_json_idle_vs_light_tmp(tmp_path: Path):
+    """Beat 115: session-a --stub --json empty→queued write; one_open→light no-write."""
+    from src.research_implement.__main__ import main
+
+    # empty_queue + --stub --json → queued write
+    empty = tmp_path / "empty_queue.md"
+    empty.write_text(_load("empty_queue.md"), encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(empty), "--stub", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "queued"
+    assert payload["wrote_item"] is True
+    assert payload["open_count"] == 1
+    assert payload["title"] == "Stub shippable change"
+    assert payload["b_pick_title"] == "Stub shippable change"
+
+    # one_open_ready + --stub --json → light, plan bytes unchanged
+    one_src = _load("one_open_ready.md")
+    one = tmp_path / "one_open_ready.md"
+    one.write_text(one_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(one), "--stub", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "light"
+    assert payload["wrote_item"] is False
+    assert payload["open_count"] == 1
+    assert payload["title"] is None
+    assert payload["b_pick_title"] == "Add fixture unit test for queue parser"
+    assert one.read_text(encoding="utf-8") == one_src
+
+
+def test_beat115_session_a_stub_json_fail_paths_tmp(tmp_path: Path):
+    """Beat 115: session-a --stub/--no-stub --json two_queue/empty→failed; no fixture mutate."""
+    from src.research_implement.__main__ import main
+
+    # two_queue_sections + --stub --json → failed
+    two_src = _load("two_queue_sections.md")
+    two = tmp_path / "two_queue_sections.md"
+    two.write_text(two_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(two), "--stub", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["wrote_item"] is False
+    assert payload["open_count"] == 0
+    assert payload["title"] is None
+    assert payload["b_pick_title"] is None
+    assert two.read_text(encoding="utf-8") == two_src
+
+    # empty_queue + --no-stub --json → failed
+    empty_src = _load("empty_queue.md")
+    empty = tmp_path / "empty_no_stub.md"
+    empty.write_text(empty_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(empty), "--no-stub", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["wrote_item"] is False
+    assert payload["open_count"] == 0
+    assert empty.read_text(encoding="utf-8") == empty_src
