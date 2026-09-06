@@ -4343,3 +4343,35 @@ def test_beat40_idle_help_no_dry_run_flag_session_b_has_it(capsys):
     b = capsys.readouterr().out.lower()
     assert "--dry-run" in b
 
+
+def test_beat41_top_help_mentions_side_dev_no_tasker(capsys):
+    """Beat 41: top-level --help mentions side-dev / no Tasker / no live LLM."""
+    from src.research_implement.__main__ import main
+
+    with pytest.raises(SystemExit) as ei:
+        main(["--help"])
+    assert ei.value.code == 0
+    out = capsys.readouterr().out.lower()
+    assert "side-dev" in out or "side dev" in out
+    assert "tasker" in out
+    assert "llm" in out
+
+
+def test_beat41_cli_rejects_implement_stub_ship_flags(tmp_path: Path, capsys):
+    """Beat 41: --implement / stub-ship style flags are unrecognized; plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "one.md"
+    plan.write_text((FIXTURES / "one_open_ready.md").read_text(encoding="utf-8"), encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    for extra in (
+        ["--implement", "stub-ship"],
+        ["--stub-ship"],
+    ):
+        with pytest.raises(SystemExit) as ei:
+            main(["session-b", "--plan", str(plan), *extra, "--json"])
+        assert ei.value.code == 2
+        err = capsys.readouterr().err.lower()
+        assert "unrecognized" in err
+        assert plan.read_text(encoding="utf-8") == before
+

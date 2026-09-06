@@ -66,3 +66,5 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - `session-a --help` documents `--stub` / `--no-stub` / `--candidate-json`.
 - Top-level `--help` lists `session-a` / `session-b` / `idle-decode`.
 - `idle-decode --help` has no `--dry-run`; `session-b --help` does.
+- Top-level `--help` states side-dev / no Tasker / no live LLM.
+- No CLI `--implement` / stub-ship flag — SHIPPED stays callback-only.
