@@ -4846,3 +4846,47 @@ def test_beat54_watch_queue_open_cli_dry_run_preserves(tmp_path: Path, capsys):
     assert "status: SHIPPED" not in body
     assert "status: OPEN" in body
 
+
+def test_beat55_no_queue_cli_idle_preserves(tmp_path: Path, capsys):
+    """Beat 55: watch_heartbeat_no_queue → idle-decode idle; markers unchanged."""
+    import json
+    from src.research_implement.__main__ import main
+
+    src = (FIXTURES / "watch_heartbeat_no_queue.md").read_text(encoding="utf-8")
+    assert "## Queue" not in src
+    plan = tmp_path / "beat55_idle.md"
+    plan.write_text(src, encoding="utf-8")
+    rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("verdict") == "idle"
+    assert payload.get("queue") == "queue 0/10"
+    assert payload.get("keep_schedule") is True
+    assert payload.get("scheduler_delete_called") is False
+    body = plan.read_text(encoding="utf-8")
+    assert body == src
+    assert "BEAT20_WATCH_MARKER" in body
+    assert "BEAT20_HEARTBEAT_MARKER" in body
+    assert "## Queue" not in body
+
+
+def test_beat55_no_queue_a_stub_creates_queue_preserves(tmp_path: Path, capsys):
+    """Beat 55: session-a --stub on no-Queue plan creates Queue; markers stay."""
+    import json
+    from src.research_implement.__main__ import main
+    from src.research_implement.queue import count_open, parse_queue_items
+
+    src = (FIXTURES / "watch_heartbeat_no_queue.md").read_text(encoding="utf-8")
+    plan = tmp_path / "beat55_a.md"
+    plan.write_text(src, encoding="utf-8")
+    rc = main(["session-a", "--plan", str(plan), "--stub", "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("verdict") == "queued"
+    assert payload.get("wrote_item") is True
+    body = plan.read_text(encoding="utf-8")
+    assert "BEAT20_WATCH_MARKER" in body
+    assert "BEAT20_HEARTBEAT_MARKER" in body
+    assert body.count("## Queue") == 1
+    assert count_open(parse_queue_items(body)) == 1
+

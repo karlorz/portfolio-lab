@@ -136,6 +136,8 @@ Beat 53: ``watch_queue_heartbeat_empty`` idle-decode/session-b → idle with Wat
 
 Beat 54: ``watch_queue_heartbeat`` (OPEN ready) idle-decode pick + ``session-b --dry-run`` leave Watch/Project/Heartbeat markers intact. Proof: pytest ``-k beat54``.
 
+Beat 55: ``watch_heartbeat_no_queue`` idle-decode stays idle with markers intact; ``session-a --stub`` creates ``## Queue`` while keeping Watch/Heartbeat markers. Proof: pytest ``-k beat55``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

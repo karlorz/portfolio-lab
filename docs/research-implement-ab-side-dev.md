@@ -80,3 +80,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Ambiguous dual `## Queue` plans: CLI exits non-zero (`verdict=failed`); never mutates the plan.
 - `watch_queue_heartbeat_empty`: idle B-fire leaves Watch/Project/Heartbeat markers; Session A stub append keeps them.
 - `watch_queue_heartbeat` (OPEN ready): idle-decode pick / `session-b --dry-run` keep Watch/Project/Heartbeat markers.
+- `watch_heartbeat_no_queue`: B idle; Session A stub creates `## Queue` and keeps Watch/Heartbeat markers.
