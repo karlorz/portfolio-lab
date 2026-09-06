@@ -7461,3 +7461,71 @@ def test_beat121_session_a_watch_json_light_and_no_stub_fail_tmp(tmp_path: Path)
     assert payload["verdict"] == "failed"
     assert payload["wrote_item"] is False
     assert only.read_text(encoding="utf-8") == only_src
+
+
+def test_beat122_session_a_watch_dry_run_json_queued_vs_light_tmp(tmp_path: Path):
+    """Beat 122: session-a --stub --dry-run --json watch_only→queued wrote_item=True plan unchanged; watch_lookalike→light."""
+    from src.research_implement.__main__ import main
+
+    # watch_only_lookalike + --stub --dry-run --json → queued, wrote_item=True, open_count=1, plan unchanged
+    only_src = _load("watch_only_lookalike.md")
+    only = tmp_path / "watch_only_lookalike.md"
+    only.write_text(only_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(only), "--stub", "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "queued"
+    assert payload["wrote_item"] is True
+    assert payload["open_count"] == 1
+    assert only.read_text(encoding="utf-8") == only_src
+
+    # watch_lookalike + --stub --dry-run --json → light, wrote_item=False, open_count=1, plan unchanged
+    look_src = _load("watch_lookalike.md")
+    look = tmp_path / "watch_lookalike.md"
+    look.write_text(look_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(look), "--stub", "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "light"
+    assert payload["wrote_item"] is False
+    assert payload["open_count"] == 1
+    assert look.read_text(encoding="utf-8") == look_src
+
+
+def test_beat122_session_a_watch_dry_run_json_heartbeat_and_no_stub_tmp(tmp_path: Path):
+    """Beat 122: session-a --stub/--no-stub --dry-run --json heartbeat_no_queue→queued; watch_only no-stub→failed; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    # watch_heartbeat_no_queue + --stub --dry-run --json → queued, wrote_item=True, plan unchanged
+    hb_src = _load("watch_heartbeat_no_queue.md")
+    hb = tmp_path / "watch_heartbeat_no_queue.md"
+    hb.write_text(hb_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(hb), "--stub", "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "queued"
+    assert payload["wrote_item"] is True
+    assert hb.read_text(encoding="utf-8") == hb_src
+
+    # watch_only_lookalike + --no-stub --dry-run --json → failed, wrote_item=False, plan unchanged
+    only_src = _load("watch_only_lookalike.md")
+    only = tmp_path / "watch_only_no_stub.md"
+    only.write_text(only_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(only), "--no-stub", "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["wrote_item"] is False
+    assert only.read_text(encoding="utf-8") == only_src
