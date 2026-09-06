@@ -195,6 +195,7 @@ Beat 119: session-b --dry-run --json Watch-fixture CLI matrix via tmp_path (watc
 Beat 120: milestone — CLI help + public API export smoke through beat120. Proof: pytest ``-k beat120``.
 Beat 121: session-a --stub|--no-stub --json Watch-fixture CLI matrix via tmp_path (queued keeps markers / light / failed). Contrast Beats 115/118/119. Proof: pytest ``-k beat121``.
 Beat 122: session-a --stub|--no-stub --dry-run --json Watch-fixture CLI matrix via tmp_path (queued wrote_item=True but plan unchanged / light / failed). Contrast Beat 117 + Beat 121. Proof: pytest ``-k beat122``.
+Beat 123: session-b --decode-only --json Watch-fixture CLI matrix via tmp_path (watch_only→idle; lookalike/heartbeat→picked; two_queue→failed). Completes Watch trilogy with Beat 118 + Beat 119. Proof: pytest ``-k beat123``.
 """
 
 from __future__ import annotations
