@@ -111,3 +111,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Beat 83: non-pickable fixtures first_b_pick=None; serialize_queue_item(s) remain public.
 - Beat 84: pickable fixtures first_b_pick ids; is_complete_six_field + is_open_status remain public.
 - Beat 85: session-a producer help flags; session-b --decode-only; idle omits --dry-run; REQUIRED_FIELDS public.
+- Beat 86: idle queue 0/10 + scheduler_delete guard; SchedulerDeleteForbidden public; decode pick report.

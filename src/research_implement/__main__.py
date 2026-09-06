@@ -192,6 +192,7 @@ Beat 82: subcommand ``--help`` still lists ``--plan``/``--json``; ``render_queue
 Beat 83: incomplete/shipped/not-ready/broken/empty ``first_b_pick`` is None; ``serialize_queue_item(s)`` stay public. Proof: pytest ``-k beat83``.
 Beat 84: pickable fixtures ``first_b_pick`` ids (Q1/Q1/Q3/Q2); ``is_complete_six_field`` + ``is_open_status`` stay public. Proof: pytest ``-k beat84``.
 Beat 85: session-a producer help flags; session-b ``--decode-only``; idle-decode omits ``--dry-run``; ``REQUIRED_FIELDS`` public. Proof: pytest ``-k beat85``.
+Beat 86: idle ``queue 0/10`` + ``scheduler_delete`` guard; ``SchedulerDeleteForbidden`` public; decode report ``decode pick``. Proof: pytest ``-k beat86``.
 
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.

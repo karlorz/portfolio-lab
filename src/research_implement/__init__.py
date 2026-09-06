@@ -157,6 +157,8 @@ Beat 82: subcommand help plan/json + render_queue_count/QUEUE_CAPACITY export. P
 Beat 83: non-pickable fixtures first_b_pick=None; serialize_queue_item(s) export. Proof: pytest ``-k beat83``.
 Beat 84: pickable fixtures first_b_pick ids; is_complete_six_field/is_open_status export. Proof: pytest ``-k beat84``.
 Beat 85: producer/decode help flags + REQUIRED_FIELDS export. Proof: pytest ``-k beat85``.
+Beat 86: idle ``queue 0/10`` + ``scheduler_delete`` guard; ``SchedulerDeleteForbidden`` export;
+decode report starts with ``decode pick``. Proof: pytest ``-k beat86``.
 """
 
 from __future__ import annotations
@@ -199,6 +201,7 @@ from src.research_implement.session_a import (
 from src.research_implement.session_b import (
     SESSION_B_RESULT_KEYS,
     SESSION_RESULT_JSON_KEYS,
+    SchedulerDeleteForbidden,
     SessionBResult,
     SessionResult,
     decode_fields,
@@ -217,6 +220,7 @@ __all__ = [
     "QUEUE_CAPACITY",
     "REQUIRED_FIELDS",
     "AmbiguousQueueError",
+    "SchedulerDeleteForbidden",
     "QueueItem",
     "SessionAResult",
     "SessionBResult",

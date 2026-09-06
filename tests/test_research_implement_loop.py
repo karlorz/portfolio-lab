@@ -5992,3 +5992,34 @@ def test_beat85_required_fields_still_exported():
         "redeploy_notes",
     )
 
+def test_beat86_idle_queue_zero_ten_and_scheduler_guard():
+    """Beat 86: idle fire is queue 0/10; scheduler_delete raises SchedulerDeleteForbidden."""
+    for name in ("empty_queue.md", "shipped_only.md", "incomplete_open.md"):
+        result = run_session_b(_load(name), decode_only=True)
+        assert result.ok is True
+        assert result.verdict == "idle"
+        assert result.keep_schedule is True
+        assert result.scheduler_delete_called is False
+        assert "queue 0/10" in result.message
+        assert result.decode_report is None
+
+    with pytest.raises(SchedulerDeleteForbidden) as ei:
+        scheduler_delete()
+    err = str(ei.value)
+    assert "queue 0/10" in err
+    assert "Never call scheduler_delete" in err
+
+
+def test_beat86_scheduler_delete_forbidden_exported_and_decode_pick():
+    """Beat 86: SchedulerDeleteForbidden public; decode report starts with decode pick."""
+    import src.research_implement as ri
+
+    assert hasattr(ri, "SchedulerDeleteForbidden")
+    assert "SchedulerDeleteForbidden" in getattr(ri, "__all__", ())
+    assert ri.SchedulerDeleteForbidden is SchedulerDeleteForbidden
+
+    item = parse_queue_items(_load("one_open_ready.md"))[0]
+    report = format_decode_report(item)
+    assert report.startswith("decode pick Q1:")
+    for n in range(1, 7):
+        assert f"  {n}. " in report
