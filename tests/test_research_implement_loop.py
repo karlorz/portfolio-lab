@@ -11498,3 +11498,121 @@ def test_beat166_idle_fixtures_session_a_stub_vs_no_stub_dry_run_json_smoke_tmp(
         if name == "watch_heartbeat_no_queue":
             assert "## Queue" not in no_body, name
         assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
+def test_beat167_nonpickable_fixtures_idle_and_session_b_dry_run_json_smoke_tmp(tmp_path: Path):
+    """Beat 167: multi-fixture idle-decode + session-b --dry-run both idle; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+
+        # idle-decode --json → idle; open_count=0; queue 0/10; keep_schedule; plan unchanged
+        idle_plan = tmp_path / f"{name}_idle.md"
+        idle_plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["idle-decode", "--plan", str(idle_plan), "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["open_count"] == 0, name
+        assert payload["queue"] == "queue 0/10", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        idle_body = idle_plan.read_text(encoding="utf-8")
+        assert idle_body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in idle_body, name
+            assert "## Heartbeat" in idle_body, name
+            assert idle_body.find("## Watch") < idle_body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+        # session-b --dry-run --json → idle (NOT dry_run); keep_schedule; plan unchanged
+        dry_plan = tmp_path / f"{name}_b_dry.md"
+        dry_plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-b", "--plan", str(dry_plan), "--dry-run", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["verdict"] != "dry_run", name
+        assert payload["open_count"] == 0, name
+        assert payload["queue"] == "queue 0/10", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        dry_body = dry_plan.read_text(encoding="utf-8")
+        assert dry_body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in dry_body, name
+            assert "## Heartbeat" in dry_body, name
+            assert dry_body.find("## Watch") < dry_body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_beat167_nonpickable_fixtures_session_a_stub_vs_no_stub_dry_run_json_smoke_tmp(tmp_path: Path):
+    """Beat 167: multi-fixture session-a --stub --dry-run→queued plan unchanged; --no-stub --dry-run→failed."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+
+        # session-a --stub --dry-run --json → queued wrote_item=True; plan UNCHANGED
+        stub_plan = tmp_path / f"{name}_a_stub_dry.md"
+        stub_plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-a", "--plan", str(stub_plan), "--stub", "--dry-run", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "queued", name
+        assert payload["wrote_item"] is True, name
+        assert payload["open_count"] == 1, name
+        assert payload["queue"] == "queue 1/10", name
+        assert payload["title"] == "Stub shippable change", name
+        stub_body = stub_plan.read_text(encoding="utf-8")
+        assert stub_body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in stub_body, name
+            assert "## Heartbeat" in stub_body, name
+            assert stub_body.find("## Watch") < stub_body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+        # session-a --no-stub --dry-run --json → rc=1 failed; wrote_item=False; plan unchanged
+        no_stub = tmp_path / f"{name}_a_no_stub_dry.md"
+        no_stub.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-a", "--plan", str(no_stub), "--no-stub", "--dry-run", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 1, name
+        assert payload["ok"] is False, name
+        assert payload["verdict"] == "failed", name
+        assert payload["wrote_item"] is False, name
+        no_body = no_stub.read_text(encoding="utf-8")
+        assert no_body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in no_body, name
+            assert "## Heartbeat" in no_body, name
+            assert no_body.find("## Watch") < no_body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
