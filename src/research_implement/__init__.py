@@ -84,6 +84,8 @@ does not create the plan file. Existing plan path still works. Proof: pytest
 ``-k beat23``. Prior beat22 stays green.
 
 Beat 40: CLI help contracts — top-level lists session-a/session-b/idle-decode; idle-decode has no --dry-run; session-b does. Proof: pytest ``-k beat40``.
+
+Beat 41–42: side-dev help wording / no CLI ``--implement``; Makefile lists ``test-research-implement`` + e2e targets; B/idle help never ``scheduler_delete``. Proof: pytest ``-k beat41`` / ``beat42``.
 """
 
 from __future__ import annotations

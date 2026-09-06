@@ -112,6 +112,8 @@ Beat 41: top-level ``--help`` mentions side-dev / no Tasker / no live LLM; CLI r
 
 Beat 42: Makefile lists ``test-research-implement`` / ``research-implement-e2e-dry-run`` / ``research-implement-e2e-pipeline``; ``session-b`` / ``idle-decode --help`` mention never ``scheduler_delete``. Proof: pytest ``-k beat42``.
 
+Beat 43: side-dev guide documents make targets + no CLI ship flag + never ``scheduler_delete``; ``__init__`` mentions Beats 40–42. Proof: pytest ``-k beat43``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

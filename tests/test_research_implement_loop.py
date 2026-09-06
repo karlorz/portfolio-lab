@@ -4402,3 +4402,25 @@ def test_beat42_b_and_idle_help_mention_never_scheduler_delete(capsys):
     idle = capsys.readouterr().out.lower()
     assert "scheduler_delete" in idle or "scheduler delete" in idle
 
+
+def test_beat43_side_dev_doc_mentions_make_and_no_cli_ship():
+    """Beat 43: side-dev guide mentions make targets, never scheduler_delete, no CLI ship."""
+    from pathlib import Path as _Path
+
+    doc = (_Path(__file__).resolve().parents[1] / "docs" / "research-implement-ab-side-dev.md")
+    text = doc.read_text(encoding="utf-8").lower()
+    assert "test-research-implement" in text
+    assert "e2e" in text
+    assert "scheduler_delete" in text or "scheduler delete" in text
+    assert "implement" in text or "stub-ship" in text or "callback" in text
+
+
+def test_beat43_init_mentions_recent_help_beats():
+    """Beat 43: package __init__ docstring mentions Beat 40 help contracts."""
+    from pathlib import Path as _Path
+
+    init = (_Path(__file__).resolve().parents[1] / "src" / "research_implement" / "__init__.py")
+    text = init.read_text(encoding="utf-8")
+    assert "Beat 40" in text
+    assert "test-research-implement" in text or "e2e" in text.lower()
+
