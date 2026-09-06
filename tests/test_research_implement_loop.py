@@ -7231,3 +7231,84 @@ def test_beat118_idle_decode_watch_json_heartbeat_and_fail_tmp(tmp_path: Path):
     assert payload["verdict"] == "failed"
     assert payload["open_count"] == 0
     assert two.read_text(encoding="utf-8") == two_src
+
+
+def test_beat119_session_b_dry_run_watch_json_idle_vs_pick_tmp(tmp_path: Path):
+    """Beat 119: session-b --dry-run --json watch_only→idle; watch_lookalike→dry_run; plan unchanged both."""
+    from src.research_implement.__main__ import main
+
+    # watch_only_lookalike → idle, open_count=0, queue 0/10; never scheduler_delete
+    only_src = _load("watch_only_lookalike.md")
+    only = tmp_path / "watch_only_lookalike.md"
+    only.write_text(only_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(only), "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "idle"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert only.read_text(encoding="utf-8") == only_src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    # watch_lookalike → dry_run, open_count=1, queue 1/10
+    look_src = _load("watch_lookalike.md")
+    look = tmp_path / "watch_lookalike.md"
+    look.write_text(look_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(look), "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "dry_run"
+    assert payload["open_count"] == 1
+    assert payload["queue"] == "queue 1/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert look.read_text(encoding="utf-8") == look_src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+
+def test_beat119_session_b_dry_run_watch_json_heartbeat_and_fail_tmp(tmp_path: Path):
+    """Beat 119: session-b --dry-run --json watch_queue_heartbeat→dry_run; two_queue→failed; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    # watch_queue_heartbeat → dry_run, open_count=1, queue 1/10
+    hb_src = _load("watch_queue_heartbeat.md")
+    hb = tmp_path / "watch_queue_heartbeat.md"
+    hb.write_text(hb_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(hb), "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "dry_run"
+    assert payload["open_count"] == 1
+    assert payload["queue"] == "queue 1/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert hb.read_text(encoding="utf-8") == hb_src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    # two_queue_sections → failed, open_count=0
+    two_src = _load("two_queue_sections.md")
+    two = tmp_path / "two_queue_sections.md"
+    two.write_text(two_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(two), "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["open_count"] == 0
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert two.read_text(encoding="utf-8") == two_src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)

@@ -191,6 +191,7 @@ Beat 115: session-a --stub|--no-stub --json CLI matrix (queued/light/failed) via
 Beat 116: session-b --dry-run --json CLI matrix (idle/dry_run/failed) via tmp_path; plan untouched. Proof: pytest ``-k beat116``.
 Beat 117: session-a --stub|--no-stub --dry-run --json CLI matrix via tmp_path (queued wrote_item=True but plan unchanged / light / failed). Contrast Beat 115. Proof: pytest ``-k beat117``.
 Beat 118: idle-decode --json Watch-fixture CLI matrix via tmp_path (watch_only→idle; watch_lookalike/heartbeat→picked; two_queue→failed). Contrast Beat 113. Proof: pytest ``-k beat118``.
+Beat 119: session-b --dry-run --json Watch-fixture CLI matrix via tmp_path (watch_only→idle; lookalike/heartbeat→dry_run; two_queue→failed). Contrast Beat 116 + Beat 118. Proof: pytest ``-k beat119``.
 """
 
 from __future__ import annotations
