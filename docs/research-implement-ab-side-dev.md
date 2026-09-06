@@ -60,3 +60,5 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Session A `--stub` on empty Queue `--json` → `wrote_item=true` / `verdict=queued`.
 - Empty / whitespace `--candidate-json` → non-zero exit (no Path('.') coerce).
 - Session A `--stub --dry-run --json` reports queued/`wrote_item=true` but does not write the plan.
+- Relative `--candidate-json` resolves when the file exists in cwd.
+- Top-level JSON `true`/`false` for `--candidate-json` fails closed.

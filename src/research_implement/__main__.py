@@ -102,6 +102,8 @@ Beat 36: ``idle-decode --json`` on a ready OPEN matches session-b decode-only (p
 
 Beat 37: empty / whitespace ``--candidate-json`` → clear non-zero exit (no Path(".") coerce); Session A ``--stub --dry-run --json`` reports ``wrote_item=true`` / ``verdict=queued`` but leaves the plan unchanged. Proof: pytest ``-k beat37``.
 
+Beat 38: relative ``--candidate-json`` resolves when the file exists in cwd; top-level JSON boolean ``true``/``false`` fails closed (wrong type). Proof: pytest ``-k beat38``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

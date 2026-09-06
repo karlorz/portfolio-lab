@@ -4212,3 +4212,59 @@ def test_beat37_session_a_stub_dry_run_json_queued_no_write(tmp_path: Path, caps
     assert payload.get("wrote_item") is True
     assert plan.read_text(encoding="utf-8") == before
 
+
+def test_beat38_relative_candidate_json_works(tmp_path: Path, monkeypatch, capsys):
+    """Beat 38: relative --candidate-json works when file exists in cwd."""
+    import json
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "plan.md"
+    plan.write_text((FIXTURES / "empty_queue.md").read_text(encoding="utf-8"), encoding="utf-8")
+    cand = tmp_path / "cand.json"
+    cand.write_text((FIXTURES / "complete_candidate.json").read_text(encoding="utf-8"), encoding="utf-8")
+    title = json.loads(cand.read_text(encoding="utf-8")).get("title") or "Complete"
+    monkeypatch.chdir(tmp_path)
+    rc = main(
+        [
+            "session-a",
+            "--plan",
+            "plan.md",
+            "--no-stub",
+            "--candidate-json",
+            "cand.json",
+            "--json",
+        ]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert title in out or "queued" in out.lower()
+    assert title in plan.read_text(encoding="utf-8")
+
+
+def test_beat38_candidate_json_boolean_fails(tmp_path: Path):
+    """Beat 38: --candidate-json top-level true/false → SystemExit; plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "plan.md"
+    plan.write_text((FIXTURES / "empty_queue.md").read_text(encoding="utf-8"), encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    for raw in ("true", "false"):
+        cand = tmp_path / f"{raw}.json"
+        cand.write_text(raw + "\n", encoding="utf-8")
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "session-a",
+                    "--plan",
+                    str(plan),
+                    "--no-stub",
+                    "--candidate-json",
+                    str(cand),
+                    "--json",
+                ]
+            )
+        msg = str(ei.value).lower()
+        assert "candidate-json" in msg
+        assert "bool" in msg or "object" in msg or "list" in msg
+        assert plan.read_text(encoding="utf-8") == before
+
