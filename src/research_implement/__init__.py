@@ -185,6 +185,7 @@ Beat 109: first_b_pick/count_open fixture consistency; __all__ unique. Proof: py
 Beat 110: milestone — CLI help + public API export smoke through beat110. Proof: pytest ``-k beat110``.
 Beat 111: idle fixtures queue 0/10 + decode_report None; picked decode_report == format_decode_report. Proof: pytest ``-k beat111``.
 Beat 112: path runners A write / B idle no-touch. Proof: pytest ``-k beat112``.
+Beat 113: idle-decode CLI --json idle/picked/failed matrix. Proof: pytest ``-k beat113``.
 """
 
 from __future__ import annotations

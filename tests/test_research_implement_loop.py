@@ -6867,3 +6867,33 @@ def test_beat112_path_b_idle_leaves_plan(tmp_path: Path):
     for name in ("run_session_a_path", "run_session_b_path"):
         assert name in getattr(ri, "__all__", ()), name
 
+def test_beat113_idle_decode_cli_json_matrix(tmp_path: Path, capsys):
+    """Beat 113: idle-decode --json empty→idle; mixed→picked Q2; two_queue→failed."""
+    import json
+    from src.research_implement.__main__ import main
+
+    cases = (
+        ("empty_queue.md", 0, "idle", None),
+        ("mixed_priority.md", 0, "picked", "Q2"),
+        ("two_queue_sections.md", 1, "failed", None),
+        ("shipped_only.md", 0, "idle", None),
+    )
+    for name, code, verdict, item_id in cases:
+        plan = tmp_path / name
+        plan.write_text(_load(name), encoding="utf-8")
+        rc = main(["idle-decode", "--plan", str(plan), "--json"])
+        assert rc == code, name
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["verdict"] == verdict, name
+        if item_id is None:
+            assert payload.get("item") is None
+        else:
+            assert payload["item"]["item_id"] == item_id, name
+        assert plan.read_text(encoding="utf-8") == _load(name)
+
+
+def test_beat113_makefile_echo_mentions_beat113():
+    """Beat 113: Makefile suite echo includes beat113."""
+    text = Path("Makefile").read_text(encoding="utf-8")
+    assert "beat10…beat113" in text or "beat113" in text
+
