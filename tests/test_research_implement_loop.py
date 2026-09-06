@@ -6574,3 +6574,24 @@ def test_beat104_queueitem_still_exported():
         assert hasattr(ri, name), name
         assert name in getattr(ri, "__all__", ()), name
 
+def test_beat105_to_json_dict_aliases_to_dict():
+    """Beat 105: Session A light + Session B picked to_json_dict == to_dict."""
+    a = run_session_a(_load("one_open_ready.md"), brainstorm=stub_brainstorm)
+    assert a.verdict == "light"
+    assert a.wrote_item is False
+    assert a.to_json_dict() == a.to_dict()
+
+    b = run_session_b(_load("one_open_ready.md"), decode_only=True)
+    assert b.verdict == "picked"
+    assert b.to_json_dict() == b.to_dict()
+
+
+def test_beat105_session_b_result_is_session_result():
+    """Beat 105: SessionBResult is SessionResult; both remain public."""
+    import src.research_implement as ri
+
+    assert ri.SessionBResult is ri.SessionResult
+    for name in ("SessionAResult", "SessionBResult", "SessionResult"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+

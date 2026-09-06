@@ -130,3 +130,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Beat 102: write_queue_section transplants two_open onto empty; default_implement aliases dry_run_implement.
 - Beat 103: serialize_queue_items two_open round-trip stays dual-pickable.
 - Beat 104: QueueItem.field_map covers REQUIRED_FIELDS; QueueItem remains public.
+- Beat 105: to_json_dict aliases to_dict; SessionBResult is SessionResult.
