@@ -172,6 +172,8 @@ Beat 71: ``session-b --json`` dry_run/idle/failed keys match ``SESSION_RESULT_JS
 
 Beat 72: Session A ``to_dict`` / ``to_json_dict`` / ``session_a_result_dict`` align for queued/light/failed; CLI ``--json`` light already keys-locked. Proof: pytest ``-k beat72``.
 
+Beat 73: ``SessionAResult`` / ``SessionResult`` / ``SessionBResult`` / ``QueueItem`` stay public; result classes still expose ``to_dict``. Proof: pytest ``-k beat73``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

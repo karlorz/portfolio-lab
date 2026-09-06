@@ -136,6 +136,8 @@ Beat 70: path runners exported; light/failed Session A JSON keys locked. Proof: 
 Beat 71: Session B dry_run/idle/failed JSON keys; to_dict aliases. Proof: pytest ``-k beat71``.
 
 Beat 72: Session A to_dict aliases align across queued/light/failed. Proof: pytest ``-k beat72``.
+
+Beat 73: result/queue dataclasses remain public API. Proof: pytest ``-k beat73``.
 """
 
 from __future__ import annotations

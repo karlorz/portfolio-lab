@@ -5622,3 +5622,39 @@ def test_beat72_session_a_cli_queued_json_keys(tmp_path: Path, capsys):
     assert payload.get("verdict") == "queued"
     assert set(payload) == set(SESSION_A_RESULT_JSON_KEYS)
 
+
+def test_beat73_result_and_queue_types_exported():
+    """Beat 73: SessionAResult / SessionResult / SessionBResult / QueueItem public."""
+    import src.research_implement as ri
+
+    for name in ("SessionAResult", "SessionResult", "SessionBResult", "QueueItem"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+
+    # SessionBResult is alias or subclass of SessionResult
+    assert ri.SessionBResult is ri.SessionResult or issubclass(
+        ri.SessionBResult, ri.SessionResult
+    )
+
+
+def test_beat73_result_to_dict_callable_on_live_results():
+    """Beat 73: live A/B results still expose to_dict matching SESSION_* keys."""
+    from src.research_implement import (
+        SESSION_A_RESULT_JSON_KEYS,
+        SESSION_RESULT_JSON_KEYS,
+        run_session_a,
+        run_session_b,
+        stub_brainstorm,
+    )
+
+    a = run_session_a(
+        (FIXTURES / "empty_queue.md").read_text(encoding="utf-8"),
+        brainstorm=stub_brainstorm,
+    )
+    assert set(a.to_dict()) == set(SESSION_A_RESULT_JSON_KEYS)
+    b = run_session_b(
+        (FIXTURES / "one_open_ready.md").read_text(encoding="utf-8"),
+        decode_only=True,
+    )
+    assert set(b.to_dict()) == set(SESSION_RESULT_JSON_KEYS)
+
