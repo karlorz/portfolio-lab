@@ -133,3 +133,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Beat 105: to_json_dict aliases to_dict; SessionBResult is SessionResult.
 - Beat 106: idle/picked keep_schedule True; never scheduler_delete_called.
 - Beat 107: Session A queued/light/failed to_dict matrix; run_session_a remains public.
+- Beat 108: Session B idle/picked/failed to_dict matrix; run_session_b remains public.

@@ -6650,3 +6650,37 @@ def test_beat107_run_session_a_still_exported():
     assert hasattr(ri, "run_session_a")
     assert "run_session_a" in getattr(ri, "__all__", ())
 
+def test_beat108_session_b_idle_picked_failed_to_dict():
+    """Beat 108: Session B empty→idle; one_open→picked; two_queue→failed."""
+    idle = run_session_b(_load("empty_queue.md"), decode_only=True).to_dict()
+    assert idle["verdict"] == "idle"
+    assert idle["ok"] is True
+    assert idle["open_count"] == 0
+    assert idle["queue"] == "queue 0/10"
+    assert idle["keep_schedule"] is True
+    assert idle["scheduler_delete_called"] is False
+    assert idle["shipped"] is False
+
+    picked = run_session_b(_load("one_open_ready.md"), decode_only=True).to_dict()
+    assert picked["verdict"] == "picked"
+    assert picked["ok"] is True
+    assert picked["open_count"] == 1
+    assert picked["queue"] == "queue 1/10"
+    assert picked["keep_schedule"] is True
+    assert picked["shipped"] is False
+
+    failed = run_session_b(_load("two_queue_sections.md"), decode_only=True).to_dict()
+    assert failed["verdict"] == "failed"
+    assert failed["ok"] is False
+    assert failed["open_count"] == 0
+    assert failed["keep_schedule"] is True
+    assert failed["scheduler_delete_called"] is False
+
+
+def test_beat108_run_session_b_still_exported():
+    """Beat 108: run_session_b remains a public export."""
+    import src.research_implement as ri
+
+    assert hasattr(ri, "run_session_b")
+    assert "run_session_b" in getattr(ri, "__all__", ())
+

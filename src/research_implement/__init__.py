@@ -180,6 +180,7 @@ Beat 104: QueueItem.field_map covers REQUIRED_FIELDS. Proof: pytest ``-k beat104
 Beat 105: to_json_dict aliases to_dict; SessionBResult is SessionResult. Proof: pytest ``-k beat105``.
 Beat 106: keep_schedule True; never scheduler_delete_called. Proof: pytest ``-k beat106``.
 Beat 107: Session A queued/light/failed to_dict matrix. Proof: pytest ``-k beat107``.
+Beat 108: Session B idle/picked/failed to_dict matrix. Proof: pytest ``-k beat108``.
 """
 
 from __future__ import annotations

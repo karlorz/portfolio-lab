@@ -214,6 +214,7 @@ Beat 104: ``QueueItem.field_map`` covers ``REQUIRED_FIELDS``; QueueItem stays pu
 Beat 105: ``to_json_dict`` aliases ``to_dict``; ``SessionBResult`` is ``SessionResult``. Proof: pytest ``-k beat105``.
 Beat 106: idle/picked ``keep_schedule`` True; never ``scheduler_delete_called``. Proof: pytest ``-k beat106``.
 Beat 107: Session A queued/light/failed ``to_dict`` matrix; ``run_session_a`` stays public. Proof: pytest ``-k beat107``.
+Beat 108: Session B idle/picked/failed ``to_dict`` matrix; ``run_session_b`` stays public. Proof: pytest ``-k beat108``.
 
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
