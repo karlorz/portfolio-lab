@@ -232,6 +232,7 @@ Beat 122: session-a ``--stub|--no-stub --dry-run --json`` Watch-fixture CLI matr
 Beat 123: session-b ``--decode-only --json`` Watch-fixture CLI matrix via tmp_path (watch_only→idle; watch_lookalike / watch_queue_heartbeat→picked; two_queue→failed); plan untouched; keep_schedule / no scheduler_delete. Completes Watch trilogy with Beat 118 (idle-decode) + Beat 119 (dry-run). Proof: pytest ``-k beat123``.
 Beat 124: idle-decode ``--json`` non-pickable OPEN CLI matrix via tmp_path (shipped_only / incomplete_open / broken_ready_flag / open_complete_not_ready→idle); plan untouched; keep_schedule / no scheduler_delete. Distinct from Beat 113 (ready picks) + Beat 118 (Watch). Proof: pytest ``-k beat124``.
 Beat 125: session-b ``--dry-run --json`` non-pickable OPEN CLI matrix via tmp_path (shipped_only / incomplete_open / broken_ready_flag / open_complete_not_ready→idle, never dry_run); plan untouched; keep_schedule / no scheduler_delete. Pairs with Beat 124 (idle-decode same fixtures). Proof: pytest ``-k beat125``.
+Beat 126: session-b ``--json`` (default decode-only path) non-pickable OPEN CLI matrix via tmp_path (shipped_only / incomplete_open / broken_ready_flag / open_complete_not_ready→idle, never dry_run); plan untouched; keep_schedule / no scheduler_delete. Completes non-pickable trilogy with Beat 124 (idle-decode) + Beat 125 (dry-run). Proof: pytest ``-k beat126``.
 
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
