@@ -5287,3 +5287,43 @@ def test_beat65_write_queue_section_still_exported():
         assert hasattr(ri, name), name
         assert name in getattr(ri, "__all__", ()), name
 
+
+def test_beat66_no_stub_light_and_failed(tmp_path: Path, capsys):
+    """Beat 66: --no-stub on one_open → light; on empty → failed; plans intact."""
+    import json
+    from src.research_implement.__main__ import main
+
+    one_src = (FIXTURES / "one_open_ready.md").read_text(encoding="utf-8")
+    one = tmp_path / "beat66_one.md"
+    one.write_text(one_src, encoding="utf-8")
+    rc_light = main(["session-a", "--plan", str(one), "--no-stub", "--json"])
+    assert rc_light == 0
+    light = json.loads(capsys.readouterr().out)
+    assert light.get("verdict") == "light"
+    assert light.get("wrote_item") is False
+    assert one.read_text(encoding="utf-8") == one_src
+
+    empty_src = (FIXTURES / "empty_queue.md").read_text(encoding="utf-8")
+    empty = tmp_path / "beat66_empty.md"
+    empty.write_text(empty_src, encoding="utf-8")
+    rc_fail = main(["session-a", "--plan", str(empty), "--no-stub", "--json"])
+    assert rc_fail == 1
+    failed = json.loads(capsys.readouterr().out)
+    assert failed.get("verdict") == "failed"
+    assert failed.get("wrote_item") is False
+    assert empty.read_text(encoding="utf-8") == empty_src
+
+
+def test_beat66_implement_helpers_still_exported():
+    """Beat 66: stub_brainstorm / dry_run_implement / make_fixture_ship_implement public."""
+    import src.research_implement as ri
+
+    for name in (
+        "stub_brainstorm",
+        "dry_run_implement",
+        "make_fixture_ship_implement",
+    ):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+        assert callable(getattr(ri, name))
+

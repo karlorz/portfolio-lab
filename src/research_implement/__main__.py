@@ -158,6 +158,8 @@ Beat 64: ``one_open_ready`` ``session-b --dry-run`` / idle-decode pick Q1; plan 
 
 Beat 65: ``two_queue_sections`` ``session-b --dry-run`` / ``session-a --dry-run`` still fail-closed (``verdict=failed``, non-zero); ``write_queue_section`` stays public. Proof: pytest ``-k beat65``.
 
+Beat 66: ``session-a --no-stub`` on OPEN>=1 is light recount; on empty Queue fails closed (no stub fallback); ``stub_brainstorm`` / ``dry_run_implement`` / ``make_fixture_ship_implement`` stay public. Proof: pytest ``-k beat66``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

@@ -91,3 +91,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - `mixed_priority` + `session-b --dry-run` / idle-decode: picks first ready OPEN; plan unchanged.
 - `one_open_ready` + `session-b --dry-run` / idle-decode: picks Q1; plan unchanged.
 - Dual-Queue + `--dry-run` still fail-closed (`verdict=failed`); never becomes a dry_run pick.
+- `session-a --no-stub`: OPEN>=1 → light recount; empty Queue → failed (no stub fallback).

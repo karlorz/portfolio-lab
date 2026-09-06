@@ -122,6 +122,8 @@ Beat 63: mixed_priority dry-run/pick first ready; count_queue_headings export. P
 Beat 64: one_open dry-run/pick; format_queue_item + require_unique_queue exports. Proof: pytest ``-k beat64``.
 
 Beat 65: dual-Queue dry-run still fail-closed; write_queue_section export. Proof: pytest ``-k beat65``.
+
+Beat 66: --no-stub light/failed CLI paths; implement helper exports. Proof: pytest ``-k beat66``.
 """
 
 from __future__ import annotations
