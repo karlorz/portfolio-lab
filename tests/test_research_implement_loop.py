@@ -6536,3 +6536,22 @@ def test_beat102_default_implement_aliases_dry_run_exported():
         assert hasattr(ri, name), name
         assert name in getattr(ri, "__all__", ()), name
 
+def test_beat103_serialize_queue_items_two_open_roundtrip():
+    """Beat 103: serialize_queue_items(two_open) → reparse stays open=2 pick Q1."""
+    original = parse_queue_items(_load("two_open_ready.md"))
+    body = serialize_queue_items(original)
+    wrapped = "## Queue" + "\n\n" + body + "\n"
+    items = parse_queue_items(wrapped)
+    assert count_open(items) == 2
+    assert [i.item_id for i in items] == ["Q1", "Q2"]
+    assert all(is_b_pickable(i) for i in items)
+    assert first_b_pick(items).item_id == "Q1"
+
+
+def test_beat103_serialize_queue_items_still_exported():
+    """Beat 103: serialize_queue_items remains a public export."""
+    import src.research_implement as ri
+
+    assert hasattr(ri, "serialize_queue_items")
+    assert "serialize_queue_items" in getattr(ri, "__all__", ())
+
