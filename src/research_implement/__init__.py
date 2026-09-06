@@ -182,6 +182,7 @@ Beat 106: keep_schedule True; never scheduler_delete_called. Proof: pytest ``-k 
 Beat 107: Session A queued/light/failed to_dict matrix. Proof: pytest ``-k beat107``.
 Beat 108: Session B idle/picked/failed to_dict matrix. Proof: pytest ``-k beat108``.
 Beat 109: first_b_pick/count_open fixture consistency; __all__ unique. Proof: pytest ``-k beat109``.
+Beat 110: milestone — CLI help + public API export smoke through beat110. Proof: pytest ``-k beat110``.
 """
 
 from __future__ import annotations
