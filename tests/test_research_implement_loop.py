@@ -5772,3 +5772,25 @@ def test_beat77_first_b_pick_still_exported():
     assert hasattr(ri, "first_b_pick")
     assert "first_b_pick" in getattr(ri, "__all__", ())
 
+
+def test_beat78_two_open_first_b_pick_and_count():
+    """Beat 78: two_open_ready first_b_pick is first; count_open is 2."""
+    from src.research_implement import count_open, first_b_pick, is_b_pickable, parse_queue_items
+
+    items = parse_queue_items((FIXTURES / "two_open_ready.md").read_text(encoding="utf-8"))
+    assert len(items) >= 2
+    assert count_open(items) == 2
+    assert all(is_b_pickable(i) for i in items[:2])
+    pick = first_b_pick(items)
+    assert pick is not None
+    assert pick.item_id == items[0].item_id
+    assert pick.item_id != items[1].item_id
+
+
+def test_beat78_parse_queue_items_still_exported():
+    """Beat 78: parse_queue_items remains a public export."""
+    import src.research_implement as ri
+
+    assert hasattr(ri, "parse_queue_items")
+    assert "parse_queue_items" in getattr(ri, "__all__", ())
+

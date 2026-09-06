@@ -182,6 +182,8 @@ Beat 76: ``open_complete_not_ready`` is not B-pickable (``count_open`` 0); ``bro
 
 Beat 77: ``mixed_priority`` ``first_b_pick`` skips incomplete rows and returns the first ready OPEN; ``count_open`` counts only pickable items. Proof: pytest ``-k beat77``.
 
+Beat 78: ``two_open_ready`` ``first_b_pick`` returns the first OPEN; ``count_open`` is 2; second stays OPEN. Proof: pytest ``-k beat78``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never
