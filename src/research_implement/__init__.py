@@ -176,6 +176,7 @@ Beat 100: milestone — CLI help + public API export smoke through beat100. Proo
 Beat 101: format_queue_item round-trip; dry_run/fixture-ship exports. Proof: pytest ``-k beat101``.
 Beat 102: write_queue_section transplant; default_implement alias dry-run. Proof: pytest ``-k beat102``.
 Beat 103: serialize_queue_items two_open round-trip. Proof: pytest ``-k beat103``.
+Beat 104: QueueItem.field_map covers REQUIRED_FIELDS. Proof: pytest ``-k beat104``.
 """
 
 from __future__ import annotations

@@ -6555,3 +6555,22 @@ def test_beat103_serialize_queue_items_still_exported():
     assert hasattr(ri, "serialize_queue_items")
     assert "serialize_queue_items" in getattr(ri, "__all__", ())
 
+def test_beat104_queueitem_field_map_covers_required():
+    """Beat 104: QueueItem.field_map keys match REQUIRED_FIELDS with values."""
+    item = parse_queue_items(_load("one_open_ready.md"))[0]
+    fields = item.field_map()
+    assert tuple(fields.keys()) == REQUIRED_FIELDS
+    for name in REQUIRED_FIELDS:
+        assert fields[name], name
+    assert item.title == fields["title"]
+    assert item.acceptance == fields["acceptance"]
+
+
+def test_beat104_queueitem_still_exported():
+    """Beat 104: QueueItem / REQUIRED_FIELDS remain public."""
+    import src.research_implement as ri
+
+    for name in ("QueueItem", "REQUIRED_FIELDS"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+

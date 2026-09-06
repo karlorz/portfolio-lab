@@ -129,3 +129,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Beat 101: format_queue_item round-trip stays pickable; dry_run_implement / make_fixture_ship_implement remain public.
 - Beat 102: write_queue_section transplants two_open onto empty; default_implement aliases dry_run_implement.
 - Beat 103: serialize_queue_items two_open round-trip stays dual-pickable.
+- Beat 104: QueueItem.field_map covers REQUIRED_FIELDS; QueueItem remains public.
