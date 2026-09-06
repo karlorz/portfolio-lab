@@ -52,3 +52,5 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Top-level JSON `null` for `--candidate-json` fails closed.
 - Empty / whitespace-only `--plan` / `--log` → non-zero exit.
 - Idle `--json` keeps `keep_schedule=true` and `scheduler_delete_called=false`.
+- Empty / whitespace `--log` fails like `--plan`.
+- `session-b --dry-run --json` keeps `keep_schedule=true` / `scheduler_delete_called=false` and does not mutate the plan.

@@ -4062,3 +4062,31 @@ def test_beat33_idle_json_never_scheduler_delete(tmp_path: Path, capsys):
     assert payload.get("scheduler_delete_called") is False
     assert payload.get("verdict") == "idle" or "idle" in str(payload.get("verdict", "")).lower()
 
+
+def test_beat34_empty_log_path_fails():
+    """Beat 34: empty / whitespace --log → SystemExit path is empty (like --plan)."""
+    from src.research_implement.__main__ import main
+
+    for bad in ("", "   ", "\t"):
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--log", bad, "--json"])
+        assert "empty" in str(ei.value).lower()
+
+
+def test_beat34_session_b_dry_run_json_never_scheduler_delete(tmp_path: Path, capsys):
+    """Beat 34: session-b --dry-run --json keeps schedule; never scheduler_delete."""
+    import json
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "one.md"
+    plan.write_text((FIXTURES / "one_open_ready.md").read_text(encoding="utf-8"), encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    rc = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("keep_schedule") is True
+    assert payload.get("scheduler_delete_called") is False
+    assert payload.get("shipped") is False
+    # dry-run must not mutate the plan (OPEN stays).
+    assert plan.read_text(encoding="utf-8") == before
+
