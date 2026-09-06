@@ -5900,3 +5900,25 @@ def test_beat82_render_queue_count_and_capacity_exported():
     assert ri.render_queue_count(0) == "queue 0/10"
     assert ri.render_queue_count(1) == "queue 1/10"
 
+def test_beat83_non_pickable_fixtures_first_b_pick_none():
+    """Beat 83: incomplete/shipped/not-ready/broken/empty never yield a first_b_pick."""
+    for name in (
+        "incomplete_open.md",
+        "shipped_only.md",
+        "open_complete_not_ready.md",
+        "broken_ready_flag.md",
+        "empty_queue.md",
+    ):
+        items = parse_queue_items(_load(name))
+        assert first_b_pick(items) is None, name
+        assert count_open(items) == 0, name
+
+
+def test_beat83_serialize_queue_helpers_still_exported():
+    """Beat 83: serialize_queue_item / serialize_queue_items remain public."""
+    import src.research_implement as ri
+
+    for name in ("serialize_queue_item", "serialize_queue_items"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+

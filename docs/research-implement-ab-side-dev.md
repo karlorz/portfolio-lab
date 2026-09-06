@@ -108,3 +108,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Milestone beat80: CLI subcommands + public runners/helpers remain stable; Makefile suite note includes beat80.
 - Beat 81: watch_lookalike first_b_pick=Q3; watch_only idle; mark_item_shipped remains public.
 - Beat 82: subcommand --help lists --plan/--json; render_queue_count + QUEUE_CAPACITY remain public.
+- Beat 83: non-pickable fixtures first_b_pick=None; serialize_queue_item(s) remain public.

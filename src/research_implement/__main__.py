@@ -189,6 +189,7 @@ Beat 79: ``one_open_ready`` ``first_b_pick`` / ``count_open`` are 1; ``empty_que
 Beat 80: milestone — top-level ``--help`` still lists session-a/session-b/idle-decode; public API still exports Session A/B runners + queue helpers; Makefile echo reaches beat80. Proof: pytest ``-k beat80``.
 Beat 81: watch_lookalike ``first_b_pick`` is Q3 (not Watch); watch_only idle; ``mark_item_shipped`` stays public. Proof: pytest ``-k beat81``.
 Beat 82: subcommand ``--help`` still lists ``--plan``/``--json``; ``render_queue_count`` + ``QUEUE_CAPACITY`` stay public. Proof: pytest ``-k beat82``.
+Beat 83: incomplete/shipped/not-ready/broken/empty ``first_b_pick`` is None; ``serialize_queue_item(s)`` stay public. Proof: pytest ``-k beat83``.
 
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
