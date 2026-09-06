@@ -178,6 +178,8 @@ Beat 74: ``QueueItem`` from ``one_open_ready`` is B-pickable; ``format_queue_ite
 
 Beat 75: ``incomplete_open`` / ``shipped_only`` items are not B-pickable; ``count_open`` stays public and returns 0 for those fixtures. Proof: pytest ``-k beat75``.
 
+Beat 76: ``open_complete_not_ready`` is not B-pickable (``count_open`` 0); ``broken_ready_flag`` likewise; ``is_ready_yes`` rejects READY/maybe. Proof: pytest ``-k beat76``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

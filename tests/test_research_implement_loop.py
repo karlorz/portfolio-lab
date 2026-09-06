@@ -5721,3 +5721,32 @@ def test_beat75_count_open_still_exported():
     assert hasattr(ri, "count_open")
     assert "count_open" in getattr(ri, "__all__", ())
 
+
+def test_beat76_not_ready_and_broken_ready_not_pickable():
+    """Beat 76: open_complete_not_ready / broken_ready_flag → no B-pick; count_open 0."""
+    from src.research_implement import (
+        count_open,
+        first_b_pick,
+        is_b_pickable,
+        is_ready_yes,
+        parse_queue_items,
+    )
+
+    for name in ("open_complete_not_ready.md", "broken_ready_flag.md"):
+        items = parse_queue_items((FIXTURES / name).read_text(encoding="utf-8"))
+        assert count_open(items) == 0, name
+        assert first_b_pick(items) is None, name
+        assert not any(is_b_pickable(i) for i in items), name
+
+    assert not is_ready_yes("READY")
+    assert not is_ready_yes("maybe")
+    assert not is_ready_yes("no")
+
+
+def test_beat76_is_ready_yes_still_exported():
+    """Beat 76: is_ready_yes remains a public export."""
+    import src.research_implement as ri
+
+    assert hasattr(ri, "is_ready_yes")
+    assert "is_ready_yes" in getattr(ri, "__all__", ())
+

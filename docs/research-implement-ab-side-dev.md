@@ -101,3 +101,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Public dataclasses: `SessionAResult`, `SessionResult`/`SessionBResult`, `QueueItem` (all expose `to_dict` where applicable).
 - `format_queue_item` → `parse_queue_items` round-trip keeps B-pickable fields.
 - `incomplete_open` / `shipped_only`: not B-pickable; `count_open` is 0.
+- `open_complete_not_ready` / `broken_ready_flag`: not B-pickable; `count_open` is 0.

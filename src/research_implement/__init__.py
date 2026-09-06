@@ -142,6 +142,8 @@ Beat 73: result/queue dataclasses remain public API. Proof: pytest ``-k beat73``
 Beat 74: QueueItem pickability + format/parse round-trip. Proof: pytest ``-k beat74``.
 
 Beat 75: incomplete/shipped fixtures never B-pickable; count_open=0. Proof: pytest ``-k beat75``.
+
+Beat 76: not-ready / broken-ready fixtures never pickable. Proof: pytest ``-k beat76``.
 """
 
 from __future__ import annotations
