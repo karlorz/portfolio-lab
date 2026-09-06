@@ -137,3 +137,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Beat 109: first_b_pick/count_open consistent across fixtures; __all__ has unique names.
 - Milestone beat110: CLI subcommands + public A/B runners/helpers/aliases/write/serialize remain stable; Makefile suite note includes beat110.
 - Beat 111: idle fixtures queue 0/10 + decode_report None; picked decode_report == format_decode_report.
+- Beat 112: path runners — Session A empty writes stub; Session B idle leaves plan untouched.

@@ -218,6 +218,7 @@ Beat 108: Session B idle/picked/failed ``to_dict`` matrix; ``run_session_b`` sta
 Beat 109: ``first_b_pick``/``count_open`` consistent across fixtures; ``__all__`` unique. Proof: pytest ``-k beat109``.
 Beat 110: milestone — top-level ``--help`` + public API through beat110 (A/B verdicts, aliases, write/serialize); Makefile echo reaches beat110. Proof: pytest ``-k beat110``.
 Beat 111: idle ``queue 0/10`` decode path (decode_report None); picked report matches ``format_decode_report``. Proof: pytest ``-k beat111``.
+Beat 112: path runners — A empty writes stub; B idle leaves plan untouched. Proof: pytest ``-k beat112``.
 
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.

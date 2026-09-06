@@ -6841,3 +6841,29 @@ def test_beat111_picked_decode_report_matches_helper():
         assert hasattr(ri, name), name
         assert name in getattr(ri, "__all__", ()), name
 
+def test_beat112_path_a_empty_writes_stub(tmp_path: Path):
+    """Beat 112: run_session_a_path empty + stub → queued write; plan gains OPEN item."""
+    plan = tmp_path / "plan.md"
+    plan.write_text(_load("empty_queue.md"), encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    result = run_session_a_path(plan, brainstorm=stub_brainstorm, write=True)
+    assert result.verdict == "queued"
+    assert result.wrote_item is True
+    after = plan.read_text(encoding="utf-8")
+    assert after != before
+    assert "Stub shippable change" in after or "status: OPEN" in after
+
+
+def test_beat112_path_b_idle_leaves_plan(tmp_path: Path):
+    """Beat 112: run_session_b_path idle decode leaves plan bytes unchanged."""
+    plan = tmp_path / "plan.md"
+    src = _load("empty_queue.md")
+    plan.write_text(src, encoding="utf-8")
+    result = run_session_b_path(plan, decode_only=True, write=False)
+    assert result.verdict == "idle"
+    assert plan.read_text(encoding="utf-8") == src
+    import src.research_implement as ri
+
+    for name in ("run_session_a_path", "run_session_b_path"):
+        assert name in getattr(ri, "__all__", ()), name
+

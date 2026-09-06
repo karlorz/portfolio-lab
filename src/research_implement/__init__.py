@@ -184,6 +184,7 @@ Beat 108: Session B idle/picked/failed to_dict matrix. Proof: pytest ``-k beat10
 Beat 109: first_b_pick/count_open fixture consistency; __all__ unique. Proof: pytest ``-k beat109``.
 Beat 110: milestone — CLI help + public API export smoke through beat110. Proof: pytest ``-k beat110``.
 Beat 111: idle fixtures queue 0/10 + decode_report None; picked decode_report == format_decode_report. Proof: pytest ``-k beat111``.
+Beat 112: path runners A write / B idle no-touch. Proof: pytest ``-k beat112``.
 """
 
 from __future__ import annotations
