@@ -134,6 +134,8 @@ Beat 69: session_*_result_dict helpers align with CLI --json. Proof: pytest ``-k
 Beat 70: path runners exported; light/failed Session A JSON keys locked. Proof: pytest ``-k beat70``.
 
 Beat 71: Session B dry_run/idle/failed JSON keys; to_dict aliases. Proof: pytest ``-k beat71``.
+
+Beat 72: Session A to_dict aliases align across queued/light/failed. Proof: pytest ``-k beat72``.
 """
 
 from __future__ import annotations

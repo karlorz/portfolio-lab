@@ -5582,3 +5582,43 @@ def test_beat71_to_dict_aliases_align():
     assert d1 == d2 == d3
     assert set(d1) == set(SESSION_RESULT_JSON_KEYS)
 
+
+def test_beat72_session_a_to_dict_aliases_align():
+    """Beat 72: to_dict / to_json_dict / session_a_result_dict agree for A verdicts."""
+    from src.research_implement import (
+        SESSION_A_RESULT_JSON_KEYS,
+        run_session_a,
+        session_a_result_dict,
+        stub_brainstorm,
+    )
+
+    cases = (
+        ((FIXTURES / "empty_queue.md").read_text(encoding="utf-8"), "queued", stub_brainstorm),
+        ((FIXTURES / "one_open_ready.md").read_text(encoding="utf-8"), "light", stub_brainstorm),
+        ((FIXTURES / "two_queue_sections.md").read_text(encoding="utf-8"), "failed", stub_brainstorm),
+    )
+    for plan_text, verdict, brainstorm in cases:
+        result = run_session_a(plan_text, brainstorm=brainstorm)
+        assert result.verdict == verdict, verdict
+        d1 = result.to_dict()
+        d2 = result.to_json_dict()
+        d3 = session_a_result_dict(result)
+        assert d1 == d2 == d3, verdict
+        assert set(d1) == set(SESSION_A_RESULT_JSON_KEYS), verdict
+
+
+def test_beat72_session_a_cli_queued_json_keys(tmp_path: Path, capsys):
+    """Beat 72: session-a --stub --json queued keys match SESSION_A_RESULT_JSON_KEYS."""
+    import json
+    from src.research_implement.__main__ import main
+    from src.research_implement.session_a import SESSION_A_RESULT_JSON_KEYS
+
+    src = (FIXTURES / "empty_queue.md").read_text(encoding="utf-8")
+    plan = tmp_path / "beat72.md"
+    plan.write_text(src, encoding="utf-8")
+    rc = main(["session-a", "--plan", str(plan), "--stub", "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("verdict") == "queued"
+    assert set(payload) == set(SESSION_A_RESULT_JSON_KEYS)
+

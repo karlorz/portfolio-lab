@@ -97,3 +97,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - CLI `--json` matches `session_a_result_dict` / `session_b_result_dict` key sets.
 - Public path runners: `run_session_a_path` / `run_session_b_path`; Session A light/failed `--json` uses `SESSION_A_RESULT_JSON_KEYS`.
 - Session B `--json` for `dry_run` / `idle` / `failed` uses `SESSION_RESULT_JSON_KEYS`; `to_dict` ≡ `to_json_dict`.
+- Session A `to_dict` ≡ `to_json_dict` ≡ `session_a_result_dict` for queued/light/failed.
