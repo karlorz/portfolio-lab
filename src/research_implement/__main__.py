@@ -156,6 +156,8 @@ Beat 63: ``mixed_priority`` ``session-b --dry-run`` / idle-decode pick first rea
 
 Beat 64: ``one_open_ready`` ``session-b --dry-run`` / idle-decode pick Q1; plan unchanged; ``format_queue_item`` / ``require_unique_queue_section`` stay public. Proof: pytest ``-k beat64``.
 
+Beat 65: ``two_queue_sections`` ``session-b --dry-run`` / ``session-a --dry-run`` still fail-closed (``verdict=failed``, non-zero); ``write_queue_section`` stays public. Proof: pytest ``-k beat65``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

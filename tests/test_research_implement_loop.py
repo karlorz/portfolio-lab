@@ -5249,3 +5249,41 @@ def test_beat64_format_and_require_unique_exports():
             (FIXTURES / "two_queue_sections.md").read_text(encoding="utf-8")
         )
 
+
+def test_beat65_two_queue_dry_run_still_failed(tmp_path: Path, capsys):
+    """Beat 65: two_queue session-b/session-a --dry-run → failed; plan intact."""
+    import json
+    from src.research_implement.__main__ import main
+
+    src = (FIXTURES / "two_queue_sections.md").read_text(encoding="utf-8")
+    # session-b --dry-run
+    plan_b = tmp_path / "beat65_b.md"
+    plan_b.write_text(src, encoding="utf-8")
+    rc_b = main(["session-b", "--plan", str(plan_b), "--dry-run", "--json"])
+    assert rc_b == 1
+    payload_b = json.loads(capsys.readouterr().out)
+    assert payload_b.get("verdict") == "failed"
+    assert payload_b.get("ok") is False
+    assert payload_b.get("implement_result") is None
+    assert payload_b.get("scheduler_delete_called") is False
+    assert plan_b.read_text(encoding="utf-8") == src
+
+    # session-a --dry-run --stub
+    plan_a = tmp_path / "beat65_a.md"
+    plan_a.write_text(src, encoding="utf-8")
+    rc_a = main(["session-a", "--plan", str(plan_a), "--stub", "--dry-run", "--json"])
+    assert rc_a == 1
+    payload_a = json.loads(capsys.readouterr().out)
+    assert payload_a.get("verdict") == "failed"
+    assert payload_a.get("wrote_item") is False
+    assert plan_a.read_text(encoding="utf-8") == src
+
+
+def test_beat65_write_queue_section_still_exported():
+    """Beat 65: write_queue_section / parse_queue_items remain public."""
+    import src.research_implement as ri
+
+    for name in ("write_queue_section", "parse_queue_items", "format_queue_item"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+

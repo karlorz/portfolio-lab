@@ -120,6 +120,8 @@ Beat 62: not-ready / broken-ready dry-run idle; next_queue_id export. Proof: pyt
 Beat 63: mixed_priority dry-run/pick first ready; count_queue_headings export. Proof: pytest ``-k beat63``.
 
 Beat 64: one_open dry-run/pick; format_queue_item + require_unique_queue exports. Proof: pytest ``-k beat64``.
+
+Beat 65: dual-Queue dry-run still fail-closed; write_queue_section export. Proof: pytest ``-k beat65``.
 """
 
 from __future__ import annotations
