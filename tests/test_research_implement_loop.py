@@ -3860,3 +3860,59 @@ def test_beat28_unknown_subcommand_fails(capsys):
     err = capsys.readouterr().err.lower()
     assert "invalid choice" in err or "not-a-real-cmd" in err
 
+
+def test_beat29_candidate_json_list_no_dicts_fails(tmp_path: Path, capsys):
+    """Beat 29: --candidate-json ["x", 1] → failed (no stub); plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    src = FIXTURES / "empty_queue.md"
+    plan = tmp_path / "plan.md"
+    plan.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    cand = tmp_path / "no_dicts.json"
+    cand.write_text('["x", 1, true]\n', encoding="utf-8")
+    rc = main(
+        [
+            "session-a",
+            "--plan",
+            str(plan),
+            "--no-stub",
+            "--candidate-json",
+            str(cand),
+            "--json",
+        ]
+    )
+    assert rc == 1
+    out = capsys.readouterr().out.lower()
+    assert '"ok": false' in out or "failed" in out
+    assert plan.read_text(encoding="utf-8") == before
+
+
+def test_beat29_json_keys_match_session_contracts(tmp_path: Path, capsys):
+    """Beat 29: CLI --json keys exactly match SESSION_*_RESULT_JSON_KEYS."""
+    import json
+    from src.research_implement.__main__ import main
+    from src.research_implement.session_a import SESSION_A_RESULT_JSON_KEYS
+    from src.research_implement.session_b import SESSION_RESULT_JSON_KEYS
+
+    empty = tmp_path / "empty.md"
+    empty.write_text((FIXTURES / "empty_queue.md").read_text(encoding="utf-8"), encoding="utf-8")
+    one = tmp_path / "one.md"
+    one.write_text((FIXTURES / "one_open_ready.md").read_text(encoding="utf-8"), encoding="utf-8")
+
+    rc_a = main(["session-a", "--plan", str(empty), "--stub", "--dry-run", "--json"])
+    assert rc_a == 0
+    payload_a = json.loads(capsys.readouterr().out)
+    assert tuple(sorted(payload_a)) == tuple(sorted(SESSION_A_RESULT_JSON_KEYS))
+    assert set(payload_a) == set(SESSION_A_RESULT_JSON_KEYS)
+
+    rc_idle = main(["idle-decode", "--plan", str(empty), "--json"])
+    assert rc_idle == 0
+    payload_idle = json.loads(capsys.readouterr().out)
+    assert set(payload_idle) == set(SESSION_RESULT_JSON_KEYS)
+
+    rc_b = main(["session-b", "--plan", str(one), "--json"])
+    assert rc_b == 0
+    payload_b = json.loads(capsys.readouterr().out)
+    assert set(payload_b) == set(SESSION_RESULT_JSON_KEYS)
+

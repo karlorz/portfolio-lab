@@ -42,3 +42,5 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Producer-only flags (`--stub` / `--no-stub` / `--candidate-json`) are rejected on `session-b` / `idle-decode`.
 - `session-a --candidate-json` with `[]` fails closed (no stub fallback); plan unchanged.
 - Unknown subcommand → non-zero exit.
+- `--candidate-json` list with no dict elements fails closed (no stub fallback).
+- CLI `--json` keys match `SESSION_A_RESULT_JSON_KEYS` / `SESSION_RESULT_JSON_KEYS`.
