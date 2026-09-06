@@ -5853,3 +5853,25 @@ def test_beat80_public_api_milestone_exports():
         assert hasattr(ri, name), name
         assert name in getattr(ri, "__all__", ()), name
 
+def test_beat81_watch_lookalike_and_watch_only_picks():
+    """Beat 81: watch_lookalike first_b_pick=Q3; watch_only first_b_pick=None."""
+    look = parse_queue_items(_load("watch_lookalike.md"))
+    pick = first_b_pick(look)
+    assert pick is not None
+    assert pick.item_id == "Q3"
+    assert "Fake" not in (pick.title or "")
+    assert count_open(look) == 1
+
+    only = parse_queue_items(_load("watch_only_lookalike.md"))
+    assert first_b_pick(only) is None
+    assert count_open(only) == 0
+    assert len(only) == 0
+
+
+def test_beat81_mark_item_shipped_still_exported():
+    """Beat 81: mark_item_shipped remains a public export."""
+    import src.research_implement as ri
+
+    assert hasattr(ri, "mark_item_shipped")
+    assert "mark_item_shipped" in getattr(ri, "__all__", ())
+

@@ -152,6 +152,7 @@ Beat 78: two_open_ready first_b_pick is first of two. Proof: pytest ``-k beat78`
 Beat 79: one_open vs empty_queue pick/count contract. Proof: pytest ``-k beat79``.
 
 Beat 80: milestone — CLI help + public API export smoke through beat80. Proof: pytest ``-k beat80``.
+Beat 81: watch_lookalike / watch_only first_b_pick + mark_item_shipped export. Proof: pytest ``-k beat81``.
 """
 
 from __future__ import annotations
