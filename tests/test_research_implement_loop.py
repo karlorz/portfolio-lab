@@ -4490,3 +4490,36 @@ def test_beat45_decode_only_message_includes_decode_pick():
     assert f"decode pick {result.item.item_id}" in result.message
     assert result.scheduler_delete_called is False
 
+
+def test_beat46_not_ready_cli_idle_json(tmp_path: Path, capsys):
+    """Beat 46: open_complete_not_ready → idle-decode/session-b idle JSON; plan unchanged."""
+    import json
+    from src.research_implement.__main__ import main
+
+    src = (FIXTURES / "open_complete_not_ready.md").read_text(encoding="utf-8")
+    for cmd in ("idle-decode", "session-b"):
+        plan = tmp_path / f"{cmd}.md"
+        plan.write_text(src, encoding="utf-8")
+        rc = main([cmd, "--plan", str(plan), "--json"])
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload.get("verdict") == "idle"
+        assert payload.get("queue") == "queue 0/10"
+        assert payload.get("keep_schedule") is True
+        assert payload.get("scheduler_delete_called") is False
+        assert payload.get("item") is None
+        assert plan.read_text(encoding="utf-8") == src
+
+
+def test_beat46_empty_queue_cli_idle_message_mentions_queue():
+    """Beat 46: empty Queue idle message mentions queue 0/10; never scheduler_delete."""
+    from src.research_implement.session_b import run_session_b
+
+    plan = (FIXTURES / "empty_queue.md").read_text(encoding="utf-8")
+    result = run_session_b(plan, decode_only=True)
+    assert result.ok
+    assert result.verdict == "idle"
+    assert "queue 0/10" in result.message
+    assert result.keep_schedule is True
+    assert result.scheduler_delete_called is False
+

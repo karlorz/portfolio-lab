@@ -118,6 +118,8 @@ Beat 44: ``session-b --json`` help matches shared ``SessionResult.to_dict`` (idl
 
 Beat 45: ``idle-decode --json`` / ``session-a --json`` help mention shared ``SessionResult.to_dict`` / ``SessionAResult.to_dict``; decode-only ``session-b`` message includes ``decode pick``. Proof: pytest ``-k beat45``.
 
+Beat 46: OPEN complete but not ready-for-implement → idle fire (``queue 0/10``, keep_schedule) via ``idle-decode`` / ``session-b`` CLI; plan unchanged. Proof: pytest ``-k beat46``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

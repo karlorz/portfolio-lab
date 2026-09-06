@@ -72,3 +72,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Session B dry-run text includes the same `decode pick` six-field report as decode-only.
 - `--json` help: session-a → `SessionAResult.to_dict`; session-b/idle-decode → `SessionResult.to_dict`.
 - Decode-only and dry-run messages both include `decode pick` six-field report.
+- OPEN complete but not ready-for-implement → idle (`queue 0/10`); plan unchanged.
