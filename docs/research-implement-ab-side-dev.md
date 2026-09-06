@@ -142,3 +142,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Beat 114: session-b --decode-only --json idle/picked/failed matrix; plan untouched.
 - Beat 115: session-a --stub|--no-stub --json CLI matrix via tmp_path (queued/light/failed).
 - Beat 116: session-b --dry-run --json CLI matrix via tmp_path (idle/dry_run/failed); plan untouched.
+- Beat 117: session-a --stub|--no-stub --dry-run --json CLI matrix via tmp_path (queued wrote_item=True but plan unchanged / light / failed); contrast Beat 115.
