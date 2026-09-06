@@ -226,6 +226,7 @@ Beat 116: session-b ``--dry-run --json`` CLI matrix via tmp_path (empty/shipped�
 Beat 117: session-a ``--stub|--no-stub --dry-run --json`` CLI matrix via tmp_path (empty stub→queued wrote_item=True but plan unchanged; one_open→light; two_queue / empty --no-stub→failed; one_open --no-stub→light). Contrast Beat 115: dry-run may report wrote_item=True while plan bytes stay unchanged. Proof: pytest ``-k beat117``.
 Beat 118: idle-decode ``--json`` Watch-fixture CLI matrix via tmp_path (watch_only→idle; watch_lookalike / watch_queue_heartbeat→picked; empty→idle; two_queue→failed); plan untouched. Distinct from Beat 113 general matrix. Proof: pytest ``-k beat118``.
 Beat 119: session-b ``--dry-run --json`` Watch-fixture CLI matrix via tmp_path (watch_only→idle; watch_lookalike / watch_queue_heartbeat→dry_run; two_queue→failed); plan untouched; keep_schedule / no scheduler_delete. Contrast Beat 116 + Beat 118. Proof: pytest ``-k beat119``.
+Beat 120: milestone — top-level ``--help`` + public API through beat120 (A/B runners + queue/decode/serialize helpers + guards); Makefile echo reaches beat120. Proof: pytest ``-k beat120``.
 
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
