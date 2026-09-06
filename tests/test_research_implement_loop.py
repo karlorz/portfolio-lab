@@ -6516,3 +6516,23 @@ def test_beat101_dry_run_and_fixture_ship_still_exported():
     assert callable(ri.dry_run_implement)
     assert callable(ri.make_fixture_ship_implement())
 
+def test_beat102_write_queue_section_transplants_two_open():
+    """Beat 102: write_queue_section(empty, two_open items) → open=2 pick Q1."""
+    empty = _load("empty_queue.md")
+    two = parse_queue_items(_load("two_open_ready.md"))
+    out = write_queue_section(empty, two)
+    items = parse_queue_items(out)
+    assert count_open(items) == 2
+    assert [i.item_id for i in items] == ["Q1", "Q2"]
+    assert first_b_pick(items).item_id == "Q1"
+
+
+def test_beat102_default_implement_aliases_dry_run_exported():
+    """Beat 102: default_implement is dry_run_implement; both + write_queue public."""
+    import src.research_implement as ri
+
+    assert ri.default_implement is ri.dry_run_implement
+    for name in ("default_implement", "dry_run_implement", "write_queue_section", "fixture_ship_implement"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+

@@ -127,3 +127,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Beat 99: count_open fixture matrix aligns with render_queue_count; QUEUE_CAPACITY remains public.
 - Milestone beat100: CLI subcommands + public runners/helpers/guards/decode/serialize remain stable; Makefile suite note includes beat100.
 - Beat 101: format_queue_item round-trip stays pickable; dry_run_implement / make_fixture_ship_implement remain public.
+- Beat 102: write_queue_section transplants two_open onto empty; default_implement aliases dry_run_implement.

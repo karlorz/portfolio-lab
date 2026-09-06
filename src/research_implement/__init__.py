@@ -174,6 +174,7 @@ Beat 98: is_b_pickable fixture matrix; complete/open/ready exports. Proof: pytes
 Beat 99: count_open fixture matrix + render_queue_count align. Proof: pytest ``-k beat99``.
 Beat 100: milestone — CLI help + public API export smoke through beat100. Proof: pytest ``-k beat100``.
 Beat 101: format_queue_item round-trip; dry_run/fixture-ship exports. Proof: pytest ``-k beat101``.
+Beat 102: write_queue_section transplant; default_implement alias dry-run. Proof: pytest ``-k beat102``.
 """
 
 from __future__ import annotations

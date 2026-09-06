@@ -208,6 +208,7 @@ Beat 98: ``is_b_pickable`` fixture matrix; complete/open/ready helpers stay publ
 Beat 99: ``count_open`` fixture matrix aligns with ``render_queue_count``; capacity helpers public. Proof: pytest ``-k beat99``.
 Beat 100: milestone — top-level ``--help`` + public API through beat100 (guards/decode/serialize/count helpers); Makefile echo reaches beat100. Proof: pytest ``-k beat100``.
 Beat 101: ``format_queue_item`` round-trip stays pickable; dry-run/fixture-ship helpers public. Proof: pytest ``-k beat101``.
+Beat 102: ``write_queue_section`` transplants two_open; ``default_implement`` aliases dry-run. Proof: pytest ``-k beat102``.
 
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
