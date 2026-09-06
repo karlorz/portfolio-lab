@@ -5949,3 +5949,46 @@ def test_beat84_complete_and_open_status_still_exported():
     assert ri.is_complete_six_field(item) is True
     assert ri.is_open_status(item.status) is True
 
+def test_beat85_subcommand_help_producer_and_decode_flags(capsys):
+    """Beat 85: session-a producer flags; session-b --decode-only; idle-decode no --dry-run."""
+    import pytest
+    from src.research_implement.__main__ import main
+
+    with pytest.raises(SystemExit) as ei:
+        main(["session-a", "--help"])
+    assert ei.value.code == 0
+    out_a = capsys.readouterr().out
+    for flag in ("--stub", "--no-stub", "--dry-run", "--candidate-json"):
+        assert flag in out_a, flag
+
+    with pytest.raises(SystemExit) as ei:
+        main(["session-b", "--help"])
+    assert ei.value.code == 0
+    out_b = capsys.readouterr().out
+    assert "--decode-only" in out_b
+    assert "--dry-run" in out_b
+
+    with pytest.raises(SystemExit) as ei:
+        main(["idle-decode", "--help"])
+    assert ei.value.code == 0
+    out_i = capsys.readouterr().out
+    assert "--plan" in out_i
+    assert "--json" in out_i
+    assert "--dry-run" not in out_i
+
+
+def test_beat85_required_fields_still_exported():
+    """Beat 85: REQUIRED_FIELDS remains public with the six field names."""
+    import src.research_implement as ri
+
+    assert hasattr(ri, "REQUIRED_FIELDS")
+    assert "REQUIRED_FIELDS" in getattr(ri, "__all__", ())
+    assert ri.REQUIRED_FIELDS == (
+        "title",
+        "acceptance",
+        "risks",
+        "file_touch",
+        "breaking_change",
+        "redeploy_notes",
+    )
+

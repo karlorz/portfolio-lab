@@ -156,6 +156,7 @@ Beat 81: watch_lookalike / watch_only first_b_pick + mark_item_shipped export. P
 Beat 82: subcommand help plan/json + render_queue_count/QUEUE_CAPACITY export. Proof: pytest ``-k beat82``.
 Beat 83: non-pickable fixtures first_b_pick=None; serialize_queue_item(s) export. Proof: pytest ``-k beat83``.
 Beat 84: pickable fixtures first_b_pick ids; is_complete_six_field/is_open_status export. Proof: pytest ``-k beat84``.
+Beat 85: producer/decode help flags + REQUIRED_FIELDS export. Proof: pytest ``-k beat85``.
 """
 
 from __future__ import annotations
