@@ -100,6 +100,8 @@ Beat 35: ``session-b`` decode-only ``--json`` (default) keeps ``keep_schedule=tr
 
 Beat 36: ``idle-decode --json`` on a ready OPEN matches session-b decode-only (picked + keep_schedule); Session A stub on empty Queue ``--json`` has ``wrote_item=true`` / ``verdict=queued``. Proof: pytest ``-k beat36``.
 
+Beat 37: empty / whitespace ``--candidate-json`` → clear non-zero exit (no Path(".") coerce); Session A ``--stub --dry-run --json`` reports ``wrote_item=true`` / ``verdict=queued`` but leaves the plan unchanged. Proof: pytest ``-k beat37``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never
@@ -255,7 +257,7 @@ def main(argv: list[str] | None = None) -> int:
     _add_plan_log(a)
     a.add_argument(
         "--candidate-json",
-        type=Path,
+        type=str,
         default=None,
         help=(
             "Candidate JSON (object or list of objects) loaded when OPEN is 0 "
@@ -343,7 +345,11 @@ def main(argv: list[str] | None = None) -> int:
         # deferred inside the callback so OPEN>=1 recount-only never reads or
         # appends the candidate. Empty/non-dict JSON → None → failed fire (no stub).
         if args.candidate_json is not None:
-            cand_path = args.candidate_json
+            # Beat 37: empty / whitespace --candidate-json fails closed (no Path(".")).
+            cand_text = str(args.candidate_json).strip()
+            if not cand_text:
+                raise SystemExit("--candidate-json path is empty")
+            cand_path = Path(cand_text)
 
             def _brainstorm(_items, _path=cand_path):
                 return _load_candidate(_path)

@@ -4171,3 +4171,44 @@ def test_beat36_session_a_stub_queues_wrote_item_true(tmp_path: Path, capsys):
     assert plan.read_text(encoding="utf-8") != before
     assert "OPEN" in plan.read_text(encoding="utf-8") or payload.get("open_count", 0) >= 1
 
+
+def test_beat37_empty_candidate_json_path_fails(tmp_path: Path):
+    """Beat 37: empty / whitespace --candidate-json → SystemExit; plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "plan.md"
+    plan.write_text((FIXTURES / "empty_queue.md").read_text(encoding="utf-8"), encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    for bad in ("", "   ", "\t"):
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "session-a",
+                    "--plan",
+                    str(plan),
+                    "--no-stub",
+                    "--candidate-json",
+                    bad,
+                    "--json",
+                ]
+            )
+        assert "empty" in str(ei.value).lower()
+        assert plan.read_text(encoding="utf-8") == before
+
+
+def test_beat37_session_a_stub_dry_run_json_queued_no_write(tmp_path: Path, capsys):
+    """Beat 37: --stub --dry-run --json → queued/wrote_item true in JSON; plan unchanged."""
+    import json
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "empty.md"
+    plan.write_text((FIXTURES / "empty_queue.md").read_text(encoding="utf-8"), encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    rc = main(["session-a", "--plan", str(plan), "--stub", "--dry-run", "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("ok") is True
+    assert payload.get("verdict") == "queued"
+    assert payload.get("wrote_item") is True
+    assert plan.read_text(encoding="utf-8") == before
+

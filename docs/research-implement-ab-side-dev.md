@@ -58,3 +58,5 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Session A OPEN>=1 recount-only `--json` has `wrote_item=false`.
 - `idle-decode --json` on ready OPEN matches `session-b` decode-only JSON shape.
 - Session A `--stub` on empty Queue `--json` → `wrote_item=true` / `verdict=queued`.
+- Empty / whitespace `--candidate-json` → non-zero exit (no Path('.') coerce).
+- Session A `--stub --dry-run --json` reports queued/`wrote_item=true` but does not write the plan.
