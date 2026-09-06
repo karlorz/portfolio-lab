@@ -12120,3 +12120,79 @@ def test_beat171_idle_fixtures_session_a_stub_dry_run_json_no_write_tmp(tmp_path
         if name == "watch_heartbeat_no_queue":
             assert "## Queue" not in dry_body, name
         assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
+def test_beat172_nonpickable_fixtures_session_a_stub_json_writes_tmp(tmp_path: Path):
+    """Beat 172: multi-fixture session-a --stub --json→queued wrote_item=True; plan CHANGED."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+
+        # session-a --stub --json (NO --dry-run) → queued wrote_item=True; plan CHANGED
+        stub_plan = tmp_path / f"{name}_a_stub_write.md"
+        stub_plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-a", "--plan", str(stub_plan), "--stub", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "queued", name
+        assert payload["wrote_item"] is True, name
+        assert payload["open_count"] == 1, name
+        assert payload["queue"] == "queue 1/10", name
+        assert payload["title"] == "Stub shippable change", name
+        stub_body = stub_plan.read_text(encoding="utf-8")
+        assert stub_body != src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in stub_body, name
+            assert "## Heartbeat" in stub_body, name
+            assert stub_body.find("## Watch") < stub_body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
+def test_beat172_nonpickable_fixtures_session_a_stub_dry_run_json_no_write_tmp(tmp_path: Path):
+    """Beat 172: multi-fixture session-a --stub --dry-run --json→queued wrote_item=True; plan UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+
+        # session-a --stub --dry-run --json → queued wrote_item=True; plan UNCHANGED
+        dry_plan = tmp_path / f"{name}_a_stub_dry.md"
+        dry_plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-a", "--plan", str(dry_plan), "--stub", "--dry-run", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "queued", name
+        assert payload["wrote_item"] is True, name
+        assert payload["open_count"] == 1, name
+        assert payload["queue"] == "queue 1/10", name
+        assert payload["title"] == "Stub shippable change", name
+        dry_body = dry_plan.read_text(encoding="utf-8")
+        assert dry_body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in dry_body, name
+            assert "## Heartbeat" in dry_body, name
+            assert dry_body.find("## Watch") < dry_body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
