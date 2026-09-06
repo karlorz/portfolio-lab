@@ -82,6 +82,8 @@ Beat 26: ``idle-decode`` rejects ``--dry-run`` (decode-only alias; use ``session
 
 Beat 27: Producer-only flags (``--stub`` / ``--no-stub`` / ``--candidate-json``) are rejected on ``session-b`` / ``idle-decode``; plan unchanged. Proof: pytest ``-k beat27``.
 
+Beat 28: ``session-a --candidate-json`` with an empty JSON list ``[]`` → failed fire (no stub fallback), plan unchanged; unknown CLI subcommand → non-zero exit. Proof: pytest ``-k beat28``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

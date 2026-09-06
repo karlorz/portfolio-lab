@@ -40,3 +40,5 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - `idle-decode` rejects `--dry-run` (decode-only; use `session-b --dry-run`).
 - Session A `--dry-run` leaves the plan file unchanged.
 - Producer-only flags (`--stub` / `--no-stub` / `--candidate-json`) are rejected on `session-b` / `idle-decode`.
+- `session-a --candidate-json` with `[]` fails closed (no stub fallback); plan unchanged.
+- Unknown subcommand → non-zero exit.

@@ -3821,3 +3821,42 @@ def test_beat27_idle_decode_rejects_producer_flags(tmp_path: Path, capsys):
         assert "unrecognized" in err
         assert plan.read_text(encoding="utf-8") == before
 
+
+def test_beat28_empty_candidate_json_list_fails(tmp_path: Path, capsys):
+    """Beat 28: --candidate-json [] → failed (no stub); plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    src = FIXTURES / "empty_queue.md"
+    plan = tmp_path / "plan.md"
+    plan.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    cand = tmp_path / "empty_list.json"
+    cand.write_text("[]\n", encoding="utf-8")
+    rc = main(
+        [
+            "session-a",
+            "--plan",
+            str(plan),
+            "--no-stub",
+            "--candidate-json",
+            str(cand),
+            "--json",
+        ]
+    )
+    assert rc == 1
+    out = capsys.readouterr().out.lower()
+    assert '"ok": false' in out or "failed" in out
+    assert plan.read_text(encoding="utf-8") == before
+
+
+def test_beat28_unknown_subcommand_fails(capsys):
+    """Beat 28: unknown subcommand → non-zero SystemExit; no plan touch."""
+    from src.research_implement.__main__ import main
+
+    with pytest.raises(SystemExit) as ei:
+        main(["not-a-real-cmd", "--plan", "/tmp/does-not-matter.md"])
+    # argparse required subparsers → exit 2
+    assert ei.value.code == 2
+    err = capsys.readouterr().err.lower()
+    assert "invalid choice" in err or "not-a-real-cmd" in err
+
