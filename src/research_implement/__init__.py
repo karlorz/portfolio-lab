@@ -110,6 +110,8 @@ Beat 57: Session A failed JSON key contract + AmbiguousQueueError export; dry-ru
 Beat 58: empty-queue ``session-b --dry-run`` stays idle; queue helper exports remain public. Proof: pytest ``-k beat58``.
 
 Beat 59: two-OPEN dry-run picks first only; plan stays dual-OPEN. Proof: pytest ``-k beat59``.
+
+Beat 60: Watch lookalike dry-run/pick stays Queue-only. Proof: pytest ``-k beat60``.
 """
 
 from __future__ import annotations
@@ -135,6 +137,7 @@ from src.research_implement.queue import (
     serialize_queue_item,
     serialize_queue_items,
     write_queue_section,
+    mark_item_shipped,
 )
 from src.research_implement.session_a import (
     SESSION_A_RESULT_JSON_KEYS,
@@ -186,6 +189,7 @@ __all__ = [
     "serialize_queue_item",
     "serialize_queue_items",
     "write_queue_section",
+    "mark_item_shipped",
     "is_b_pickable",
     "is_ready_yes",
     "is_complete_six_field",

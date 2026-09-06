@@ -5063,3 +5063,41 @@ def test_beat59_two_open_idle_decode_picks_first(tmp_path: Path, capsys):
     assert (payload.get("item") or {}).get("item_id") == first_id
     assert plan.read_text(encoding="utf-8") == src
 
+
+def test_beat60_watch_lookalike_dry_run_picks_queue(tmp_path: Path, capsys):
+    """Beat 60: watch_lookalike session-b --dry-run picks Q3; never Watch title."""
+    import json
+    from src.research_implement.__main__ import main
+
+    src = (FIXTURES / "watch_lookalike.md").read_text(encoding="utf-8")
+    plan = tmp_path / "beat60_dry.md"
+    plan.write_text(src, encoding="utf-8")
+    rc = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("verdict") == "dry_run"
+    item = payload.get("item") or {}
+    assert item.get("item_id") == "Q3"
+    assert item.get("title") == "Real ready Queue item"
+    assert "Watch lookalike" not in str(item.get("title") or "")
+    assert payload.get("open_count") == 1
+    assert plan.read_text(encoding="utf-8") == src
+
+
+def test_beat60_watch_lookalike_idle_decode_picks_queue(tmp_path: Path, capsys):
+    """Beat 60: idle-decode on watch_lookalike picks Queue Q3; plan unchanged."""
+    import json
+    from src.research_implement.__main__ import main
+
+    src = (FIXTURES / "watch_lookalike.md").read_text(encoding="utf-8")
+    plan = tmp_path / "beat60_decode.md"
+    plan.write_text(src, encoding="utf-8")
+    rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("verdict") == "picked"
+    item = payload.get("item") or {}
+    assert item.get("item_id") == "Q3"
+    assert "Watch lookalike" not in str(payload)
+    assert plan.read_text(encoding="utf-8") == src
+

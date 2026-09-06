@@ -146,6 +146,8 @@ Beat 58: ``session-b --dry-run`` on empty Queue is idle (not dry_run); public ex
 
 Beat 59: ``two_open_ready`` ``session-b --dry-run`` picks first OPEN (``open_count`` stays 2); plan unchanged with both still OPEN. Proof: pytest ``-k beat59``.
 
+Beat 60: ``watch_lookalike`` ``session-b --dry-run`` / idle-decode pick Queue ``Q3`` only (never Watch lookalike); plan unchanged. Proof: pytest ``-k beat60``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never
