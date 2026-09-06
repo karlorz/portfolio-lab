@@ -131,3 +131,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Beat 103: serialize_queue_items two_open round-trip stays dual-pickable.
 - Beat 104: QueueItem.field_map covers REQUIRED_FIELDS; QueueItem remains public.
 - Beat 105: to_json_dict aliases to_dict; SessionBResult is SessionResult.
+- Beat 106: idle/picked keep_schedule True; never scheduler_delete_called.

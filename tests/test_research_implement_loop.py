@@ -6595,3 +6595,27 @@ def test_beat105_session_b_result_is_session_result():
         assert hasattr(ri, name), name
         assert name in getattr(ri, "__all__", ()), name
 
+def test_beat106_keep_schedule_never_scheduler_delete():
+    """Beat 106: idle fixtures + one_open pick keep_schedule; never scheduler_delete_called."""
+    for name in ("empty_queue.md", "shipped_only.md", "incomplete_open.md"):
+        result = run_session_b(_load(name), decode_only=True)
+        assert result.verdict == "idle", name
+        assert result.keep_schedule is True, name
+        assert result.scheduler_delete_called is False, name
+
+    picked = run_session_b(_load("one_open_ready.md"), decode_only=True)
+    assert picked.verdict == "picked"
+    assert picked.keep_schedule is True
+    assert picked.scheduler_delete_called is False
+
+
+def test_beat106_scheduler_delete_still_forbidden_exported():
+    """Beat 106: scheduler_delete raises SchedulerDeleteForbidden; both public."""
+    import src.research_implement as ri
+
+    with pytest.raises(SchedulerDeleteForbidden):
+        scheduler_delete()
+    for name in ("scheduler_delete", "SchedulerDeleteForbidden"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+

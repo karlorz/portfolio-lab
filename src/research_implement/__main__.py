@@ -212,6 +212,7 @@ Beat 102: ``write_queue_section`` transplants two_open; ``default_implement`` al
 Beat 103: ``serialize_queue_items`` two_open round-trip stays dual-pickable. Proof: pytest ``-k beat103``.
 Beat 104: ``QueueItem.field_map`` covers ``REQUIRED_FIELDS``; QueueItem stays public. Proof: pytest ``-k beat104``.
 Beat 105: ``to_json_dict`` aliases ``to_dict``; ``SessionBResult`` is ``SessionResult``. Proof: pytest ``-k beat105``.
+Beat 106: idle/picked ``keep_schedule`` True; never ``scheduler_delete_called``. Proof: pytest ``-k beat106``.
 
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
