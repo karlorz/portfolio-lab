@@ -88,6 +88,8 @@ Beat 29: ``--candidate-json`` list with no dict elements → failed fire (no stu
 
 Beat 30: ``--candidate-json`` list skips leading non-dicts and uses the first dict; relative ``--plan`` path resolves when the file exists. Proof: pytest ``-k beat30``.
 
+Beat 31: ``--plan`` / ``--log`` path that exists but is not a file (e.g. directory) → clear non-zero exit; relative ``--log`` alias works like relative ``--plan``. Proof: pytest ``-k beat31``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never
@@ -152,6 +154,9 @@ def _resolve_plan(args: argparse.Namespace) -> Path:
         raise SystemExit("--plan or --log is required")
     resolved = Path(path)
     # Beat 23: missing plan/log path fail-closed (do not create).
+    # Beat 31: existing non-file (directory/symlink-to-dir) → clear not-a-file exit.
+    if resolved.exists() and not resolved.is_file():
+        raise SystemExit(f"--plan/--log is not a file: {resolved}")
     if not resolved.is_file():
         raise SystemExit(f"--plan/--log file not found: {resolved}")
     return resolved

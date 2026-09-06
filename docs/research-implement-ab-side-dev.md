@@ -46,3 +46,5 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - CLI `--json` keys match `SESSION_A_RESULT_JSON_KEYS` / `SESSION_RESULT_JSON_KEYS`.
 - `--candidate-json` list skips leading non-dicts and uses the first dict.
 - Relative `--plan` / `--log` paths resolve when the file exists in cwd.
+- `--plan` / `--log` that exists but is not a file (e.g. directory) → non-zero exit.
+- Relative `--log` alias works like relative `--plan`.

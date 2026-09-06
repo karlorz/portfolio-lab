@@ -3956,3 +3956,29 @@ def test_beat30_relative_plan_path_works(tmp_path: Path, monkeypatch, capsys):
     out = capsys.readouterr().out.lower()
     assert "idle" in out or "queue" in out or '"ok"' in out
 
+
+def test_beat31_plan_directory_fails(tmp_path: Path, capsys):
+    """Beat 31: --plan pointing at a directory → SystemExit; clear not-a-file."""
+    from src.research_implement.__main__ import main
+
+    d = tmp_path / "not-a-plan"
+    d.mkdir()
+    with pytest.raises(SystemExit) as ei:
+        main(["idle-decode", "--plan", str(d), "--json"])
+    msg = str(ei.value).lower()
+    assert "not a file" in msg
+    assert d.is_dir()
+
+
+def test_beat31_relative_log_alias_works(tmp_path: Path, monkeypatch, capsys):
+    """Beat 31: relative --log alias resolves like --plan when file exists in cwd."""
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "rel-log.md"
+    plan.write_text((FIXTURES / "empty_queue.md").read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    rc = main(["idle-decode", "--log", "rel-log.md", "--json"])
+    assert rc == 0
+    out = capsys.readouterr().out.lower()
+    assert "idle" in out or "queue" in out or '"ok"' in out
+
