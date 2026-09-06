@@ -7610,3 +7610,85 @@ def test_beat123_session_b_decode_watch_json_heartbeat_and_fail_tmp(tmp_path: Pa
     assert payload["scheduler_delete_called"] is False
     assert two.read_text(encoding="utf-8") == two_src
     assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+
+def test_beat124_idle_decode_nonpickable_json_shipped_vs_incomplete_tmp(tmp_path: Path):
+    """Beat 124: idle-decode --json shipped_only→idle; incomplete_open→idle; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    # shipped_only → idle, open_count=0, queue 0/10; never scheduler_delete
+    shipped_src = _load("shipped_only.md")
+    shipped = tmp_path / "shipped_only.md"
+    shipped.write_text(shipped_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(shipped), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "idle"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert shipped.read_text(encoding="utf-8") == shipped_src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    # incomplete_open → idle; plan unchanged
+    inc_src = _load("incomplete_open.md")
+    inc = tmp_path / "incomplete_open.md"
+    inc.write_text(inc_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(inc), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "idle"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert inc.read_text(encoding="utf-8") == inc_src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+
+def test_beat124_idle_decode_nonpickable_json_broken_vs_not_ready_tmp(tmp_path: Path):
+    """Beat 124: idle-decode --json broken_ready_flag→idle; open_complete_not_ready→idle; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    # broken_ready_flag → idle; never scheduler_delete
+    broken_src = _load("broken_ready_flag.md")
+    broken = tmp_path / "broken_ready_flag.md"
+    broken.write_text(broken_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(broken), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "idle"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert broken.read_text(encoding="utf-8") == broken_src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    # open_complete_not_ready → idle; plan unchanged
+    nr_src = _load("open_complete_not_ready.md")
+    nr = tmp_path / "open_complete_not_ready.md"
+    nr.write_text(nr_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(nr), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "idle"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert nr.read_text(encoding="utf-8") == nr_src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
