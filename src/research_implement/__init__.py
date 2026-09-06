@@ -130,6 +130,8 @@ Beat 67: --no-stub --dry-run light/failed; decode helper exports. Proof: pytest 
 Beat 68: first_b_pick / incomplete_candidate_reasons contracts; idle-decode decode-pick message. Proof: pytest ``-k beat68``.
 
 Beat 69: session_*_result_dict helpers align with CLI --json. Proof: pytest ``-k beat69``.
+
+Beat 70: path runners exported; light/failed Session A JSON keys locked. Proof: pytest ``-k beat70``.
 """
 
 from __future__ import annotations
@@ -164,6 +166,7 @@ from src.research_implement.session_a import (
     default_search_plan,
     incomplete_candidate_reasons,
     run_session_a,
+    run_session_a_path,
     session_a_result_dict,
     stub_brainstorm,
     stub_search_plan,
@@ -180,6 +183,7 @@ from src.research_implement.session_b import (
     format_decode_report,
     make_fixture_ship_implement,
     run_session_b,
+    run_session_b_path,
     scheduler_delete,
     session_b_result_dict,
 )
@@ -217,7 +221,9 @@ __all__ = [
     "render_queue_count",
     "default_search_plan",
     "run_session_a",
+    "run_session_a_path",
     "run_session_b",
+    "run_session_b_path",
     "incomplete_candidate_reasons",
     "stub_brainstorm",
     "stub_search_plan",

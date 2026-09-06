@@ -5483,3 +5483,46 @@ def test_beat69_result_dict_helpers_still_exported():
         assert hasattr(ri, name), name
         assert name in getattr(ri, "__all__", ()), name
 
+
+def test_beat70_session_a_light_failed_json_keys(tmp_path: Path, capsys):
+    """Beat 70: session-a --json light/failed keys match SESSION_A_RESULT_JSON_KEYS."""
+    import json
+    from src.research_implement.__main__ import main
+    from src.research_implement.session_a import SESSION_A_RESULT_JSON_KEYS
+
+    one = tmp_path / "beat70_one.md"
+    one.write_text((FIXTURES / "one_open_ready.md").read_text(encoding="utf-8"), encoding="utf-8")
+    rc_light = main(["session-a", "--plan", str(one), "--stub", "--json"])
+    assert rc_light == 0
+    light = json.loads(capsys.readouterr().out)
+    assert light.get("verdict") == "light"
+    assert set(light) == set(SESSION_A_RESULT_JSON_KEYS)
+    assert one.read_text(encoding="utf-8") == (FIXTURES / "one_open_ready.md").read_text(encoding="utf-8")
+
+    fail = tmp_path / "beat70_fail.md"
+    fail_src = (FIXTURES / "two_queue_sections.md").read_text(encoding="utf-8")
+    fail.write_text(fail_src, encoding="utf-8")
+    rc_fail = main(["session-a", "--plan", str(fail), "--stub", "--json"])
+    assert rc_fail == 1
+    failed = json.loads(capsys.readouterr().out)
+    assert failed.get("verdict") == "failed"
+    assert set(failed) == set(SESSION_A_RESULT_JSON_KEYS)
+    assert fail.read_text(encoding="utf-8") == fail_src
+
+
+def test_beat70_path_runners_still_exported(tmp_path: Path):
+    """Beat 70: run_session_a_path / run_session_b_path public and usable."""
+    import src.research_implement as ri
+    from src.research_implement import stub_brainstorm
+
+    for name in ("run_session_a_path", "run_session_b_path"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+
+    plan = tmp_path / "beat70_path.md"
+    plan.write_text((FIXTURES / "empty_queue.md").read_text(encoding="utf-8"), encoding="utf-8")
+    a = ri.run_session_a_path(plan, brainstorm=stub_brainstorm, write=False)
+    assert a.verdict in {"queued", "light", "failed"}
+    b = ri.run_session_b_path(plan, decode_only=True, write=False)
+    assert b.verdict in {"idle", "picked", "failed"}
+

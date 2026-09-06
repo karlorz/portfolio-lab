@@ -95,3 +95,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - `session-a --no-stub --dry-run`: same light/failed as `--no-stub`; plan unchanged.
 - `first_b_pick`: first B-pickable OPEN, else None; idle-decode messages include `decode pick`.
 - CLI `--json` matches `session_a_result_dict` / `session_b_result_dict` key sets.
+- Public path runners: `run_session_a_path` / `run_session_b_path`; Session A light/failed `--json` uses `SESSION_A_RESULT_JSON_KEYS`.
