@@ -10821,3 +10821,76 @@ def test_beat159_watch_lookalike_session_a_stub_vs_no_stub_dry_run_json_light_tm
     assert no_stub.read_text(encoding="utf-8") == src
     assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
 
+
+
+def test_beat160_top_level_help_still_lists_subcommands(capsys):
+    """Beat 160: top-level --help lists session-a / session-b / idle-decode."""
+    import pytest
+    from src.research_implement.__main__ import main
+
+    with pytest.raises(SystemExit) as ei:
+        main(["--help"])
+    assert ei.value.code == 0
+    out = capsys.readouterr().out
+    for name in ("session-a", "session-b", "idle-decode"):
+        assert name in out, name
+
+
+def test_beat160_public_api_milestone_exports():
+    """Beat 160: core A/B API + aliases/write/serialize remain public through beat160."""
+    import src.research_implement as ri
+
+    for name in (
+        "run_session_a",
+        "run_session_b",
+        "run_session_a_path",
+        "run_session_b_path",
+        "parse_queue_items",
+        "first_b_pick",
+        "is_b_pickable",
+        "is_ready_yes",
+        "is_complete_six_field",
+        "is_open_status",
+        "count_open",
+        "count_queue_headings",
+        "next_queue_id",
+        "mark_item_shipped",
+        "append_queue_item",
+        "format_queue_item",
+        "write_queue_section",
+        "serialize_queue_item",
+        "serialize_queue_items",
+        "render_queue_count",
+        "QUEUE_CAPACITY",
+        "REQUIRED_FIELDS",
+        "AmbiguousQueueError",
+        "SchedulerDeleteForbidden",
+        "scheduler_delete",
+        "require_unique_queue_section",
+        "incomplete_candidate_reasons",
+        "decode_fields",
+        "format_decode_report",
+        "stub_brainstorm",
+        "default_search_plan",
+        "stub_search_plan",
+        "default_implement",
+        "dry_run_implement",
+        "make_fixture_ship_implement",
+        "fixture_ship_implement",
+        "session_a_result_dict",
+        "session_b_result_dict",
+        "SessionAResult",
+        "SessionResult",
+        "SessionBResult",
+        "QueueItem",
+        "SESSION_A_RESULT_KEYS",
+        "SESSION_B_RESULT_KEYS",
+        "SESSION_A_RESULT_JSON_KEYS",
+        "SESSION_RESULT_JSON_KEYS",
+    ):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+    assert ri.SessionBResult is ri.SessionResult
+    assert ri.default_implement is ri.dry_run_implement
+    assert ri.default_search_plan is ri.stub_brainstorm
+    assert len(ri.__all__) == len(set(ri.__all__))
