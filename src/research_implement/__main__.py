@@ -120,6 +120,8 @@ Beat 45: ``idle-decode --json`` / ``session-a --json`` help mention shared ``Ses
 
 Beat 46: OPEN complete but not ready-for-implement → idle fire (``queue 0/10``, keep_schedule) via ``idle-decode`` / ``session-b`` CLI; plan unchanged. Proof: pytest ``-k beat46``.
 
+Beat 47: incomplete OPEN / SHIPPED-only → idle CLI JSON; ``mixed_priority`` picks first ready OPEN via ``session-b --json`` (plan unchanged on decode-only). Proof: pytest ``-k beat47``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

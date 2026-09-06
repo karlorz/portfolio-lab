@@ -4523,3 +4523,40 @@ def test_beat46_empty_queue_cli_idle_message_mentions_queue():
     assert result.keep_schedule is True
     assert result.scheduler_delete_called is False
 
+
+def test_beat47_incomplete_and_shipped_only_cli_idle(tmp_path: Path, capsys):
+    """Beat 47: incomplete_open / shipped_only → idle-decode idle JSON; plan unchanged."""
+    import json
+    from src.research_implement.__main__ import main
+
+    for name in ("incomplete_open.md", "shipped_only.md"):
+        src = (FIXTURES / name).read_text(encoding="utf-8")
+        plan = tmp_path / name
+        plan.write_text(src, encoding="utf-8")
+        rc = main(["idle-decode", "--plan", str(plan), "--json"])
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload.get("verdict") == "idle"
+        assert payload.get("queue") == "queue 0/10"
+        assert payload.get("keep_schedule") is True
+        assert payload.get("scheduler_delete_called") is False
+        assert plan.read_text(encoding="utf-8") == src
+
+
+def test_beat47_mixed_priority_cli_picks_first_ready(tmp_path: Path, capsys):
+    """Beat 47: mixed_priority → session-b --json picks first ready; plan unchanged."""
+    import json
+    from src.research_implement.__main__ import main
+
+    src = (FIXTURES / "mixed_priority.md").read_text(encoding="utf-8")
+    plan = tmp_path / "mixed.md"
+    plan.write_text(src, encoding="utf-8")
+    rc = main(["session-b", "--plan", str(plan), "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("verdict") == "picked"
+    assert payload.get("item") is not None
+    assert payload.get("keep_schedule") is True
+    assert payload.get("scheduler_delete_called") is False
+    assert plan.read_text(encoding="utf-8") == src
+
