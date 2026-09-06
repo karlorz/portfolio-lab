@@ -92,6 +92,8 @@ Beat 31: ``--plan`` / ``--log`` path that exists but is not a file (e.g. directo
 
 Beat 32: ``--candidate-json`` path that exists but is not a file (e.g. directory) → clear non-zero exit; top-level JSON ``null`` also fails closed. Proof: pytest ``-k beat32``.
 
+Beat 33: empty / whitespace-only ``--plan`` / ``--log`` → clear non-zero exit; idle-decode ``--json`` keeps ``keep_schedule=true`` and ``scheduler_delete_called=false``. Proof: pytest ``-k beat33``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never
@@ -152,12 +154,20 @@ def _load_candidate(path: Path | None) -> dict | None:
 def _resolve_plan(args: argparse.Namespace) -> Path:
     plan = getattr(args, "plan", None)
     log = getattr(args, "log", None)
-    if plan and log:
+    if plan is not None and log is not None:
         raise SystemExit("pass only one of --plan / --log")
-    path = plan or log
-    if path is None:
+    # Beat 33: do not use ``plan or log`` — empty string is falsy but still "passed".
+    if plan is not None:
+        path = plan
+    elif log is not None:
+        path = log
+    else:
         raise SystemExit("--plan or --log is required")
-    resolved = Path(path)
+    # Empty / whitespace-only path fails closed (do not coerce to Path(".")).
+    text = str(path).strip()
+    if not text:
+        raise SystemExit("--plan/--log path is empty")
+    resolved = Path(text)
     # Beat 23: missing plan/log path fail-closed (do not create).
     # Beat 31: existing non-file (directory/symlink-to-dir) → clear not-a-file exit.
     if resolved.exists() and not resolved.is_file():
@@ -168,14 +178,15 @@ def _resolve_plan(args: argparse.Namespace) -> Path:
 
 def _add_plan_log(p: argparse.ArgumentParser) -> None:
     g = p.add_mutually_exclusive_group(required=True)
+    # Beat 33: keep as str so empty / whitespace is not coerced to Path(".").
     g.add_argument(
         "--plan",
-        type=Path,
+        type=str,
         help="Living plan.md path (fixture or working copy)",
     )
     g.add_argument(
         "--log",
-        type=Path,
+        type=str,
         help="Alias for --plan (e.g. logs/research-implement.md host contract)",
     )
 

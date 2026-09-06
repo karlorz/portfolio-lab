@@ -4036,3 +4036,29 @@ def test_beat32_candidate_json_null_fails(tmp_path: Path):
     assert "candidate-json" in msg
     assert plan.read_text(encoding="utf-8") == before
 
+
+def test_beat33_empty_plan_path_fails(capsys):
+    """Beat 33: empty / whitespace --plan → SystemExit; clear empty-path message."""
+    from src.research_implement.__main__ import main
+
+    for bad in ("", "   ", "\t"):
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--plan", bad, "--json"])
+        msg = str(ei.value).lower()
+        assert "empty" in msg
+
+
+def test_beat33_idle_json_never_scheduler_delete(tmp_path: Path, capsys):
+    """Beat 33: idle-decode --json keeps schedule; never scheduler_delete."""
+    import json
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "empty.md"
+    plan.write_text((FIXTURES / "empty_queue.md").read_text(encoding="utf-8"), encoding="utf-8")
+    rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("keep_schedule") is True
+    assert payload.get("scheduler_delete_called") is False
+    assert payload.get("verdict") == "idle" or "idle" in str(payload.get("verdict", "")).lower()
+

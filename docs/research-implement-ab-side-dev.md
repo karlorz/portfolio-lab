@@ -50,3 +50,5 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Relative `--log` alias works like relative `--plan`.
 - `--candidate-json` that exists but is not a file (e.g. directory) → non-zero exit.
 - Top-level JSON `null` for `--candidate-json` fails closed.
+- Empty / whitespace-only `--plan` / `--log` → non-zero exit.
+- Idle `--json` keeps `keep_schedule=true` and `scheduler_delete_called=false`.
