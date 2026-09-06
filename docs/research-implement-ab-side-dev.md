@@ -93,3 +93,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Dual-Queue + `--dry-run` still fail-closed (`verdict=failed`); never becomes a dry_run pick.
 - `session-a --no-stub`: OPEN>=1 → light recount; empty Queue → failed (no stub fallback).
 - `session-a --no-stub --dry-run`: same light/failed as `--no-stub`; plan unchanged.
+- `first_b_pick`: first B-pickable OPEN, else None; idle-decode messages include `decode pick`.

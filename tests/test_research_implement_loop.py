@@ -5376,3 +5376,56 @@ def test_beat67_decode_helpers_still_exported():
     assert f"decode pick {pick.item_id}:" in report
     assert "1. title:" in report
 
+
+def test_beat68_first_b_pick_and_incomplete_reasons():
+    """Beat 68: first_b_pick on fixtures; incomplete_candidate_reasons({}) full list."""
+    from src.research_implement import first_b_pick, incomplete_candidate_reasons, parse_queue_items
+
+    one = parse_queue_items((FIXTURES / "one_open_ready.md").read_text(encoding="utf-8"))
+    assert first_b_pick(one) is not None
+    assert first_b_pick(one).item_id == "Q1"
+
+    two = parse_queue_items((FIXTURES / "two_open_ready.md").read_text(encoding="utf-8"))
+    assert first_b_pick(two).item_id == two[0].item_id
+
+    empty = parse_queue_items((FIXTURES / "empty_queue.md").read_text(encoding="utf-8"))
+    assert first_b_pick(empty) is None
+    shipped = parse_queue_items((FIXTURES / "shipped_only.md").read_text(encoding="utf-8"))
+    assert first_b_pick(shipped) is None
+
+    reasons = incomplete_candidate_reasons({})
+    for key in (
+        "title",
+        "acceptance",
+        "risks",
+        "file_touch",
+        "breaking_change",
+        "redeploy_notes",
+        "ready_for_implement",
+    ):
+        assert key in reasons, key
+
+
+def test_beat68_idle_decode_message_has_decode_pick(tmp_path: Path, capsys):
+    """Beat 68: idle-decode --json on one_open includes decode pick in message path."""
+    import json
+    from src.research_implement.__main__ import main
+    from src.research_implement import format_decode_report, first_b_pick, parse_queue_items
+
+    src = (FIXTURES / "one_open_ready.md").read_text(encoding="utf-8")
+    plan = tmp_path / "beat68.md"
+    plan.write_text(src, encoding="utf-8")
+    rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert payload.get("verdict") == "picked"
+    item = payload.get("item") or {}
+    assert item.get("item_id") == "Q1"
+    # Shared decode report wording still available for the picked item.
+    pick = first_b_pick(parse_queue_items(src))
+    report = format_decode_report(pick)
+    assert "decode pick" in report.lower()
+    assert "Q1" in report
+    assert plan.read_text(encoding="utf-8") == src
+

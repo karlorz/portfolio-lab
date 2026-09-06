@@ -126,6 +126,8 @@ Beat 65: dual-Queue dry-run still fail-closed; write_queue_section export. Proof
 Beat 66: --no-stub light/failed CLI paths; implement helper exports. Proof: pytest ``-k beat66``.
 
 Beat 67: --no-stub --dry-run light/failed; decode helper exports. Proof: pytest ``-k beat67``.
+
+Beat 68: first_b_pick / incomplete_candidate_reasons contracts; idle-decode decode-pick message. Proof: pytest ``-k beat68``.
 """
 
 from __future__ import annotations

@@ -162,6 +162,8 @@ Beat 66: ``session-a --no-stub`` on OPEN>=1 is light recount; on empty Queue fai
 
 Beat 67: ``session-a --no-stub --dry-run`` keeps the same light/failed paths without mutating the plan; ``decode_fields`` / ``format_decode_report`` / ``first_b_pick`` stay public. Proof: pytest ``-k beat67``.
 
+Beat 68: ``first_b_pick`` returns the first ready OPEN (None on empty/shipped-only); idle-decode ``--json`` message still includes ``decode pick``; ``incomplete_candidate_reasons({{}})`` lists all six fields + ready. Proof: pytest ``-k beat68``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never
