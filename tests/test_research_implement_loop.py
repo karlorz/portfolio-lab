@@ -7162,3 +7162,72 @@ def test_beat117_session_a_dry_run_json_fail_and_no_stub_tmp(tmp_path: Path):
     assert payload["wrote_item"] is False
     assert payload["open_count"] == 1
     assert one.read_text(encoding="utf-8") == one_src
+
+
+def test_beat118_idle_decode_watch_json_idle_vs_pick_tmp(tmp_path: Path):
+    """Beat 118: idle-decode --json watch_only→idle; watch_lookalike→picked; plan unchanged both."""
+    from src.research_implement.__main__ import main
+
+    # watch_only_lookalike → idle, open_count=0, queue 0/10
+    only_src = _load("watch_only_lookalike.md")
+    only = tmp_path / "watch_only_lookalike.md"
+    only.write_text(only_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(only), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "idle"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert only.read_text(encoding="utf-8") == only_src
+
+    # watch_lookalike → picked, open_count=1, queue 1/10
+    look_src = _load("watch_lookalike.md")
+    look = tmp_path / "watch_lookalike.md"
+    look.write_text(look_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(look), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "picked"
+    assert payload["open_count"] == 1
+    assert payload["queue"] == "queue 1/10"
+    assert look.read_text(encoding="utf-8") == look_src
+
+
+def test_beat118_idle_decode_watch_json_heartbeat_and_fail_tmp(tmp_path: Path):
+    """Beat 118: idle-decode --json watch_queue_heartbeat→picked; two_queue→failed; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    # watch_queue_heartbeat → picked, open_count=1, queue 1/10
+    hb_src = _load("watch_queue_heartbeat.md")
+    hb = tmp_path / "watch_queue_heartbeat.md"
+    hb.write_text(hb_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(hb), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "picked"
+    assert payload["open_count"] == 1
+    assert payload["queue"] == "queue 1/10"
+    assert hb.read_text(encoding="utf-8") == hb_src
+
+    # two_queue_sections → failed, open_count=0
+    two_src = _load("two_queue_sections.md")
+    two = tmp_path / "two_queue_sections.md"
+    two.write_text(two_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(two), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["open_count"] == 0
+    assert two.read_text(encoding="utf-8") == two_src
