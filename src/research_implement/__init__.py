@@ -214,6 +214,7 @@ Beat 138: watch_queue_heartbeat_empty cross-CLI --json matrix via tmp_path (empt
 Beat 139: two_queue_sections fail-closed cross-CLI --json matrix via tmp_path (ambiguous dual Queue sections; every path fails; plan unchanged): idle-decode + session-b --decode-only + session-b --dry-run all failed keep_schedule; session-a --stub/--no-stub/--stub --dry-run all failed wrote_item=False; plans unchanged. Proof: pytest ``-k beat139``.
 Beat 140: milestone — CLI help + public API export smoke through beat140. Proof: pytest ``-k beat140``.
 Beat 141: shipped_only cross-CLI --json matrix via tmp_path (foundational post-milestone baseline; only SHIPPED; open_count=0): B/idle paths idle keep_schedule; session-a --stub→queued write title Stub shippable change; --no-stub→failed plan unchanged. Proof: pytest ``-k beat141``.
+Beat 142: incomplete_open cross-CLI --json matrix via tmp_path (foundational non-pickable OPEN after shipped_only Beat 141; incomplete OPEN missing fields; open_count=0): B/idle paths idle keep_schedule; session-a --stub→queued write title Stub shippable change Heartbeat kept; --no-stub→failed plan unchanged. Proof: pytest ``-k beat142``.
 """
 
 from __future__ import annotations
