@@ -205,6 +205,7 @@ Beat 95: serialize_queue_item round-trip stays pickable; count_queue_headings fi
 Beat 96: ``decode_fields`` covers six fields + status/ready; decode report lines 1–6. Proof: pytest ``-k beat96``.
 Beat 97: ``next_queue_id`` progression (empty→Q1, one→Q2, two→Q3, lookalike→Q4); require_unique fail-closed. Proof: pytest ``-k beat97``.
 Beat 98: ``is_b_pickable`` fixture matrix; complete/open/ready helpers stay public. Proof: pytest ``-k beat98``.
+Beat 99: ``count_open`` fixture matrix aligns with ``render_queue_count``; capacity helpers public. Proof: pytest ``-k beat99``.
 
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.

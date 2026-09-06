@@ -6394,3 +6394,30 @@ def test_beat98_pick_helpers_still_exported():
         assert hasattr(ri, name), name
         assert name in getattr(ri, "__all__", ()), name
 
+def test_beat99_count_open_fixture_matrix_and_render():
+    """Beat 99: count_open per fixture; render_queue_count matches queue N/10."""
+    expectations = (
+        ("empty_queue.md", 0),
+        ("one_open_ready.md", 1),
+        ("two_open_ready.md", 2),
+        ("incomplete_open.md", 0),
+        ("shipped_only.md", 0),
+        ("mixed_priority.md", 1),
+        ("watch_lookalike.md", 1),
+        ("broken_ready_flag.md", 0),
+    )
+    for name, open_n in expectations:
+        items = parse_queue_items(_load(name))
+        assert count_open(items) == open_n, name
+        assert render_queue_count(open_n) == f"queue {open_n}/10", name
+
+
+def test_beat99_count_render_capacity_still_exported():
+    """Beat 99: count_open / render_queue_count / QUEUE_CAPACITY remain public."""
+    import src.research_implement as ri
+
+    for name in ("count_open", "render_queue_count", "QUEUE_CAPACITY"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+    assert ri.QUEUE_CAPACITY == 10
+
