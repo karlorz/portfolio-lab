@@ -139,3 +139,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Beat 111: idle fixtures queue 0/10 + decode_report None; picked decode_report == format_decode_report.
 - Beat 112: path runners — Session A empty writes stub; Session B idle leaves plan untouched.
 - Beat 113: idle-decode CLI --json idle/picked/failed matrix (mixed_priority→Q2).
+- Beat 114: session-b --decode-only --json idle/picked/failed matrix; plan untouched.

@@ -6897,3 +6897,35 @@ def test_beat113_makefile_echo_mentions_beat113():
     text = Path("Makefile").read_text(encoding="utf-8")
     assert "beat10…beat113" in text or "beat113" in text
 
+def test_beat114_session_b_decode_only_cli_json_matrix(tmp_path: Path, capsys):
+    """Beat 114: session-b --decode-only --json empty→idle; one_open→Q1; two_queue→failed."""
+    import json
+    from src.research_implement.__main__ import main
+
+    cases = (
+        ("empty_queue.md", 0, "idle", None),
+        ("one_open_ready.md", 0, "picked", "Q1"),
+        ("two_queue_sections.md", 1, "failed", None),
+    )
+    for name, code, verdict, item_id in cases:
+        plan = tmp_path / name
+        src = _load(name)
+        plan.write_text(src, encoding="utf-8")
+        rc = main(["session-b", "--plan", str(plan), "--decode-only", "--json"])
+        assert rc == code, name
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["verdict"] == verdict, name
+        if item_id is None:
+            assert payload.get("item") is None
+        else:
+            assert payload["item"]["item_id"] == item_id, name
+        assert plan.read_text(encoding="utf-8") == src
+        assert payload["keep_schedule"] is True
+        assert payload["scheduler_delete_called"] is False
+
+
+def test_beat114_makefile_echo_mentions_beat114():
+    """Beat 114: Makefile suite echo includes beat114."""
+    text = Path("Makefile").read_text(encoding="utf-8")
+    assert "beat114" in text
+
