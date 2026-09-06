@@ -3916,3 +3916,43 @@ def test_beat29_json_keys_match_session_contracts(tmp_path: Path, capsys):
     payload_b = json.loads(capsys.readouterr().out)
     assert set(payload_b) == set(SESSION_RESULT_JSON_KEYS)
 
+
+def test_beat30_candidate_json_list_skips_nondicts(tmp_path: Path, capsys):
+    """Beat 30: list skips leading non-dicts; first dict queues; plan gains that title."""
+    from src.research_implement.__main__ import main
+
+    src = FIXTURES / "empty_queue.md"
+    plan = tmp_path / "plan.md"
+    plan.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    cand = FIXTURES / "complete_candidate_list_skip_nondict.json"
+    rc = main(
+        [
+            "session-a",
+            "--plan",
+            str(plan),
+            "--no-stub",
+            "--candidate-json",
+            str(cand),
+            "--json",
+        ]
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Skip-nondict first dict" in out or "queued" in out.lower()
+    body = plan.read_text(encoding="utf-8")
+    assert "Skip-nondict first dict" in body
+    assert "ignored second" not in body
+
+
+def test_beat30_relative_plan_path_works(tmp_path: Path, monkeypatch, capsys):
+    """Beat 30: relative --plan path works when cwd has the file."""
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "rel-plan.md"
+    plan.write_text((FIXTURES / "empty_queue.md").read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    rc = main(["idle-decode", "--plan", "rel-plan.md", "--json"])
+    assert rc == 0
+    out = capsys.readouterr().out.lower()
+    assert "idle" in out or "queue" in out or '"ok"' in out
+

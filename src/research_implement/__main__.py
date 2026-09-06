@@ -86,6 +86,8 @@ Beat 28: ``session-a --candidate-json`` with an empty JSON list ``[]`` → faile
 
 Beat 29: ``--candidate-json`` list with no dict elements → failed fire (no stub), plan unchanged; CLI ``--json`` emits exactly ``SESSION_A_RESULT_JSON_KEYS`` / ``SESSION_RESULT_JSON_KEYS``. Proof: pytest ``-k beat29``.
 
+Beat 30: ``--candidate-json`` list skips leading non-dicts and uses the first dict; relative ``--plan`` path resolves when the file exists. Proof: pytest ``-k beat30``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

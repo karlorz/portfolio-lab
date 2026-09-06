@@ -44,3 +44,5 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Unknown subcommand → non-zero exit.
 - `--candidate-json` list with no dict elements fails closed (no stub fallback).
 - CLI `--json` keys match `SESSION_A_RESULT_JSON_KEYS` / `SESSION_RESULT_JSON_KEYS`.
+- `--candidate-json` list skips leading non-dicts and uses the first dict.
+- Relative `--plan` / `--log` paths resolve when the file exists in cwd.
