@@ -8915,3 +8915,111 @@ def test_beat138_watch_queue_heartbeat_empty_dry_run_idle_and_session_a_stub_vs_
     assert "## Heartbeat" in no_body
     assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
 
+
+
+def test_beat139_two_queue_idle_and_session_b_json_fail_tmp(tmp_path: Path):
+    """Beat 139: idle-decode + session-b --decode-only + session-b --dry-run all failed; keep_schedule; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    src = _load("two_queue_sections.md")
+
+    # idle-decode --json → rc=1 failed; open_count=0 queue 0/10; keep_schedule; plan unchanged
+    idle_plan = tmp_path / "two_queue_idle.md"
+    idle_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(idle_plan), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert idle_plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    # session-b --decode-only --json → same failed; plan unchanged
+    b_plan = tmp_path / "two_queue_decode.md"
+    b_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(b_plan), "--decode-only", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert b_plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    # session-b --dry-run --json → failed (NOT dry_run); keep_schedule; plan unchanged
+    dry_plan = tmp_path / "two_queue_dry.md"
+    dry_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(dry_plan), "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["verdict"] != "dry_run"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert dry_plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+
+def test_beat139_two_queue_session_a_stub_and_no_stub_json_fail_tmp(tmp_path: Path):
+    """Beat 139: session-a --stub, --no-stub, and --stub --dry-run all failed wrote_item=False; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    src = _load("two_queue_sections.md")
+
+    # session-a --stub --json → failed; wrote_item=False; plan unchanged
+    stub_plan = tmp_path / "two_queue_a_stub.md"
+    stub_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(stub_plan), "--stub", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["wrote_item"] is False
+    assert stub_plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
+
+    # session-a --no-stub --json → failed; wrote_item=False; plan unchanged
+    no_stub = tmp_path / "two_queue_a_no_stub.md"
+    no_stub.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(no_stub), "--no-stub", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["wrote_item"] is False
+    assert no_stub.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
+
+    # session-a --stub --dry-run --json → failed; wrote_item=False; plan unchanged
+    dry_stub = tmp_path / "two_queue_a_stub_dry.md"
+    dry_stub.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(dry_stub), "--stub", "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["wrote_item"] is False
+    assert dry_stub.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
