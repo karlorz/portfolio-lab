@@ -4424,3 +4424,40 @@ def test_beat43_init_mentions_recent_help_beats():
     assert "Beat 40" in text
     assert "test-research-implement" in text or "e2e" in text.lower()
 
+def test_beat44_session_b_json_help_mentions_session_result(capsys):
+    """Beat 44: session-b --json help mentions SessionResult.to_dict / shared shape."""
+    from src.research_implement.__main__ import main
+
+    with pytest.raises(SystemExit) as ei:
+        main(["session-b", "--help"])
+    assert ei.value.code == 0
+    out = capsys.readouterr().out.lower()
+    assert "sessionresult" in out.replace("_", "") or "sessionresult.to_dict" in out.replace(" ", "")
+    assert "to_dict" in out or "sessionresult" in out.lower()
+    assert "idle" in out
+    assert "scheduler_delete" in out or "scheduler delete" in out
+
+
+def test_beat44_dry_run_message_includes_decode_pick():
+    """Beat 44: dry-run message includes decode pick six-field report; never scheduler_delete."""
+    from unittest.mock import patch
+
+    calls = {"n": 0}
+
+    def _spy(*_a, **_k):
+        calls["n"] += 1
+
+    with patch("src.research_implement.session_b.scheduler_delete", _spy):
+        result = run_session_b(_load("one_open_ready.md"), decode_only=False)
+    assert result.ok is True
+    assert result.verdict == "dry_run"
+    assert result.keep_schedule is True
+    assert result.scheduler_delete_called is False
+    assert calls["n"] == 0
+    assert "no repo write" in result.message
+    assert "decode pick" in result.message
+    assert "1. title:" in result.message
+    assert "6. redeploy_notes:" in result.message
+    assert result.decode_report is not None
+    assert "decode pick" in result.decode_report
+

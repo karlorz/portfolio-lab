@@ -68,3 +68,5 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - `idle-decode --help` has no `--dry-run`; `session-b --help` does.
 - Top-level `--help` states side-dev / no Tasker / no live LLM.
 - No CLI `--implement` / stub-ship flag — SHIPPED stays callback-only.
+- `session-b --json` emits shared `SessionResult.to_dict` (idle | picked | dry_run); never `scheduler_delete`.
+- Session B dry-run text includes the same `decode pick` six-field report as decode-only.

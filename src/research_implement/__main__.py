@@ -114,6 +114,8 @@ Beat 42: Makefile lists ``test-research-implement`` / ``research-implement-e2e-d
 
 Beat 43: side-dev guide documents make targets + no CLI ship flag + never ``scheduler_delete``; ``__init__`` mentions Beats 40–42. Proof: pytest ``-k beat43``.
 
+Beat 44: ``session-b --json`` help matches shared ``SessionResult.to_dict`` (idle | picked | dry_run); dry-run message includes ``decode pick`` six-field report like decode-only. Proof: pytest ``-k beat44``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never
@@ -321,7 +323,10 @@ def main(argv: list[str] | None = None) -> int:
         "--json",
         action="store_true",
         dest="as_json",
-        help="Emit decode fields as JSON (Q id + six fields) when picked",
+        help=(
+            "Emit shared SessionResult.to_dict JSON "
+            "(idle | picked decode_only | dry_run; never scheduler_delete)"
+        ),
     )
 
     idle = sub.add_parser(

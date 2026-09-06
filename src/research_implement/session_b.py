@@ -361,11 +361,15 @@ def run_session_b(
         )
     elif is_dry:
         # Dry-run: record intended file_touch / acceptance; never write repo/plan.
+        # Beat 44: include the same decode-pick six-field report as decode-only
+        # so non-JSON CLI output has clear decode path visibility.
         verdict = "dry_run"
+        report = format_decode_report(pick)
         msg = (
             f"dry-run; {pick.item_id}; file_touch={pick.file_touch}; "
             f"acceptance={pick.acceptance}; {render_queue_count(open_n)}; "
-            f"plan {path_label}; no repo write"
+            f"plan {path_label}; no repo write\n"
+            f"{report}"
         )
     else:
         msg = (
