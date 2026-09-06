@@ -107,3 +107,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - `one_open_ready`: `first_b_pick` and `count_open` are 1; `empty_queue` is 0 / None.
 - Milestone beat80: CLI subcommands + public runners/helpers remain stable; Makefile suite note includes beat80.
 - Beat 81: watch_lookalike first_b_pick=Q3; watch_only idle; mark_item_shipped remains public.
+- Beat 82: subcommand --help lists --plan/--json; render_queue_count + QUEUE_CAPACITY remain public.

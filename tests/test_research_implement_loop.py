@@ -5875,3 +5875,28 @@ def test_beat81_mark_item_shipped_still_exported():
     assert hasattr(ri, "mark_item_shipped")
     assert "mark_item_shipped" in getattr(ri, "__all__", ())
 
+def test_beat82_subcommand_help_lists_plan_json(capsys):
+    """Beat 82: session-a / session-b / idle-decode --help mention --plan and --json."""
+    import pytest
+    from src.research_implement.__main__ import main
+
+    for cmd in ("session-a", "session-b", "idle-decode"):
+        with pytest.raises(SystemExit) as ei:
+            main([cmd, "--help"])
+        assert ei.value.code == 0
+        out = capsys.readouterr().out
+        assert "--plan" in out, cmd
+        assert "--json" in out, cmd
+
+
+def test_beat82_render_queue_count_and_capacity_exported():
+    """Beat 82: render_queue_count / QUEUE_CAPACITY remain public; smoke strings."""
+    import src.research_implement as ri
+
+    for name in ("render_queue_count", "QUEUE_CAPACITY"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+    assert ri.QUEUE_CAPACITY == 10
+    assert ri.render_queue_count(0) == "queue 0/10"
+    assert ri.render_queue_count(1) == "queue 1/10"
+

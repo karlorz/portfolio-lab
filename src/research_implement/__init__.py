@@ -153,6 +153,7 @@ Beat 79: one_open vs empty_queue pick/count contract. Proof: pytest ``-k beat79`
 
 Beat 80: milestone — CLI help + public API export smoke through beat80. Proof: pytest ``-k beat80``.
 Beat 81: watch_lookalike / watch_only first_b_pick + mark_item_shipped export. Proof: pytest ``-k beat81``.
+Beat 82: subcommand help plan/json + render_queue_count/QUEUE_CAPACITY export. Proof: pytest ``-k beat82``.
 """
 
 from __future__ import annotations
