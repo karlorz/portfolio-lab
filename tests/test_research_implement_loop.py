@@ -6619,3 +6619,34 @@ def test_beat106_scheduler_delete_still_forbidden_exported():
         assert hasattr(ri, name), name
         assert name in getattr(ri, "__all__", ()), name
 
+def test_beat107_session_a_queued_light_failed_to_dict():
+    """Beat 107: Session A empty→queued wrote; one_open→light; two_queue→failed."""
+    queued = run_session_a(_load("empty_queue.md"), brainstorm=stub_brainstorm).to_dict()
+    assert queued["verdict"] == "queued"
+    assert queued["ok"] is True
+    assert queued["wrote_item"] is True
+    assert queued["open_count"] == 1
+    assert queued["queue"] == "queue 1/10"
+    assert queued["title"] == "Stub shippable change"
+
+    light = run_session_a(_load("one_open_ready.md"), brainstorm=stub_brainstorm).to_dict()
+    assert light["verdict"] == "light"
+    assert light["ok"] is True
+    assert light["wrote_item"] is False
+    assert light["open_count"] == 1
+    assert light["title"] is None
+
+    failed = run_session_a(_load("two_queue_sections.md"), brainstorm=stub_brainstorm).to_dict()
+    assert failed["verdict"] == "failed"
+    assert failed["ok"] is False
+    assert failed["wrote_item"] is False
+    assert failed["open_count"] == 0
+
+
+def test_beat107_run_session_a_still_exported():
+    """Beat 107: run_session_a remains a public export."""
+    import src.research_implement as ri
+
+    assert hasattr(ri, "run_session_a")
+    assert "run_session_a" in getattr(ri, "__all__", ())
+

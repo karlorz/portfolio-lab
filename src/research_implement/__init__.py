@@ -179,6 +179,7 @@ Beat 103: serialize_queue_items two_open round-trip. Proof: pytest ``-k beat103`
 Beat 104: QueueItem.field_map covers REQUIRED_FIELDS. Proof: pytest ``-k beat104``.
 Beat 105: to_json_dict aliases to_dict; SessionBResult is SessionResult. Proof: pytest ``-k beat105``.
 Beat 106: keep_schedule True; never scheduler_delete_called. Proof: pytest ``-k beat106``.
+Beat 107: Session A queued/light/failed to_dict matrix. Proof: pytest ``-k beat107``.
 """
 
 from __future__ import annotations
