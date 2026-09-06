@@ -8511,3 +8511,96 @@ def test_beat134_watch_queue_heartbeat_dry_run_and_session_a_light_tmp(tmp_path:
     assert "## Watch" in a_body
     assert "## Heartbeat" in a_body
     assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
+
+
+
+def test_beat135_watch_only_idle_and_session_b_json_idle_tmp(tmp_path: Path):
+    """Beat 135: idle-decode + session-b --decode-only --json both idle open_count=0; keep_schedule; Watch/Heartbeat markers; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    src = _load("watch_only_lookalike.md")
+
+    # idle-decode --json → idle, open_count=0, queue 0/10; keep_schedule; markers + plan unchanged
+    idle_plan = tmp_path / "watch_only_idle.md"
+    idle_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(idle_plan), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "idle"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    idle_body = idle_plan.read_text(encoding="utf-8")
+    assert idle_body == src
+    assert "## Watch" in idle_body
+    assert "## Heartbeat" in idle_body
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    # session-b --decode-only --json → same idle; markers + plan unchanged
+    b_plan = tmp_path / "watch_only_decode.md"
+    b_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(b_plan), "--decode-only", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "idle"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    b_body = b_plan.read_text(encoding="utf-8")
+    assert b_body == src
+    assert "## Watch" in b_body
+    assert "## Heartbeat" in b_body
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+
+def test_beat135_watch_only_dry_run_idle_and_session_a_queued_tmp(tmp_path: Path):
+    """Beat 135: session-b --dry-run→idle (not dry_run); session-a --stub→queued wrote_item=True open_count=1; Watch/Heartbeat intact after write."""
+    from src.research_implement.__main__ import main
+
+    src = _load("watch_only_lookalike.md")
+
+    # session-b --dry-run --json → idle (NOT dry_run), open_count=0; markers + plan unchanged
+    dry_plan = tmp_path / "watch_only_dry.md"
+    dry_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(dry_plan), "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "idle"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    dry_body = dry_plan.read_text(encoding="utf-8")
+    assert dry_body == src
+    assert "## Watch" in dry_body
+    assert "## Heartbeat" in dry_body
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    # session-a --stub --json → queued write; wrote_item=True; open_count=1; Watch/Heartbeat still present (plan changes)
+    a_plan = tmp_path / "watch_only_a.md"
+    a_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(a_plan), "--stub", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "queued"
+    assert payload["wrote_item"] is True
+    assert payload["open_count"] == 1
+    a_body = a_plan.read_text(encoding="utf-8")
+    assert a_body != src
+    assert "## Watch" in a_body
+    assert "## Heartbeat" in a_body
+    assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
