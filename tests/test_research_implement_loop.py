@@ -4646,3 +4646,38 @@ def test_beat49_queue_watch_heartbeat_a_append_preserves(tmp_path: Path, capsys)
     assert "## Heartbeat" in body or "Heartbeat" in body
     assert "## Queue" in body
 
+
+def test_beat50_broken_ready_cli_idle(tmp_path: Path, capsys):
+    """Beat 50: broken_ready_flag → idle-decode/session-b idle; plan unchanged."""
+    import json
+    from src.research_implement.__main__ import main
+
+    src = (FIXTURES / "broken_ready_flag.md").read_text(encoding="utf-8")
+    for cmd in ("idle-decode", "session-b"):
+        plan = tmp_path / f"{cmd}.md"
+        plan.write_text(src, encoding="utf-8")
+        rc = main([cmd, "--plan", str(plan), "--json"])
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload.get("verdict") == "idle"
+        assert payload.get("queue") == "queue 0/10"
+        assert payload.get("keep_schedule") is True
+        assert payload.get("scheduler_delete_called") is False
+        assert plan.read_text(encoding="utf-8") == src
+
+
+def test_beat50_public_api_exports_still_stable():
+    """Beat 50: research_implement still exports Session A/B result helpers."""
+    import src.research_implement as ri
+
+    for name in (
+        "SessionAResult",
+        "SessionResult",
+        "SESSION_A_RESULT_JSON_KEYS",
+        "SESSION_RESULT_JSON_KEYS",
+        "run_session_a",
+        "run_session_b",
+        "parse_queue_items",
+    ):
+        assert hasattr(ri, name), name
+

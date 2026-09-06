@@ -90,6 +90,8 @@ Beat 41–42: side-dev help wording / no CLI ``--implement``; Makefile lists ``t
 Beat 43: side-dev guide pins make/ship contracts; package docs mention Beat 40 help. Proof: pytest ``-k beat43``.
 
 Beat 44: Session B dry-run message includes decode-pick six-field report; ``session-b --json`` help matches ``SessionResult.to_dict``. Proof: pytest ``-k beat44``.
+
+Beat 50: broken ready-for-implement flags idle via CLI; public API exports remain stable through A/B side-dev. Proof: pytest ``-k beat50``.
 """
 
 from __future__ import annotations
