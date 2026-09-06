@@ -222,6 +222,7 @@ Beat 112: path runners — A empty writes stub; B idle leaves plan untouched. Pr
 Beat 113: idle-decode CLI ``--json`` idle/picked/failed matrix (mixed→Q2). Proof: pytest ``-k beat113``.
 Beat 114: session-b ``--decode-only --json`` idle/picked/failed matrix; plan untouched. Proof: pytest ``-k beat114``.
 Beat 115: session-a ``--stub|--no-stub --json`` CLI matrix via tmp_path (empty→queued write; one_open→light no-write; two_queue / empty --no-stub→failed). Proof: pytest ``-k beat115``.
+Beat 116: session-b ``--dry-run --json`` CLI matrix via tmp_path (empty/shipped→idle; one_open/mixed→dry_run open_count=1; two_open→dry_run open_count=2; two_queue→failed); plan untouched. Proof: pytest ``-k beat116``.
 
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.

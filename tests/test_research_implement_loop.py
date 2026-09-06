@@ -7005,3 +7005,73 @@ def test_beat115_session_a_stub_json_fail_paths_tmp(tmp_path: Path):
     assert payload["wrote_item"] is False
     assert payload["open_count"] == 0
     assert empty.read_text(encoding="utf-8") == empty_src
+
+
+def test_beat116_session_b_dry_run_json_idle_vs_picked_tmp(tmp_path: Path):
+    """Beat 116: session-b --dry-run --json empty→idle; one_open→dry_run open_count=1; plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    # empty_queue → idle, open_count=0
+    empty_src = _load("empty_queue.md")
+    empty = tmp_path / "empty_queue.md"
+    empty.write_text(empty_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(empty), "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "idle"
+    assert payload["open_count"] == 0
+    assert empty.read_text(encoding="utf-8") == empty_src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    # one_open_ready → dry_run, open_count=1
+    one_src = _load("one_open_ready.md")
+    one = tmp_path / "one_open_ready.md"
+    one.write_text(one_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(one), "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "dry_run"
+    assert payload["open_count"] == 1
+    assert one.read_text(encoding="utf-8") == one_src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+
+def test_beat116_session_b_dry_run_json_fail_and_multi_tmp(tmp_path: Path):
+    """Beat 116: session-b --dry-run --json two_queue→failed; two_open→dry_run open_count=2; plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    # two_queue_sections → failed, open_count=0
+    two_src = _load("two_queue_sections.md")
+    two = tmp_path / "two_queue_sections.md"
+    two.write_text(two_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(two), "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["open_count"] == 0
+    assert two.read_text(encoding="utf-8") == two_src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    # two_open_ready → dry_run, open_count=2
+    multi_src = _load("two_open_ready.md")
+    multi = tmp_path / "two_open_ready.md"
+    multi.write_text(multi_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(multi), "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "dry_run"
+    assert payload["open_count"] == 2
+    assert multi.read_text(encoding="utf-8") == multi_src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
