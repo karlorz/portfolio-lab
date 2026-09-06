@@ -5816,3 +5816,40 @@ def test_beat79_next_queue_id_still_exported():
     assert hasattr(ri, "next_queue_id")
     assert "next_queue_id" in getattr(ri, "__all__", ())
 
+
+def test_beat80_top_level_help_still_lists_subcommands(capsys):
+    """Beat 80: top-level --help lists session-a / session-b / idle-decode."""
+    import pytest
+    from src.research_implement.__main__ import main
+
+    with pytest.raises(SystemExit) as ei:
+        main(["--help"])
+    assert ei.value.code == 0
+    out = capsys.readouterr().out
+    for name in ("session-a", "session-b", "idle-decode"):
+        assert name in out, name
+
+
+def test_beat80_public_api_milestone_exports():
+    """Beat 80: core runners/helpers/result types remain public."""
+    import src.research_implement as ri
+
+    for name in (
+        "run_session_a",
+        "run_session_b",
+        "run_session_a_path",
+        "run_session_b_path",
+        "parse_queue_items",
+        "first_b_pick",
+        "is_b_pickable",
+        "is_ready_yes",
+        "count_open",
+        "SessionAResult",
+        "SessionResult",
+        "QueueItem",
+        "SESSION_A_RESULT_JSON_KEYS",
+        "SESSION_RESULT_JSON_KEYS",
+    ):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+

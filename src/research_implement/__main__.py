@@ -186,6 +186,8 @@ Beat 78: ``two_open_ready`` ``first_b_pick`` returns the first OPEN; ``count_ope
 
 Beat 79: ``one_open_ready`` ``first_b_pick`` / ``count_open`` are 1; ``empty_queue`` stays 0 / None. Proof: pytest ``-k beat79``.
 
+Beat 80: milestone — top-level ``--help`` still lists session-a/session-b/idle-decode; public API still exports Session A/B runners + queue helpers; Makefile echo reaches beat80. Proof: pytest ``-k beat80``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

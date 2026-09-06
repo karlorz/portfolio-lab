@@ -105,3 +105,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - `mixed_priority`: `first_b_pick` skips incomplete; `count_open` is pickable-only.
 - `two_open_ready`: `first_b_pick` is the first of two pickable OPENs; `count_open` is 2.
 - `one_open_ready`: `first_b_pick` and `count_open` are 1; `empty_queue` is 0 / None.
+- Milestone beat80: CLI subcommands + public runners/helpers remain stable; Makefile suite note includes beat80.
