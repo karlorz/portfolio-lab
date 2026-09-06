@@ -148,6 +148,8 @@ Beat 76: not-ready / broken-ready fixtures never pickable. Proof: pytest ``-k be
 Beat 77: mixed_priority first_b_pick skips incomplete. Proof: pytest ``-k beat77``.
 
 Beat 78: two_open_ready first_b_pick is first of two. Proof: pytest ``-k beat78``.
+
+Beat 79: one_open vs empty_queue pick/count contract. Proof: pytest ``-k beat79``.
 """
 
 from __future__ import annotations

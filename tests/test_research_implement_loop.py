@@ -5794,3 +5794,25 @@ def test_beat78_parse_queue_items_still_exported():
     assert hasattr(ri, "parse_queue_items")
     assert "parse_queue_items" in getattr(ri, "__all__", ())
 
+
+def test_beat79_one_open_and_empty_pick_counts():
+    """Beat 79: one_open pick/count=1; empty_queue pick None / count 0."""
+    from src.research_implement import count_open, first_b_pick, parse_queue_items
+
+    one = parse_queue_items((FIXTURES / "one_open_ready.md").read_text(encoding="utf-8"))
+    assert count_open(one) == 1
+    pick = first_b_pick(one)
+    assert pick is not None and pick.item_id == "Q1"
+
+    empty = parse_queue_items((FIXTURES / "empty_queue.md").read_text(encoding="utf-8"))
+    assert count_open(empty) == 0
+    assert first_b_pick(empty) is None
+
+
+def test_beat79_next_queue_id_still_exported():
+    """Beat 79: next_queue_id remains a public export."""
+    import src.research_implement as ri
+
+    assert hasattr(ri, "next_queue_id")
+    assert "next_queue_id" in getattr(ri, "__all__", ())
+

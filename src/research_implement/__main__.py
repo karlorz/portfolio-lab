@@ -184,6 +184,8 @@ Beat 77: ``mixed_priority`` ``first_b_pick`` skips incomplete rows and returns t
 
 Beat 78: ``two_open_ready`` ``first_b_pick`` returns the first OPEN; ``count_open`` is 2; second stays OPEN. Proof: pytest ``-k beat78``.
 
+Beat 79: ``one_open_ready`` ``first_b_pick`` / ``count_open`` are 1; ``empty_queue`` stays 0 / None. Proof: pytest ``-k beat79``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never
