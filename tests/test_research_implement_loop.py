@@ -5327,3 +5327,52 @@ def test_beat66_implement_helpers_still_exported():
         assert name in getattr(ri, "__all__", ()), name
         assert callable(getattr(ri, name))
 
+
+def test_beat67_no_stub_dry_run_light_and_failed(tmp_path: Path, capsys):
+    """Beat 67: --no-stub --dry-run on one_open → light; on empty → failed; plans intact."""
+    import json
+    from src.research_implement.__main__ import main
+
+    one_src = (FIXTURES / "one_open_ready.md").read_text(encoding="utf-8")
+    one = tmp_path / "beat67_one.md"
+    one.write_text(one_src, encoding="utf-8")
+    rc_light = main(
+        ["session-a", "--plan", str(one), "--no-stub", "--dry-run", "--json"]
+    )
+    assert rc_light == 0
+    light = json.loads(capsys.readouterr().out)
+    assert light.get("verdict") == "light"
+    assert light.get("wrote_item") is False
+    assert one.read_text(encoding="utf-8") == one_src
+
+    empty_src = (FIXTURES / "empty_queue.md").read_text(encoding="utf-8")
+    empty = tmp_path / "beat67_empty.md"
+    empty.write_text(empty_src, encoding="utf-8")
+    rc_fail = main(
+        ["session-a", "--plan", str(empty), "--no-stub", "--dry-run", "--json"]
+    )
+    assert rc_fail == 1
+    failed = json.loads(capsys.readouterr().out)
+    assert failed.get("verdict") == "failed"
+    assert failed.get("wrote_item") is False
+    assert empty.read_text(encoding="utf-8") == empty_src
+
+
+def test_beat67_decode_helpers_still_exported():
+    """Beat 67: decode_fields / format_decode_report / first_b_pick stay public."""
+    import src.research_implement as ri
+
+    for name in ("decode_fields", "format_decode_report", "first_b_pick"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+        assert callable(getattr(ri, name))
+
+    items = parse_queue_items((FIXTURES / "one_open_ready.md").read_text(encoding="utf-8"))
+    pick = ri.first_b_pick(items)
+    assert pick is not None
+    fields = ri.decode_fields(pick)
+    report = ri.format_decode_report(pick)
+    assert fields["item_id"] == pick.item_id
+    assert f"decode pick {pick.item_id}:" in report
+    assert "1. title:" in report
+

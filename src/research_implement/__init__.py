@@ -124,6 +124,8 @@ Beat 64: one_open dry-run/pick; format_queue_item + require_unique_queue exports
 Beat 65: dual-Queue dry-run still fail-closed; write_queue_section export. Proof: pytest ``-k beat65``.
 
 Beat 66: --no-stub light/failed CLI paths; implement helper exports. Proof: pytest ``-k beat66``.
+
+Beat 67: --no-stub --dry-run light/failed; decode helper exports. Proof: pytest ``-k beat67``.
 """
 
 from __future__ import annotations
