@@ -160,6 +160,7 @@ Beat 85: producer/decode help flags + REQUIRED_FIELDS export. Proof: pytest ``-k
 Beat 86: idle ``queue 0/10`` + ``scheduler_delete`` guard; ``SchedulerDeleteForbidden`` export;
 decode report starts with ``decode pick``. Proof: pytest ``-k beat86``.
 Beat 87: two_queue AmbiguousQueueError + heading count; decode helpers export. Proof: pytest ``-k beat87``.
+Beat 88: Watch/Heartbeat fixture idle/pick; SESSION_A/B_RESULT_KEYS export. Proof: pytest ``-k beat88``.
 """
 
 from __future__ import annotations

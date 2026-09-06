@@ -113,3 +113,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Beat 85: session-a producer help flags; session-b --decode-only; idle omits --dry-run; REQUIRED_FIELDS public.
 - Beat 86: idle queue 0/10 + scheduler_delete guard; SchedulerDeleteForbidden public; decode pick report.
 - Beat 87: two_queue AmbiguousQueueError + heading count=2; format_decode_report/decode_fields remain public.
+- Beat 88: Watch/Heartbeat fixtures idle or pick Q1; SESSION_A/B_RESULT_KEYS remain public.

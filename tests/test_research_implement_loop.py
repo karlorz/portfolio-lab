@@ -6045,3 +6045,54 @@ def test_beat87_decode_helpers_still_exported():
     report = format_decode_report(item)
     assert report.startswith("decode pick Q1:")
 
+def test_beat88_watch_marker_fixtures_idle_or_pick():
+    """Beat 88: Watch/Heartbeat empty/no-queue idle; watch_queue_heartbeat picks Q1."""
+    for name in (
+        "watch_queue_heartbeat_empty.md",
+        "watch_heartbeat_no_queue.md",
+        "queue_with_watch_heartbeat.md",
+    ):
+        result = run_session_b(_load(name), decode_only=True)
+        assert result.ok is True
+        assert result.verdict == "idle", name
+        assert result.keep_schedule is True
+        body = _load(name)
+        assert "## Watch" in body
+        assert "## Heartbeat" in body
+
+    result = run_session_b(_load("watch_queue_heartbeat.md"), decode_only=True)
+    assert result.ok is True
+    assert result.verdict == "picked"
+    assert result.item is not None
+    assert result.item.item_id == "Q1"
+
+
+def test_beat88_session_result_keys_still_exported():
+    """Beat 88: SESSION_A_RESULT_KEYS / SESSION_B_RESULT_KEYS remain public."""
+    import src.research_implement as ri
+
+    for name in ("SESSION_A_RESULT_KEYS", "SESSION_B_RESULT_KEYS"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+    assert ri.SESSION_A_RESULT_KEYS == (
+        "ok",
+        "verdict",
+        "open_count",
+        "queue",
+        "b_pick_title",
+        "title",
+        "wrote_item",
+    )
+    assert ri.SESSION_B_RESULT_KEYS == (
+        "ok",
+        "verdict",
+        "open_count",
+        "queue",
+        "keep_schedule",
+        "scheduler_delete_called",
+        "item",
+        "implement_result",
+        "wrote_files",
+        "shipped",
+    )
+
