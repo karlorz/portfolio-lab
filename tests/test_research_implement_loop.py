@@ -6319,3 +6319,28 @@ def test_beat95_count_queue_headings_fixture_contract():
     assert "count_queue_headings" in getattr(ri, "__all__", ())
     assert "serialize_queue_item" in getattr(ri, "__all__", ())
 
+def test_beat96_decode_fields_and_report_lines():
+    """Beat 96: decode_fields has six fields + status/ready; report has lines 1–6."""
+    item = parse_queue_items(_load("one_open_ready.md"))[0]
+    fields = decode_fields(item)
+    for name in REQUIRED_FIELDS:
+        assert name in fields, name
+        assert fields[name]
+    assert fields["status"] == "OPEN"
+    assert is_ready_yes(fields["ready_for_implement"]) is True
+    assert fields["item_id"] == "Q1"
+
+    report = format_decode_report(item)
+    assert report.startswith("decode pick Q1:")
+    for n, name in enumerate(REQUIRED_FIELDS, start=1):
+        assert f"  {n}. {name}:" in report, name
+
+
+def test_beat96_decode_helpers_still_exported():
+    """Beat 96: decode_fields / format_decode_report remain public."""
+    import src.research_implement as ri
+
+    for name in ("decode_fields", "format_decode_report", "REQUIRED_FIELDS"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+

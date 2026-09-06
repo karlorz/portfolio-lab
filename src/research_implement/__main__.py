@@ -202,6 +202,7 @@ Beat 92: ``mark_item_shipped`` clears pick; ``stub_brainstorm`` ready yes; stub/
 Beat 93: ``is_ready_yes`` aliases; ``default_search_plan``/``stub_search_plan`` alias stub; result-dict helpers public. Proof: pytest ``-k beat93``.
 Beat 94: session_*_result_dict / to_dict match JSON keys; path runners stay public. Proof: pytest ``-k beat94``.
 Beat 95: serialize_queue_item round-trip stays pickable; count_queue_headings fixture contract. Proof: pytest ``-k beat95``.
+Beat 96: ``decode_fields`` covers six fields + status/ready; decode report lines 1–6. Proof: pytest ``-k beat96``.
 
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
