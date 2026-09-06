@@ -3982,3 +3982,57 @@ def test_beat31_relative_log_alias_works(tmp_path: Path, monkeypatch, capsys):
     out = capsys.readouterr().out.lower()
     assert "idle" in out or "queue" in out or '"ok"' in out
 
+
+def test_beat32_candidate_json_directory_fails(tmp_path: Path):
+    """Beat 32: --candidate-json pointing at a directory → SystemExit; plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    src = FIXTURES / "empty_queue.md"
+    plan = tmp_path / "plan.md"
+    plan.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    d = tmp_path / "cand-dir"
+    d.mkdir()
+    with pytest.raises(SystemExit) as ei:
+        main(
+            [
+                "session-a",
+                "--plan",
+                str(plan),
+                "--no-stub",
+                "--candidate-json",
+                str(d),
+                "--json",
+            ]
+        )
+    msg = str(ei.value).lower()
+    assert "not a file" in msg and "candidate-json" in msg
+    assert plan.read_text(encoding="utf-8") == before
+
+
+def test_beat32_candidate_json_null_fails(tmp_path: Path):
+    """Beat 32: --candidate-json top-level null → SystemExit; plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    src = FIXTURES / "empty_queue.md"
+    plan = tmp_path / "plan.md"
+    plan.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    cand = tmp_path / "null.json"
+    cand.write_text("null\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as ei:
+        main(
+            [
+                "session-a",
+                "--plan",
+                str(plan),
+                "--no-stub",
+                "--candidate-json",
+                str(cand),
+                "--json",
+            ]
+        )
+    msg = str(ei.value).lower()
+    assert "candidate-json" in msg
+    assert plan.read_text(encoding="utf-8") == before
+

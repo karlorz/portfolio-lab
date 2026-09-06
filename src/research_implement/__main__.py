@@ -90,6 +90,8 @@ Beat 30: ``--candidate-json`` list skips leading non-dicts and uses the first di
 
 Beat 31: ``--plan`` / ``--log`` path that exists but is not a file (e.g. directory) → clear non-zero exit; relative ``--log`` alias works like relative ``--plan``. Proof: pytest ``-k beat31``.
 
+Beat 32: ``--candidate-json`` path that exists but is not a file (e.g. directory) → clear non-zero exit; top-level JSON ``null`` also fails closed. Proof: pytest ``-k beat32``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never
@@ -126,6 +128,9 @@ def _load_candidate(path: Path | None) -> dict | None:
     """
     if path is None:
         return None
+    # Beat 32: existing non-file (directory) → clear not-a-file exit.
+    if path.exists() and not path.is_file():
+        raise SystemExit(f"--candidate-json is not a file: {path}")
     if not path.is_file():
         raise SystemExit(f"--candidate-json file not found: {path}")
     try:

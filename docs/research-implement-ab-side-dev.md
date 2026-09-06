@@ -48,3 +48,5 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Relative `--plan` / `--log` paths resolve when the file exists in cwd.
 - `--plan` / `--log` that exists but is not a file (e.g. directory) → non-zero exit.
 - Relative `--log` alias works like relative `--plan`.
+- `--candidate-json` that exists but is not a file (e.g. directory) → non-zero exit.
+- Top-level JSON `null` for `--candidate-json` fails closed.
