@@ -10978,3 +10978,87 @@ def test_beat161_one_open_ready_session_a_stub_vs_no_stub_dry_run_json_light_tmp
     assert payload["b_pick_title"] == "Add fixture unit test for queue parser"
     assert no_stub.read_text(encoding="utf-8") == src
     assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
+
+
+def test_beat162_two_open_ready_idle_and_session_b_dry_run_json_pick_tmp(tmp_path: Path):
+    """Beat 162: idle-decode→picked; session-b --dry-run→dry_run; keep_schedule; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    src = _load("two_open_ready.md")
+
+    # idle-decode --json → picked Q1, open_count=2, queue 2/10; keep_schedule; plan unchanged
+    idle_plan = tmp_path / "two_open_ready_idle.md"
+    idle_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(idle_plan), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "picked"
+    assert payload["open_count"] == 2
+    assert payload["queue"] == "queue 2/10"
+    assert payload["item"]["item_id"] == "Q1"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert idle_plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    # session-b --dry-run --json → dry_run Q1, open_count=2; keep_schedule; plan unchanged
+    dry_plan = tmp_path / "two_open_ready_b_dry.md"
+    dry_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(dry_plan), "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "dry_run"
+    assert payload["open_count"] == 2
+    assert payload["queue"] == "queue 2/10"
+    assert payload["item"]["item_id"] == "Q1"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert dry_plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+
+def test_beat162_two_open_ready_session_a_stub_vs_no_stub_dry_run_json_light_tmp(tmp_path: Path):
+    """Beat 162: session-a --stub|--no-stub --dry-run both light wrote_item=False; plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    src = _load("two_open_ready.md")
+
+    # session-a --stub --dry-run --json → light; wrote_item=False; open_count=2; b_pick_title First ready complete item; plan unchanged
+    stub_plan = tmp_path / "two_open_ready_a_stub_dry.md"
+    stub_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(stub_plan), "--stub", "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "light"
+    assert payload["wrote_item"] is False
+    assert payload["open_count"] == 2
+    assert payload["queue"] == "queue 2/10"
+    assert payload["b_pick_title"] == "First ready complete item"
+    assert stub_plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
+
+    # session-a --no-stub --dry-run --json → light; wrote_item=False; plan unchanged
+    no_stub = tmp_path / "two_open_ready_a_no_stub_dry.md"
+    no_stub.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(no_stub), "--no-stub", "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "light"
+    assert payload["wrote_item"] is False
+    assert payload["open_count"] == 2
+    assert payload["queue"] == "queue 2/10"
+    assert payload["b_pick_title"] == "First ready complete item"
+    assert no_stub.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
