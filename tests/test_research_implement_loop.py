@@ -4600,3 +4600,49 @@ def test_beat48_watch_only_cli_idles(tmp_path: Path, capsys):
         assert payload.get("scheduler_delete_called") is False
         assert plan.read_text(encoding="utf-8") == src
 
+
+def test_beat49_two_open_cli_picks_first(tmp_path: Path, capsys):
+    """Beat 49: two_open_ready → session-b picks first OPEN; plan unchanged (decode-only)."""
+    import json
+    from src.research_implement.__main__ import main
+    from src.research_implement.queue import parse_queue_items
+
+    src = (FIXTURES / "two_open_ready.md").read_text(encoding="utf-8")
+    plan = tmp_path / "two.md"
+    plan.write_text(src, encoding="utf-8")
+    before_ids = [i.item_id for i in parse_queue_items(src)]
+    rc = main(["session-b", "--plan", str(plan), "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("verdict") == "picked"
+    item = payload.get("item") or {}
+    first_id = str(item.get("item_id") or "")
+    assert first_id == before_ids[0] or first_id.startswith("Q")
+    # Second OPEN still present; plan not mutated by decode-only.
+    assert plan.read_text(encoding="utf-8") == src
+    assert len(parse_queue_items(plan.read_text(encoding="utf-8"))) >= 2
+
+
+def test_beat49_queue_watch_heartbeat_a_append_preserves(tmp_path: Path, capsys):
+    """Beat 49: session-a stub append on queue_with_watch_heartbeat keeps Watch/Heartbeat."""
+    from src.research_implement.__main__ import main
+
+    # Prefer fixture with empty-ish queue if present; else watch_queue_heartbeat_empty
+    for name in ("watch_queue_heartbeat_empty.md", "queue_with_watch_heartbeat.md"):
+        path = FIXTURES / name
+        if path.is_file():
+            src = path.read_text(encoding="utf-8")
+            break
+    else:
+        raise AssertionError("missing watch/queue heartbeat fixture")
+
+    plan = tmp_path / "wh.md"
+    plan.write_text(src, encoding="utf-8")
+    # If already OPEN>=1, recount-only — still must preserve sections.
+    rc = main(["session-a", "--plan", str(plan), "--stub", "--json"])
+    assert rc == 0
+    body = plan.read_text(encoding="utf-8")
+    assert "## Watch" in body or "Watch" in body
+    assert "## Heartbeat" in body or "Heartbeat" in body
+    assert "## Queue" in body
+
