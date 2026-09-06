@@ -108,6 +108,8 @@ Beat 56: light/dry_run/failed CLI JSON key contracts stay locked; Watch-before-Q
 Beat 57: Session A failed JSON key contract + AmbiguousQueueError export; dry-run A no write. Proof: pytest ``-k beat57``.
 
 Beat 58: empty-queue ``session-b --dry-run`` stays idle; queue helper exports remain public. Proof: pytest ``-k beat58``.
+
+Beat 59: two-OPEN dry-run picks first only; plan stays dual-OPEN. Proof: pytest ``-k beat59``.
 """
 
 from __future__ import annotations

@@ -5018,3 +5018,48 @@ def test_beat58_queue_helper_exports_still_public():
         assert hasattr(ri, name), name
         assert name in getattr(ri, "__all__", ()), name
 
+
+def test_beat59_two_open_dry_run_picks_first(tmp_path: Path, capsys):
+    """Beat 59: two_open_ready session-b --dry-run picks Q1; both OPEN stay."""
+    import json
+    from src.research_implement.__main__ import main
+    from src.research_implement.queue import count_open, parse_queue_items
+
+    src = (FIXTURES / "two_open_ready.md").read_text(encoding="utf-8")
+    before = parse_queue_items(src)
+    assert count_open(before) == 2
+    plan = tmp_path / "beat59_two.md"
+    plan.write_text(src, encoding="utf-8")
+    rc = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("verdict") == "dry_run"
+    assert payload.get("open_count") == 2
+    item = payload.get("item") or {}
+    assert item.get("item_id") == before[0].item_id
+    impl = payload.get("implement_result") or {}
+    assert impl.get("dry_run") is True
+    assert payload.get("scheduler_delete_called") is False
+    body = plan.read_text(encoding="utf-8")
+    assert body == src
+    assert count_open(parse_queue_items(body)) == 2
+    assert "status: SHIPPED" not in body
+
+
+def test_beat59_two_open_idle_decode_picks_first(tmp_path: Path, capsys):
+    """Beat 59: idle-decode on two_open_ready picks first; plan unchanged."""
+    import json
+    from src.research_implement.__main__ import main
+    from src.research_implement.queue import parse_queue_items
+
+    src = (FIXTURES / "two_open_ready.md").read_text(encoding="utf-8")
+    first_id = parse_queue_items(src)[0].item_id
+    plan = tmp_path / "beat59_decode.md"
+    plan.write_text(src, encoding="utf-8")
+    rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("verdict") == "picked"
+    assert (payload.get("item") or {}).get("item_id") == first_id
+    assert plan.read_text(encoding="utf-8") == src
+

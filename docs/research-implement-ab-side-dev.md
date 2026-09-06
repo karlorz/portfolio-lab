@@ -84,3 +84,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - CLI `--json` for `light` / `dry_run` / `failed` uses the same Session A/B key sets as queued/idle/picked.
 - Dual-Queue Session A failed CLI uses `SESSION_A_RESULT_JSON_KEYS`; `AmbiguousQueueError` is a public export.
 - `session-b --dry-run` on empty Queue → `idle` (no implement_result); helpers `is_b_pickable` / `is_ready_yes` / `count_open` stay public.
+- `two_open_ready` + `session-b --dry-run`: picks first OPEN; both remain OPEN on disk.

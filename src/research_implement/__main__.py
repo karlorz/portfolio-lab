@@ -144,6 +144,8 @@ Beat 57: ``session-a`` failed (dual-Queue) ``--json`` keys match ``SESSION_A_RES
 
 Beat 58: ``session-b --dry-run`` on empty Queue is idle (not dry_run); public exports still include ``is_b_pickable`` / ``is_ready_yes`` / ``count_open``. Proof: pytest ``-k beat58``.
 
+Beat 59: ``two_open_ready`` ``session-b --dry-run`` picks first OPEN (``open_count`` stays 2); plan unchanged with both still OPEN. Proof: pytest ``-k beat59``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never
