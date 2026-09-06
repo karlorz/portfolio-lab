@@ -174,6 +174,8 @@ Beat 72: Session A ``to_dict`` / ``to_json_dict`` / ``session_a_result_dict`` al
 
 Beat 73: ``SessionAResult`` / ``SessionResult`` / ``SessionBResult`` / ``QueueItem`` stay public; result classes still expose ``to_dict``. Proof: pytest ``-k beat73``.
 
+Beat 74: ``QueueItem`` from ``one_open_ready`` is B-pickable; ``format_queue_item`` round-trips via ``parse_queue_items``; ``is_b_pickable`` stays public. Proof: pytest ``-k beat74``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

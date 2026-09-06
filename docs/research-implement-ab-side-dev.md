@@ -99,3 +99,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Session B `--json` for `dry_run` / `idle` / `failed` uses `SESSION_RESULT_JSON_KEYS`; `to_dict` ≡ `to_json_dict`.
 - Session A `to_dict` ≡ `to_json_dict` ≡ `session_a_result_dict` for queued/light/failed.
 - Public dataclasses: `SessionAResult`, `SessionResult`/`SessionBResult`, `QueueItem` (all expose `to_dict` where applicable).
+- `format_queue_item` → `parse_queue_items` round-trip keeps B-pickable fields.

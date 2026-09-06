@@ -5658,3 +5658,47 @@ def test_beat73_result_to_dict_callable_on_live_results():
     )
     assert set(b.to_dict()) == set(SESSION_RESULT_JSON_KEYS)
 
+
+def test_beat74_queueitem_pickable_and_format_roundtrip():
+    """Beat 74: one_open QueueItem is B-pickable; format/parse round-trip."""
+    from src.research_implement import (
+        format_queue_item,
+        is_b_pickable,
+        parse_queue_items,
+    )
+
+    items = parse_queue_items((FIXTURES / "one_open_ready.md").read_text(encoding="utf-8"))
+    assert len(items) >= 1
+    item = items[0]
+    assert is_b_pickable(item)
+    assert item.item_id == "Q1"
+    assert item.status.upper() == "OPEN"
+    assert item.ready_for_implement.strip().lower() in {"yes", "y", "true", "1"}
+
+    blob = format_queue_item(
+        item_id=item.item_id,
+        heading=item.heading or item.title,
+        title=item.title,
+        acceptance=item.acceptance,
+        risks=item.risks,
+        file_touch=item.file_touch,
+        breaking_change=item.breaking_change,
+        redeploy_notes=item.redeploy_notes,
+        status=item.status,
+        ready_for_implement=item.ready_for_implement,
+    )
+    wrapped = "## Queue\n\n" + blob + "\n"
+    again = parse_queue_items(wrapped)
+    assert len(again) == 1
+    assert again[0].item_id == item.item_id
+    assert again[0].title == item.title
+    assert is_b_pickable(again[0])
+
+
+def test_beat74_is_b_pickable_still_exported():
+    """Beat 74: is_b_pickable remains a public export."""
+    import src.research_implement as ri
+
+    assert hasattr(ri, "is_b_pickable")
+    assert "is_b_pickable" in getattr(ri, "__all__", ())
+

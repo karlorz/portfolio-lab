@@ -138,6 +138,8 @@ Beat 71: Session B dry_run/idle/failed JSON keys; to_dict aliases. Proof: pytest
 Beat 72: Session A to_dict aliases align across queued/light/failed. Proof: pytest ``-k beat72``.
 
 Beat 73: result/queue dataclasses remain public API. Proof: pytest ``-k beat73``.
+
+Beat 74: QueueItem pickability + format/parse round-trip. Proof: pytest ``-k beat74``.
 """
 
 from __future__ import annotations
