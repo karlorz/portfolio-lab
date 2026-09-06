@@ -5526,3 +5526,59 @@ def test_beat70_path_runners_still_exported(tmp_path: Path):
     b = ri.run_session_b_path(plan, decode_only=True, write=False)
     assert b.verdict in {"idle", "picked", "failed"}
 
+
+def test_beat71_session_b_dry_idle_failed_json_keys(tmp_path: Path, capsys):
+    """Beat 71: session-b --json dry_run/idle/failed keys match SESSION_RESULT_JSON_KEYS."""
+    import json
+    from src.research_implement.__main__ import main
+    from src.research_implement.session_b import SESSION_RESULT_JSON_KEYS
+
+    one = tmp_path / "beat71_one.md"
+    one.write_text((FIXTURES / "one_open_ready.md").read_text(encoding="utf-8"), encoding="utf-8")
+    rc_dry = main(["session-b", "--plan", str(one), "--dry-run", "--json"])
+    assert rc_dry == 0
+    dry = json.loads(capsys.readouterr().out)
+    assert dry.get("verdict") == "dry_run"
+    assert set(dry) == set(SESSION_RESULT_JSON_KEYS)
+    assert one.read_text(encoding="utf-8") == (FIXTURES / "one_open_ready.md").read_text(encoding="utf-8")
+
+    empty = tmp_path / "beat71_empty.md"
+    empty_src = (FIXTURES / "empty_queue.md").read_text(encoding="utf-8")
+    empty.write_text(empty_src, encoding="utf-8")
+    rc_idle = main(["session-b", "--plan", str(empty), "--json"])
+    assert rc_idle == 0
+    idle = json.loads(capsys.readouterr().out)
+    assert idle.get("verdict") == "idle"
+    assert set(idle) == set(SESSION_RESULT_JSON_KEYS)
+    assert empty.read_text(encoding="utf-8") == empty_src
+
+    fail = tmp_path / "beat71_fail.md"
+    fail_src = (FIXTURES / "two_queue_sections.md").read_text(encoding="utf-8")
+    fail.write_text(fail_src, encoding="utf-8")
+    rc_fail = main(["session-b", "--plan", str(fail), "--json"])
+    assert rc_fail == 1
+    failed = json.loads(capsys.readouterr().out)
+    assert failed.get("verdict") == "failed"
+    assert set(failed) == set(SESSION_RESULT_JSON_KEYS)
+    assert fail.read_text(encoding="utf-8") == fail_src
+
+
+def test_beat71_to_dict_aliases_align():
+    """Beat 71: to_dict / to_json_dict / session_b_result_dict agree on a pick."""
+    from src.research_implement import (
+        run_session_b,
+        session_b_result_dict,
+        SESSION_RESULT_JSON_KEYS,
+    )
+
+    result = run_session_b(
+        (FIXTURES / "one_open_ready.md").read_text(encoding="utf-8"),
+        decode_only=True,
+    )
+    assert result.verdict == "picked"
+    d1 = result.to_dict()
+    d2 = result.to_json_dict()
+    d3 = session_b_result_dict(result)
+    assert d1 == d2 == d3
+    assert set(d1) == set(SESSION_RESULT_JSON_KEYS)
+

@@ -168,6 +168,8 @@ Beat 69: CLI ``--json`` matches ``session_a_result_dict`` / ``session_b_result_d
 
 Beat 70: ``session-a --json`` light/failed keys match ``SESSION_A_RESULT_JSON_KEYS``; ``run_session_a_path`` / ``run_session_b_path`` are public. Proof: pytest ``-k beat70``.
 
+Beat 71: ``session-b --json`` dry_run/idle/failed keys match ``SESSION_RESULT_JSON_KEYS``; ``to_dict`` / ``to_json_dict`` / ``session_b_result_dict`` stay aligned. Proof: pytest ``-k beat71``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

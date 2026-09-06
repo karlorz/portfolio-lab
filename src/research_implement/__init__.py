@@ -132,6 +132,8 @@ Beat 68: first_b_pick / incomplete_candidate_reasons contracts; idle-decode deco
 Beat 69: session_*_result_dict helpers align with CLI --json. Proof: pytest ``-k beat69``.
 
 Beat 70: path runners exported; light/failed Session A JSON keys locked. Proof: pytest ``-k beat70``.
+
+Beat 71: Session B dry_run/idle/failed JSON keys; to_dict aliases. Proof: pytest ``-k beat71``.
 """
 
 from __future__ import annotations
