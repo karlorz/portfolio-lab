@@ -130,6 +130,8 @@ Beat 50: ``broken_ready_flag`` → idle CLI JSON (never pick garbage ready); pub
 
 Beat 51: ``ready-for-implement`` accepts case-insensitive aliases (``yes``/``y``/``true``/``1``) for B-pick CLI; rejects non-alias garbage. Proof: pytest ``-k beat51``.
 
+Beat 52: ``two_queue_sections`` CLI (session-a / session-b / idle-decode) → non-zero exit, ``verdict=failed``, plan untouched (ambiguous Queue fail-closed). Proof: pytest ``-k beat52``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

@@ -4709,3 +4709,48 @@ def test_beat51_ready_alias_cli_pick(tmp_path: Path, capsys):
         assert payload.get("verdict") == "picked", (alias, cmd, payload)
         assert plan.read_text(encoding="utf-8") == plan_text
 
+
+def test_beat52_two_queue_cli_fail_closed(tmp_path: Path, capsys):
+    """Beat 52: two_queue_sections → session-a/b/idle-decode CLI failed; plan intact."""
+    import json
+    from src.research_implement.__main__ import main
+
+    src = (FIXTURES / "two_queue_sections.md").read_text(encoding="utf-8")
+    for cmd, extra in (
+        ("session-a", ["--stub"]),
+        ("session-b", []),
+        ("idle-decode", []),
+    ):
+        plan = tmp_path / f"beat52_{cmd}.md"
+        plan.write_text(src, encoding="utf-8")
+        rc = main([cmd, "--plan", str(plan), "--json", *extra])
+        assert rc == 1, cmd
+        payload = json.loads(capsys.readouterr().out)
+        assert payload.get("ok") is False, cmd
+        assert payload.get("verdict") == "failed", cmd
+        if cmd == "session-a":
+            assert payload.get("wrote_item") is False
+        else:
+            assert payload.get("shipped") is False
+            assert payload.get("scheduler_delete_called") is False
+            assert payload.get("keep_schedule") is True
+        assert plan.read_text(encoding="utf-8") == src
+
+
+def test_beat52_two_queue_cli_markers_intact(tmp_path: Path, capsys):
+    """Beat 52: after failed CLI, Watch/Heartbeat markers still present on disk."""
+    import json
+    from src.research_implement.__main__ import main
+
+    src = (FIXTURES / "two_queue_sections.md").read_text(encoding="utf-8")
+    plan = tmp_path / "beat52_markers.md"
+    plan.write_text(src, encoding="utf-8")
+    rc = main(["session-b", "--plan", str(plan), "--json"])
+    assert rc == 1
+    _ = json.loads(capsys.readouterr().out)
+    on_disk = plan.read_text(encoding="utf-8")
+    assert on_disk == src
+    assert "BEAT21_WATCH_MARKER" in on_disk
+    assert "BEAT21_HEARTBEAT_MARKER" in on_disk or "Heartbeat" in on_disk
+    assert on_disk.count("## Queue") == 2
+
