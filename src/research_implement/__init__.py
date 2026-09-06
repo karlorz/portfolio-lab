@@ -172,6 +172,7 @@ Beat 96: decode_fields + format_decode_report line contract. Proof: pytest ``-k 
 Beat 97: next_queue_id progression; require_unique fail-closed. Proof: pytest ``-k beat97``.
 Beat 98: is_b_pickable fixture matrix; complete/open/ready exports. Proof: pytest ``-k beat98``.
 Beat 99: count_open fixture matrix + render_queue_count align. Proof: pytest ``-k beat99``.
+Beat 100: milestone — CLI help + public API export smoke through beat100. Proof: pytest ``-k beat100``.
 """
 
 from __future__ import annotations

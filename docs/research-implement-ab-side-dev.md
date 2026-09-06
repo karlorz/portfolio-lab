@@ -125,3 +125,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - Beat 97: next_queue_id progression (empty→Q1 … lookalike→Q4); require_unique fail-closed on dual Queue.
 - Beat 98: is_b_pickable fixture matrix; is_complete_six_field / is_open_status / is_ready_yes remain public.
 - Beat 99: count_open fixture matrix aligns with render_queue_count; QUEUE_CAPACITY remains public.
+- Milestone beat100: CLI subcommands + public runners/helpers/guards/decode/serialize remain stable; Makefile suite note includes beat100.

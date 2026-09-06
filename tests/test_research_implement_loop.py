@@ -6421,3 +6421,65 @@ def test_beat99_count_render_capacity_still_exported():
         assert name in getattr(ri, "__all__", ()), name
     assert ri.QUEUE_CAPACITY == 10
 
+def test_beat100_top_level_help_still_lists_subcommands(capsys):
+    """Beat 100: top-level --help lists session-a / session-b / idle-decode."""
+    import pytest
+    from src.research_implement.__main__ import main
+
+    with pytest.raises(SystemExit) as ei:
+        main(["--help"])
+    assert ei.value.code == 0
+    out = capsys.readouterr().out
+    for name in ("session-a", "session-b", "idle-decode"):
+        assert name in out, name
+
+
+def test_beat100_public_api_milestone_exports():
+    """Beat 100: core runners/helpers/guards/decode/serialize remain public through beat100."""
+    import src.research_implement as ri
+
+    for name in (
+        "run_session_a",
+        "run_session_b",
+        "run_session_a_path",
+        "run_session_b_path",
+        "parse_queue_items",
+        "first_b_pick",
+        "is_b_pickable",
+        "is_ready_yes",
+        "is_complete_six_field",
+        "is_open_status",
+        "count_open",
+        "count_queue_headings",
+        "next_queue_id",
+        "mark_item_shipped",
+        "append_queue_item",
+        "format_queue_item",
+        "write_queue_section",
+        "serialize_queue_item",
+        "serialize_queue_items",
+        "render_queue_count",
+        "QUEUE_CAPACITY",
+        "REQUIRED_FIELDS",
+        "AmbiguousQueueError",
+        "SchedulerDeleteForbidden",
+        "require_unique_queue_section",
+        "incomplete_candidate_reasons",
+        "decode_fields",
+        "format_decode_report",
+        "stub_brainstorm",
+        "default_search_plan",
+        "session_a_result_dict",
+        "session_b_result_dict",
+        "SessionAResult",
+        "SessionResult",
+        "SessionBResult",
+        "QueueItem",
+        "SESSION_A_RESULT_KEYS",
+        "SESSION_B_RESULT_KEYS",
+        "SESSION_A_RESULT_JSON_KEYS",
+        "SESSION_RESULT_JSON_KEYS",
+    ):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+
