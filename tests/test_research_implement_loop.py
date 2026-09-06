@@ -6134,3 +6134,49 @@ def test_beat89_session_json_keys_still_exported():
         "shipped",
     )
 
+def test_beat90_top_level_help_still_lists_subcommands(capsys):
+    """Beat 90: top-level --help lists session-a / session-b / idle-decode."""
+    import pytest
+    from src.research_implement.__main__ import main
+
+    with pytest.raises(SystemExit) as ei:
+        main(["--help"])
+    assert ei.value.code == 0
+    out = capsys.readouterr().out
+    for name in ("session-a", "session-b", "idle-decode"):
+        assert name in out, name
+
+
+def test_beat90_public_api_milestone_exports():
+    """Beat 90: core runners/helpers/guards/result types remain public through beat90."""
+    import src.research_implement as ri
+
+    for name in (
+        "run_session_a",
+        "run_session_b",
+        "run_session_a_path",
+        "run_session_b_path",
+        "parse_queue_items",
+        "first_b_pick",
+        "is_b_pickable",
+        "is_ready_yes",
+        "count_open",
+        "mark_item_shipped",
+        "render_queue_count",
+        "QUEUE_CAPACITY",
+        "REQUIRED_FIELDS",
+        "AmbiguousQueueError",
+        "SchedulerDeleteForbidden",
+        "incomplete_candidate_reasons",
+        "SessionAResult",
+        "SessionResult",
+        "SessionBResult",
+        "QueueItem",
+        "SESSION_A_RESULT_KEYS",
+        "SESSION_B_RESULT_KEYS",
+        "SESSION_A_RESULT_JSON_KEYS",
+        "SESSION_RESULT_JSON_KEYS",
+    ):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+

@@ -162,6 +162,7 @@ decode report starts with ``decode pick``. Proof: pytest ``-k beat86``.
 Beat 87: two_queue AmbiguousQueueError + heading count; decode helpers export. Proof: pytest ``-k beat87``.
 Beat 88: Watch/Heartbeat fixture idle/pick; SESSION_A/B_RESULT_KEYS export. Proof: pytest ``-k beat88``.
 Beat 89: incomplete_candidate_reasons contract; SESSION_*_JSON_KEYS export. Proof: pytest ``-k beat89``.
+Beat 90: milestone — CLI help + public API export smoke through beat90. Proof: pytest ``-k beat90``.
 """
 
 from __future__ import annotations
