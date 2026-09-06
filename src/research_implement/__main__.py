@@ -104,6 +104,8 @@ Beat 37: empty / whitespace ``--candidate-json`` → clear non-zero exit (no Pat
 
 Beat 38: relative ``--candidate-json`` resolves when the file exists in cwd; top-level JSON boolean ``true``/``false`` fails closed (wrong type). Proof: pytest ``-k beat38``.
 
+Beat 39: ``--candidate-json`` empty object ``{}`` fail-closes via Session A incomplete candidate (rc=1, plan unchanged); ``session-a --help`` mentions ``--stub`` / ``--no-stub`` / ``--candidate-json``. Proof: pytest ``-k beat39``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

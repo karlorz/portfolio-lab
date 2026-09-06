@@ -4268,3 +4268,45 @@ def test_beat38_candidate_json_boolean_fails(tmp_path: Path):
         assert "bool" in msg or "object" in msg or "list" in msg
         assert plan.read_text(encoding="utf-8") == before
 
+
+def test_beat39_empty_object_candidate_json_fails(tmp_path: Path, capsys):
+    """Beat 39: --candidate-json {} → Session A failed (incomplete); plan unchanged."""
+    import json
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "plan.md"
+    plan.write_text((FIXTURES / "empty_queue.md").read_text(encoding="utf-8"), encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    cand = tmp_path / "empty_obj.json"
+    cand.write_text("{}\n", encoding="utf-8")
+    rc = main(
+        [
+            "session-a",
+            "--plan",
+            str(plan),
+            "--no-stub",
+            "--candidate-json",
+            str(cand),
+            "--json",
+        ]
+    )
+    assert rc == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("ok") is False
+    assert payload.get("wrote_item") is False
+    assert payload.get("verdict") == "failed"
+    assert plan.read_text(encoding="utf-8") == before
+
+
+def test_beat39_session_a_help_mentions_producer_flags(capsys):
+    """Beat 39: session-a --help mentions --stub / --no-stub / --candidate-json."""
+    from src.research_implement.__main__ import main
+
+    with pytest.raises(SystemExit) as ei:
+        main(["session-a", "--help"])
+    assert ei.value.code == 0
+    out = capsys.readouterr().out.lower()
+    assert "--stub" in out
+    assert "--no-stub" in out
+    assert "--candidate-json" in out
+
