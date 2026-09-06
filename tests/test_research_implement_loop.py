@@ -5131,3 +5131,35 @@ def test_beat61_append_queue_item_still_exported():
         assert hasattr(ri, name), name
         assert name in getattr(ri, "__all__", ()), name
 
+
+def test_beat62_not_ready_dry_run_idle(tmp_path: Path, capsys):
+    """Beat 62: open_complete_not_ready / broken_ready_flag --dry-run → idle."""
+    import json
+    from src.research_implement.__main__ import main
+
+    for name in ("open_complete_not_ready.md", "broken_ready_flag.md"):
+        src = (FIXTURES / name).read_text(encoding="utf-8")
+        plan = tmp_path / f"beat62_{name}"
+        plan.write_text(src, encoding="utf-8")
+        rc = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+        assert rc == 0, name
+        payload = json.loads(capsys.readouterr().out)
+        assert payload.get("verdict") == "idle", name
+        assert payload.get("queue") == "queue 0/10", name
+        assert payload.get("keep_schedule") is True, name
+        assert payload.get("scheduler_delete_called") is False, name
+        assert payload.get("implement_result") is None, name
+        assert plan.read_text(encoding="utf-8") == src, name
+
+
+def test_beat62_next_queue_id_still_exported():
+    """Beat 62: next_queue_id remains public and advances past existing Q ids."""
+    import src.research_implement as ri
+    from src.research_implement.queue import QueueItem, next_queue_id, parse_queue_items
+
+    assert hasattr(ri, "next_queue_id")
+    assert "next_queue_id" in getattr(ri, "__all__", ())
+    items = parse_queue_items((FIXTURES / "two_open_ready.md").read_text(encoding="utf-8"))
+    assert next_queue_id(items).startswith("Q")
+    assert int(next_queue_id(items)[1:]) > max(int(i.item_id[1:]) for i in items)
+

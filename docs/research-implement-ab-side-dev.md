@@ -87,3 +87,4 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - `two_open_ready` + `session-b --dry-run`: picks first OPEN; both remain OPEN on disk.
 - `watch_lookalike`: dry-run/idle-decode pick Queue item only; Watch lookalike never selected.
 - Non-pickable plans (`shipped_only` / `incomplete_open` / `watch_only_lookalike`): `session-b --dry-run` → `idle`.
+- `open_complete_not_ready` / `broken_ready_flag` + `session-b --dry-run` → `idle`.

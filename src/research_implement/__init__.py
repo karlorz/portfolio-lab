@@ -114,6 +114,8 @@ Beat 59: two-OPEN dry-run picks first only; plan stays dual-OPEN. Proof: pytest 
 Beat 60: Watch lookalike dry-run/pick stays Queue-only. Proof: pytest ``-k beat60``.
 
 Beat 61: non-pickable plans stay idle under ``session-b --dry-run``. Proof: pytest ``-k beat61``.
+
+Beat 62: not-ready / broken-ready dry-run idle; next_queue_id export. Proof: pytest ``-k beat62``.
 """
 
 from __future__ import annotations
