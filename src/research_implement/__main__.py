@@ -154,6 +154,8 @@ Beat 62: ``session-b --dry-run`` on ``open_complete_not_ready`` / ``broken_ready
 
 Beat 63: ``mixed_priority`` ``session-b --dry-run`` / idle-decode pick first ready OPEN; plan unchanged; ``count_queue_headings`` stays public. Proof: pytest ``-k beat63``.
 
+Beat 64: ``one_open_ready`` ``session-b --dry-run`` / idle-decode pick Q1; plan unchanged; ``format_queue_item`` / ``require_unique_queue_section`` stay public. Proof: pytest ``-k beat64``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

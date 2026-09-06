@@ -118,6 +118,8 @@ Beat 61: non-pickable plans stay idle under ``session-b --dry-run``. Proof: pyte
 Beat 62: not-ready / broken-ready dry-run idle; next_queue_id export. Proof: pytest ``-k beat62``.
 
 Beat 63: mixed_priority dry-run/pick first ready; count_queue_headings export. Proof: pytest ``-k beat63``.
+
+Beat 64: one_open dry-run/pick; format_queue_item + require_unique_queue exports. Proof: pytest ``-k beat64``.
 """
 
 from __future__ import annotations

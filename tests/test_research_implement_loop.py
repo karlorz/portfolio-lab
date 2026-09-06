@@ -5207,3 +5207,45 @@ def test_beat63_mixed_priority_idle_decode_and_heading_export(tmp_path: Path, ca
     assert (payload.get("item") or {}).get("item_id") == first_id
     assert plan.read_text(encoding="utf-8") == src
 
+
+def test_beat64_one_open_dry_run_and_decode(tmp_path: Path, capsys):
+    """Beat 64: one_open_ready dry-run + idle-decode pick Q1; plan intact."""
+    import json
+    from src.research_implement.__main__ import main
+
+    src = (FIXTURES / "one_open_ready.md").read_text(encoding="utf-8")
+    for cmd, extra, verdict in (
+        ("session-b", ["--dry-run"], "dry_run"),
+        ("idle-decode", [], "picked"),
+    ):
+        plan = tmp_path / f"beat64_{cmd}.md"
+        plan.write_text(src, encoding="utf-8")
+        rc = main([cmd, "--plan", str(plan), "--json", *extra])
+        assert rc == 0, cmd
+        payload = json.loads(capsys.readouterr().out)
+        assert payload.get("verdict") == verdict, cmd
+        assert (payload.get("item") or {}).get("item_id") == "Q1", cmd
+        assert payload.get("open_count") == 1, cmd
+        assert payload.get("keep_schedule") is True, cmd
+        assert payload.get("scheduler_delete_called") is False, cmd
+        assert plan.read_text(encoding="utf-8") == src, cmd
+
+
+def test_beat64_format_and_require_unique_exports():
+    """Beat 64: format_queue_item / require_unique_queue_section stay public."""
+    import src.research_implement as ri
+    from src.research_implement.queue import require_unique_queue_section
+
+    for name in ("format_queue_item", "require_unique_queue_section"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+    src = (FIXTURES / "one_open_ready.md").read_text(encoding="utf-8")
+    require_unique_queue_section(src)  # raises AmbiguousQueueError if duplicate
+    from src.research_implement.queue import AmbiguousQueueError, count_queue_headings
+
+    assert count_queue_headings(src) == 1
+    with __import__("pytest").raises(AmbiguousQueueError):
+        require_unique_queue_section(
+            (FIXTURES / "two_queue_sections.md").read_text(encoding="utf-8")
+        )
+
