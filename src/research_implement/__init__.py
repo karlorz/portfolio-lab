@@ -98,6 +98,8 @@ Beat 51: ready-for-implement aliases (YES/Y/TRUE/1) remain B-pickable via CLI; n
 Beat 52: ambiguous dual-Queue plans fail closed via CLI with plan unchanged. Proof: pytest ``-k beat52``.
 
 Beat 53: empty Queue + Watch/Project/Heartbeat CLI idle/append preserves non-Queue markers. Proof: pytest ``-k beat53``.
+
+Beat 54: OPEN Watch/Heartbeat plan CLI pick/dry-run preserves non-Queue markers. Proof: pytest ``-k beat54``.
 """
 
 from __future__ import annotations

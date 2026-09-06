@@ -134,6 +134,8 @@ Beat 52: ``two_queue_sections`` CLI (session-a / session-b / idle-decode) → no
 
 Beat 53: ``watch_queue_heartbeat_empty`` idle-decode/session-b → idle with Watch/Project/Heartbeat markers intact; session-a stub append keeps those sections. Proof: pytest ``-k beat53``.
 
+Beat 54: ``watch_queue_heartbeat`` (OPEN ready) idle-decode pick + ``session-b --dry-run`` leave Watch/Project/Heartbeat markers intact. Proof: pytest ``-k beat54``.
+
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
 Session B / idle-decode: decode-only pick or idle fire (queue 0/10); never

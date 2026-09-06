@@ -4799,3 +4799,50 @@ def test_beat53_watch_queue_empty_a_append_preserves(tmp_path: Path, capsys):
     assert "## Queue" in body
     assert count_open(parse_queue_items(body)) == 1
 
+
+def test_beat54_watch_queue_open_cli_pick_preserves(tmp_path: Path, capsys):
+    """Beat 54: watch_queue_heartbeat idle-decode pick; markers unchanged."""
+    import json
+    from src.research_implement.__main__ import main
+
+    src = (FIXTURES / "watch_queue_heartbeat.md").read_text(encoding="utf-8")
+    plan = tmp_path / "beat54_pick.md"
+    plan.write_text(src, encoding="utf-8")
+    rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("verdict") == "picked"
+    item = payload.get("item") or {}
+    assert item.get("item_id") == "Q1"
+    assert payload.get("keep_schedule") is True
+    assert payload.get("scheduler_delete_called") is False
+    body = plan.read_text(encoding="utf-8")
+    assert body == src
+    assert "BEAT19_WATCH_MARKER" in body
+    assert "BEAT19_PROJECT_MARKER" in body
+    assert "BEAT19_HEARTBEAT_MARKER" in body
+
+
+def test_beat54_watch_queue_open_cli_dry_run_preserves(tmp_path: Path, capsys):
+    """Beat 54: session-b --dry-run on OPEN Watch/Heartbeat plan; no mutation."""
+    import json
+    from src.research_implement.__main__ import main
+
+    src = (FIXTURES / "watch_queue_heartbeat.md").read_text(encoding="utf-8")
+    plan = tmp_path / "beat54_dry.md"
+    plan.write_text(src, encoding="utf-8")
+    rc = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("verdict") == "dry_run"
+    assert payload.get("shipped") is False
+    assert payload.get("wrote_files") is False
+    assert payload.get("scheduler_delete_called") is False
+    impl = payload.get("implement_result") or {}
+    assert impl.get("dry_run") is True
+    body = plan.read_text(encoding="utf-8")
+    assert body == src
+    assert "BEAT19_WATCH_MARKER" in body
+    assert "status: SHIPPED" not in body
+    assert "status: OPEN" in body
+
