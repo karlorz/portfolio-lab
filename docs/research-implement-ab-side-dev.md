@@ -56,3 +56,5 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - `session-b --dry-run --json` keeps `keep_schedule=true` / `scheduler_delete_called=false` and does not mutate the plan.
 - `session-b` decode-only `--json` keeps schedule / never `scheduler_delete` / plan unchanged.
 - Session A OPEN>=1 recount-only `--json` has `wrote_item=false`.
+- `idle-decode --json` on ready OPEN matches `session-b` decode-only JSON shape.
+- Session A `--stub` on empty Queue `--json` → `wrote_item=true` / `verdict=queued`.

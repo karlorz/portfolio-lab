@@ -4126,3 +4126,48 @@ def test_beat35_session_a_recount_json_wrote_item_false(tmp_path: Path, capsys):
     # recount-only: open stays >=1, no new append
     assert plan.read_text(encoding="utf-8") == before
 
+
+def test_beat36_idle_decode_picked_json_matches_session_b(tmp_path: Path, capsys):
+    """Beat 36: idle-decode --json on ready OPEN matches session-b decode-only shape."""
+    import json
+    from src.research_implement.__main__ import main
+
+    src = (FIXTURES / "one_open_ready.md").read_text(encoding="utf-8")
+    plan_idle = tmp_path / "idle.md"
+    plan_b = tmp_path / "b.md"
+    plan_idle.write_text(src, encoding="utf-8")
+    plan_b.write_text(src, encoding="utf-8")
+
+    rc_i = main(["idle-decode", "--plan", str(plan_idle), "--json"])
+    out_i = capsys.readouterr().out
+    rc_b = main(["session-b", "--plan", str(plan_b), "--json"])
+    out_b = capsys.readouterr().out
+    assert rc_i == 0 and rc_b == 0
+    pi = json.loads(out_i)
+    pb = json.loads(out_b)
+    assert pi.get("verdict") == pb.get("verdict") == "picked"
+    assert pi.get("keep_schedule") is True
+    assert pi.get("scheduler_delete_called") is False
+    assert pi.get("shipped") is False
+    assert set(pi) == set(pb)
+    assert plan_idle.read_text(encoding="utf-8") == src
+    assert plan_b.read_text(encoding="utf-8") == src
+
+
+def test_beat36_session_a_stub_queues_wrote_item_true(tmp_path: Path, capsys):
+    """Beat 36: session-a --stub on empty Queue --json → wrote_item=true / queued."""
+    import json
+    from src.research_implement.__main__ import main
+
+    plan = tmp_path / "empty.md"
+    plan.write_text((FIXTURES / "empty_queue.md").read_text(encoding="utf-8"), encoding="utf-8")
+    before = plan.read_text(encoding="utf-8")
+    rc = main(["session-a", "--plan", str(plan), "--stub", "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("ok") is True
+    assert payload.get("wrote_item") is True
+    assert payload.get("verdict") == "queued"
+    assert plan.read_text(encoding="utf-8") != before
+    assert "OPEN" in plan.read_text(encoding="utf-8") or payload.get("open_count", 0) >= 1
+
