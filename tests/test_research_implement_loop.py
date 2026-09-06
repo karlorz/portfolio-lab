@@ -6483,3 +6483,36 @@ def test_beat100_public_api_milestone_exports():
         assert hasattr(ri, name), name
         assert name in getattr(ri, "__all__", ()), name
 
+def test_beat101_format_queue_item_roundtrip_pickable():
+    """Beat 101: format_queue_item → parse under ## Queue stays B-pickable."""
+    block = format_queue_item(
+        item_id="Q7",
+        heading="Beat101",
+        title="Beat101",
+        acceptance="ok",
+        risks="none",
+        file_touch="t.py",
+        breaking_change="false",
+        redeploy_notes="none",
+        status="OPEN",
+        ready_for_implement="yes",
+    )
+    wrapped = "## Queue" + "\n\n" + block + "\n"
+    items = parse_queue_items(wrapped)
+    assert len(items) == 1
+    assert items[0].item_id == "Q7"
+    assert items[0].title == "Beat101"
+    assert is_b_pickable(items[0]) is True
+    assert first_b_pick(items).item_id == "Q7"
+
+
+def test_beat101_dry_run_and_fixture_ship_still_exported():
+    """Beat 101: dry_run_implement / make_fixture_ship_implement remain public."""
+    import src.research_implement as ri
+
+    for name in ("dry_run_implement", "make_fixture_ship_implement", "format_queue_item"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+    assert callable(ri.dry_run_implement)
+    assert callable(ri.make_fixture_ship_implement())
+
