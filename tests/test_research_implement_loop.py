@@ -5163,3 +5163,47 @@ def test_beat62_next_queue_id_still_exported():
     assert next_queue_id(items).startswith("Q")
     assert int(next_queue_id(items)[1:]) > max(int(i.item_id[1:]) for i in items)
 
+
+def test_beat63_mixed_priority_dry_run_picks_first_ready(tmp_path: Path, capsys):
+    """Beat 63: mixed_priority session-b --dry-run picks first ready; plan intact."""
+    import json
+    from src.research_implement.__main__ import main
+    from src.research_implement.queue import is_b_pickable, parse_queue_items
+
+    src = (FIXTURES / "mixed_priority.md").read_text(encoding="utf-8")
+    ready = [i for i in parse_queue_items(src) if is_b_pickable(i)]
+    assert ready
+    first_id = ready[0].item_id
+    plan = tmp_path / "beat63_dry.md"
+    plan.write_text(src, encoding="utf-8")
+    rc = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("verdict") == "dry_run"
+    assert (payload.get("item") or {}).get("item_id") == first_id
+    assert payload.get("scheduler_delete_called") is False
+    assert plan.read_text(encoding="utf-8") == src
+
+
+def test_beat63_mixed_priority_idle_decode_and_heading_export(tmp_path: Path, capsys):
+    """Beat 63: idle-decode picks same first ready; count_queue_headings exported."""
+    import json
+    import src.research_implement as ri
+    from src.research_implement.__main__ import main
+    from src.research_implement.queue import count_queue_headings, is_b_pickable, parse_queue_items
+
+    assert hasattr(ri, "count_queue_headings")
+    assert "count_queue_headings" in getattr(ri, "__all__", ())
+
+    src = (FIXTURES / "mixed_priority.md").read_text(encoding="utf-8")
+    assert count_queue_headings(src) == 1
+    first_id = [i for i in parse_queue_items(src) if is_b_pickable(i)][0].item_id
+    plan = tmp_path / "beat63_decode.md"
+    plan.write_text(src, encoding="utf-8")
+    rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload.get("verdict") == "picked"
+    assert (payload.get("item") or {}).get("item_id") == first_id
+    assert plan.read_text(encoding="utf-8") == src
+
