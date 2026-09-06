@@ -155,6 +155,7 @@ Beat 80: milestone — CLI help + public API export smoke through beat80. Proof:
 Beat 81: watch_lookalike / watch_only first_b_pick + mark_item_shipped export. Proof: pytest ``-k beat81``.
 Beat 82: subcommand help plan/json + render_queue_count/QUEUE_CAPACITY export. Proof: pytest ``-k beat82``.
 Beat 83: non-pickable fixtures first_b_pick=None; serialize_queue_item(s) export. Proof: pytest ``-k beat83``.
+Beat 84: pickable fixtures first_b_pick ids; is_complete_six_field/is_open_status export. Proof: pytest ``-k beat84``.
 """
 
 from __future__ import annotations

@@ -5922,3 +5922,30 @@ def test_beat83_serialize_queue_helpers_still_exported():
         assert hasattr(ri, name), name
         assert name in getattr(ri, "__all__", ()), name
 
+def test_beat84_pickable_fixtures_first_b_pick_ids():
+    """Beat 84: one_open/two_open/watch_lookalike/mixed_priority first_b_pick ids."""
+    expectations = (
+        ("one_open_ready.md", "Q1", 1),
+        ("two_open_ready.md", "Q1", 2),
+        ("watch_lookalike.md", "Q3", 1),
+        ("mixed_priority.md", "Q2", 1),
+    )
+    for name, item_id, open_n in expectations:
+        items = parse_queue_items(_load(name))
+        pick = first_b_pick(items)
+        assert pick is not None, name
+        assert pick.item_id == item_id, name
+        assert count_open(items) == open_n, name
+
+
+def test_beat84_complete_and_open_status_still_exported():
+    """Beat 84: is_complete_six_field / is_open_status remain public."""
+    import src.research_implement as ri
+
+    for name in ("is_complete_six_field", "is_open_status"):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+    item = parse_queue_items(_load("one_open_ready.md"))[0]
+    assert ri.is_complete_six_field(item) is True
+    assert ri.is_open_status(item.status) is True
+

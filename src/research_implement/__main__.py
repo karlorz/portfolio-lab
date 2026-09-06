@@ -190,6 +190,7 @@ Beat 80: milestone — top-level ``--help`` still lists session-a/session-b/idle
 Beat 81: watch_lookalike ``first_b_pick`` is Q3 (not Watch); watch_only idle; ``mark_item_shipped`` stays public. Proof: pytest ``-k beat81``.
 Beat 82: subcommand ``--help`` still lists ``--plan``/``--json``; ``render_queue_count`` + ``QUEUE_CAPACITY`` stay public. Proof: pytest ``-k beat82``.
 Beat 83: incomplete/shipped/not-ready/broken/empty ``first_b_pick`` is None; ``serialize_queue_item(s)`` stay public. Proof: pytest ``-k beat83``.
+Beat 84: pickable fixtures ``first_b_pick`` ids (Q1/Q1/Q3/Q2); ``is_complete_six_field`` + ``is_open_status`` stay public. Proof: pytest ``-k beat84``.
 
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
 ``--candidate-json``; recount-only when OPEN >= 1. Appends at most one OPEN.
