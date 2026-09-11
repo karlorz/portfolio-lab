@@ -80,6 +80,8 @@ except OSError:
 
     # ── Layer 3: Memory limit ──────────────────────────────────────────
     ulimit -v $((GUARD_MEMORY_MB * 1024)) 2>/dev/null || true
+    # Prevent core dumps filling the overlay (/tmp/core.python3.*)
+    ulimit -c 0 2>/dev/null || true
 
     # ── Layer 4: Hard timeout (background watchdog) ─────────────────────
     # Spawn a subshell that SIGTERMs the parent after timeout_secs,

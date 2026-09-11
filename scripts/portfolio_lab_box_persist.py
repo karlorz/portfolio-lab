@@ -113,6 +113,17 @@ _ACTIONS = (
 _SPAWNED: dict[int, subprocess.Popen[str]] = {}
 
 
+
+def _disable_core_dumps() -> None:
+    """Prevent Tasker/static children from writing /tmp/core.python3.* overlays."""
+    try:
+        import resource
+
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    except Exception:
+        pass
+
+
 def die(message: str, exc: BaseException | None = None) -> None:
     print(f"ERROR: {message}", file=sys.stderr)
     err = SystemExit(1)
@@ -943,6 +954,7 @@ def spawn(
             stdout=log_fd,
             stderr=log_fd,
             start_new_session=True,
+            preexec_fn=_disable_core_dumps,
             close_fds=True,
         )
     finally:

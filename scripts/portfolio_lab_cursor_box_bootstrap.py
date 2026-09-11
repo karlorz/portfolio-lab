@@ -635,14 +635,21 @@ PYTHON_ROOT="${{PORTFOLIO_LAB_PYTHON_ROOT:-$PREFIX/{DEFAULT_PYTHON_ROOT_SUBDIR}}
 ALPINE_ROOT="${{PORTFOLIO_LAB_ALPINE_ROOT:-$PREFIX/{DEFAULT_ALPINE_ROOT_SUBDIR}}}"
 BUILD_ROOT="${{PORTFOLIO_LAB_ALPINE_BUILD_ROOT:-$PREFIX/{DEFAULT_ALPINE_BUILD_ROOT_SUBDIR}}}"
 
-LIB_DIRS="$BUILD_ROOT/usr/lib:$BUILD_ROOT/lib:$ALPINE_ROOT/usr/lib:$ALPINE_ROOT/lib"
+LIB_DIRS="$PYTHON_ROOT/lib:$BUILD_ROOT/usr/lib:$BUILD_ROOT/lib:$ALPINE_ROOT/usr/lib:$ALPINE_ROOT/lib"
 if [ -n "${{LD_LIBRARY_PATH:-}}" ]; then
     export LD_LIBRARY_PATH="$LIB_DIRS:$LD_LIBRARY_PATH"
 else
     export LD_LIBRARY_PATH="$LIB_DIRS"
 fi
 
-exec "$PYTHON_ROOT/bin/python3" "$@"
+# cursor-box has no /lib/ld-musl-x86_64.so.1; invoke via toolchain loader.
+ulimit -c 0 2>/dev/null || true
+PY_BIN="$PYTHON_ROOT/bin/python3"
+LOADER="$BUILD_ROOT/lib/ld-musl-x86_64.so.1"
+if [ -x "$LOADER" ] && [ -e "$PY_BIN" ]; then
+    exec "$LOADER" --library-path "$LD_LIBRARY_PATH" "$PY_BIN" "$@"
+fi
+exec "$PY_BIN" "$@"
 """
         wrapper_path.write_text(script, encoding="utf-8")
         wrapper_path.chmod(0o755)
