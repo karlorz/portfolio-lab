@@ -313,6 +313,18 @@ class TaskRunner:
                     "PORTFOLIO_LAB_ENABLE_ML": "0",
                 }
             )
+            # Box-local SkillWiki leaf; do not invent credentials.
+            env.setdefault("WIKI_DIR", str(Path.home() / "wiki"))
+
+            def _disable_core_dumps() -> None:
+                # Prevent /tmp/core.python3.* overlay fills from Tasker children.
+                try:
+                    import resource
+
+                    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+                except Exception:
+                    pass
+
             with log_path.open("ab") as log:
                 process = subprocess.Popen(
                     command,
@@ -321,6 +333,7 @@ class TaskRunner:
                     stdout=log,
                     stderr=subprocess.STDOUT,
                     start_new_session=True,
+                    preexec_fn=_disable_core_dumps,
                 )
                 self._processes[run_id] = process
                 self.store.mark_run_running(run_id, pid=process.pid)
