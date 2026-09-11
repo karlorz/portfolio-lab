@@ -177,3 +177,5 @@ raw/market/
 # Operator-chosen absolute destinations; never commit archive or sidecar.
 *.portfolio-lab-recovery.tar
 *.portfolio-lab-recovery.tar.sha256
+# Restore-side metadata dir (manifest, reports, extracted tools). Keep local-only.
+.portfolio-lab-recovery/

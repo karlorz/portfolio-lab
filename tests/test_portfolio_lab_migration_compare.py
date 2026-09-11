@@ -21,7 +21,10 @@ Tests cover:
    or unused entry is unavailable and blocking; duplicate explanations rejected.
 10. Output contains no raw mismatching values, secret sentinel, input/output path, credentials,
     query token, Authorization/Bearer text, or arbitrary exception text.
-11. Blocked Markdown ends with exact failed check IDs, Dry run blocked, and retained safe-state line.
+11. Blocked Markdown ends with exact failed check IDs, Dry run blocked, and the
+    read-only no-change statement; the pass statement is post-cutover-neutral
+    ("Comparison passed; attended operational gates remain required."). The
+    tool is read-only: it changes no authority or scheduler state.
     CLI exits 2 after reports are written.
 12. Atomic output: injected write/replace failure leaves prior reports unchanged and no sibling temp file.
 13. Output paths same/colliding, symlink output, or missing parent are rejected before writes.
@@ -66,6 +69,7 @@ def _load_shipped_module() -> Any:
 VALID_COMMIT = "a" * 40
 VALID_SHA256 = "b" * 64
 VALID_TIME = "2026-09-03T12:00:00+00:00"
+PASS_TERMINAL_STATEMENT = "Comparison passed; attended operational gates remain required."
 
 BASE_SOURCE_EVIDENCE: dict[str, Any] = {
     "schema_version": "portfolio-lab-migration-evidence/v1",
@@ -330,7 +334,7 @@ class TestMigrationCompareCLI:
         # stdout compact JSON check
         stdout_json = json.loads(res1.stdout)
         assert stdout_json["verdict"] == "pass"
-        assert stdout_json["terminal_statement"] == "Dry run passed; cutover approval required."
+        assert stdout_json["terminal_statement"] == PASS_TERMINAL_STATEMENT
         assert "report1.json" not in res1.stdout
         assert str(src_dir) not in res1.stdout
 
@@ -342,7 +346,7 @@ class TestMigrationCompareCLI:
 
         # Markdown ending check
         md_text1 = out_md1.read_text()
-        assert md_text1.rstrip().endswith("Dry run passed; cutover approval required.")
+        assert md_text1.rstrip().endswith(PASS_TERMINAL_STATEMENT)
         # No local path or raw url leakage
         assert str(src_dir) not in md_text1
         assert str(cand_dir) not in md_text1
@@ -535,7 +539,14 @@ class TestMigrationCompareCLI:
         md = out_md.read_text()
         assert "Dry run blocked" in md
         assert "git.commit" in md
-        assert "Retained safe state: sg01 remains authoritative; cursor-box scheduler remains disabled." in md
+        assert "Read-only comparison: this tool did not change authority or scheduler state." in md
+        assert "sg01 remains authoritative" not in md
+        assert "cursor-box scheduler remains disabled" not in md
+        stdout_rep = json.loads(res.stdout)
+        assert stdout_rep["terminal_statement"] == (
+            "Dry run blocked (git.bundle_source_commit, git.commit, release.source_git_sha). "
+            "Read-only comparison: this tool did not change authority or scheduler state."
+        )
 
     def test_allocation_strictness(self, tmp_path: Path) -> None:
         """Requirement 8: Champion allocation 46/38/16 must match exactly."""
@@ -1936,12 +1947,14 @@ class TestStaleExplanationDimensionAndBlockedSuffix:
             "- `release.manifest_sha256`\n"
             "- `release.source_git_sha`\n"
             "\n"
-            "Retained safe state: sg01 remains authoritative; cursor-box scheduler remains disabled."
+            "Read-only comparison: this tool did not change authority or scheduler state."
         )
         assert md.rstrip().endswith(expected_suffix)
         assert md.rstrip().splitlines()[-1] == (
-            "Retained safe state: sg01 remains authoritative; cursor-box scheduler remains disabled."
+            "Read-only comparison: this tool did not change authority or scheduler state."
         )
+        assert "sg01 remains authoritative" not in md
+        assert "cursor-box scheduler remains disabled" not in md
 
     def test_freshness_expected_reasons_static(self, tmp_path: Path) -> None:
         src_file = tmp_path / "src.json"

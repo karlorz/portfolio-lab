@@ -6,7 +6,9 @@ records received argv/environment (no secrets) and creates/removes fake
 ``PLBP_PROC_ROOT`` entries, and real child PIDs/signals where useful. Start/
 stop/kill deadlines are lowered through the named environment variables
 (PLBP_START_TIMEOUT / PLBP_STOP_TIMEOUT / PLBP_KILL_TIMEOUT); no sleep-heavy
-tests.
+tests. One determinism test inspects the shipped script itself: its shebang
+must invoke the user-owned cursor-box python3 entrypoint directly so that
+direct execution of the installed controller never depends on PATH resolution.
 
 The fake process identity mirrors /proc: ``<proc>/<pid>/{status,cmdline,
 environ,exe,cwd,fd}`` plus ``<proc>/net/tcp`` (and ``tcp6``). The helper's
@@ -16,6 +18,7 @@ own PID is a real child PID in every case.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
@@ -707,6 +710,64 @@ def test_status_garbage_pid_file_cleaned(bp):
     payload, _ = ok_cli(bp, *bp_args(bp, "status"))
     assert payload["state"] == "inactive"
     assert not path.exists()
+
+
+# ── read-only status: --read-only never cleans stale/unsafe records ──────
+
+
+def test_status_read_only_preserves_stale_pid_and_state_records(bp):
+    pid_file = write_pid_file(bp, "candidate", 999999)
+    state_file = bp.root / "run" / "tasker-candidate-state.json"
+    _write(state_file, '{"pid": 999999}\n')
+    payload, _ = ok_cli(bp, "--read-only", *bp_args(bp, "status"))
+    assert payload["state"] == "inactive"
+    assert payload["identity_exact"] is True
+    assert pid_file.exists(), "read-only status must not delete stale PID record"
+    assert state_file.exists(), "read-only status must not delete state record"
+
+
+def test_status_read_only_preserves_garbage_pid_record(bp):
+    path = bp.root / "run" / "tasker-candidate.pid"
+    _write(path, "not-a-pid\n")
+    os.chmod(path, 0o600)
+    payload, _ = ok_cli(bp, "--read-only", *bp_args(bp, "status"))
+    assert payload["state"] == "inactive"
+    assert payload["identity_exact"] is True
+    assert path.exists(), "read-only status must not delete a garbage PID record"
+
+
+def test_status_read_only_preserves_zombie_records_without_signal(bp):
+    proc = spawn_direct(bp, ["-m", "src.tasker.service", "--no-scheduler"])
+    write_pid_file(bp, "candidate", proc.pid)
+    state_file = bp.root / "run" / "tasker-candidate-state.json"
+    _write(state_file, f'{{"pid": {proc.pid}}}\n')
+    rewrite_status(bp, proc.pid)
+    payload, _ = ok_cli(bp, "--read-only", *bp_args(bp, "status"))
+    assert payload["state"] == "inactive"
+    assert payload["identity_exact"] is True
+    assert (bp.root / "run" / "tasker-candidate.pid").exists()
+    assert (bp.root / "run" / "tasker-candidate-state.json").exists()
+    assert all(e.get("event") != "term" for e in helper_lines(bp))
+    os.kill(proc.pid, 0)
+
+
+def test_read_only_rejected_for_non_status_actions(bp):
+    res = fail_cli(bp, "--read-only", *bp_args(bp, "stop"))
+    assert "read-only" in res.stderr.lower()
+    res = fail_cli(bp, "--read-only", *bp_args(bp, "preflight"))
+    assert "read-only" in res.stderr.lower()
+
+
+def test_env_timeout_rejects_non_finite_values(monkeypatch, capsys):
+    sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+    import portfolio_lab_box_persist as bp_mod
+
+    for value in ("nan", "inf", "-inf", "1e309"):
+        monkeypatch.setenv("PLBP_START_TIMEOUT", value)
+        with pytest.raises(SystemExit) as excinfo:
+            bp_mod._env_float("PLBP_START_TIMEOUT", 5.0)
+        assert excinfo.value.code != 0, value
+        assert "PLBP_START_TIMEOUT" in capsys.readouterr().err
 
 
 def test_preflight_leaves_garbage_pid_and_state_unchanged(bp):
@@ -1997,3 +2058,28 @@ def test_activate_rolls_back_production_scheduler_when_marker_write_fails(bp, mo
     # Original write failure preserved in exception chain
     assert isinstance(excinfo.value.__cause__, OSError)
     assert "simulated disk full during marker write" in str(excinfo.value.__cause__)
+
+
+# ── shipped executable determinism (direct execution, PATH without python3) ─
+
+
+def test_shipped_executable_uses_user_owned_python_entrypoint_directly():
+    """Direct execution of the installed controller at CONTROLLER_PATH must stay
+    deterministic even when PATH lacks python3: the shipped script's shebang must
+    invoke the user-owned cursor-box python3 entrypoint (same .local/bin dir as
+    the controller) directly, never /usr/bin/env python3, which resolves
+    python3 through PATH and fails on a bare Alpine host with no system python."""
+    spec = importlib.util.spec_from_file_location("plbp_shipped_cli", BP_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    # Derive the production install path from the shipped module itself and
+    # cross-check it against the test-level constant so the two cannot drift.
+    installed = Path(mod.CONTROLLER_INSTALL_PATH)
+    assert installed == Path(CONTROLLER_PATH)
+    assert os.path.isabs(str(installed))
+
+    first_line = BP_SCRIPT.read_text(encoding="utf-8").splitlines()[0]
+    assert first_line == f"#!{installed.parent / 'python3'}"
+    assert not first_line.startswith("#!/usr/bin/env")

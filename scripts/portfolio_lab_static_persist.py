@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/box/.local/bin/python3
 """Native static SPA lifecycle controller and ensure installer for Portfolio Lab on cursor-box.
 
 Task 2.3 of the sg01 -> cursor-box migration: a focused, stdlib-only
@@ -7,7 +7,8 @@ controller for the static SPA origin lifecycle on ``box``.
 Actions::
 
   preflight   --mode candidate|production --web-root PATH --service-name NAME
-  status      (same)
+  status      (same; accepts --read-only, which never cleans stale PID/state
+              records)
   start       (same)
   stop        (same)
   ensure      (same)
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import shlex
@@ -117,6 +119,8 @@ def _env_float(name: str, default: float) -> float:
         value = float(raw)
     except ValueError:
         die(f"{name} must be a numeric timeout in seconds; got {raw!r}")
+    if not math.isfinite(value):
+        die(f"{name} must be a finite numeric timeout in seconds; got {raw!r}")
     if value < 0:
         die(f"{name} must be nonnegative; got {value!r}")
     return value
@@ -782,8 +786,10 @@ def action_preflight(mode: str, web_r: Path, service_name: str, port: int) -> di
     return payload
 
 
-def action_status(mode: str, web_r: Path, service_name: str, port: int) -> dict[str, Any]:
-    return inspect(mode, web_r, service_name, port)
+def action_status(
+    mode: str, web_r: Path, service_name: str, port: int, *, read_only: bool = False
+) -> dict[str, Any]:
+    return inspect(mode, web_r, service_name, port, cleanup_stale=not read_only)
 
 
 def ensure_run_dir(root: Path) -> Path:
@@ -1031,9 +1037,16 @@ def main() -> None:
     parser.add_argument("--web-root", required=True, help="Absolute path to web root")
     parser.add_argument("--service-name", required=True, help="Service name")
     parser.add_argument("--ensure-script", default=ENSURE_SCRIPT_DEFAULT, help="Path to ensure.sh script")
+    parser.add_argument(
+        "--read-only",
+        action="store_true",
+        help="status: evaluate without cleaning stale PID/state records",
+    )
     args = parser.parse_args()
 
     validate_service_name(args.service_name)
+    if args.read_only and args.action != "status":
+        die("--read-only applies only to the status action")
     web_r = validate_web_root(args.mode, args.web_root)
     port = configured_port()
 
@@ -1045,7 +1058,7 @@ def main() -> None:
     if args.action == "preflight":
         res = action_preflight(args.mode, web_r, args.service_name, port)
     elif args.action == "status":
-        res = action_status(args.mode, web_r, args.service_name, port)
+        res = action_status(args.mode, web_r, args.service_name, port, read_only=args.read_only)
     elif args.action == "start":
         res = action_start(args.mode, web_r, args.service_name, port)
     elif args.action == "stop":

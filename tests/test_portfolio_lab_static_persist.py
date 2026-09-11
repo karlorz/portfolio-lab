@@ -20,6 +20,7 @@ Tests exercise:
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import stat
@@ -741,6 +742,68 @@ def test_stale_pid_cleanup(layout: dict[str, Path]) -> None:
     assert not state_file.exists()
 
 
+def test_status_read_only_preserves_stale_records(layout: dict[str, Path]) -> None:
+    pid_file = layout["root"] / "run" / "static-candidate.pid"
+    state_file = layout["root"] / "run" / "static-candidate-state.json"
+    pid_file.write_text("9999999\n")
+    pid_file.chmod(0o600)
+    state_file.write_text("{}", encoding="utf-8")
+    state_file.chmod(0o600)
+
+    res = run_persist_cli([
+        "status", "--read-only",
+        "--mode", "candidate",
+        "--web-root", str(layout["www_candidate"]),
+        "--service-name", SERVICE,
+    ], layout=layout)
+    assert res.returncode == 0
+    data = json.loads(res.stdout)
+    assert data["state"] == "inactive"
+    assert data["identity_exact"] is True
+    assert pid_file.exists(), "read-only status must not delete stale PID record"
+    assert state_file.exists(), "read-only status must not delete state record"
+
+
+def test_status_read_only_preserves_garbage_pid_record(layout: dict[str, Path]) -> None:
+    pid_file = layout["root"] / "run" / "static-candidate.pid"
+    pid_file.write_text("not-a-pid\n")
+    pid_file.chmod(0o600)
+
+    res = run_persist_cli([
+        "status", "--read-only",
+        "--mode", "candidate",
+        "--web-root", str(layout["www_candidate"]),
+        "--service-name", SERVICE,
+    ], layout=layout)
+    assert res.returncode == 0
+    data = json.loads(res.stdout)
+    assert data["state"] == "inactive"
+    assert pid_file.exists(), "read-only status must not delete a garbage PID record"
+
+
+def test_read_only_rejected_for_non_status_actions(layout: dict[str, Path]) -> None:
+    res = run_persist_cli([
+        "preflight", "--read-only",
+        "--mode", "candidate",
+        "--web-root", str(layout["www_candidate"]),
+        "--service-name", SERVICE,
+    ], layout=layout)
+    assert res.returncode != 0
+    assert res.stdout.strip() == ""
+    assert "read-only" in res.stderr.lower()
+
+
+def test_env_timeout_rejects_non_finite_values(monkeypatch, capsys) -> None:
+    import scripts.portfolio_lab_static_persist as persist_mod
+
+    for value in ("nan", "inf", "-inf", "1e309"):
+        monkeypatch.setenv("PLSP_STOP_TIMEOUT", value)
+        with pytest.raises(SystemExit) as excinfo:
+            persist_mod._env_float("PLSP_STOP_TIMEOUT", 10.0)
+        assert excinfo.value.code != 0, value
+        assert "PLSP_STOP_TIMEOUT" in capsys.readouterr().err
+
+
 def test_unsafe_pid_file_permissions_fail_closed(layout: dict[str, Path]) -> None:
     pid_file = layout["root"] / "run" / "static-candidate.pid"
     pid_file.write_text("12345\n")
@@ -1290,3 +1353,28 @@ def test_empty_path_execution(layout: dict[str, Path]) -> None:
     assert res.returncode == 0, res.stderr
     data = json.loads(res.stdout)
     assert data["state"] == "inactive"
+
+
+# ── 13. Shipped executable determinism (direct execution, PATH without python3) ─
+
+
+def test_shipped_executable_uses_user_owned_python_entrypoint_directly() -> None:
+    """Direct execution of the installed controller at CONTROLLER_INSTALL_PATH must
+    stay deterministic even when PATH lacks python3: the shipped script's shebang
+    must invoke the user-owned cursor-box python3 entrypoint (same .local/bin dir
+    as the controller) directly, never /usr/bin/env python3, which resolves
+    python3 through PATH and fails on a bare Alpine host with no system python."""
+    spec = importlib.util.spec_from_file_location("plsp_shipped_cli", PERSIST_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    # Derive the production install path from the shipped module itself so the
+    # shebang cannot drift from the path the controller self-reports.
+    installed = Path(mod.CONTROLLER_INSTALL_PATH)
+    assert os.path.isabs(str(installed))
+
+    first_line = PERSIST_SCRIPT.read_text(encoding="utf-8").splitlines()[0]
+    assert first_line == f"#!{installed.parent / 'python3'}"
+    assert first_line == "#!/home/box/.local/bin/python3"
+    assert not first_line.startswith("#!/usr/bin/env")

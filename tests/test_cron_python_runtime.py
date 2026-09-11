@@ -195,6 +195,23 @@ def test_hermes_cron_wrappers_use_project_runtime_launcher(script_name: str) -> 
     assert "python3 -m src." not in text
 
 
+def test_python_runtime_disables_core_dumps_and_prefers_musl_loader() -> None:
+    """cursor-box overlay leftover: job-level dump disable + musl venv loader."""
+    text = RUNTIME_SCRIPT.read_text()
+    assert "ulimit -c 0" in text
+    assert "MUSL_LOADER=" in text
+    assert 'exec "$MUSL_LOADER" --library-path "$LD_LIBRARY_PATH" "$VENV_PY"' in text
+
+
+def test_cron_guard_disables_core_dumps() -> None:
+    """Already-running jobs ignore ~/.profile ulimit; cron_guard must set it."""
+    for path in (
+        PROJECT_ROOT / "scripts" / "cron_guard.sh",
+        PROJECT_ROOT / "scripts" / "cron" / "cron_guard.sh",
+    ):
+        assert "ulimit -c 0" in path.read_text(), path
+
+
 def test_python_runtime_launcher_prefers_uv_run_python(tmp_path: Path) -> None:
     """The shared launcher should route Python through uv when uv is available."""
     bin_dir = tmp_path / "bin"

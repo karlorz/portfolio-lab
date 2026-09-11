@@ -1,17 +1,32 @@
 # Portfolio Lab Cursor-Box Migration Runbook
 
-> **Status:** Operator guidance for the cursor-box dry run and migration
-> procedure. This document is **not evidence** that any migration, recovery
+> **Status:** Operator guidance covering the historical cursor-box dry run and
+> cutover procedure (pre-cutover reference) plus the current post-cutover
+> state. This document is **not evidence** that any migration, recovery
 > archive, or cutover has occurred. Evidence of record lives in redacted
 > manifests, recovery reports, and verified archives only.
 
-## Authority and dry-run boundary
+## Current state (post-cutover)
 
-- sg01 remains the **authoritative** production host for Portfolio Lab.
-- cursor-box is a **candidate-only** shadow host. Its scheduler must never run.
-- During the dry run, cursor-box serves a shadow site behind Cloudflare Access.
-- This runbook never authorizes DNS, Caddy/Cloudflare row changes, or traffic
-  cutover; those require separate approval (see "Pause before cutover").
+- cursor-box is the current **authoritative** production host for Portfolio Lab.
+- sg01 Tasker (scheduler) and the sg01 archive timer remain **stopped/disabled**.
+- Cloudflare Access on the public origin remains **in place**.
+- The old domain remains **non-authoritative**; no DNS, Caddy, or Cloudflare
+  row change has been applied to it.
+- Recycle persistence (production lifecycle surviving a box restart) and the
+  seven-day acceptance observation remain **unproven/pending**.
+- Attended gates remain required before: Access removal, any old-domain
+  change, a recycle/restart exercise, a restore, or any authority change.
+  This runbook alone authorizes none of them.
+
+## Historical dry-run boundary
+
+Before cutover, sg01 was the **authoritative** production host and cursor-box
+was a **candidate-only** shadow host whose scheduler never ran, serving a
+shadow site behind Cloudflare Access. The dry run never authorized DNS,
+Caddy/Cloudflare row changes, or traffic cutover; those required separate
+approval (see "Cutover and current attended gates" below). The rest of this runbook
+documents that attended dry-run and cutover procedure for reference.
 
 ## Host constraints
 
@@ -39,11 +54,13 @@
 
 ## Tasker candidate controls
 
-- Tasker on cursor-box must be disabled by **both** scheduler controls:
-  environment (`TASKER_DISABLE_SCHEDULER=1`) and argument (`--no-scheduler`).
-- One-scheduler invariant: exactly zero Tasker scheduler instances may exist on
-  the candidate during the dry run; any observed scheduled start is blocking.
-- sg01 keeps exactly one authoritative scheduler instance at all times.
+Historical dry-run requirement: Tasker on cursor-box had to be disabled by
+**both** scheduler controls — environment (`TASKER_DISABLE_SCHEDULER=1`) and
+argument (`--no-scheduler`) — and exactly zero candidate scheduler instances
+were allowed; any observed scheduled start was blocking.
+
+Post-cutover: the one-scheduler invariant applies to the current authority
+(cursor-box); sg01 Tasker and the sg01 archive timer remain stopped/disabled.
 
 ## Static and API origins
 
@@ -51,8 +68,8 @@
   loopback port **8000**. Both must bind loopback only.
 - Cloudflare must route `/api/*` (exact row, placed **before** the static
   catch-all) to port 8000 and the catch-all to port 8001.
-- Cloudflare Access is required during the dry run; removing Access protection
-  requires separate cutover approval.
+- Cloudflare Access was required during the dry run and remains in place
+  post-cutover; removing Access protection requires separate attended approval.
 
 ## Recovery archives
 
@@ -60,7 +77,7 @@
   `--materialize-generations-current` so the `data/generations/current`
   relative symlink is preserved as ordinary bytes with metadata/member parity;
   restore reconstructs the exact relative link.
-- Seed and candidate verification gates: after restore, verify archive
+- Historical dry-run guidance: after restore, verify archive
   sidecar, Git bundle commit, SQLite integrity, static manifest
   `_release.json.source_git_sha`, scheduler disable controls, and loopback
   bindings before treating the candidate as dry-run ready.
@@ -85,9 +102,11 @@ python3 scripts/portfolio_lab_migration_compare.py \
 - Differences are classified as: `expected`, `explained`,
   `blocking`, or `unavailable`.
 - Terminal statements: on pass,
-  `Dry run passed; cutover approval required.`; on blocked,
+  `Comparison passed; attended operational gates remain required.`; on blocked,
   `Dry run blocked` followed by the failed check IDs and
-  `Retained safe state: sg01 remains authoritative; cursor-box scheduler remains disabled.`
+  `Read-only comparison: this tool did not change authority or scheduler state.`
+  The comparison tool is read-only: it never changes authority or scheduler
+  state.
 
 ## Browser verification
 
@@ -97,23 +116,34 @@ python3 scripts/portfolio_lab_migration_compare.py \
   - Component and network states: loading states, empty/unavailable dataset states, and graceful error presentation.
   - Console and layout hygiene: zero page errors, zero browser console exceptions, and no horizontal or vertical document overflow.
   - Driven interaction: at least one interactive form input or driven navigation causing an expected visible DOM/state change.
-- Recheck every existing hostname and service, including authoritative `lab.karldigi.dev` and sg01 origins, before and after each candidate verification window.
+- During the dry run, recheck every existing hostname and service, including
+  then-authoritative `lab.karldigi.dev` and sg01 origins, before and after each
+  candidate verification window.
 
-## Pause before cutover
+## Cutover and current attended gates
 
-- Cutover is separately approved and requires all of:
-  cursor-box persistence proof across restart, former-authority (sg01)
-  scheduler stopped, a fresh recovery archive, sole scheduler activation on
-  cursor-box, and explicit Access-removal approval.
+- The cutover was separately approved and required all of: cursor-box
+  persistence proof across restart, former-authority (sg01) scheduler
+  stopped, a fresh recovery archive, sole scheduler activation on cursor-box,
+  and explicit Access-removal approval.
+- Post-cutover, attended gates remain required for: Access removal, any
+  old-domain change, a recycle/restart exercise, a restore, and any authority
+  change. Each requires separate operator approval and must not be performed
+  from this runbook alone.
 
 ## Rollback
 
 - Rollback always stops cursor-box first, then restores the whole prior state
   from the archived recovery point. No bidirectional state merge is ever
   performed.
+- Restore remains an attended gate post-cutover: it requires separate
+  operator approval and a verified recovery archive.
 
 ## Seven-day observation
 
+- **Status: pending/unproven until a full seven-day acceptance window
+  completes.** Recycle persistence (production box-persist lifecycle surviving
+  a host restart) is likewise unproven until exercised and observed.
 - Observe for seven days across all operational dimensions:
   - Scheduler identity and one-scheduler invariant proof across runs.
   - Expected job executions, completed runs, and expected failures or dead-letter counts.
@@ -123,10 +153,12 @@ python3 scripts/portfolio_lab_migration_compare.py \
   - Disk headroom (including host APFS/ext4 volumes) and memory utilization over time.
   - API endpoint and public origin availability metrics.
   - Verified, reproducible recovery points and sidecars.
-- Final old-domain choice (one of):
+- Old-domain status: `lab.karldigi.dev` remains **non-authoritative** awaiting
+  a final attended choice (one of):
   - `lab.karldigi.dev` redirect,
   - retirement response, or
   - static archived notice.
+  No old-domain change may be applied without attended approval.
 
 ## Exclusion note
 

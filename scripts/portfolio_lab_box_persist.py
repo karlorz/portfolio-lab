@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/box/.local/bin/python3
 """Native box-persist lifecycle controller for Portfolio Lab on cursor-box.
 
 Task 2.2 of the sg01 -> cursor-box migration: a focused, stdlib-only
@@ -8,7 +8,8 @@ Actions (argparse-validated)::
 
   preflight   --mode candidate|production --app-dir PATH --web-root PATH \\
               --service-name NAME
-  status      (same identity args)
+  status      (same identity args; accepts --read-only, which never cleans
+              stale PID/state records)
   start-candidate (same; requires --mode candidate)
   stop        (same)
   ensure      (same)
@@ -68,6 +69,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import shlex
@@ -144,6 +146,8 @@ def _env_float(name: str, default: float) -> float:
         value = float(raw)
     except ValueError:
         die(f"{name} must be a numeric timeout in seconds; got {raw!r}")
+    if not math.isfinite(value):
+        die(f"{name} must be a finite numeric timeout in seconds; got {raw!r}")
     if value < 0:
         die(f"{name} must be nonnegative; got {value!r}")
     return value
@@ -1123,8 +1127,12 @@ def terminate_exact(
 # ── actions ────────────────────────────────────────────────────────────────
 
 
-def action_status(mode: str, app_r: Path, web_r: Path, service_name: str) -> dict[str, Any]:
-    payload, _schedulers, _conflicts = inspect(mode, app_r, web_r, service_name)
+def action_status(
+    mode: str, app_r: Path, web_r: Path, service_name: str, *, read_only: bool = False
+) -> dict[str, Any]:
+    payload, _schedulers, _conflicts = inspect(
+        mode, app_r, web_r, service_name, cleanup_stale=not read_only
+    )
     return payload
 
 
@@ -1438,6 +1446,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--service-name", required=True)
     parser.add_argument("--former-authority-confirmed-stopped", default=None)
     parser.add_argument("--ensure-script", default=ENSURE_SCRIPT_DEFAULT)
+    parser.add_argument(
+        "--read-only",
+        action="store_true",
+        help="status: evaluate without cleaning stale PID/state records",
+    )
     return parser
 
 
@@ -1446,6 +1459,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     validate_service_name(args.service_name)
     app_r, web_r = validate_targets(args.app_dir, args.web_root)
+    if args.read_only and args.action != "status":
+        die("--read-only applies only to the status action")
     if args.action == "install-ensure-hook":
         emit(
             install_ensure_hook(
@@ -1457,7 +1472,7 @@ def main(argv: list[str] | None = None) -> int:
         emit(action_preflight(args.mode, app_r, web_r, args.service_name))
         return 0
     if args.action == "status":
-        emit(action_status(args.mode, app_r, web_r, args.service_name))
+        emit(action_status(args.mode, app_r, web_r, args.service_name, read_only=args.read_only))
         return 0
     if args.action == "start-candidate":
         emit(action_start_candidate(args.mode, app_r, web_r, args.service_name))
