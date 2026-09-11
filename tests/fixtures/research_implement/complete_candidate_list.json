@@ -1,0 +1,16 @@
+[
+  {
+    "heading": "Complete list candidate",
+    "title": "Complete list candidate",
+    "acceptance": "pytest EXIT=0",
+    "risks": "do not touch kill_switch",
+    "file_touch": "write tests/test_complete_list_candidate.py",
+    "breaking_change": false,
+    "redeploy_notes": "none",
+    "ready_for_implement": "yes"
+  },
+  {
+    "title": "Second ignored",
+    "acceptance": "ignored"
+  }
+]

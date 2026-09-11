@@ -1,0 +1,18 @@
+[
+  "skip",
+  1,
+  null,
+  {
+    "heading": "Skip-nondict first dict",
+    "title": "Skip-nondict first dict",
+    "acceptance": "pytest EXIT=0",
+    "risks": "do not touch kill_switch or order_router",
+    "file_touch": "write tests/test_complete_candidate.py",
+    "breaking_change": false,
+    "redeploy_notes": "none",
+    "ready_for_implement": "yes"
+  },
+  {
+    "title": "ignored second"
+  }
+]

@@ -54,6 +54,7 @@ help:
 	@echo "  make test-ml-extract  Run extracted ML-kernel tests (safe: ML disabled)"
 	@echo "  make test-ml      Run full test suite including ML (requires torch/sklearn)"
 	@echo "  make test-isolation  Run top-20 failing files individually (bypasses pollution)"
+	@echo "  make test-research-implement  Side-dev A/B loop + contract fixture tests (no Tasker)"
 	@echo "  make data         Fetch Yahoo Finance market data"
 	@echo "  make dashboard    Regenerate dashboard JSON files"
 	@echo "  make health       Generate public/data/health.json system health monitor"
@@ -953,3 +954,71 @@ fetch-trends:
 s3-archive:
 	@echo "=== SeaweedFS S3 Daily Archive: $$(date) ==="; \
 	timeout 2400 $(PROJECT_DIR)/scripts/cron/portfolio-lab-s3-archive.sh
+
+# ── Research-implement A/B side-dev (tmp dry-run; no Tasker / no LLM) ──
+# Dry-run is non-mutating: never SHIPPED / never scheduler_delete; second B
+# picks the same OPEN again. Fixture proof: pytest -k e2e_a_stub_then_b_dry_run
+# Optional SHIPPED path is test-double only (fixture_ship_implement); never CLI
+# default / never live prod. Proof: pytest -k beat5_dry_run_never_ships
+
+.PHONY: research-implement-e2e-dry-run
+research-implement-e2e-dry-run:
+	@echo "E2E dry-run (copy empty fixture to a temp plan, then):"
+	@echo "  python -m src.research_implement session-a --plan /tmp/ri-plan.md --stub"
+	@echo "  python -m src.research_implement session-b --plan /tmp/ri-plan.md --dry-run --json"
+	@echo "  python -m src.research_implement session-b --plan /tmp/ri-plan.md --dry-run --json"
+	@echo "(second B still dry_run on same OPEN — dry-run never ships)"
+	@echo "Or: PYTHONPATH=. pytest tests/test_research_implement_loop.py -q -k e2e"
+	@echo "Optional ship (test double / tmp_path only; not wired to CLI):"
+	@echo "  PYTHONPATH=. pytest tests/test_research_implement_loop.py -q -k beat5"
+	@echo "(ship is callback-only — no CLI stub-ship; prefer pytest tmp_path doubles)"
+
+# Beat 11 full pipeline (side-dev / tmp_path only; no Tasker / no LLM / no prod):
+#   A stub append → B dry_run (JSON) → B fixture_ship → A light (OPEN>=1) and/or B idle
+#   (light is mid-pipeline after dry_run while OPEN still present)
+# Proof: pytest -k beat11_full_pipeline (fixture_ship is test-double only).
+# Beat 12: CLI --help smoke (session-a/b/idle-decode) + brainstorm spy OPEN>=1 recount-only.
+# Proof: pytest -k beat12
+# Beat 13: Queue markdown round-trip + Session A stub append id stability.
+# Proof: pytest -k beat13
+# Beat 14: Session A fail-closed incomplete brainstorm/search_plan candidate.
+# Proof: pytest -k beat14
+# Beat 15: CLI session-a --candidate-json dict/list when OPEN=0; incomplete fail-closes;
+# OPEN>=1 recount-only ignores candidate-json. Proof: pytest -k beat15
+# Beat 16: --candidate-json error paths (missing/invalid/wrong-type) clear fail + no plan
+# mutation; sequential double-OPEN ship → idle never scheduler_delete. Proof: pytest -k beat16
+# Beat 17: decode_only default / CLI session-b never calls implement; dry_run path
+# invokes dry_run_implement; fixture_ship only when opted in. Proof: pytest -k beat17
+# Beat 18: public API __all__/getattr smoke + Makefile lists research-implement targets.
+# Proof: pytest -k beat18
+# Beat 19: Queue rewrite preserves Watch/Project Work/Heartbeat. Proof: pytest -k beat19
+# Beat 20: Missing ## Queue → create (Watch/Heartbeat/front matter preserved; empty→Queue).
+# Proof: pytest -k beat20
+.PHONY: research-implement-e2e-pipeline
+research-implement-e2e-pipeline:
+	@echo "Beat 11 full pipeline (tmp_path via pytest; side-dev only):"
+	@echo "  A stub → B dry_run JSON → B fixture_ship → A light (OPEN>=1) and/or B idle"
+	@echo "  dry_run never ships; fixture_ship ships on tmp_path only; never scheduler_delete"
+	@echo "Run: PORTFOLIO_LAB_ENABLE_ML=0 <RI_PYTHON> -m pytest tests/test_research_implement_loop.py -q -k beat11_full_pipeline"
+	@echo "Or:  make test-research-implement   # full A/B suite incl. beat10…beat173"
+
+# Side-dev only (no Tasker / no LLM / no 8000/8001): A/B loop + contract
+# fixture tests + optional host contract (skip-if-missing).
+# Documented runtime: scripts/python_runtime.sh (PYTHON_RUNTIME).
+# On cursor-box the side .venv can be broken; override RI_PYTHON with the
+# musl-wrapped app interpreter (same loader path PYTHON_RUNTIME uses):
+#   MUSL=/home/box/.local/share/portfolio-lab/toolchain/alpine-build-root/lib/ld-musl-x86_64.so.1
+#   APP_PY=/home/box/.local/share/portfolio-lab/app/.venv/bin/python
+#   LIBS=$$(scripts/python_runtime.sh -c 'import os; print(os.environ["LD_LIBRARY_PATH"])' 2>/dev/null || true)
+#   make test-research-implement RI_PYTHON="$$MUSL --library-path $$LD_LIBRARY_PATH $$APP_PY"
+RI_PYTHON ?= $(PYTHON_RUNTIME)
+
+.PHONY: test-research-implement
+test-research-implement:
+	@echo "=== test-research-implement (side-dev; no Tasker) ==="; \
+	cd $(PROJECT_DIR) && \
+	PORTFOLIO_LAB_ENABLE_ML=0 $(RI_PYTHON) -m pytest \
+	  tests/test_research_implement_loop.py \
+	  tests/test_research_implement_loop_contract_fixture.py \
+	  tests/test_research_implement_loop_contract.py \
+	  -q --tb=short -p no:cacheprovider

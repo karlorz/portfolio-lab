@@ -1,0 +1,8 @@
+{
+  "heading": "Incomplete candidate fixture",
+  "title": "Incomplete candidate fixture",
+  "risks": "do not touch order_router",
+  "file_touch": "write tests/test_incomplete_candidate.py",
+  "breaking_change": false,
+  "redeploy_notes": "none"
+}

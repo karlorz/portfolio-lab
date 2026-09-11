@@ -1,0 +1,10 @@
+{
+  "heading": "Complete candidate fixture",
+  "title": "Complete candidate fixture",
+  "acceptance": "pytest EXIT=0",
+  "risks": "do not touch kill_switch or order_router",
+  "file_touch": "write tests/test_complete_candidate.py",
+  "breaking_change": false,
+  "redeploy_notes": "none",
+  "ready_for_implement": "yes"
+}
