@@ -30,17 +30,30 @@ RAW_DIR = _DATA_DIR.parent / "raw" / "market"
 DB_PATH = MARKET_DB
 
 
-def _ensure_default_wiki_dir_has_vault() -> None:
-    """Default SkillWiki-backed wiki dir must resolve before write operations."""
+def _ensure_default_wiki_dir_has_vault() -> bool:
+    """Default SkillWiki-backed wiki dir must resolve before write operations.
+
+    Returns True if vault is available, False if missing (fail-soft).
+    """
     if WIKI_DIR == _PROJECT_WIKI_DIR:
-        _require_project_wiki_dir()
+        try:
+            _require_project_wiki_dir()
+        except RuntimeError as e:
+            logger.warning("Wiki vault not available (fail-soft): %s", e)
+            return False
+    return True
 
 
 class WikiSync:
     def __init__(self):
         RAW_DIR.mkdir(parents=True, exist_ok=True)
-        _ensure_default_wiki_dir_has_vault()
-        (WIKI_DIR / "compound").mkdir(parents=True, exist_ok=True)
+        self.vault_available = _ensure_default_wiki_dir_has_vault()
+        if self.vault_available:
+            try:
+                (WIKI_DIR / "compound").mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                logger.warning("Could not create compound dir in wiki vault: %s", e)
+                self.vault_available = False
         self._conn = None
 
     @property
@@ -105,6 +118,9 @@ created: {datetime.now().isoformat()}
     
     def sync_regime_analysis(self) -> Optional[Path]:
         """Sync regime log to wiki compound page."""
+        if not self.vault_available:
+            logger.info("Wiki vault unavailable; skipping regime compound page sync")
+            return None
         cursor = self.conn.cursor()
         
         cursor.execute("""
@@ -527,6 +543,9 @@ Based on recent regime patterns:
 
     def update_knowledge_md(self):
         """Update knowledge.md to link new pages."""
+        if not self.vault_available:
+            logger.info("Wiki vault unavailable; skipping knowledge.md update")
+            return None
         knowledge_path = WIKI_DIR / "knowledge.md"
         
         # Find all compound pages
