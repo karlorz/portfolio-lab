@@ -6900,7 +6900,7 @@ def test_beat113_idle_decode_cli_json_matrix(tmp_path: Path, capsys):
 def test_beat113_makefile_echo_mentions_beat113():
     """Beat 113: Makefile suite echo includes beat113 or the current beat range."""
     text = Path("Makefile").read_text(encoding="utf-8")
-    assert "beat10…beat184" in text or "beat113" in text
+    assert "beat10…beat185" in text or "beat113" in text
 
 def test_beat114_session_b_decode_only_cli_json_matrix(tmp_path: Path, capsys):
     """Beat 114: session-b --decode-only --json empty→idle; one_open→Q1; two_queue→failed."""
@@ -6932,7 +6932,7 @@ def test_beat114_session_b_decode_only_cli_json_matrix(tmp_path: Path, capsys):
 def test_beat114_makefile_echo_mentions_beat114():
     """Beat 114: Makefile suite echo includes beat114 or the current beat range."""
     text = Path("Makefile").read_text(encoding="utf-8")
-    assert "beat10…beat184" in text or "beat114" in text
+    assert "beat10…beat185" in text or "beat114" in text
 
 
 
@@ -13445,4 +13445,115 @@ def test_beat184_pickable_fixtures_session_a_candidate_json_dry_run_json_light_n
             assert "## Heartbeat" in body
             assert "BEAT19_WATCH_MARKER" in body
             assert "BEAT19_HEARTBEAT_MARKER" in body
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
+def test_beat185_idle_fixtures_session_a_empty_candidate_list_json_fails_tmp(tmp_path: Path):
+    """Beat 185: multi-fixture idle session-a --candidate-json [] --json (NO dry-run)→rc=1 failed; plan UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    cand = tmp_path / "empty_list.json"
+    cand.write_text("[]\n", encoding="utf-8")
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+
+        # session-a --candidate-json [] --json (NO --dry-run) → rc=1 failed; plan UNCHANGED
+        # empty list → None → failed fire (no stub fallback); title is None
+        plan = tmp_path / f"{name}_a_empty_list_live.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(
+                [
+                    "session-a",
+                    "--plan",
+                    str(plan),
+                    "--candidate-json",
+                    str(cand),
+                    "--json",
+                ]
+            )
+        payload = json.loads(buf.getvalue())
+        assert rc == 1, name
+        assert payload["ok"] is False, name
+        assert payload["verdict"] == "failed", name
+        assert payload["wrote_item"] is False, name
+        assert payload["open_count"] == 0, name
+        assert payload["queue"] == "queue 0/10", name
+        assert payload["title"] is None, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in body, name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
+def test_beat185_idle_fixtures_session_a_empty_candidate_list_json_dry_run_json_fails_tmp(tmp_path: Path):
+    """Beat 185: multi-fixture idle session-a --candidate-json [] --dry-run --json→rc=1 failed; plan UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    cand = tmp_path / "empty_list.json"
+    cand.write_text("[]\n", encoding="utf-8")
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+
+        # session-a --candidate-json [] --dry-run --json → rc=1 failed; plan UNCHANGED
+        # empty list → None → failed fire (no stub fallback); title is None
+        plan = tmp_path / f"{name}_a_empty_list_dry.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(
+                [
+                    "session-a",
+                    "--plan",
+                    str(plan),
+                    "--candidate-json",
+                    str(cand),
+                    "--dry-run",
+                    "--json",
+                ]
+            )
+        payload = json.loads(buf.getvalue())
+        assert rc == 1, name
+        assert payload["ok"] is False, name
+        assert payload["verdict"] == "failed", name
+        assert payload["wrote_item"] is False, name
+        assert payload["open_count"] == 0, name
+        assert payload["queue"] == "queue 0/10", name
+        assert payload["title"] is None, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in body, name
         assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
