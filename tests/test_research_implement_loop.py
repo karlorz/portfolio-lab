@@ -6900,7 +6900,7 @@ def test_beat113_idle_decode_cli_json_matrix(tmp_path: Path, capsys):
 def test_beat113_makefile_echo_mentions_beat113():
     """Beat 113: Makefile suite echo includes beat113 or the current beat range."""
     text = Path("Makefile").read_text(encoding="utf-8")
-    assert "beat10…beat189" in text or "beat113" in text
+    assert "beat10…beat190" in text or "beat113" in text
 
 def test_beat114_session_b_decode_only_cli_json_matrix(tmp_path: Path, capsys):
     """Beat 114: session-b --decode-only --json empty→idle; one_open→Q1; two_queue→failed."""
@@ -6932,7 +6932,7 @@ def test_beat114_session_b_decode_only_cli_json_matrix(tmp_path: Path, capsys):
 def test_beat114_makefile_echo_mentions_beat114():
     """Beat 114: Makefile suite echo includes beat114 or the current beat range."""
     text = Path("Makefile").read_text(encoding="utf-8")
-    assert "beat10…beat189" in text or "beat114" in text
+    assert "beat10…beat190" in text or "beat114" in text
 
 
 
@@ -13977,3 +13977,75 @@ def test_beat189_pickable_fixtures_session_a_nodict_candidate_list_json_dry_run_
             assert "BEAT19_WATCH_MARKER" in body
             assert "BEAT19_HEARTBEAT_MARKER" in body
         assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+def test_beat190_top_level_help_still_lists_subcommands(capsys):
+    """Beat 190: top-level --help lists session-a / session-b / idle-decode."""
+    import pytest
+    from src.research_implement.__main__ import main
+
+    with pytest.raises(SystemExit) as ei:
+        main(["--help"])
+    assert ei.value.code == 0
+    out = capsys.readouterr().out
+    for name in ("session-a", "session-b", "idle-decode"):
+        assert name in out, name
+
+
+def test_beat190_public_api_milestone_exports():
+    """Beat 190: core A/B API + aliases/write/serialize remain public through beat190."""
+    import src.research_implement as ri
+
+    for name in (
+        "run_session_a",
+        "run_session_b",
+        "run_session_a_path",
+        "run_session_b_path",
+        "parse_queue_items",
+        "first_b_pick",
+        "is_b_pickable",
+        "is_ready_yes",
+        "is_complete_six_field",
+        "is_open_status",
+        "count_open",
+        "count_queue_headings",
+        "next_queue_id",
+        "mark_item_shipped",
+        "append_queue_item",
+        "format_queue_item",
+        "write_queue_section",
+        "serialize_queue_item",
+        "serialize_queue_items",
+        "render_queue_count",
+        "QUEUE_CAPACITY",
+        "REQUIRED_FIELDS",
+        "AmbiguousQueueError",
+        "SchedulerDeleteForbidden",
+        "scheduler_delete",
+        "require_unique_queue_section",
+        "incomplete_candidate_reasons",
+        "decode_fields",
+        "format_decode_report",
+        "stub_brainstorm",
+        "default_search_plan",
+        "stub_search_plan",
+        "default_implement",
+        "dry_run_implement",
+        "make_fixture_ship_implement",
+        "fixture_ship_implement",
+        "session_a_result_dict",
+        "session_b_result_dict",
+        "SessionAResult",
+        "SessionResult",
+        "SessionBResult",
+        "QueueItem",
+        "SESSION_A_RESULT_KEYS",
+        "SESSION_B_RESULT_KEYS",
+        "SESSION_A_RESULT_JSON_KEYS",
+        "SESSION_RESULT_JSON_KEYS",
+    ):
+        assert hasattr(ri, name), name
+        assert name in getattr(ri, "__all__", ()), name
+    assert ri.SessionBResult is ri.SessionResult
+    assert ri.default_implement is ri.dry_run_implement
+    assert ri.default_search_plan is ri.stub_brainstorm
+    assert len(ri.__all__) == len(set(ri.__all__))
