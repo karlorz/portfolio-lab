@@ -6900,7 +6900,7 @@ def test_beat113_idle_decode_cli_json_matrix(tmp_path: Path, capsys):
 def test_beat113_makefile_echo_mentions_beat113():
     """Beat 113: Makefile suite echo includes beat113 or the current beat range."""
     text = Path("Makefile").read_text(encoding="utf-8")
-    assert "beat10…beat197" in text or "beat113" in text
+    assert "beat10…beat198" in text or "beat113" in text
 
 def test_beat114_session_b_decode_only_cli_json_matrix(tmp_path: Path, capsys):
     """Beat 114: session-b --decode-only --json empty→idle; one_open→Q1; two_queue→failed."""
@@ -6932,7 +6932,7 @@ def test_beat114_session_b_decode_only_cli_json_matrix(tmp_path: Path, capsys):
 def test_beat114_makefile_echo_mentions_beat114():
     """Beat 114: Makefile suite echo includes beat114 or the current beat range."""
     text = Path("Makefile").read_text(encoding="utf-8")
-    assert "beat10…beat197" in text or "beat114" in text
+    assert "beat10…beat198" in text or "beat114" in text
 
 
 
@@ -14781,3 +14781,112 @@ def test_beat197_pickable_fixtures_session_a_empty_object_candidate_json_dry_run
             assert "BEAT19_WATCH_MARKER" in body
             assert "BEAT19_HEARTBEAT_MARKER" in body
         assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
+def test_beat198_idle_fixtures_session_a_missing_candidate_json_file_fails_tmp(tmp_path: Path):
+    """Beat 198: multi-fixture idle session-a --candidate-json missing path --json (NO dry-run)→SystemExit; plan UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    missing = tmp_path / "does_not_exist_candidate.json"
+    assert not missing.exists()
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+
+        # session-a --candidate-json missing --json (NO --dry-run) → SystemExit; plan UNCHANGED
+        # CLI load-fail (not verdict=failed JSON); dry-run would not skip this either
+        plan = tmp_path / f"{name}_a_missing_cand_live.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(
+                    [
+                        "session-a",
+                        "--plan",
+                        str(plan),
+                        "--candidate-json",
+                        str(missing),
+                        "--json",
+                    ]
+                )
+        assert ei.value.code != 0, name
+        msg = str(ei.value)
+        assert "--candidate-json" in msg, name
+        assert "not found" in msg.lower(), name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in body, name
+        out = buf.getvalue().strip()
+        assert out == "" or ("queued" not in out and "light" not in out), name
+        assert not missing.exists(), name
+
+
+def test_beat198_idle_fixtures_session_a_missing_candidate_json_file_dry_run_fails_tmp(tmp_path: Path):
+    """Beat 198: multi-fixture idle session-a --candidate-json missing path --dry-run --json→SystemExit; plan UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    missing = tmp_path / "does_not_exist_candidate.json"
+    assert not missing.exists()
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+
+        # session-a --candidate-json missing --dry-run --json → SystemExit; plan UNCHANGED
+        # dry-run does not skip the missing-file load
+        plan = tmp_path / f"{name}_a_missing_cand_dry.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(
+                    [
+                        "session-a",
+                        "--plan",
+                        str(plan),
+                        "--candidate-json",
+                        str(missing),
+                        "--dry-run",
+                        "--json",
+                    ]
+                )
+        assert ei.value.code != 0, name
+        msg = str(ei.value)
+        assert "--candidate-json" in msg, name
+        assert "not found" in msg.lower(), name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in body, name
+        out = buf.getvalue().strip()
+        assert out == "" or ("queued" not in out and "light" not in out), name
+        assert not missing.exists(), name
