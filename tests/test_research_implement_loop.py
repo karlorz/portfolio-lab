@@ -47273,5 +47273,461 @@ def test_cli_idle_decode_symlink_to_file_log_pickable_tmp(tmp_path: Path):
         assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
 
 
+def test_cli_idle_decode_dot_slash_relative_plan_idle_tmp(tmp_path: Path, monkeypatch):
+    """Path leftover (not nested --dry-run; not CLI-flag; not Beat N): idle idle-decode ./file.md --plan."""
+    from src.research_implement.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        plan_rel = f"./{name}_dot_plan.md"
+        plan = tmp_path / f"{name}_dot_plan.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["idle-decode", "--plan", plan_rel, "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert plan_rel.startswith("./"), name
+        assert plan.read_text(encoding="utf-8") == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_cli_idle_decode_dot_slash_relative_log_idle_tmp(tmp_path: Path, monkeypatch):
+    """Path leftover pair: idle idle-decode ./file.md --log; unused copy UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        log_rel = f"./{name}_dot_log.md"
+        log = tmp_path / f"{name}_dot_log.md"
+        log.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["idle-decode", "--log", log_rel, "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert log_rel.startswith("./"), name
+        assert log.read_text(encoding="utf-8") == src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_cli_idle_decode_dot_slash_relative_plan_nonpick_tmp(tmp_path: Path, monkeypatch):
+    """Path leftover: non-pickable idle-decode ./file.md --plan; plan UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        plan_rel = f"./{name}_dot_plan.md"
+        plan = tmp_path / f"{name}_dot_plan.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["idle-decode", "--plan", plan_rel, "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert plan_rel.startswith("./"), name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_cli_idle_decode_dot_slash_relative_log_nonpick_tmp(tmp_path: Path, monkeypatch):
+    """Path leftover pair: non-pickable idle-decode ./file.md --log; unused copy UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        log_rel = f"./{name}_dot_log.md"
+        log = tmp_path / f"{name}_dot_log.md"
+        log.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["idle-decode", "--log", log_rel, "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert log_rel.startswith("./"), name
+        body = log.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_cli_idle_decode_dot_slash_relative_plan_pickable_tmp(tmp_path: Path, monkeypatch):
+    """Path leftover: pickable idle-decode ./file.md --plan → picked; plan UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    cases = (
+        ("watch_lookalike", "Q3"),
+        ("one_open_ready", "Q1"),
+        ("two_open_ready", "Q1"),
+        ("mixed_priority", "Q2"),
+        ("watch_queue_heartbeat", "Q1"),
+    )
+    for name, item_id in cases:
+        src = _load(f"{name}.md")
+        plan_rel = f"./{name}_dot_plan.md"
+        plan = tmp_path / f"{name}_dot_plan.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["idle-decode", "--plan", plan_rel, "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "picked", name
+        assert payload["item"]["item_id"] == item_id, name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert plan_rel.startswith("./"), name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_cli_idle_decode_dot_slash_relative_log_pickable_tmp(tmp_path: Path, monkeypatch):
+    """Path leftover pair: pickable idle-decode ./file.md --log → picked; unused copy UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    cases = (
+        ("watch_lookalike", "Q3"),
+        ("one_open_ready", "Q1"),
+        ("two_open_ready", "Q1"),
+        ("mixed_priority", "Q2"),
+        ("watch_queue_heartbeat", "Q1"),
+    )
+    for name, item_id in cases:
+        src = _load(f"{name}.md")
+        log_rel = f"./{name}_dot_log.md"
+        log = tmp_path / f"{name}_dot_log.md"
+        log.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["idle-decode", "--log", log_rel, "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "picked", name
+        assert payload["item"]["item_id"] == item_id, name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert log_rel.startswith("./"), name
+        body = log.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_cli_idle_decode_parent_relative_plan_idle_tmp(tmp_path: Path, monkeypatch):
+    """Path leftover (not nested --dry-run; not ./ walk; not CLI-flag; not Beat N): idle ../file.md --plan."""
+    from src.research_implement.__main__ import main
+
+    child = tmp_path / "cwd"
+    child.mkdir()
+    monkeypatch.chdir(child)
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        plan_rel = f"../{name}_parent_plan.md"
+        plan = tmp_path / f"{name}_parent_plan.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["idle-decode", "--plan", plan_rel, "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert plan_rel.startswith("../"), name
+        assert plan.read_text(encoding="utf-8") == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_cli_idle_decode_parent_relative_log_idle_tmp(tmp_path: Path, monkeypatch):
+    """Path leftover pair: idle idle-decode ../file.md --log; unused copy UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    child = tmp_path / "cwd"
+    child.mkdir()
+    monkeypatch.chdir(child)
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        log_rel = f"../{name}_parent_log.md"
+        log = tmp_path / f"{name}_parent_log.md"
+        log.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["idle-decode", "--log", log_rel, "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert log_rel.startswith("../"), name
+        assert log.read_text(encoding="utf-8") == src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_cli_idle_decode_parent_relative_plan_nonpick_tmp(tmp_path: Path, monkeypatch):
+    """Path leftover: non-pickable idle-decode ../file.md --plan; plan UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    child = tmp_path / "cwd"
+    child.mkdir()
+    monkeypatch.chdir(child)
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        plan_rel = f"../{name}_parent_plan.md"
+        plan = tmp_path / f"{name}_parent_plan.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["idle-decode", "--plan", plan_rel, "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert plan_rel.startswith("../"), name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_cli_idle_decode_parent_relative_log_nonpick_tmp(tmp_path: Path, monkeypatch):
+    """Path leftover pair: non-pickable idle-decode ../file.md --log; unused copy UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    child = tmp_path / "cwd"
+    child.mkdir()
+    monkeypatch.chdir(child)
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        log_rel = f"../{name}_parent_log.md"
+        log = tmp_path / f"{name}_parent_log.md"
+        log.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["idle-decode", "--log", log_rel, "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert log_rel.startswith("../"), name
+        body = log.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_cli_idle_decode_parent_relative_plan_pickable_tmp(tmp_path: Path, monkeypatch):
+    """Path leftover: pickable idle-decode ../file.md --plan → picked; plan UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    child = tmp_path / "cwd"
+    child.mkdir()
+    monkeypatch.chdir(child)
+    cases = (
+        ("watch_lookalike", "Q3"),
+        ("one_open_ready", "Q1"),
+        ("two_open_ready", "Q1"),
+        ("mixed_priority", "Q2"),
+        ("watch_queue_heartbeat", "Q1"),
+    )
+    for name, item_id in cases:
+        src = _load(f"{name}.md")
+        plan_rel = f"../{name}_parent_plan.md"
+        plan = tmp_path / f"{name}_parent_plan.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["idle-decode", "--plan", plan_rel, "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "picked", name
+        assert payload["item"]["item_id"] == item_id, name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert plan_rel.startswith("../"), name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_cli_idle_decode_parent_relative_log_pickable_tmp(tmp_path: Path, monkeypatch):
+    """Path leftover pair: pickable idle-decode ../file.md --log → picked; unused copy UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    child = tmp_path / "cwd"
+    child.mkdir()
+    monkeypatch.chdir(child)
+    cases = (
+        ("watch_lookalike", "Q3"),
+        ("one_open_ready", "Q1"),
+        ("two_open_ready", "Q1"),
+        ("mixed_priority", "Q2"),
+        ("watch_queue_heartbeat", "Q1"),
+    )
+    for name, item_id in cases:
+        src = _load(f"{name}.md")
+        log_rel = f"../{name}_parent_log.md"
+        log = tmp_path / f"{name}_parent_log.md"
+        log.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["idle-decode", "--log", log_rel, "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "picked", name
+        assert payload["item"]["item_id"] == item_id, name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert log_rel.startswith("../"), name
+        body = log.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
 
 
