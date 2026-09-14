@@ -53315,4 +53315,46 @@ def test_cli_idle_decode_watch_two_paths_fail_closed_tmp(tmp_path: Path):
     assert path_b in plan.read_text(encoding="utf-8")
 
 
+def test_cli_idle_decode_watch_parent_escape_fail_closed_tmp(tmp_path: Path):
+    """Fixture leftover (not watch_two_paths; not argparse path-shape; not Beat N; not Session B impl): idle-decode fail-closed when ## Watch body path contains .."""
+    import re
+
+    from src.research_implement.__main__ import main
+
+    src = _load("two_queue_sections.md")
+    unused = tmp_path / "two_queue_watch_parent_escape.unused.md"
+    unused.write_text(src, encoding="utf-8")
+    heading_re = re.compile(r"^##[ \t]+Watch\s*$", re.M)
+    assert len(heading_re.findall(src)) == 1
+    escape_path = "../outside/beat21-watch-escape.md"
+    extra_row = f"| `{escape_path}` | Watch path parent escape |\n"
+    first_queue = src.find("## Queue")
+    assert first_queue != -1
+    escaped = src[:first_queue] + extra_row + "\n" + src[first_queue:]
+    assert len(heading_re.findall(escaped)) == 1
+    assert escape_path in escaped
+    assert ".." in escape_path
+    assert escaped.count("## Queue") == 2
+    assert "## Heartbeat" in escaped
+    assert "BEAT21_WATCH_MARKER" in escaped
+    assert "BEAT21_HEARTBEAT_MARKER" in escaped
+    plan = tmp_path / "two_queue_watch_parent_escape.md"
+    plan.write_text(escaped, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+    assert plan.read_text(encoding="utf-8") == escaped
+    assert unused.read_text(encoding="utf-8") == src
+    assert escape_path not in unused.read_text(encoding="utf-8")
+    assert len(heading_re.findall(plan.read_text(encoding="utf-8"))) == 1
+    assert escape_path in plan.read_text(encoding="utf-8")
+
+
 
