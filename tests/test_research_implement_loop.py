@@ -48341,5 +48341,212 @@ def test_cli_idle_decode_plan_is_dir_plain_pickable_tmp(tmp_path: Path, capsys):
             assert "BEAT19_HEARTBEAT_MARKER" in body, name
 
 
+def test_cli_idle_decode_empty_plan_file_json_idle_tmp(tmp_path: Path, capsys):
+    """I/O leftover (not directory; not missing-path; not Beat N): idle idle-decode --plan empty file --json."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_empty_plan_file.json.md"
+        unused.write_text(src, encoding="utf-8")
+        empty = tmp_path / f"{name}_empty_plan.json.md"
+        empty.write_text("", encoding="utf-8")
+        rc = main(["idle-decode", "--plan", str(empty), "--json"])
+        payload = json.loads(capsys.readouterr().out)
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert empty.read_text(encoding="utf-8") == "", name
+        assert empty.is_file(), name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_cli_idle_decode_empty_plan_file_plain_idle_tmp(tmp_path: Path, capsys):
+    """I/O leftover pair: idle idle-decode --plan empty file without --json; empty plan UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_empty_plan_file.plain.md"
+        unused.write_text(src, encoding="utf-8")
+        empty = tmp_path / f"{name}_empty_plan.plain.md"
+        empty.write_text("", encoding="utf-8")
+        rc = main(["idle-decode", "--plan", str(empty)])
+        out = capsys.readouterr().out.lower()
+        assert rc == 0, name
+        assert "nothing to implement" in out, name
+        assert "queue 0/10" in out, name
+        assert "keep_schedule" in out, name
+        assert empty.read_text(encoding="utf-8") == "", name
+        assert empty.is_file(), name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+
+
+def test_cli_idle_decode_empty_plan_file_json_nonpick_tmp(tmp_path: Path, capsys):
+    """I/O leftover: non-pickable unused copy; idle-decode --plan empty file --json stays idle."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_empty_plan_file.json.md"
+        unused.write_text(src, encoding="utf-8")
+        empty = tmp_path / f"{name}_empty_plan.json.md"
+        empty.write_text("", encoding="utf-8")
+        rc = main(["idle-decode", "--plan", str(empty), "--json"])
+        payload = json.loads(capsys.readouterr().out)
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert empty.read_text(encoding="utf-8") == "", name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_cli_idle_decode_empty_plan_file_plain_nonpick_tmp(tmp_path: Path, capsys):
+    """I/O leftover pair: non-pickable unused copy; idle-decode --plan empty file without --json."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_empty_plan_file.plain.md"
+        unused.write_text(src, encoding="utf-8")
+        empty = tmp_path / f"{name}_empty_plan.plain.md"
+        empty.write_text("", encoding="utf-8")
+        rc = main(["idle-decode", "--plan", str(empty)])
+        out = capsys.readouterr().out.lower()
+        assert rc == 0, name
+        assert "nothing to implement" in out, name
+        assert "queue 0/10" in out, name
+        assert "keep_schedule" in out, name
+        assert empty.read_text(encoding="utf-8") == "", name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+
+
+def test_cli_idle_decode_empty_plan_file_json_pickable_tmp(tmp_path: Path, capsys):
+    """I/O leftover: pickable unused copy; idle-decode --plan empty file --json stays idle (not picked)."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "watch_lookalike",
+        "one_open_ready",
+        "two_open_ready",
+        "mixed_priority",
+        "watch_queue_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_empty_plan_file.json.md"
+        unused.write_text(src, encoding="utf-8")
+        empty = tmp_path / f"{name}_empty_plan.json.md"
+        empty.write_text("", encoding="utf-8")
+        rc = main(["idle-decode", "--plan", str(empty), "--json"])
+        payload = json.loads(capsys.readouterr().out)
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["item"] is None, name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert empty.read_text(encoding="utf-8") == "", name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_cli_idle_decode_empty_plan_file_plain_pickable_tmp(tmp_path: Path, capsys):
+    """I/O leftover pair: pickable unused copy; idle-decode --plan empty file without --json; not deferred."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "watch_lookalike",
+        "one_open_ready",
+        "two_open_ready",
+        "mixed_priority",
+        "watch_queue_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_empty_plan_file.plain.md"
+        unused.write_text(src, encoding="utf-8")
+        empty = tmp_path / f"{name}_empty_plan.plain.md"
+        empty.write_text("", encoding="utf-8")
+        rc = main(["idle-decode", "--plan", str(empty)])
+        out = capsys.readouterr().out.lower()
+        assert rc == 0, name
+        assert "nothing to implement" in out, name
+        assert "queue 0/10" in out, name
+        assert "keep_schedule" in out, name
+        assert empty.read_text(encoding="utf-8") == "", name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+
+
 
 
