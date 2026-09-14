@@ -53429,4 +53429,36 @@ def test_cli_idle_decode_utf8_bom_fail_closed_tmp(tmp_path: Path):
     assert "BEAT21_HEARTBEAT_MARKER" in decoded
 
 
+def test_cli_idle_decode_fail_closed_json_not_array_tmp(tmp_path: Path):
+    """JSON leftover (not json_plain; not utf8_bom; not Beat N; not Session B impl): idle-decode fail-closed --json stdout is an object, not an array."""
+    from src.research_implement.__main__ import main
+
+    src = _load("two_queue_sections.md")
+    unused = tmp_path / "two_queue_json_not_array.unused.md"
+    unused.write_text(src, encoding="utf-8")
+    plan = tmp_path / "two_queue_json_not_array.md"
+    plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    out = buf.getvalue()
+    payload = json.loads(out)
+    assert rc == 1
+    assert not isinstance(payload, list)
+    assert isinstance(payload, dict)
+    assert not out.lstrip().startswith("[")
+    assert out.lstrip().startswith("{")
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+    assert plan.read_text(encoding="utf-8") == src
+    assert unused.read_text(encoding="utf-8") == src
+    assert "## Watch" in unused.read_text(encoding="utf-8")
+    assert "## Heartbeat" in unused.read_text(encoding="utf-8")
+    assert "BEAT21_WATCH_MARKER" in unused.read_text(encoding="utf-8")
+    assert "BEAT21_HEARTBEAT_MARKER" in unused.read_text(encoding="utf-8")
+
+
 
