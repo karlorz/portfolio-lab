@@ -53395,4 +53395,38 @@ def test_cli_idle_decode_watch_heading_case_fail_closed_tmp(tmp_path: Path):
     assert len(title_re.findall(plan.read_text(encoding="utf-8"))) == 0
 
 
+def test_cli_idle_decode_utf8_bom_fail_closed_tmp(tmp_path: Path):
+    """Encoding leftover (not watch_heading_case; not argparse; not Beat N; not Session B impl): idle-decode fail-closed when plan starts with UTF-8 BOM."""
+    from src.research_implement.__main__ import main
+
+    src = _load("two_queue_sections.md")
+    unused = tmp_path / "two_queue_utf8_bom.unused.md"
+    unused.write_text(src, encoding="utf-8")
+    bom = b"\xef\xbb\xbf"
+    raw = bom + src.encode("utf-8")
+    plan = tmp_path / "two_queue_utf8_bom.md"
+    plan.write_bytes(raw)
+    assert plan.read_bytes().startswith(bom)
+    assert not unused.read_bytes().startswith(bom)
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+    assert plan.read_bytes() == raw
+    assert unused.read_text(encoding="utf-8") == src
+    decoded = plan.read_text(encoding="utf-8")
+    assert decoded.startswith("\ufeff")
+    assert "## Watch" in decoded
+    assert "## Heartbeat" in decoded
+    assert decoded.count("## Queue") == 2
+    assert "BEAT21_WATCH_MARKER" in decoded
+    assert "BEAT21_HEARTBEAT_MARKER" in decoded
+
+
 
