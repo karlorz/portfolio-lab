@@ -4431,7 +4431,7 @@ def test_old_archive_without_materialization_verifies_and_restores_unchanged(her
         (lambda d: _write(d / "current", "regular file"), "missing or is not a symlink"),  # regular file
         (lambda d: (d / "current").symlink_to("gen-missing"), "unresolvable or broken link"),  # broken link
         (lambda d: (d / "current").symlink_to("/etc/passwd"), "invalid generations/current symlink target text"),  # absolute link
-        (lambda d: (d / "current").symlink_to(""), "invalid generations/current symlink target text"),  # empty component / target
+        # Empty symlink targets are rejected by Linux (ENOENT); cover via is_safe_original_link unit test instead.
         (lambda d: (d / "current").symlink_to("."), "invalid generations/current symlink target text"),  # dot component
         (lambda d: (d / "current").symlink_to(".."), "invalid generations/current symlink target text"),  # dot-dot component
         (lambda d: (d / "current").symlink_to("../escape"), "invalid generations/current symlink target text"),  # traversal
@@ -5565,6 +5565,12 @@ def test_create_verify_restore_nested_ordinary_directories(hermetic, tmp_path: P
     assert restored_link.is_symlink()
     assert os.readlink(restored_link) == gen_id
     assert (restored_link / "nested1" / "nested2" / "file2.json").is_file()
+
+
+def test_is_safe_original_link_rejects_empty_target():
+    """Empty symlink target text is unsafe; Linux cannot even create such links."""
+    mod = _load_recovery_module()
+    assert mod.is_safe_original_link("") is False
 
 
 def test_is_safe_original_link_rejects_lone_surrogate():

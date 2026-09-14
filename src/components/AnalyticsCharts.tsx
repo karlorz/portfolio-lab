@@ -385,6 +385,27 @@ interface CrisisOverlayProps {
   crisisPeriodsReason?: string | null;
 }
 
+const CRISIS_UNAVAILABLE_DEFAULT =
+  'Portfolio crisis returns unavailable — historical simulation not computed. SPY reference figures only.';
+const CRISIS_UNAVAILABLE_OUTSIDE_WINDOWS =
+  'Portfolio crisis returns unavailable — paper history (~2026-05–2026-09) does not overlap classic crisis windows (2008 / 2020 / 2022). SPY reference figures only.';
+const CRISIS_PARTIAL_DEFAULT =
+  'Portfolio crisis returns partial — some periods lack historical simulation.';
+
+/** Visible crisis-section banner. Map known gap reasons to honest prose. */
+export function crisisSectionBannerCopy(
+  status: CrisisPeriodsStatus,
+  reason?: string | null,
+): string {
+  if (status === 'partial') {
+    return CRISIS_PARTIAL_DEFAULT;
+  }
+  if (reason === 'performance_history_outside_crisis_windows') {
+    return CRISIS_UNAVAILABLE_OUTSIDE_WINDOWS;
+  }
+  return CRISIS_UNAVAILABLE_DEFAULT;
+}
+
 /** Infer section status from rows when producer omitted explicit metadata. */
 export function resolveCrisisPeriodsStatus(
   periods: CrisisPeriod[],
@@ -425,9 +446,7 @@ export const CrisisOverlay: React.FC<CrisisOverlayProps> = ({
       <h3 className="crisis-title">Crisis Period Comparison</h3>
       {degraded && (
         <div className="crisis-section-banner muted" role="status">
-          {sectionStatus === 'unavailable'
-            ? 'Portfolio crisis returns unavailable — historical simulation not computed. SPY reference figures only.'
-            : 'Portfolio crisis returns partial — some periods lack historical simulation.'}
+          {crisisSectionBannerCopy(sectionStatus, bannerReason)}
           {bannerReason ? (
             <span className="crisis-section-reason"> ({bannerReason})</span>
           ) : null}

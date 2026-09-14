@@ -247,11 +247,7 @@ def run_session_a(
             wrote_item=False,
         )
     open_n = count_open(items)
-    first = next((i for i in items if i.status and i.status.upper().startswith("OPEN")), None)
-    # Prefer B-pickable title for heartbeat; else first OPEN heading.
-
     pick = first_b_pick(items)
-    b_title = (pick.title if pick else None) or (first.title if first else None)
 
     if open_n >= 1:
         msg = (

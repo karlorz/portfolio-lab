@@ -57,13 +57,21 @@ class CrisisPeriod:
 
 def classify_crisis_periods_availability(
     crisis_rows: List[Dict],
+    *,
+    unavailable_reason: str = "historical_simulation_unavailable",
 ) -> Tuple[str, Optional[str]]:
     """Return (status, reason) for crisis-period portfolio comparison section.
 
     status:
       - success: every row has a numeric portfolio_return
       - partial: some rows have portfolio returns, others null
-      - unavailable: no rows have portfolio returns (historical sim not run)
+      - unavailable: no rows have portfolio returns
+
+    ``unavailable_reason`` documents *why* returns are missing when the real
+    computation path ran but could not fill any crisis window (for example
+    ``performance_history_outside_crisis_windows`` when paper NAV history does
+    not overlap classic 2008/2020/2022 windows). Callers should not invent
+    crisis portfolio returns.
     """
     if not crisis_rows:
         return "unavailable", "no_crisis_periods"
@@ -74,7 +82,7 @@ def classify_crisis_periods_availability(
     if len(available) == len(crisis_rows):
         return "success", None
     if len(available) == 0:
-        return "unavailable", "historical_simulation_unavailable"
+        return "unavailable", unavailable_reason
     return "partial", "historical_simulation_incomplete"
 
 
@@ -94,7 +102,7 @@ class AnalyticsCalculator:
             end_date="2009-03-31",
             description="Global Financial Crisis",
             spy_return=-0.47,
-            portfolio_return=None,  # Would be calculated
+            portfolio_return=None,  # Filled at report time from paper NAV when history covers window
         ),
         CrisisPeriod(
             name="COVID 2020",
@@ -102,7 +110,7 @@ class AnalyticsCalculator:
             end_date="2020-03-23",
             description="COVID-19 Market Crash",
             spy_return=-0.34,
-            portfolio_return=None,
+            portfolio_return=None,  # Filled at report time from paper NAV when history covers window
         ),
         CrisisPeriod(
             name="Rate Hikes 2022",
@@ -110,7 +118,7 @@ class AnalyticsCalculator:
             end_date="2022-10-12",
             description="Fed Rate Hike Cycle",
             spy_return=-0.25,
-            portfolio_return=None,
+            portfolio_return=None,  # Filled at report time from paper NAV when history covers window
         ),
     ]
     
@@ -509,7 +517,80 @@ class AnalyticsCalculator:
             "role": "benchmark",
         }
     
+    @staticmethod
+    def portfolio_return_for_crisis_window(
+        performance_data: List[Dict],
+        start_date: str,
+        end_date: str,
+    ) -> Optional[float]:
+        """Compute portfolio return (%) over a crisis window from paper NAV history.
+
+        Uses observations whose dates fall inside ``[start_date, end_date]``
+        (inclusive). Returns None when fewer than two positive NAV points exist
+        in that window — never invents returns for classic crisis years that
+        predate available paper history.
+        """
+        points: List[Tuple[str, float]] = []
+        for row in performance_data:
+            ts = row.get("timestamp") or row.get("date") or ""
+            day = str(ts)[:10]
+            if len(day) < 10:
+                continue
+            if day < start_date or day > end_date:
+                continue
+            value = row.get("total_value")
+            if isinstance(value, (int, float)) and float(value) > 0:
+                points.append((day, float(value)))
+        if len(points) < 2:
+            return None
+        points.sort(key=lambda item: item[0])
+        start_value = points[0][1]
+        end_value = points[-1][1]
+        if start_value <= 0:
+            return None
+        return round((end_value - start_value) / start_value * 100, 1)
+
+    def build_crisis_period_summary(
+        self,
+        performance_data: List[Dict],
+    ) -> Tuple[List[Dict], str, Optional[str]]:
+        """Build crisis comparison rows from available paper history.
+
+        Classic CRISIS_PERIODS (2008/2020/2022) only get numeric
+        ``portfolio_return`` when ``performance.jsonl`` actually overlaps that
+        window. Short paper histories (e.g. 2026-only) yield an honest
+        ``performance_history_outside_crisis_windows`` gap — not fabricated
+        crisis returns.
+        """
+        crisis_summary: List[Dict] = []
+        for crisis in self.CRISIS_PERIODS:
+            portfolio_return = self.portfolio_return_for_crisis_window(
+                performance_data,
+                crisis.start_date,
+                crisis.end_date,
+            )
+            available = portfolio_return is not None
+            row = {
+                "name": crisis.name,
+                "period": f"{crisis.start_date} to {crisis.end_date}",
+                "description": crisis.description,
+                "spy_return": round(crisis.spy_return * 100, 1),
+                "portfolio_return": portfolio_return,
+                "portfolio_return_available": available,
+                "availability": "available" if available else "unavailable",
+            }
+            if not available:
+                row["availability_reason"] = "performance_history_outside_crisis_windows"
+            crisis_summary.append(row)
+
+        status, reason = classify_crisis_periods_availability(
+            crisis_summary,
+            unavailable_reason="performance_history_outside_crisis_windows",
+        )
+        return crisis_summary, status, reason
+
     def generate_analytics_report(self) -> Dict:
+
         """Generate complete analytics report."""
         perf_data = self.load_performance_data()
         
@@ -539,22 +620,11 @@ class AnalyticsCalculator:
             for d in drawdown_series
         ]
         
-        # Crisis period performance (would need historical backtest data).
-        # Emit explicit section availability so UI does not treat all-null
-        # portfolio returns as a complete comparison under status=success.
-        crisis_summary = []
-        for crisis in self.CRISIS_PERIODS:
-            crisis_summary.append({
-                "name": crisis.name,
-                "period": f"{crisis.start_date} to {crisis.end_date}",
-                "description": crisis.description,
-                "spy_return": round(crisis.spy_return * 100, 1),
-                "portfolio_return": None,  # Would require historical simulation
-                "portfolio_return_available": False,
-                "availability": "unavailable",
-            })
-        crisis_periods_status, crisis_periods_reason = classify_crisis_periods_availability(
-            crisis_summary
+        # Crisis period performance from paper NAV when history covers the window.
+        # Short paper histories cannot cover classic 2008/2020/2022 crises; the
+        # builder records that gap instead of inventing portfolio returns.
+        crisis_summary, crisis_periods_status, crisis_periods_reason = (
+            self.build_crisis_period_summary(perf_data)
         )
 
         return {

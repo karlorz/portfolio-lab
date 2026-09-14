@@ -469,8 +469,9 @@ class TestGenerateAnalyticsReport:
         assert len(report['crisis_periods']) == 3
 
     def test_all_null_crisis_portfolio_returns_emit_unavailable_metadata(self, tmp_path):
-        """Global status may be success, but crisis comparison must not look complete."""
+        """Paper hist outside classic crisis windows → honest gap, not invented returns."""
         calc = AnalyticsCalculator(data_dir=str(tmp_path))
+        # Default helper starts 2024-01-02 — no overlap with 2008/2020/2022 crises.
         data = _make_perf_data(n_days=300, daily_return=0.001)
         f = tmp_path / "performance.jsonl"
         with open(f, 'w') as fh:
@@ -479,9 +480,49 @@ class TestGenerateAnalyticsReport:
         report = calc.generate_analytics_report()
         assert report["status"] == "success"
         assert report["crisis_periods_status"] == "unavailable"
-        assert report["crisis_periods_reason"] == "historical_simulation_unavailable"
+        assert report["crisis_periods_reason"] == "performance_history_outside_crisis_windows"
         assert all(row["portfolio_return"] is None for row in report["crisis_periods"])
         assert all(row.get("portfolio_return_available") is False for row in report["crisis_periods"])
+        assert all(
+            row.get("availability_reason") == "performance_history_outside_crisis_windows"
+            for row in report["crisis_periods"]
+        )
+
+    def test_crisis_portfolio_return_computed_when_history_covers_window(self, tmp_path):
+        """When NAV history overlaps a crisis window, compute real portfolio return %."""
+        calc = AnalyticsCalculator(data_dir=str(tmp_path))
+        # Cover COVID window 2020-02-19..2020-03-23 with a known drawdown.
+        data = _make_perf_data(
+            n_days=40,
+            start_value=100000,
+            daily_return=-0.01,
+            start_date='2020-02-10',
+        )
+        f = tmp_path / "performance.jsonl"
+        with open(f, 'w') as fh:
+            for entry in data:
+                fh.write(json.dumps(entry) + '\n')
+        report = calc.generate_analytics_report()
+        by_name = {row["name"]: row for row in report["crisis_periods"]}
+        covid = by_name["COVID 2020"]
+        assert covid["portfolio_return_available"] is True
+        assert isinstance(covid["portfolio_return"], float)
+        assert covid["portfolio_return"] < 0
+        # GFC / Rate Hikes still uncovered → partial section status
+        assert by_name["GFC 2008"]["portfolio_return"] is None
+        assert by_name["Rate Hikes 2022"]["portfolio_return"] is None
+        assert report["crisis_periods_status"] == "partial"
+        assert report["crisis_periods_reason"] == "historical_simulation_incomplete"
+
+    def test_portfolio_return_for_crisis_window_requires_two_points(self):
+        assert AnalyticsCalculator.portfolio_return_for_crisis_window([], "2020-02-19", "2020-03-23") is None
+        one = [{"timestamp": "2020-03-01T15:30:00", "total_value": 100000}]
+        assert AnalyticsCalculator.portfolio_return_for_crisis_window(one, "2020-02-19", "2020-03-23") is None
+        two = [
+            {"timestamp": "2020-02-20T15:30:00", "total_value": 100000},
+            {"timestamp": "2020-03-20T15:30:00", "total_value": 90000},
+        ]
+        assert AnalyticsCalculator.portfolio_return_for_crisis_window(two, "2020-02-19", "2020-03-23") == -10.0
 
     def test_report_has_benchmark(self, tmp_path):
         calc = AnalyticsCalculator(data_dir=str(tmp_path))

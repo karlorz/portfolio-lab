@@ -3,6 +3,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
   CrisisOverlay,
+  crisisSectionBannerCopy,
   resolveCrisisPeriodsStatus,
 } from '../../src/components/AnalyticsCharts';
 import { AnalyticsDataSchema } from '../../src/schemas/signals';
@@ -73,5 +74,31 @@ describe('CrisisOverlay availability', () => {
       crisis_periods_reason: 'historical_simulation_unavailable',
     });
     expect(result.success).toBe(true);
+  });
+
+  it('maps performance_history_outside_crisis_windows to paper-history gap prose', () => {
+    const copy = crisisSectionBannerCopy(
+      'unavailable',
+      'performance_history_outside_crisis_windows',
+    );
+    expect(copy).toContain('paper history');
+    expect(copy).toContain('2026-05');
+    expect(copy).toContain('2026-09');
+    expect(copy).toContain('2008');
+    expect(copy).toContain('2020');
+    expect(copy).toContain('2022');
+    expect(copy).not.toContain('historical simulation not computed');
+
+    const html = renderToStaticMarkup(
+      React.createElement(CrisisOverlay, {
+        periods: nullPeriods,
+        crisisPeriodsStatus: 'unavailable',
+        crisisPeriodsReason: 'performance_history_outside_crisis_windows',
+      }),
+    );
+    expect(html).toContain('paper history');
+    expect(html).toContain('does not overlap classic crisis windows');
+    expect(html).not.toContain('historical simulation not computed');
+    expect(html).toContain('performance_history_outside_crisis_windows');
   });
 });
