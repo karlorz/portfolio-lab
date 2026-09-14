@@ -52987,4 +52987,103 @@ def test_cli_idle_decode_fail_closed_unused_session_b_copies_unchanged_tmp(
             assert "BEAT19_HEARTBEAT_MARKER" in body, name
 
 
+def test_cli_session_b_dry_run_watch_existing_json_idle_tmp(tmp_path: Path, capsys):
+    """CLI leftover (not unused_session_b; not absent_watch missing-path; not Beat N): idle session-b --dry-run --watch existing --json."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_dry_run_watch.json.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan = tmp_path / f"{name}_dry_run_watch.json.md"
+        plan.write_text(src, encoding="utf-8")
+        watch = tmp_path / f"{name}_dry_run_watch.existing.md"
+        watch.write_text(src, encoding="utf-8")
+        assert watch.is_file(), name
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "session-b",
+                    "--plan",
+                    str(plan),
+                    "--dry-run",
+                    "--watch",
+                    str(watch),
+                    "--json",
+                ]
+            )
+        assert ei.value.code == 2, name
+        captured = capsys.readouterr()
+        err = captured.err.lower()
+        assert "unrecognized" in err and "--watch" in err, name
+        assert "not found" not in err, name
+        assert captured.out.strip() == "", name
+        assert watch.is_file(), name
+        assert watch.read_text(encoding="utf-8") == src, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+
+
+def test_cli_session_b_dry_run_watch_existing_plain_idle_tmp(tmp_path: Path, capsys):
+    """CLI leftover pair: idle session-b --dry-run --watch existing without --json; unused copy UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_dry_run_watch.plain.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan = tmp_path / f"{name}_dry_run_watch.plain.md"
+        plan.write_text(src, encoding="utf-8")
+        watch = tmp_path / f"{name}_dry_run_watch.plain.existing.md"
+        watch.write_text(src, encoding="utf-8")
+        assert watch.is_file(), name
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "session-b",
+                    "--plan",
+                    str(plan),
+                    "--dry-run",
+                    "--watch",
+                    str(watch),
+                ]
+            )
+        assert ei.value.code == 2, name
+        captured = capsys.readouterr()
+        err = captured.err.lower()
+        assert "unrecognized" in err and "--watch" in err, name
+        assert "not found" not in err, name
+        assert captured.out.strip() == "", name
+        assert watch.is_file(), name
+        assert watch.read_text(encoding="utf-8") == src, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+
+
 
