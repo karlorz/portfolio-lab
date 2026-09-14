@@ -53357,4 +53357,42 @@ def test_cli_idle_decode_watch_parent_escape_fail_closed_tmp(tmp_path: Path):
     assert escape_path in plan.read_text(encoding="utf-8")
 
 
+def test_cli_idle_decode_watch_heading_case_fail_closed_tmp(tmp_path: Path):
+    """Fixture leftover (not watch_parent_escape path; not argparse; not Beat N; not Session B impl): idle-decode fail-closed when Watch heading is lowercase ## watch."""
+    import re
+
+    from src.research_implement.__main__ import main
+
+    src = _load("two_queue_sections.md")
+    unused = tmp_path / "two_queue_watch_heading_case.unused.md"
+    unused.write_text(src, encoding="utf-8")
+    title_re = re.compile(r"^##[ \t]+Watch\s*$", re.M)
+    lower_re = re.compile(r"^##[ \t]+watch\s*$", re.M)
+    assert len(title_re.findall(src)) == 1
+    lowered = title_re.sub("## watch", src, count=1)
+    assert len(title_re.findall(lowered)) == 0
+    assert len(lower_re.findall(lowered)) == 1
+    assert lowered.count("## Queue") == 2
+    assert "## Heartbeat" in lowered
+    assert "BEAT21_WATCH_MARKER" in lowered
+    assert "BEAT21_HEARTBEAT_MARKER" in lowered
+    plan = tmp_path / "two_queue_watch_heading_case.md"
+    plan.write_text(lowered, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+    assert plan.read_text(encoding="utf-8") == lowered
+    assert unused.read_text(encoding="utf-8") == src
+    assert len(title_re.findall(unused.read_text(encoding="utf-8"))) == 1
+    assert len(lower_re.findall(plan.read_text(encoding="utf-8"))) == 1
+    assert len(title_re.findall(plan.read_text(encoding="utf-8"))) == 0
+
+
 
