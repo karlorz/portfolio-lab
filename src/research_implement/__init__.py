@@ -672,6 +672,7 @@ Beat 597: session-b --decode-only --json empty→idle / one_open→Q1 / two_queu
 Beat 598: multi-fixture idle idle-decode vs session-b --dry-run --json (promotes Beat 115 leftover after Beat 114 closed at 597): idle-decode→idle plan UNCHANGED. Contrast Beat 115 (session-a stub JSON matrix) + Beat 595 (idle decode-only family). Proof: pytest ``-k beat598``.
 Beat 599: multi-fixture non-pickable idle-decode vs session-b --dry-run --json stays idle (parallel Beat 598; Beat 115 leftover): both idle. Contrast Beat 115 (session-a stub idle) + Beat 596 (nonpick decode-only family). Proof: pytest ``-k beat599``.
 Beat 600: session-a --stub|--no-stub --json CLI matrix via tmp_path + multi-fixture pickable (closes Beat 115 leftover after Beat 598/599): empty stub→queued tmp write; one_open→light; two_queue / empty --no-stub→failed; idle-decode→picked item_id Q3/Q1/Q1/Q2/Q1; --dry-run→dry_run same. Contrast Beat 115 (stub JSON matrix) + Beat 597 (pickable decode-only close). Proof: pytest ``-k beat600``.
+Beat 601: multi-fixture idle idle-decode vs session-b --dry-run --json (promotes Beat 116 leftover after Beat 115 closed at 600): idle-decode→idle plan UNCHANGED. Contrast Beat 116 (dry-run JSON matrix) + Beat 598 (idle Beat 115 family). Proof: pytest ``-k beat601``.
 Beat 200: milestone — CLI help + public API export smoke through beat200. Proof: pytest ``-k beat200``.
 """
 
