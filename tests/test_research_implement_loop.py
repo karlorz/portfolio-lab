@@ -7,7 +7,7 @@ contract tests in ``test_research_implement_loop_contract.py`` remain unchanged.
 from __future__ import annotations
 
 import json
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -53461,4 +53461,37 @@ def test_cli_idle_decode_fail_closed_json_not_array_tmp(tmp_path: Path):
     assert "BEAT21_HEARTBEAT_MARKER" in unused.read_text(encoding="utf-8")
 
 
+def test_cli_idle_decode_fail_closed_json_stderr_empty_tmp(tmp_path: Path):
+    """Stream leftover (not json_not_array stdout-shape; not json_plain; not Beat N; not Session B impl): idle-decode fail-closed --json writes the JSON object to stdout only; stderr stays empty."""
+    from src.research_implement.__main__ import main
+
+    src = _load("two_queue_sections.md")
+    unused = tmp_path / "two_queue_json_stderr.unused.md"
+    unused.write_text(src, encoding="utf-8")
+    plan = tmp_path / "two_queue_json_stderr.md"
+    plan.write_text(src, encoding="utf-8")
+    out_buf = StringIO()
+    err_buf = StringIO()
+    with redirect_stdout(out_buf), redirect_stderr(err_buf):
+        rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    out = out_buf.getvalue()
+    err = err_buf.getvalue()
+    payload = json.loads(out)
+    assert rc == 1
+    assert err == ""
+    assert "[" not in err
+    assert "{" not in err
+    assert isinstance(payload, dict)
+    assert not isinstance(payload, list)
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+    assert plan.read_text(encoding="utf-8") == src
+    assert unused.read_text(encoding="utf-8") == src
+    assert "## Watch" in unused.read_text(encoding="utf-8")
+    assert "## Heartbeat" in unused.read_text(encoding="utf-8")
+    assert "BEAT21_WATCH_MARKER" in unused.read_text(encoding="utf-8")
+    assert "BEAT21_HEARTBEAT_MARKER" in unused.read_text(encoding="utf-8")
 
