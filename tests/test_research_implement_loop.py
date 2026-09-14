@@ -6900,7 +6900,7 @@ def test_beat113_idle_decode_cli_json_matrix(tmp_path: Path, capsys):
 def test_beat113_makefile_echo_mentions_beat113():
     """Beat 113: Makefile suite echo includes beat113 or the current beat range."""
     text = Path("Makefile").read_text(encoding="utf-8")
-    assert "beat10…beat605" in text or "beat10…beat604" in text or "beat113" in text
+    assert "beat10…beat606" in text or "beat10…beat605" in text or "beat113" in text
 
 def test_beat114_session_b_decode_only_cli_json_matrix(tmp_path: Path, capsys):
     """Beat 114: session-b --decode-only --json empty→idle; one_open→Q1; two_queue→failed."""
@@ -6932,7 +6932,7 @@ def test_beat114_session_b_decode_only_cli_json_matrix(tmp_path: Path, capsys):
 def test_beat114_makefile_echo_mentions_beat114():
     """Beat 114: Makefile suite echo includes beat114 or the current beat range."""
     text = Path("Makefile").read_text(encoding="utf-8")
-    assert "beat10…beat605" in text or "beat10…beat604" in text or "beat114" in text
+    assert "beat10…beat606" in text or "beat10…beat605" in text or "beat114" in text
 
 
 
@@ -45458,6 +45458,149 @@ def test_beat605_nonpickable_fixtures_session_b_dry_run_json_stub_dry_run_family
             assert "## Watch" in body, name
             assert "## Heartbeat" in body, name
             assert body.find("## Watch") < body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_beat606_pickable_session_a_stub_dry_run_json_matrix_and_idle_decode_tmp(tmp_path: Path):
+    """Beat 606: session-a --stub/--no-stub --dry-run --json matrix; pickable idle-decode still picks (closes Beat 117 leftover)."""
+    from src.research_implement.__main__ import main
+
+    empty_src = _load("empty_queue.md")
+    unused_empty = tmp_path / "empty_queue_b606.unused.md"
+    unused_empty.write_text(empty_src, encoding="utf-8")
+    empty = tmp_path / "empty_queue_b606_stub.md"
+    empty.write_text(empty_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(empty), "--stub", "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "queued"
+    assert payload["wrote_item"] is True
+    assert payload["open_count"] == 1
+    assert unused_empty.read_text(encoding="utf-8") == empty_src
+    assert empty.read_text(encoding="utf-8") == empty_src
+    assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
+
+    one_src = _load("one_open_ready.md")
+    one = tmp_path / "one_open_ready_b606_stub.md"
+    one.write_text(one_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(one), "--stub", "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "light"
+    assert payload["wrote_item"] is False
+    assert one.read_text(encoding="utf-8") == one_src
+
+    two_src = _load("two_queue_sections.md")
+    two = tmp_path / "two_queue_sections_b606_stub.md"
+    two.write_text(two_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(two), "--stub", "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["wrote_item"] is False
+    assert two.read_text(encoding="utf-8") == two_src
+
+    empty_ns = tmp_path / "empty_queue_b606_no_stub.md"
+    empty_ns.write_text(empty_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(empty_ns), "--no-stub", "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["wrote_item"] is False
+    assert empty_ns.read_text(encoding="utf-8") == empty_src
+
+    one_ns = tmp_path / "one_open_ready_b606_no_stub.md"
+    one_ns.write_text(one_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(one_ns), "--no-stub", "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "light"
+    assert payload["wrote_item"] is False
+    assert one_ns.read_text(encoding="utf-8") == one_src
+
+    cases = (
+        ("watch_lookalike", "Q3"),
+        ("one_open_ready", "Q1"),
+        ("two_open_ready", "Q1"),
+        ("mixed_priority", "Q2"),
+        ("watch_queue_heartbeat", "Q1"),
+    )
+    for name, item_id in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_idle_b606.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan = tmp_path / f"{name}_idle_b606.json.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["idle-decode", "--plan", str(plan), "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["verdict"] == "picked", name
+        assert payload["item"]["item_id"] == item_id, name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_beat606_pickable_session_b_dry_run_json_still_picks_tmp(tmp_path: Path):
+    """Beat 606: multi-fixture pickable session-b --dry-run --json still dry_run (closes Beat 117)."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        ("watch_lookalike", "Q3"),
+        ("one_open_ready", "Q1"),
+        ("two_open_ready", "Q1"),
+        ("mixed_priority", "Q2"),
+        ("watch_queue_heartbeat", "Q1"),
+    )
+    for name, item_id in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_b606_dry.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan = tmp_path / f"{name}_b606_dry.json.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "dry_run", name
+        assert payload["item"]["item_id"] == item_id, name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
         assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
 
 
