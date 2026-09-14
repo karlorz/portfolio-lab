@@ -6900,7 +6900,7 @@ def test_beat113_idle_decode_cli_json_matrix(tmp_path: Path, capsys):
 def test_beat113_makefile_echo_mentions_beat113():
     """Beat 113: Makefile suite echo includes beat113 or the current beat range."""
     text = Path("Makefile").read_text(encoding="utf-8")
-    assert "beat10…beat217" in text or "beat113" in text
+    assert "beat10…beat218" in text or "beat113" in text
 
 def test_beat114_session_b_decode_only_cli_json_matrix(tmp_path: Path, capsys):
     """Beat 114: session-b --decode-only --json empty→idle; one_open→Q1; two_queue→failed."""
@@ -6932,7 +6932,7 @@ def test_beat114_session_b_decode_only_cli_json_matrix(tmp_path: Path, capsys):
 def test_beat114_makefile_echo_mentions_beat114():
     """Beat 114: Makefile suite echo includes beat114 or the current beat range."""
     text = Path("Makefile").read_text(encoding="utf-8")
-    assert "beat10…beat217" in text or "beat114" in text
+    assert "beat10…beat218" in text or "beat114" in text
 
 
 
@@ -16801,6 +16801,105 @@ def test_beat217_idle_fixtures_session_a_directory_candidate_json_dry_run_fails_
             assert "## Heartbeat" in body, name
         if name == "watch_heartbeat_no_queue":
             assert "## Queue" not in body, name
+        out = buf.getvalue().strip()
+        assert out == "" or ("queued" not in out and "light" not in out), name
+        assert bad.is_dir(), name
+
+
+def test_beat218_nonpickable_fixtures_session_a_directory_candidate_json_fails_tmp(tmp_path: Path):
+    """Beat 218: multi-fixture non-pickable session-a --candidate-json directory --json (NO dry-run)→SystemExit; plan UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        bad = tmp_path / "cand-dir"
+        bad.mkdir(exist_ok=True)
+
+        # session-a --candidate-json directory --json (NO --dry-run) → SystemExit; plan UNCHANGED
+        # CLI load-fail (not verdict=failed JSON); parallel Beat 217 idle directory + Beat 199 nonpick missing
+        plan = tmp_path / f"{name}_a_dir_cand_live.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(
+                    [
+                        "session-a",
+                        "--plan",
+                        str(plan),
+                        "--candidate-json",
+                        str(bad),
+                        "--json",
+                    ]
+                )
+        assert ei.value.code != 0, name
+        msg = str(ei.value)
+        assert "--candidate-json" in msg, name
+        assert "not a file" in msg.lower(), name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+        out = buf.getvalue().strip()
+        assert out == "" or ("queued" not in out and "light" not in out), name
+        assert bad.is_dir(), name
+
+
+def test_beat218_nonpickable_fixtures_session_a_directory_candidate_json_dry_run_fails_tmp(tmp_path: Path):
+    """Beat 218: multi-fixture non-pickable session-a --candidate-json directory --dry-run --json→SystemExit; plan UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        bad = tmp_path / "cand-dir"
+        bad.mkdir(exist_ok=True)
+
+        # session-a --candidate-json directory --dry-run --json → SystemExit; plan UNCHANGED
+        # dry-run does not skip the directory load
+        plan = tmp_path / f"{name}_a_dir_cand_dry.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(
+                    [
+                        "session-a",
+                        "--plan",
+                        str(plan),
+                        "--candidate-json",
+                        str(bad),
+                        "--dry-run",
+                        "--json",
+                    ]
+                )
+        assert ei.value.code != 0, name
+        msg = str(ei.value)
+        assert "--candidate-json" in msg, name
+        assert "not a file" in msg.lower(), name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
         out = buf.getvalue().strip()
         assert out == "" or ("queued" not in out and "light" not in out), name
         assert bad.is_dir(), name

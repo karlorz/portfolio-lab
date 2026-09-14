@@ -1000,7 +1000,7 @@ research-implement-e2e-pipeline:
 	@echo "  A stub → B dry_run JSON → B fixture_ship → A light (OPEN>=1) and/or B idle"
 	@echo "  dry_run never ships; fixture_ship ships on tmp_path only; never scheduler_delete"
 	@echo "Run: PORTFOLIO_LAB_ENABLE_ML=0 <RI_PYTHON> -m pytest tests/test_research_implement_loop.py -q -k beat11_full_pipeline"
-	@echo "Or:  make test-research-implement   # full A/B suite incl. beat10…beat217"
+	@echo "Or:  make test-research-implement   # full A/B suite incl. beat10…beat218"
 
 # Side-dev only (no Tasker / no LLM / no 8000/8001): A/B loop + contract
 # fixture tests + optional host contract (skip-if-missing).
