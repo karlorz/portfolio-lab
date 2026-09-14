@@ -688,6 +688,7 @@ Beat 613: multi-fixture idle idle-decode vs session-b --dry-run --json (promotes
 Beat 614: multi-fixture non-pickable idle-decode vs session-b --dry-run --json stays idle (parallel Beat 613; Beat 120 leftover): both idle. Contrast Beat 120 (CLI help milestone idle) + Beat 611 (nonpick Beat 119 family). Proof: pytest ``-k beat614``.
 Beat 615: top-level --help + public API milestone via tmp_path + multi-fixture pickable (closes Beat 120 leftover after Beat 613/614): help lists session-a/session-b/idle-decode; ``__all__`` exports remain; idle-decode→picked item_id Q3/Q1/Q1/Q2/Q1; --dry-run→dry_run same. Contrast Beat 120 (CLI help + public API milestone) + Beat 612 (pickable Beat 119 close). Proof: pytest ``-k beat615``.
 Beat 616: multi-fixture idle idle-decode vs session-b --dry-run --json (promotes Beat 121 leftover after Beat 120 closed at 615): idle-decode→idle plan UNCHANGED. Contrast Beat 121 (session-a stub Watch JSON matrix) + Beat 613 (idle Beat 120 family). Proof: pytest ``-k beat616``.
+Beat 617: multi-fixture non-pickable idle-decode vs session-b --dry-run --json stays idle (parallel Beat 616; Beat 121 leftover): both idle. Contrast Beat 121 (session-a stub Watch JSON idle) + Beat 614 (nonpick Beat 120 family). Proof: pytest ``-k beat617``.
 Beat 200: milestone — CLI help + public API export smoke through beat200. Proof: pytest ``-k beat200``.
 """
 
