@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import {
@@ -44,11 +44,21 @@ import { DecisionRegistrySchema } from '../../src/schemas/decision_registry';
 //
 // CI-vs-live contract: public/data/ seeds are generated payloads, untracked
 // by design since fda0020 — a fresh CI clone has zero seed files, so the
-// parse gate cannot run there. Skip the whole test when the seed SET is
-// absent; on hosts WITH seeds the gate stays strict — any file missing
-// mid-set is still a drift failure, never a silent per-file skip.
+// parse gate cannot run there. Skip the whole test when the published seed
+// SET is absent (no signals.json). A leftover file such as only
+// tasker_status.json is not a published set — treating `readdirSync.length > 0`
+// as present caused ENOENT on side-dev. On hosts WITH signals.json the gate
+// stays strict: any contracted file missing mid-set is a drift failure
+// (`${file}: missing`), never a silent per-file skip, and payloads still
+// parse with the exact frontend schema.
 const SEED_DIR = new URL('../../public/data/', import.meta.url).pathname;
-const SEED_SET_PRESENT = existsSync(SEED_DIR) && readdirSync(SEED_DIR).length > 0;
+const PUBLISHED_SEED_SENTINEL = 'signals.json';
+
+export function publishedSeedSetPresent(dir: string, sentinel = PUBLISHED_SEED_SENTINEL): boolean {
+  return existsSync(join(dir, sentinel));
+}
+
+const SEED_SET_PRESENT = publishedSeedSetPresent(SEED_DIR);
 
 const checks: [string, z.ZodType][] = [
   ['signals.json', SignalsDataSchema],
@@ -77,21 +87,32 @@ const checks: [string, z.ZodType][] = [
 ];
 
 describe('published data seed ↔ frontend schema parity', () => {
+  it('does not treat a leftover partial public/data dir as a published seed set', () => {
+    // Side-dev / CI: tasker_status.json alone must skip, not ENOENT signals.json.
+    expect(SEED_SET_PRESENT).toBe(existsSync(join(SEED_DIR, PUBLISHED_SEED_SENTINEL)));
+    expect(publishedSeedSetPresent('/tmp/data-schema-parity-missing-dir')).toBe(false);
+  });
+
   it(`parses all ${checks.length} seeded payloads with their exact frontend schemas`, () => {
     if (!SEED_SET_PRESENT) {
-      // Fresh CI clone: public/data/ seeds are generated payloads,
-      // untracked by design since fda0020. Skip cleanly — the live-parity
-      // gate activates on hosts where payloads are published (dev host,
-      // production). Do NOT convert to per-file `if exists` parsing, which
-      // would let partial seed sets drift silently on hosts WITH seeds.
+      // Fresh CI clone or leftover-only dir: public/data/ seeds are generated
+      // payloads, untracked by design since fda0020. Skip cleanly — the
+      // live-parity gate activates on hosts where signals.json is published.
+      // Do NOT convert to per-file `if exists` parsing on those hosts, which
+      // would let partial seed sets drift silently.
       console.warn(
-        `[data-schema-parity] skip: no public/data/ seeds at ${SEED_DIR} — live-parity gate activates where payloads are published`,
+        `[data-schema-parity] skip: no published ${PUBLISHED_SEED_SENTINEL} at ${SEED_DIR} — live-parity gate activates where payloads are published`,
       );
       return;
     }
     const failures: string[] = [];
     for (const [file, schema] of checks) {
-      const raw = JSON.parse(readFileSync(join(SEED_DIR, file), 'utf8')) as unknown;
+      const path = join(SEED_DIR, file);
+      if (!existsSync(path)) {
+        failures.push(`${file}: missing`);
+        continue;
+      }
+      const raw = JSON.parse(readFileSync(path, 'utf8')) as unknown;
       const parsed = schema.safeParse(raw);
       if (!parsed.success) {
         failures.push(`${file}: ${JSON.stringify(parsed.error.issues?.[0] ?? parsed.error).slice(0, 180)}`);

@@ -9,7 +9,7 @@ import logging
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from src.paths import (
     DATA_DIR as _DATA_DIR,
@@ -30,23 +30,38 @@ WORK_DIR = _WORK_DIR
 DB_PATH = MARKET_DB
 
 
-def _ensure_default_work_dir_has_vault() -> None:
+def _ensure_default_work_dir_has_vault() -> bool:
     """Default SkillWiki-backed work dir must resolve before it is created."""
     if WORK_DIR == _PROJECT_WORK_DIR:
-        _require_project_wiki_dir()
+        try:
+            _require_project_wiki_dir()
+        except RuntimeError as e:
+            logger.warning("Wiki work dir not available (fail-soft): %s", e)
+            return False
+    return True
 
 
-def _ensure_default_wiki_dir_has_vault() -> None:
+def _ensure_default_wiki_dir_has_vault() -> bool:
     """Default SkillWiki-backed wiki dir must resolve before write operations."""
     if WIKI_DIR == _PROJECT_WIKI_DIR:
-        _require_project_wiki_dir()
+        try:
+            _require_project_wiki_dir()
+        except RuntimeError as e:
+            logger.warning("Wiki dir not available (fail-soft): %s", e)
+            return False
+    return True
 
 
 class ResearchAgent:
     def __init__(self):
         self._conn = None
-        _ensure_default_work_dir_has_vault()
-        WORK_DIR.mkdir(parents=True, exist_ok=True)
+        self.vault_available = _ensure_default_work_dir_has_vault()
+        if self.vault_available:
+            try:
+                WORK_DIR.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                logger.warning("Could not create work dir in wiki vault: %s", e)
+                self.vault_available = False
 
     @property
     def conn(self):
@@ -188,14 +203,19 @@ class ResearchAgent:
             })
         
         # Save work item for Claude Code
+        if not self.vault_available:
+            logger.info("Wiki work dir unavailable; skipping save_work_item")
+            return None
         work_file = WORK_DIR / f"claude_{work_item['id']}.json"
         save_results_json(work_item, output_path=str(work_file))
         
         return work_file
     
-    def crystallize_to_wiki(self, analysis: Dict) -> Path:
+    def crystallize_to_wiki(self, analysis: Dict) -> Optional[Path]:
         """Save research findings to wiki compound page."""
-        _ensure_default_wiki_dir_has_vault()
+        if not _ensure_default_wiki_dir_has_vault():
+            logger.info("Wiki vault unavailable; skipping crystallize to wiki")
+            return None
         timestamp = datetime.now().strftime("%Y-%m-%d")
         page_path = WIKI_DIR / "compound" / f"regime-analysis-{timestamp}.md"
         

@@ -18,16 +18,35 @@ A4 float-tolerance policy.
 """
 from __future__ import annotations
 
-import sys
+import ast
 from pathlib import Path
 
+_WF_PATH = Path(__file__).resolve().parent.parent / "scripts" / "walk_forward_validation.py"
 
-# Ensure project root is on sys.path (mirrors test_walk_forward_validation.py)
-_project_root = str(Path(__file__).resolve().parent.parent)
-if _project_root not in sys.path:
-    sys.path.insert(0, _project_root)
 
-from scripts.walk_forward_validation import GRID_CONFIGS  # noqa: E402
+def _load_grid_configs_from_script() -> list[dict[str, float]]:
+    """Load GRID_CONFIGS without importing sklearn/scipy.
+
+    ``scripts/walk_forward_validation.py`` imports TimeSeriesSplit at
+    module level. That prefix is ML-gate-safe, but sklearn's ``__init__``
+    still loads scipy native libs. On this host that import fails
+    (``libgcc_s`` ``GCC_4.8.0``). The pin only needs
+    ``generate_grid_configs`` from the script source.
+    """
+    src = _WF_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(src, filename=str(_WF_PATH))
+    fn_node = None
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == "generate_grid_configs":
+            fn_node = node
+            break
+    assert fn_node is not None, "generate_grid_configs not found in walk_forward_validation.py"
+    ns: dict = {}
+    exec(compile(ast.Module(body=[fn_node], type_ignores=[]), str(_WF_PATH), "exec"), ns)
+    return ns["generate_grid_configs"]()
+
+
+GRID_CONFIGS = _load_grid_configs_from_script()
 
 # ---------------------------------------------------------------------------
 # TS region mirror — source of truth: src/backtest/grid-search.ts

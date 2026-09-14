@@ -101,7 +101,7 @@ cli_entry_override:
 
 Python tests run through `make test` with ML disabled and a 3GB cap; use the
 latest test output for the exact collected count.
-TypeScript inventory: 39 test files (`bun test tests/ts/`).
+TypeScript inventory: 51 test files (`bun test tests/ts/`).
 Run via `make test` (ML disabled) or `make test-ml`.
 
 ## E2E
