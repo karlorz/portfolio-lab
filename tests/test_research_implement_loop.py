@@ -53560,3 +53560,46 @@ def test_cli_idle_decode_fail_closed_json_no_sidecar_tmp(tmp_path: Path):
     assert "BEAT21_WATCH_MARKER" in unused.read_text(encoding="utf-8")
     assert "BEAT21_HEARTBEAT_MARKER" in unused.read_text(encoding="utf-8")
 
+
+def test_cli_idle_decode_fail_closed_json_unknown_status_enum_tmp(tmp_path: Path):
+    """Enum leftover (not missing_status missing-key; not no_sidecar filesystem; not Beat N; not Session B impl): idle-decode fail-closed when plan Queue status is an unknown string; --json verdict stays the known enum `failed`."""
+    from src.research_implement.__main__ import main
+
+    unknown = "NOT_A_REAL_ENUM"
+    known_verdicts = {"idle", "picked", "dry_run", "shipped", "refused", "failed"}
+    src = _load("two_queue_sections.md")
+    unused = tmp_path / "two_queue_json_unknown_status.unused.md"
+    unused.write_text(src, encoding="utf-8")
+    mutated = src.replace("status: OPEN", f"status: {unknown}")
+    assert mutated.count(f"status: {unknown}") == 2
+    assert "status: OPEN" not in mutated
+    assert "status: living" in mutated
+    assert mutated.count("## Queue") == 2
+    assert "## Watch" in mutated
+    assert "## Heartbeat" in mutated
+    plan = tmp_path / "two_queue_json_unknown_status.md"
+    plan.write_text(mutated, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] in known_verdicts
+    assert payload["verdict"] == "failed"
+    assert payload["verdict"] != unknown
+    assert payload["item"] is None
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+    dumped = json.dumps(payload)
+    assert unknown not in dumped
+    assert plan.read_text(encoding="utf-8") == mutated
+    assert unused.read_text(encoding="utf-8") == src
+    assert f"status: {unknown}" not in unused.read_text(encoding="utf-8")
+    assert "status: OPEN" in unused.read_text(encoding="utf-8")
+    assert "## Watch" in unused.read_text(encoding="utf-8")
+    assert "## Heartbeat" in unused.read_text(encoding="utf-8")
+    assert "BEAT21_WATCH_MARKER" in unused.read_text(encoding="utf-8")
+    assert "BEAT21_HEARTBEAT_MARKER" in unused.read_text(encoding="utf-8")
+
