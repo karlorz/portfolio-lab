@@ -53679,3 +53679,35 @@ def test_cli_idle_decode_fail_closed_plain_tmp(tmp_path: Path):
     assert "BEAT21_WATCH_MARKER" in unused.read_text(encoding="utf-8")
     assert "BEAT21_HEARTBEAT_MARKER" in unused.read_text(encoding="utf-8")
 
+
+def test_cli_idle_decode_fail_closed_cwd_unchanged_tmp(tmp_path: Path):
+    """Process leftover cwd_unchanged (not fail_closed_plain human-message; not plan_log_mtime stat; not Beat N; not Session B impl): idle-decode fail-closed --json does not chdir."""
+    import os
+
+    from src.research_implement.__main__ import main
+
+    src = _load("two_queue_sections.md")
+    unused = tmp_path / "two_queue_cwd_unchanged.unused.md"
+    unused.write_text(src, encoding="utf-8")
+    plan = tmp_path / "two_queue_cwd_unchanged.md"
+    plan.write_text(src, encoding="utf-8")
+    before = os.getcwd()
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert os.getcwd() == before
+    assert Path.cwd() == Path(before)
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+    assert plan.read_text(encoding="utf-8") == src
+    assert unused.read_text(encoding="utf-8") == src
+    assert "## Watch" in unused.read_text(encoding="utf-8")
+    assert "## Heartbeat" in unused.read_text(encoding="utf-8")
+    assert "BEAT21_WATCH_MARKER" in unused.read_text(encoding="utf-8")
+    assert "BEAT21_HEARTBEAT_MARKER" in unused.read_text(encoding="utf-8")
+
