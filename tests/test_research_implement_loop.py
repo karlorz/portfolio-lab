@@ -53649,3 +53649,33 @@ def test_cli_idle_decode_fail_closed_plan_log_mtime_unchanged_tmp(tmp_path: Path
     assert "BEAT21_WATCH_MARKER" in plan.read_text(encoding="utf-8")
     assert "BEAT21_HEARTBEAT_MARKER" in log.read_text(encoding="utf-8")
 
+
+def test_cli_idle_decode_fail_closed_plain_tmp(tmp_path: Path):
+    """Output leftover fail_closed_plain (not plan_log_mtime stat; not json_not_array type-shape; not json_plain argparse; not Beat N; not Session B impl): idle-decode fail-closed without --json prints a human failed; message, not JSON."""
+    from src.research_implement.__main__ import main
+
+    src = _load("two_queue_sections.md")
+    unused = tmp_path / "two_queue_fail_closed_plain.unused.md"
+    unused.write_text(src, encoding="utf-8")
+    plan = tmp_path / "two_queue_fail_closed_plain.md"
+    plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(plan)])
+    out = buf.getvalue()
+    stripped = out.lstrip()
+    assert rc == 1
+    assert stripped.startswith("failed;")
+    assert "keep_schedule" in out
+    assert render_queue_count(0) in out
+    assert not stripped.startswith("{")
+    assert not stripped.startswith("[")
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(out)
+    assert plan.read_text(encoding="utf-8") == src
+    assert unused.read_text(encoding="utf-8") == src
+    assert "## Watch" in unused.read_text(encoding="utf-8")
+    assert "## Heartbeat" in unused.read_text(encoding="utf-8")
+    assert "BEAT21_WATCH_MARKER" in unused.read_text(encoding="utf-8")
+    assert "BEAT21_HEARTBEAT_MARKER" in unused.read_text(encoding="utf-8")
+
