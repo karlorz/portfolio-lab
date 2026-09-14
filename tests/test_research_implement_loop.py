@@ -53086,4 +53086,48 @@ def test_cli_session_b_dry_run_watch_existing_plain_idle_tmp(tmp_path: Path, cap
             assert "## Queue" not in src, name
 
 
+def test_cli_idle_decode_missing_watch_section_fail_closed_tmp(tmp_path: Path):
+    """Fixture leftover (not watch_existing argparse; not Beat N; not Session B impl): idle-decode fail-closed when ## Watch is missing."""
+    import re
+
+    from src.research_implement.__main__ import main
+
+    src = _load("two_queue_sections.md")
+    unused = tmp_path / "two_queue_missing_watch.unused.md"
+    unused.write_text(src, encoding="utf-8")
+    assert "## Watch" in src
+    lines: list[str] = []
+    skipping = False
+    for line in src.splitlines(keepends=True):
+        if re.match(r"^##[ \t]+Watch\s*$", line):
+            skipping = True
+            continue
+        if skipping and re.match(r"^##[ \t]+", line):
+            skipping = False
+        if not skipping:
+            lines.append(line)
+    stripped = "".join(lines)
+    assert "## Watch" not in stripped
+    assert stripped.count("## Queue") == 2
+    assert "## Heartbeat" in stripped
+    assert "BEAT21_WATCH_MARKER" not in stripped
+    assert "BEAT21_HEARTBEAT_MARKER" in stripped
+    plan = tmp_path / "two_queue_missing_watch.md"
+    plan.write_text(stripped, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+    assert plan.read_text(encoding="utf-8") == stripped
+    assert unused.read_text(encoding="utf-8") == src
+    assert "## Watch" in unused.read_text(encoding="utf-8")
+    assert "## Watch" not in plan.read_text(encoding="utf-8")
+
+
 
