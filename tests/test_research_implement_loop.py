@@ -52932,4 +52932,59 @@ def test_cli_idle_decode_heartbeat_no_watch_plain_idle_tmp(tmp_path: Path, capsy
             assert "## Queue" not in src, name
 
 
+def test_cli_idle_decode_fail_closed_unused_session_b_copies_unchanged_tmp(
+    tmp_path: Path,
+):
+    """Isolation leftover (not heartbeat_no_watch; not Beat N; not Session B impl): idle-decode fail-closed leaves unused Session B copies UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+        "watch_queue_heartbeat",
+    }
+    unused_names = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+        "one_open_ready",
+        "watch_queue_heartbeat",
+    )
+    unused_b: dict[str, tuple[Path, str]] = {}
+    for name in unused_names:
+        src = _load(f"{name}.md")
+        copy = tmp_path / f"{name}_session_b.unused.md"
+        copy.write_text(src, encoding="utf-8")
+        unused_b[name] = (copy, src)
+
+    fail_src = _load("two_queue_sections.md")
+    plan = tmp_path / "two_queue_idle_decode.fail.md"
+    plan.write_text(fail_src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+    assert plan.read_text(encoding="utf-8") == fail_src
+
+    for name, (copy, src) in unused_b.items():
+        body = copy.read_text(encoding="utf-8")
+        assert body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in body, name
+        if name == "watch_queue_heartbeat":
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+
+
 
