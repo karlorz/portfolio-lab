@@ -53223,4 +53223,49 @@ def test_cli_idle_decode_empty_watch_body_fail_closed_tmp(tmp_path: Path):
     assert "BEAT21_WATCH_MARKER" not in plan.read_text(encoding="utf-8")
 
 
+def test_cli_idle_decode_dup_watch_section_fail_closed_tmp(tmp_path: Path):
+    """Fixture leftover (not empty_watch_body; not missing_watch; not argparse; not Beat N; not Session B impl): idle-decode fail-closed when ## Watch heading is duplicated."""
+    import re
+
+    from src.research_implement.__main__ import main
+
+    src = _load("two_queue_sections.md")
+    unused = tmp_path / "two_queue_dup_watch.unused.md"
+    unused.write_text(src, encoding="utf-8")
+    heading_re = re.compile(r"^##[ \t]+Watch\s*$", re.M)
+    assert len(heading_re.findall(src)) == 1
+    dup_block = (
+        "\n## Watch\n\n"
+        "BEAT21_WATCH_DUP_MARKER\n"
+        "| Row | Why not queued |\n"
+        "|---|---|\n"
+        "| **beat21-watch-dup** | duplicate Watch heading |\n\n"
+    )
+    first_queue = src.find("## Queue")
+    assert first_queue != -1
+    duplicated = src[:first_queue] + dup_block + src[first_queue:]
+    assert len(heading_re.findall(duplicated)) == 2
+    assert duplicated.count("## Queue") == 2
+    assert "## Heartbeat" in duplicated
+    assert "BEAT21_WATCH_MARKER" in duplicated
+    assert "BEAT21_WATCH_DUP_MARKER" in duplicated
+    assert "BEAT21_HEARTBEAT_MARKER" in duplicated
+    plan = tmp_path / "two_queue_dup_watch.md"
+    plan.write_text(duplicated, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+    assert plan.read_text(encoding="utf-8") == duplicated
+    assert unused.read_text(encoding="utf-8") == src
+    assert len(heading_re.findall(unused.read_text(encoding="utf-8"))) == 1
+    assert len(heading_re.findall(plan.read_text(encoding="utf-8"))) == 2
+
+
 
