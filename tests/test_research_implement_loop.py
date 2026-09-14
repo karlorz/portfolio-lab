@@ -5160,7 +5160,7 @@ def test_beat62_not_ready_dry_run_idle(tmp_path: Path, capsys):
 def test_beat62_next_queue_id_still_exported():
     """Beat 62: next_queue_id remains public and advances past existing Q ids."""
     import src.research_implement as ri
-    from src.research_implement.queue import QueueItem, next_queue_id, parse_queue_items
+    from src.research_implement.queue import next_queue_id, parse_queue_items
 
     assert hasattr(ri, "next_queue_id")
     assert "next_queue_id" in getattr(ri, "__all__", ())

@@ -495,7 +495,7 @@ def run_black_litterman(
     Returns:
         BLResult with posterior returns, optimized weights, and metrics.
     """
-    from pypfopt import BlackLittermanModel, EfficientFrontier
+    from pypfopt import BlackLittermanModel
 
     symbols = views.symbols
     n_assets = len(symbols)
