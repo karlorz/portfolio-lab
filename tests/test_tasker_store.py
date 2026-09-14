@@ -311,12 +311,17 @@ def test_prune_run_skips_unreadable_log_file(tmp_path, monkeypatch):
     run_ids = _seed_runs(store, "portfolio-lab-health", 25)
     unreadable_id = run_ids[0]
     unreadable_path = Path(store.log_dir / f"{unreadable_id}.log")
+    # Resolve BEFORE patching Path.stat — Path.resolve() calls Path.stat and
+    # recurses into fake_stat (INTERNALERROR / RecursionError on 3.12).
+    import os
+
+    unreadable_key = os.path.realpath(os.fspath(unreadable_path))
 
     orig_stat = Path.stat
 
     def fake_stat(self, *args, **kwargs):
-        if self.resolve() == unreadable_path.resolve():
-            raise PermissionError(13, "Permission denied", str(self))
+        if os.path.realpath(os.fspath(self)) == unreadable_key:
+            raise PermissionError(13, "Permission denied", os.fspath(self))
         return orig_stat(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "stat", fake_stat)
