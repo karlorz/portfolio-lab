@@ -53174,4 +53174,53 @@ def test_cli_idle_decode_missing_heartbeat_section_fail_closed_tmp(tmp_path: Pat
     assert "## Heartbeat" not in plan.read_text(encoding="utf-8")
 
 
+def test_cli_idle_decode_empty_watch_body_fail_closed_tmp(tmp_path: Path):
+    """Fixture leftover (not missing_watch heading; not argparse; not Beat N; not Session B impl): idle-decode fail-closed when ## Watch heading exists with empty body."""
+    import re
+
+    from src.research_implement.__main__ import main
+
+    src = _load("two_queue_sections.md")
+    unused = tmp_path / "two_queue_empty_watch_body.unused.md"
+    unused.write_text(src, encoding="utf-8")
+    assert "## Watch" in src
+    assert "BEAT21_WATCH_MARKER" in src
+    lines: list[str] = []
+    emptying = False
+    for line in src.splitlines(keepends=True):
+        if re.match(r"^##[ \t]+Watch\s*$", line):
+            lines.append(line)
+            emptying = True
+            continue
+        if emptying and re.match(r"^##[ \t]+", line):
+            emptying = False
+        if emptying:
+            continue
+        lines.append(line)
+    emptied = "".join(lines)
+    assert "## Watch" in emptied
+    assert "BEAT21_WATCH_MARKER" not in emptied
+    assert "beat21-watch-row" not in emptied
+    assert emptied.count("## Queue") == 2
+    assert "## Heartbeat" in emptied
+    assert "BEAT21_HEARTBEAT_MARKER" in emptied
+    plan = tmp_path / "two_queue_empty_watch_body.md"
+    plan.write_text(emptied, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+    assert plan.read_text(encoding="utf-8") == emptied
+    assert unused.read_text(encoding="utf-8") == src
+    assert "BEAT21_WATCH_MARKER" in unused.read_text(encoding="utf-8")
+    assert "## Watch" in plan.read_text(encoding="utf-8")
+    assert "BEAT21_WATCH_MARKER" not in plan.read_text(encoding="utf-8")
+
+
 
