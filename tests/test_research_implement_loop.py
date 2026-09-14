@@ -52697,5 +52697,81 @@ def test_cli_idle_decode_json_plain_order_pickable_tmp(tmp_path: Path, capsys):
             assert "BEAT19_HEARTBEAT_MARKER" in body, name
 
 
+def test_cli_idle_decode_absent_watch_json_idle_tmp(tmp_path: Path, capsys):
+    """CLI leftover (not missing --plan/--log; not Beat N): idle --watch missing path --json; unrecognized, not not-found."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_absent_watch.json.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan = tmp_path / f"{name}_absent_watch.json.md"
+        plan.write_text(src, encoding="utf-8")
+        missing = tmp_path / f"{name}_no_such_watch.md"
+        assert not missing.exists(), name
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--plan", str(plan), "--watch", str(missing), "--json"])
+        assert ei.value.code == 2, name
+        captured = capsys.readouterr()
+        err = captured.err.lower()
+        assert "unrecognized" in err and "--watch" in err, name
+        assert "not found" not in err, name
+        assert captured.out.strip() == "", name
+        assert not missing.exists(), name
+        assert plan.read_text(encoding="utf-8") == src, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+
+
+def test_cli_idle_decode_absent_watch_plain_idle_tmp(tmp_path: Path, capsys):
+    """CLI leftover pair: idle --watch missing path without --json; unrecognized, unused copy UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_absent_watch.plain.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan = tmp_path / f"{name}_absent_watch.plain.md"
+        plan.write_text(src, encoding="utf-8")
+        missing = tmp_path / f"{name}_no_such_watch_plain.md"
+        assert not missing.exists(), name
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--plan", str(plan), "--watch", str(missing)])
+        assert ei.value.code == 2, name
+        captured = capsys.readouterr()
+        err = captured.err.lower()
+        assert "unrecognized" in err and "--watch" in err, name
+        assert "not found" not in err, name
+        assert captured.out.strip() == "", name
+        assert not missing.exists(), name
+        assert plan.read_text(encoding="utf-8") == src, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+
+
 
 
