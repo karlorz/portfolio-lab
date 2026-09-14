@@ -703,6 +703,7 @@ Beat 594: idle-decode ``--json`` empty→idle / mixed→Q2 / two_queue→failed 
 Beat 595: multi-fixture **idle** idle-decode vs session-b ``--dry-run --json`` (promotes Beat 114 leftover after Beat 113 closed at 594): idle-decode→idle plan UNCHANGED. Contrast Beat 114 (decode-only CLI) + Beat 592 (idle CLI matrix). Proof: pytest ``-k beat595``.
 Beat 596: multi-fixture **non-pickable** idle-decode vs session-b ``--dry-run --json`` stays idle (parallel Beat 595; Beat 114 leftover): both idle. Contrast Beat 114 (decode-only idle) + Beat 593 (nonpick CLI matrix). Proof: pytest ``-k beat596``.
 Beat 597: session-b ``--decode-only --json`` empty→idle / one_open→Q1 / two_queue→failed + multi-fixture **pickable** (closes Beat 114 leftover after Beat 595/596): keep_schedule; no scheduler_delete; plans UNCHANGED; idle-decode→picked item_id Q3/Q1/Q1/Q2/Q1; ``--dry-run``→dry_run same. Contrast Beat 114 (decode-only matrix) + Beat 594 (idle-decode matrix). Proof: pytest ``-k beat597``.
+Beat 598: multi-fixture **idle** idle-decode vs session-b ``--dry-run --json`` (promotes Beat 115 leftover after Beat 114 closed at 597): idle-decode→idle plan UNCHANGED. Contrast Beat 115 (session-a stub JSON matrix) + Beat 595 (idle decode-only family). Proof: pytest ``-k beat598``.
 Beat 200: milestone — top-level ``--help`` + public API through beat200 (A/B runners + queue/decode/serialize helpers + guards); Makefile echo reaches beat200. Proof: pytest ``-k beat200``.
 
 Session A: when OPEN is 0, uses ``--stub`` (deterministic six-field fill) or
