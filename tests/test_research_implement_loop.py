@@ -53268,4 +53268,51 @@ def test_cli_idle_decode_dup_watch_section_fail_closed_tmp(tmp_path: Path):
     assert len(heading_re.findall(plan.read_text(encoding="utf-8"))) == 2
 
 
+def test_cli_idle_decode_watch_two_paths_fail_closed_tmp(tmp_path: Path):
+    """Fixture leftover (not dup_watch heading; not empty_watch_body; not argparse; not Beat N; not Session B impl): idle-decode fail-closed when ## Watch body lists two paths."""
+    import re
+
+    from src.research_implement.__main__ import main
+
+    src = _load("two_queue_sections.md")
+    unused = tmp_path / "two_queue_watch_two_paths.unused.md"
+    unused.write_text(src, encoding="utf-8")
+    heading_re = re.compile(r"^##[ \t]+Watch\s*$", re.M)
+    assert len(heading_re.findall(src)) == 1
+    path_a = "raw/transcripts/beat21-watch-path-a.md"
+    path_b = "projects/portfolio-lab/work/beat21-watch-path-b.md"
+    extra_rows = (
+        f"| `{path_a}` | first Watch path |\n"
+        f"| `{path_b}` | second Watch path |\n"
+    )
+    first_queue = src.find("## Queue")
+    assert first_queue != -1
+    multi = src[:first_queue] + extra_rows + "\n" + src[first_queue:]
+    assert len(heading_re.findall(multi)) == 1
+    assert path_a in multi and path_b in multi
+    assert multi.count("## Queue") == 2
+    assert "## Heartbeat" in multi
+    assert "BEAT21_WATCH_MARKER" in multi
+    assert "BEAT21_HEARTBEAT_MARKER" in multi
+    plan = tmp_path / "two_queue_watch_two_paths.md"
+    plan.write_text(multi, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+    assert plan.read_text(encoding="utf-8") == multi
+    assert unused.read_text(encoding="utf-8") == src
+    unused_body = unused.read_text(encoding="utf-8")
+    assert path_a not in unused_body and path_b not in unused_body
+    assert len(heading_re.findall(plan.read_text(encoding="utf-8"))) == 1
+    assert path_a in plan.read_text(encoding="utf-8")
+    assert path_b in plan.read_text(encoding="utf-8")
+
+
 
