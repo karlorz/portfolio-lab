@@ -48548,5 +48548,452 @@ def test_cli_idle_decode_empty_plan_file_plain_pickable_tmp(tmp_path: Path, caps
             assert "BEAT19_HEARTBEAT_MARKER" in body, name
 
 
+def test_cli_idle_decode_plan_log_conflict_json_idle_tmp(tmp_path: Path, capsys):
+    """CLI leftover (not omit-both; not Beat N): idle idle-decode --plan and --log different files --json."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    other = _load("one_open_ready.md")
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_plan_log_conflict.json.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan = tmp_path / f"{name}_plan_log_conflict.plan.md"
+        log = tmp_path / f"{name}_plan_log_conflict.log.md"
+        plan.write_text(src, encoding="utf-8")
+        log.write_text(other, encoding="utf-8")
+        assert src != other, name
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--plan", str(plan), "--log", str(log), "--json"])
+        assert ei.value.code == 2, name
+        captured = capsys.readouterr()
+        err = captured.err.lower()
+        assert "not allowed" in err and "--plan" in err, name
+        assert captured.out.strip() == "", name
+        assert plan.read_text(encoding="utf-8") == src, name
+        assert log.read_text(encoding="utf-8") == other, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+
+
+def test_cli_idle_decode_plan_log_conflict_plain_idle_tmp(tmp_path: Path, capsys):
+    """CLI leftover pair: idle idle-decode --plan and --log different files without --json."""
+    from src.research_implement.__main__ import main
+
+    other = _load("one_open_ready.md")
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_plan_log_conflict.plain.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan = tmp_path / f"{name}_plan_log_conflict.plan.md"
+        log = tmp_path / f"{name}_plan_log_conflict.log.md"
+        plan.write_text(src, encoding="utf-8")
+        log.write_text(other, encoding="utf-8")
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--plan", str(plan), "--log", str(log)])
+        assert ei.value.code == 2, name
+        captured = capsys.readouterr()
+        err = captured.err.lower()
+        assert "not allowed" in err and "--plan" in err, name
+        assert captured.out.strip() == "", name
+        assert plan.read_text(encoding="utf-8") == src, name
+        assert log.read_text(encoding="utf-8") == other, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+
+
+def test_cli_idle_decode_plan_log_conflict_json_nonpick_tmp(tmp_path: Path, capsys):
+    """CLI leftover: non-pickable idle-decode --plan and --log different files --json; both UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    other = _load("one_open_ready.md")
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_plan_log_conflict.json.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan = tmp_path / f"{name}_plan_log_conflict.plan.md"
+        log = tmp_path / f"{name}_plan_log_conflict.log.md"
+        plan.write_text(src, encoding="utf-8")
+        log.write_text(other, encoding="utf-8")
+        assert src != other, name
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--plan", str(plan), "--log", str(log), "--json"])
+        assert ei.value.code == 2, name
+        captured = capsys.readouterr()
+        err = captured.err.lower()
+        assert "not allowed" in err and "--plan" in err, name
+        assert captured.out.strip() == "", name
+        assert plan.read_text(encoding="utf-8") == src, name
+        assert log.read_text(encoding="utf-8") == other, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+
+
+def test_cli_idle_decode_plan_log_conflict_plain_nonpick_tmp(tmp_path: Path, capsys):
+    """CLI leftover pair: non-pickable idle-decode --plan and --log different files without --json."""
+    from src.research_implement.__main__ import main
+
+    other = _load("one_open_ready.md")
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_plan_log_conflict.plain.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan = tmp_path / f"{name}_plan_log_conflict.plan.md"
+        log = tmp_path / f"{name}_plan_log_conflict.log.md"
+        plan.write_text(src, encoding="utf-8")
+        log.write_text(other, encoding="utf-8")
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--plan", str(plan), "--log", str(log)])
+        assert ei.value.code == 2, name
+        captured = capsys.readouterr()
+        err = captured.err.lower()
+        assert "not allowed" in err and "--plan" in err, name
+        assert captured.out.strip() == "", name
+        assert plan.read_text(encoding="utf-8") == src, name
+        assert log.read_text(encoding="utf-8") == other, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+
+
+def test_cli_idle_decode_plan_log_conflict_json_pickable_tmp(tmp_path: Path, capsys):
+    """CLI leftover: pickable idle-decode --plan and --log different files --json; not last-wins."""
+    from src.research_implement.__main__ import main
+
+    other = _load("empty_queue.md")
+    cases = (
+        "watch_lookalike",
+        "one_open_ready",
+        "two_open_ready",
+        "mixed_priority",
+        "watch_queue_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_plan_log_conflict.json.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan = tmp_path / f"{name}_plan_log_conflict.plan.md"
+        log = tmp_path / f"{name}_plan_log_conflict.log.md"
+        plan.write_text(src, encoding="utf-8")
+        log.write_text(other, encoding="utf-8")
+        assert src != other, name
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--plan", str(plan), "--log", str(log), "--json"])
+        assert ei.value.code == 2, name
+        captured = capsys.readouterr()
+        err = captured.err.lower()
+        assert "not allowed" in err and "--plan" in err, name
+        assert captured.out.strip() == "", name
+        assert plan.read_text(encoding="utf-8") == src, name
+        assert log.read_text(encoding="utf-8") == other, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+
+
+def test_cli_idle_decode_plan_log_conflict_plain_pickable_tmp(tmp_path: Path, capsys):
+    """CLI leftover pair: pickable idle-decode --plan and --log different files without --json; not last-wins."""
+    from src.research_implement.__main__ import main
+
+    other = _load("empty_queue.md")
+    cases = (
+        "watch_lookalike",
+        "one_open_ready",
+        "two_open_ready",
+        "mixed_priority",
+        "watch_queue_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_plan_log_conflict.plain.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan = tmp_path / f"{name}_plan_log_conflict.plan.md"
+        log = tmp_path / f"{name}_plan_log_conflict.log.md"
+        plan.write_text(src, encoding="utf-8")
+        log.write_text(other, encoding="utf-8")
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--plan", str(plan), "--log", str(log)])
+        assert ei.value.code == 2, name
+        captured = capsys.readouterr()
+        err = captured.err.lower()
+        assert "not allowed" in err and "--plan" in err, name
+        assert captured.out.strip() == "", name
+        assert plan.read_text(encoding="utf-8") == src, name
+        assert log.read_text(encoding="utf-8") == other, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+
+
+def test_cli_idle_decode_log_is_dir_json_idle_tmp(tmp_path: Path, capsys):
+    """I/O leftover (not --plan-on-directory; not Beat N): idle idle-decode --log directory --json."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_log_is_dir.json.md"
+        unused.write_text(src, encoding="utf-8")
+        log_dir = tmp_path / f"{name}_log_dir"
+        log_dir.mkdir()
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--log", str(log_dir), "--json"])
+        msg = str(ei.value).lower()
+        assert ei.value.code != 0, name
+        assert "not a file" in msg, name
+        assert "--plan" in msg or "--log" in msg, name
+        assert log_dir.is_dir(), name
+        assert list(log_dir.iterdir()) == [], name
+        out = capsys.readouterr().out
+        assert out.strip() == "", name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+
+
+def test_cli_idle_decode_log_is_dir_plain_idle_tmp(tmp_path: Path, capsys):
+    """I/O leftover pair: idle idle-decode --log directory without --json; unused copy UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_log_is_dir.plain.md"
+        unused.write_text(src, encoding="utf-8")
+        log_dir = tmp_path / f"{name}_log_dir_plain"
+        log_dir.mkdir()
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--log", str(log_dir)])
+        msg = str(ei.value).lower()
+        assert ei.value.code != 0, name
+        assert "not a file" in msg, name
+        assert "--plan" in msg or "--log" in msg, name
+        assert log_dir.is_dir(), name
+        assert list(log_dir.iterdir()) == [], name
+        out = capsys.readouterr().out
+        assert out.strip() == "", name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+
+
+def test_cli_idle_decode_log_is_dir_json_nonpick_tmp(tmp_path: Path, capsys):
+    """I/O leftover: non-pickable idle-decode --log directory --json; unused copy UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_log_is_dir.json.md"
+        unused.write_text(src, encoding="utf-8")
+        log_dir = tmp_path / f"{name}_log_dir"
+        log_dir.mkdir()
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--log", str(log_dir), "--json"])
+        msg = str(ei.value).lower()
+        assert ei.value.code != 0, name
+        assert "not a file" in msg, name
+        assert "--plan" in msg or "--log" in msg, name
+        assert log_dir.is_dir(), name
+        assert list(log_dir.iterdir()) == [], name
+        out = capsys.readouterr().out
+        assert out.strip() == "", name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+
+
+def test_cli_idle_decode_log_is_dir_plain_nonpick_tmp(tmp_path: Path, capsys):
+    """I/O leftover pair: non-pickable idle-decode --log directory without --json."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_log_is_dir.plain.md"
+        unused.write_text(src, encoding="utf-8")
+        log_dir = tmp_path / f"{name}_log_dir_plain"
+        log_dir.mkdir()
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--log", str(log_dir)])
+        msg = str(ei.value).lower()
+        assert ei.value.code != 0, name
+        assert "not a file" in msg, name
+        assert "--plan" in msg or "--log" in msg, name
+        assert log_dir.is_dir(), name
+        assert list(log_dir.iterdir()) == [], name
+        out = capsys.readouterr().out
+        assert out.strip() == "", name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+
+
+def test_cli_idle_decode_log_is_dir_json_pickable_tmp(tmp_path: Path, capsys):
+    """I/O leftover: pickable idle-decode --log directory --json; unused copy UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "watch_lookalike",
+        "one_open_ready",
+        "two_open_ready",
+        "mixed_priority",
+        "watch_queue_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_log_is_dir.json.md"
+        unused.write_text(src, encoding="utf-8")
+        log_dir = tmp_path / f"{name}_log_dir"
+        log_dir.mkdir()
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--log", str(log_dir), "--json"])
+        msg = str(ei.value).lower()
+        assert ei.value.code != 0, name
+        assert "not a file" in msg, name
+        assert "--plan" in msg or "--log" in msg, name
+        assert log_dir.is_dir(), name
+        assert list(log_dir.iterdir()) == [], name
+        out = capsys.readouterr().out
+        assert out.strip() == "", name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+
+
+def test_cli_idle_decode_log_is_dir_plain_pickable_tmp(tmp_path: Path, capsys):
+    """I/O leftover pair: pickable idle-decode --log directory without --json; not deferred."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "watch_lookalike",
+        "one_open_ready",
+        "two_open_ready",
+        "mixed_priority",
+        "watch_queue_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_log_is_dir.plain.md"
+        unused.write_text(src, encoding="utf-8")
+        log_dir = tmp_path / f"{name}_log_dir_plain"
+        log_dir.mkdir()
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--log", str(log_dir)])
+        msg = str(ei.value).lower()
+        assert ei.value.code != 0, name
+        assert "not a file" in msg, name
+        assert "--plan" in msg or "--log" in msg, name
+        assert log_dir.is_dir(), name
+        assert list(log_dir.iterdir()) == [], name
+        out = capsys.readouterr().out
+        assert out.strip() == "", name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+
+
 
 

@@ -645,4 +645,6 @@ Proof: `PORTFOLIO_LAB_ENABLE_ML=0 pytest tests/test_research_implement_loop.py -
 - CLI leftover (not omit-both; not path-shape; not Beat N): idle-decode `--plan` missing path `--json` vs plain. Idle/nonpick/pickable unused copies UNCHANGED; missing file not created. Proof: pytest `-k 'absent_plan'`.
 - I/O leftover (not missing-path; not omit-both; not Beat N): idle-decode `--plan` directory (not a file) `--json` vs plain. Unused copies UNCHANGED; dir empty. Proof: pytest `-k 'plan_is_dir'`.
 - I/O leftover (not directory; not missing-path; not Beat N): idle-decode `--plan` empty file `--json` vs plain. Decode is idle (empty file is a file; not argparse fail-closed). Unused copies UNCHANGED; empty plan stays empty. Proof: pytest `-k 'empty_plan_file'`.
+- CLI leftover (not omit-both; not Beat N): idle-decode `--plan` and `--log` set to **different** files (`--json` vs plain). Argparse conflict exit 2 `not allowed` (not last-wins). Both files UNCHANGED. Proof: pytest `-k 'plan_log_conflict'`.
+- I/O leftover (not `--plan`-on-directory; not Beat N): idle-decode `--log` directory (not a file) `--json` vs plain. Unused copies UNCHANGED; dir empty. Proof: pytest `-k 'log_is_dir'`.
 - Milestone beat200: CLI subcommands + public A/B runners/helpers/guards/decode/serialize remain stable; Makefile suite note includes beat200.
