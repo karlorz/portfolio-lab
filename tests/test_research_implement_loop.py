@@ -6900,7 +6900,7 @@ def test_beat113_idle_decode_cli_json_matrix(tmp_path: Path, capsys):
 def test_beat113_makefile_echo_mentions_beat113():
     """Beat 113: Makefile suite echo includes beat113 or the current beat range."""
     text = Path("Makefile").read_text(encoding="utf-8")
-    assert "beat10…beat598" in text or "beat10…beat597" in text or "beat113" in text
+    assert "beat10…beat599" in text or "beat10…beat598" in text or "beat113" in text
 
 def test_beat114_session_b_decode_only_cli_json_matrix(tmp_path: Path, capsys):
     """Beat 114: session-b --decode-only --json empty→idle; one_open→Q1; two_queue→failed."""
@@ -6932,7 +6932,7 @@ def test_beat114_session_b_decode_only_cli_json_matrix(tmp_path: Path, capsys):
 def test_beat114_makefile_echo_mentions_beat114():
     """Beat 114: Makefile suite echo includes beat114 or the current beat range."""
     text = Path("Makefile").read_text(encoding="utf-8")
-    assert "beat10…beat598" in text or "beat10…beat597" in text or "beat114" in text
+    assert "beat10…beat599" in text or "beat10…beat598" in text or "beat114" in text
 
 
 
@@ -44824,6 +44824,80 @@ def test_beat598_idle_fixtures_session_b_dry_run_json_session_a_stub_family_tmp(
         assert body == src, name
         if name == "watch_heartbeat_no_queue":
             assert "## Queue" not in src, name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_beat599_nonpickable_fixtures_idle_decode_json_session_a_stub_family_tmp(tmp_path: Path):
+    """Beat 599: multi-fixture non-pickable idle-decode --json stays idle (Beat 115 leftover)."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_idle_b599.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan = tmp_path / f"{name}_idle_b599.json.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["idle-decode", "--plan", str(plan), "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_beat599_nonpickable_fixtures_session_b_dry_run_json_session_a_stub_family_tmp(tmp_path: Path):
+    """Beat 599: multi-fixture non-pickable session-b --dry-run --json stays idle (Beat 115 pair)."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_b599_dry.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan = tmp_path / f"{name}_b599_dry.json.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
         assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
 
 
