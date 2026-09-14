@@ -53603,3 +53603,49 @@ def test_cli_idle_decode_fail_closed_json_unknown_status_enum_tmp(tmp_path: Path
     assert "BEAT21_WATCH_MARKER" in unused.read_text(encoding="utf-8")
     assert "BEAT21_HEARTBEAT_MARKER" in unused.read_text(encoding="utf-8")
 
+
+def test_cli_idle_decode_fail_closed_plan_log_mtime_unchanged_tmp(tmp_path: Path):
+    """Stat leftover plan_log_mtime (not unknown_status enum; not no_sidecar listing; not argparse idle-decode --dry-run; not Beat N; not Session B impl): idle-decode fail-closed --json and session-b --dry-run --json leave plan and log st_mtime_ns unchanged."""
+    import os
+
+    from src.research_implement.__main__ import main
+
+    src = _load("two_queue_sections.md")
+    plan = tmp_path / "two_queue_plan_log_mtime.plan.md"
+    log = tmp_path / "two_queue_plan_log_mtime.log.md"
+    plan.write_text(src, encoding="utf-8")
+    log.write_text(src, encoding="utf-8")
+    frozen = (1_700_000_000, 1_700_000_000)
+    os.utime(plan, frozen)
+    os.utime(log, frozen)
+    plan_mtime = plan.stat().st_mtime_ns
+    log_mtime = log.stat().st_mtime_ns
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc_idle = main(["idle-decode", "--plan", str(plan), "--json"])
+    payload_idle = json.loads(buf.getvalue())
+    buf_dry = StringIO()
+    with redirect_stdout(buf_dry):
+        rc_dry = main(["session-b", "--log", str(log), "--dry-run", "--json"])
+    payload_dry = json.loads(buf_dry.getvalue())
+    assert rc_idle == 1
+    assert rc_dry == 1
+    assert payload_idle["ok"] is False
+    assert payload_dry["ok"] is False
+    assert payload_idle["verdict"] == "failed"
+    assert payload_dry["verdict"] == "failed"
+    assert payload_idle["keep_schedule"] is True
+    assert payload_dry["keep_schedule"] is True
+    assert payload_idle["scheduler_delete_called"] is False
+    assert payload_dry["scheduler_delete_called"] is False
+    assert set(payload_idle.keys()) == set(SESSION_RESULT_JSON_KEYS)
+    assert set(payload_dry.keys()) == set(SESSION_RESULT_JSON_KEYS)
+    assert plan.stat().st_mtime_ns == plan_mtime
+    assert log.stat().st_mtime_ns == log_mtime
+    assert plan.read_text(encoding="utf-8") == src
+    assert log.read_text(encoding="utf-8") == src
+    assert "## Watch" in plan.read_text(encoding="utf-8")
+    assert "## Heartbeat" in log.read_text(encoding="utf-8")
+    assert "BEAT21_WATCH_MARKER" in plan.read_text(encoding="utf-8")
+    assert "BEAT21_HEARTBEAT_MARKER" in log.read_text(encoding="utf-8")
+
