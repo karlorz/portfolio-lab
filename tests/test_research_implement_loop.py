@@ -49616,5 +49616,243 @@ def test_cli_idle_decode_absent_log_plain_pickable_tmp(tmp_path: Path, capsys):
             assert "BEAT19_HEARTBEAT_MARKER" in body, name
 
 
+def test_cli_idle_decode_nested_plan_dry_run_json_idle_tmp(tmp_path: Path, monkeypatch):
+    """Path leftover (not nested_relative --plan vs --log; not Beat N): idle nested --plan --json."""
+    from src.research_implement.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_nested_plan_dry_run.json.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan_rel = f"nested/{name}_nested_plan_dry_run.md"
+        plan = tmp_path / plan_rel
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["idle-decode", "--plan", plan_rel, "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_cli_idle_decode_nested_plan_dry_run_reject_idle_tmp(tmp_path: Path, monkeypatch, capsys):
+    """Path leftover pair: idle nested --plan --dry-run --json argparse-rejects; not last-wins."""
+    from src.research_implement.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_nested_plan_dry_run.reject.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan_rel = f"nested/{name}_nested_plan_dry_run.reject.md"
+        plan = tmp_path / plan_rel
+        plan.write_text(src, encoding="utf-8")
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--plan", plan_rel, "--dry-run", "--json"])
+        assert ei.value.code == 2, name
+        captured = capsys.readouterr()
+        err = captured.err.lower()
+        assert "unrecognized" in err, name
+        assert captured.out.strip() == "", name
+        assert plan.read_text(encoding="utf-8") == src, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+
+
+def test_cli_idle_decode_nested_plan_dry_run_json_nonpick_tmp(tmp_path: Path, monkeypatch):
+    """Path leftover: non-pickable nested --plan --json stays idle; plan UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_nested_plan_dry_run.json.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan_rel = f"nested/{name}_nested_plan_dry_run.md"
+        plan = tmp_path / plan_rel
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["idle-decode", "--plan", plan_rel, "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_cli_idle_decode_nested_plan_dry_run_reject_nonpick_tmp(tmp_path: Path, monkeypatch, capsys):
+    """Path leftover pair: non-pickable nested --plan --dry-run --json argparse-rejects; not last-wins."""
+    from src.research_implement.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_nested_plan_dry_run.reject.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan_rel = f"nested/{name}_nested_plan_dry_run.reject.md"
+        plan = tmp_path / plan_rel
+        plan.write_text(src, encoding="utf-8")
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--plan", plan_rel, "--dry-run", "--json"])
+        assert ei.value.code == 2, name
+        captured = capsys.readouterr()
+        err = captured.err.lower()
+        assert "unrecognized" in err, name
+        assert captured.out.strip() == "", name
+        assert plan.read_text(encoding="utf-8") == src, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+
+
+def test_cli_idle_decode_nested_plan_dry_run_json_pickable_tmp(tmp_path: Path, monkeypatch):
+    """Path leftover: pickable nested --plan --json → picked; --dry-run is not last-wins."""
+    from src.research_implement.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    cases = (
+        ("watch_lookalike", "Q3"),
+        ("one_open_ready", "Q1"),
+        ("two_open_ready", "Q1"),
+        ("mixed_priority", "Q2"),
+        ("watch_queue_heartbeat", "Q1"),
+    )
+    for name, item_id in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_nested_plan_dry_run.json.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan_rel = f"nested/{name}_nested_plan_dry_run.md"
+        plan = tmp_path / plan_rel
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["idle-decode", "--plan", plan_rel, "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "picked", name
+        assert payload["item"]["item_id"] == item_id, name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_cli_idle_decode_nested_plan_dry_run_reject_pickable_tmp(tmp_path: Path, monkeypatch, capsys):
+    """Path leftover pair: pickable nested --plan --dry-run --json argparse-rejects; not deferred."""
+    from src.research_implement.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    cases = (
+        "watch_lookalike",
+        "one_open_ready",
+        "two_open_ready",
+        "mixed_priority",
+        "watch_queue_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_nested_plan_dry_run.reject.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan_rel = f"nested/{name}_nested_plan_dry_run.reject.md"
+        plan = tmp_path / plan_rel
+        plan.write_text(src, encoding="utf-8")
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--plan", plan_rel, "--dry-run", "--json"])
+        assert ei.value.code == 2, name
+        captured = capsys.readouterr()
+        err = captured.err.lower()
+        assert "unrecognized" in err, name
+        assert captured.out.strip() == "", name
+        assert plan.read_text(encoding="utf-8") == src, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+
+
 
 
