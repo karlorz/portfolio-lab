@@ -810,6 +810,6 @@ def test_crontab_and_cron_targets():
     assert len(commented_lines) >= 1, "Crontab must contain a commented s3-archive fallback line"
 
     from src.cron_compat import CRON_TARGETS
-    assert len(CRON_TARGETS) == 18, f"CRON_TARGETS must remain length 18, found {len(CRON_TARGETS)}"
+    assert len(CRON_TARGETS) == 19, f"CRON_TARGETS must remain length 19, found {len(CRON_TARGETS)}"
     assert "portfolio-lab-s3-archive" not in CRON_TARGETS
     assert "s3-archive" not in CRON_TARGETS

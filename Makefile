@@ -58,7 +58,8 @@ help:
 	@echo "  make data         Fetch Yahoo Finance market data"
 	@echo "  make dashboard    Regenerate dashboard JSON files"
 	@echo "  make health       Generate public/data/health.json system health monitor"
-	@echo "  make daily-brief  Operator daily brief (tasker :25 hourly; dual-mode cron)"
+	@echo "  make daily-brief  Operator daily brief (tasker :26 hourly; dual-mode cron)"
+	@echo "  make broker-snapshot  Opt-in IBKR/Futu snapshot pull (tasker :24; env-gated)"
 	@echo "  make rebalance-health  Generate public/data/rebalance_health.json diagnostics"
 	@echo "  make ops-regen    Post-merge operator refresh: dashboard + wiki-sync + health"
 	@echo "  make eval         Run strategy evaluator (paper trading)"
@@ -811,6 +812,35 @@ daily-brief:
 	fi; \
 	exit $$EXIT
 
+# ── Broker snapshot (opt-in; daily brief only) ───────────────────────
+
+.PHONY: broker-snapshot
+broker-snapshot:
+	@echo "=== Broker snapshot: $$(date) ==="; \
+	if [ "$${PORTFOLIO_LAB_ENABLE_BROKER_SNAPSHOT:-0}" != "1" ]; then \
+	  echo "skipped (PORTFOLIO_LAB_ENABLE_BROKER_SNAPSHOT!=1)"; \
+	  $(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-broker-snapshot ok 0; \
+	  exit 0; \
+	fi; \
+	START=$$(date +%s); \
+	GATEWAY_SRC="$(PROJECT_DIR)/../broker-readonly-gateway/src"; \
+	if [ ! -d "$$GATEWAY_SRC" ]; then \
+	  echo "WARN: broker-readonly-gateway src missing; skip pull"; \
+	  $(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-broker-snapshot ok 0; \
+	  exit 0; \
+	fi; \
+	cd $(PROJECT_DIR) && PYTHONPATH="$$GATEWAY_SRC:$(PYTHONPATH)" ulimit -v 3145728 && timeout 60 $(PYTHON_RUNTIME) -m broker_readonly_gateway.cli pull 2>&1 | tee -a $(DATA_DIR)/broker_snapshot.log; \
+	EXIT=$${PIPESTATUS[0]}; \
+	END=$$(date +%s); \
+	DUR=$$((END - START)); \
+	if [ $$EXIT -eq 0 ] || [ $$EXIT -eq 2 ]; then STATUS="ok"; \
+	elif [ $$EXIT -eq 124 ]; then STATUS="timeout"; \
+	elif [ $$EXIT -eq 137 ] || [ $$EXIT -eq 139 ]; then STATUS="oom"; \
+	else STATUS="error"; fi; \
+	$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-broker-snapshot $$STATUS $$DUR; \
+	if [ $$EXIT -eq 2 ]; then exit 0; fi; \
+	exit $$EXIT
+
 # ── Portfolio Query ──────────────────────────────────────────────────
 
 .PHONY: ask
@@ -892,6 +922,7 @@ cron-reset:
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-prod-ideas pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-fetch-trends pending 0 manual
 	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-daily-brief pending 0 manual
+	@$(PYTHON_RUNTIME) $(CRON_UPDATE) portfolio-lab-broker-snapshot pending 0 manual
 	@echo "Cron status reset: $(CRON_STATUS)"
 
 # ── Verification ─────────────────────────────────────────────────────

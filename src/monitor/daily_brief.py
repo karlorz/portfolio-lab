@@ -265,6 +265,16 @@ def generate_brief_sections(dashboard: Dict[str, Any]) -> List[BriefSection]:
         data_text=model_text,
     ))
 
+    try:
+        from src.monitor.broker_snapshot_plugin import load_broker_snapshot_section
+
+        broker_section = load_broker_snapshot_section()
+    except (ImportError, AttributeError, TypeError, RuntimeError, OSError) as exc:
+        logger.warning("broker snapshot plugin skipped: %s", exc)
+        broker_section = None
+    if broker_section is not None:
+        sections.append(broker_section)
+
     # ── Action Items ──
     warnings = [s for s in sections if s.severity in ("warning", "alert")]
     alerts = health.get("alerts", [])

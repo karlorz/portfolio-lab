@@ -101,9 +101,12 @@ Domain glossary for dev-loop agents. Use these precise terms instead of paraphra
   `src/cron_compat.py` + `config/tasker.yaml` together; run `make verify-cron-sync`.
   Tasker is the live source of truth; crontab entries are commented fallbacks.
 - **Daily brief** — `make daily-brief` / tasker job `portfolio-lab-daily-brief`
-  (`25 * * * *`). Writes `data/daily_brief.json` (operator narrative/sections;
+  (`26 * * * *`). Writes `data/daily_brief.json` (operator narrative/sections;
   data-plane, not an ops SLI). Graceful degrade if LLM narrative unavailable.
   Vault: `projects/portfolio-lab/work/2026-07-26-daily-brief-stale-cron-wiring/`.
+- **Broker snapshot plugin** — default off. `PORTFOLIO_LAB_ENABLE_BROKER_SNAPSHOT=1`
+  adds a daily-brief section and enables `make broker-snapshot` (tasker `:24`).
+  Sibling repo `broker-readonly-gateway`; never attaches to `order_router`.
 
 ## Project Conventions
 

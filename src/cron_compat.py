@@ -45,6 +45,7 @@ CRON_TARGETS = [
     "portfolio-lab-prod-ideas",
     "portfolio-lab-fetch-trends",
     "portfolio-lab-daily-brief",
+    "portfolio-lab-broker-snapshot",
 ]
 
 # S18b: optional suite segments — NOT production cron jobs (not in CRON_TARGETS /
@@ -77,6 +78,7 @@ CRON_EXPECTED_DURATIONS = {
     "portfolio-lab-prod-ideas": 60,  # 1 min — scan ops SSOT → channel delta (ML off)
     "portfolio-lab-fetch-trends": 300,  # 5 min — pytrends weekly refresh
     "portfolio-lab-daily-brief": 120,  # 2 min — template sections + optional LLM narrative
+    "portfolio-lab-broker-snapshot": 60,  # 1 min — opt-in read-only snapshot pull; no-op unless env on
 }
 
 # Guard configuration (applied by scripts/cron_guard.sh)

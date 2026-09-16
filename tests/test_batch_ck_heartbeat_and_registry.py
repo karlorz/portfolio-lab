@@ -98,6 +98,51 @@ def test_hourly_job_overdue_when_age_exceeds_period_plus_grace():
     assert hb["heartbeat_state"] == "overdue"
 
 
+def test_weekly_job_near_schedule_boundary_stays_ok():
+    """A successful weekly run just under period+grace is still healthy."""
+    now = datetime(2026, 8, 16, 4, 0, tzinfo=timezone.utc).timestamp()
+    last = datetime(2026, 8, 9, 3, 30, tzinfo=timezone.utc).timestamp()
+    job = {
+        "name": "portfolio-lab-fetch-trends",
+        "schedule": "20 4 * * 0",
+        "status": "ok",
+        "enabled": True,
+        "manual_only": False,
+        "state": "scheduled",
+        "last_run": datetime.fromtimestamp(last, tz=timezone.utc).isoformat(),
+    }
+    hb = schedule_aware_last_success_heartbeat(job, now=now)
+    assert hb["schedule_period_seconds"] == 7 * 86400
+    assert hb["heartbeat_state"] == "ok"
+    assert hb["overdue"] is False
+
+
+def test_weekly_job_overdue_after_period_plus_grace():
+    """A weekly run beyond period+grace is overdue and degrades its backend."""
+    now = datetime(2026, 8, 23, 4, 0, tzinfo=timezone.utc).timestamp()
+    last = datetime(2026, 8, 15, 2, 0, tzinfo=timezone.utc).timestamp()
+    job = {
+        "name": "portfolio-lab-fetch-trends",
+        "schedule": "20 4 * * 0",
+        "status": "ok",
+        "enabled": True,
+        "manual_only": False,
+        "state": "scheduled",
+        "last_run": datetime.fromtimestamp(last, tz=timezone.utc).isoformat(),
+    }
+    normalized = normalize_cron_job(
+        job,
+        backend="tasker",
+        source="test",
+        now=now,
+    )
+    summary = summarize_backend(backend="tasker", source="test", jobs=[normalized])
+    assert normalized["heartbeat_state"] == "overdue"
+    assert normalized["heartbeat_overdue"] is True
+    assert summary["status"] == "degraded"
+    assert summary["heartbeat_overdue_jobs"] == 1
+
+
 def test_normalize_cron_job_attaches_heartbeat_fields(tmp_path, monkeypatch):
     # Batch DT: empty data dirs so live google_trends.json cannot soft-ok pending
     import src.monitor.hermes_cron as hc

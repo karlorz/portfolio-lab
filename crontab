@@ -56,6 +56,9 @@
 # Daily P&L capture — hourly at :10 and :41 (DISABLED: owned by tasker portfolio-lab-daily-pnl)
 # 10,41 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab daily-pnl >> /root/projects/portfolio-lab/data/daily_pnl.log 2>&1
 
+# Broker snapshot pull — hourly at :24 (DISABLED: owned by tasker portfolio-lab-broker-snapshot)
+# 24 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab broker-snapshot >> /root/projects/portfolio-lab/data/broker_snapshot.log 2>&1
+
 # Daily brief — hourly at :26 (DISABLED: owned by tasker portfolio-lab-daily-brief)
 # 26 * * * * CRON_BACKEND=crontab make -C /root/projects/portfolio-lab daily-brief >> /root/projects/portfolio-lab/data/daily_brief.log 2>&1
 

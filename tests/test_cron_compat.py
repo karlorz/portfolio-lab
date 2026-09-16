@@ -61,14 +61,15 @@ class TestCRONTargets:
         from src.cron_compat import CRON_TARGETS
         assert isinstance(CRON_TARGETS, list)
 
-    def test_eighteen_default_targets(self):
+    def test_nineteen_default_targets(self):
         from src.cron_compat import CRON_TARGETS
-        # Base suite + portfolio-lab-prod-ideas + portfolio-lab-fetch-trends
-        # + portfolio-lab-daily-brief (operator narrative freshness, 2026-07-26)
-        assert len(CRON_TARGETS) == 18
+        # Base suite + prod-ideas + fetch-trends + daily-brief
+        # + broker-snapshot (opt-in read-only pull, 2026-09-16)
+        assert len(CRON_TARGETS) == 19
         assert "portfolio-lab-prod-ideas" in CRON_TARGETS
         assert "portfolio-lab-fetch-trends" in CRON_TARGETS
         assert "portfolio-lab-daily-brief" in CRON_TARGETS
+        assert "portfolio-lab-broker-snapshot" in CRON_TARGETS
 
     def test_all_targets_have_prefix(self):
         from src.cron_compat import CRON_TARGETS

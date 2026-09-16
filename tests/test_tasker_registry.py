@@ -44,6 +44,7 @@ def test_default_registry_loads_expected_portfolio_lab_tasks():
         "portfolio-lab-prod-ideas",
         "portfolio-lab-fetch-trends",
         "portfolio-lab-daily-brief",
+        "portfolio-lab-broker-snapshot",
     }
 
     assert {task.id for task in registry.tasks} == expected_ids
@@ -102,6 +103,27 @@ def test_daily_brief_tasker_entry_uses_hourly_26_schedule():
     assert task.manual_only is False
     assert task.schedule == "26 * * * *"
     assert task.command == ["make", "daily-brief"]
+    assert task.timeout_seconds > 0
+
+
+def test_make_broker_snapshot_target_is_env_gated():
+    makefile = (PROJECT_ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = makefile_recipe(makefile, "broker-snapshot")
+
+    assert "PORTFOLIO_LAB_ENABLE_BROKER_SNAPSHOT" in recipe
+    assert "broker_readonly_gateway.cli" in recipe
+    assert "portfolio-lab-broker-snapshot" in recipe
+    assert "order_router" not in recipe
+
+
+def test_broker_snapshot_tasker_entry_uses_hourly_24_schedule():
+    registry = load_task_registry()
+    task = registry.get("portfolio-lab-broker-snapshot")
+
+    assert task.enabled is True
+    assert task.manual_only is False
+    assert task.schedule == "24 * * * *"
+    assert task.command == ["make", "broker-snapshot"]
     assert task.timeout_seconds > 0
 
 

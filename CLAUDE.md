@@ -7,6 +7,7 @@ Keep this file short: it is always injected into agent context. **Do not re-expa
 ### Hard rules
 - **cursor-box**: side-dev is this checkout (`/workspace/code/portfolio-lab`, symlink `/home/box/code/portfolio-lab`). Production is `/home/box/.local/share/portfolio-lab/app` (`:8000`/`:8001`) — do not edit it; never start a second Tasker scheduler. Wiki is `/home/box/wiki` (GitHub leaf).
 - **No ML imports** without explicit user request (`torch` / `sklearn` / `xgboost` / `hmmlearn`). Default `PORTFOLIO_LAB_ENABLE_ML=0`. Safe work: `src/strategy/`, `src/signals/`, `src/broker/`, `src/monitor/`.
+- **Broker snapshot plugin** is opt-in (`PORTFOLIO_LAB_ENABLE_BROKER_SNAPSHOT=1`) and daily-brief only. Never wire it to `src.broker.order_router`.
 - **Live authority**: only `signals.json.target_allocations` → `src.broker.order_router`. Ensemble / overlays / MARL are advisory unless separately promoted (`marl_status.live_authoritative: false`).
 - **Champion baseline**: SPY/GLD/TLT **46/38/16** (base-grid Sharpe 0.79; overlay research ~0.95). Challenger 44/36/20 is defensive only.
 - **Paths**: import from `src.paths` (`DATA_DIR`, `MARKET_DB`, `WIKI_DIR`, …). Metrics: `src/backtest/metrics.py`.

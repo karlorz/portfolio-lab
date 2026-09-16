@@ -87,6 +87,13 @@ tasks:
     schedule: "10,41 * * * *"
     timeout_seconds: 60
 
+  - id: portfolio-lab-broker-snapshot
+    label: Broker Snapshot
+    command: make broker-snapshot
+    # Pull before daily-brief (:26). No-op unless PORTFOLIO_LAB_ENABLE_BROKER_SNAPSHOT=1.
+    schedule: "24 * * * *"
+    timeout_seconds: 60
+
   - id: portfolio-lab-daily-brief
     label: Daily Brief
     command: make daily-brief

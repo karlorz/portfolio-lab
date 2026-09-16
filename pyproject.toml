@@ -55,13 +55,22 @@ ml = [
     "sympy>=1.13",
     "hmmlearn>=0.3",
 ]
+broker-snapshot = [
+    "broker-readonly-gateway",
+]
 
 [tool.uv]
 # ML deps are optional — not synced by default.
 # Use: uv sync --group ml  to include torch/xgboost
 # Or:   uv run --group ml python -m src.agents.ai_controller
+# Broker snapshot group is opt-in; do not uv sync it while APFS Data >= 90%.
+# Use: uv sync --group broker-snapshot
+# Runtime gate: PORTFOLIO_LAB_ENABLE_BROKER_SNAPSHOT=1 (daily brief only).
 no-build-isolation-package = []
 build-constraint-dependencies = ["scikit-build-core>=0.10,<1.0.0"]
+
+[tool.uv.sources]
+broker-readonly-gateway = { path = "../broker-readonly-gateway" }
 
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"
