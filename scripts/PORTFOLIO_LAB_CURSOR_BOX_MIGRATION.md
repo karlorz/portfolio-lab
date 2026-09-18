@@ -11,6 +11,10 @@
 - cursor-box is the current **authoritative** production host for Portfolio Lab.
 - sg01 Tasker (scheduler) and the sg01 archive timer remain **stopped/disabled**.
 - Cloudflare Access on the public origin remains **in place**.
+- Broker Brief is served independently by the Access-protected
+  `broker-brief-edge` Cloudflare Worker for the exact `/broker-brief` and
+  `/broker-brief/*` routes. The cursor-box tunnel route remains configured as
+  the immediate rollback origin.
 - The old domain remains **non-authoritative**; no DNS, Caddy, or Cloudflare
   row change has been applied to it.
 - Recycle persistence (production lifecycle surviving a box restart) and the
@@ -80,10 +84,17 @@ Post-cutover: the one-scheduler invariant applies to the current authority
   services, or the separate shared cursor-box tunnel. Durable public
   availability additionally requires a redundant static edge origin independent
   of cursor-box.
-- The broker brief route must remain ahead of the static catch-all:
-  `/broker-brief*` routes to loopback port **8011**. Only the five approved
-  HTML files belong in that webroot; private broker JSON/XML artifacts stay
-  outside it.
+- The production edge routes `/broker-brief` and `/broker-brief/*` to the
+  `broker-brief-edge` Worker, which serves only the five approved HTML files
+  from Cloudflare static assets. Responses remain Access-protected, private,
+  no-store, frame-denied, and no-indexed. Private broker JSON/XML artifacts
+  stay outside the Worker bundle and fail closed with `404`.
+- Keep the tunnel `/broker-brief*` row ahead of the static catch-all, routing
+  to loopback port **8011**. It is the immediate rollback origin and must not
+  be removed merely because the Worker route is active. Removing the two
+  Worker routes or rolling back the Worker deployment restores this origin
+  without restarting Tasker, broker services, static origins, or either
+  tunnel connector.
 - Cloudflare Access was required during the dry run and remains in place
   post-cutover; removing Access protection requires separate attended approval.
 
