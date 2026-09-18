@@ -68,6 +68,18 @@ Post-cutover: the one-scheduler invariant applies to the current authority
   loopback port **8000**. Both must bind loopback only.
 - Cloudflare must route `/api/*` (exact row, placed **before** the static
   catch-all) to port 8000 and the catch-all to port 8001.
+- The dedicated `portfolio-lab-shadow` connector must use Cloudflare Tunnel
+  transport `http2`. The cursor-box network path repeatedly expired all four
+  QUIC connections together, producing short public Error 1033 windows even
+  while the loopback origins stayed healthy. Before switching an existing
+  connector, run a bounded second-connector canary with `--protocol http2` and
+  require all four connections to register successfully. Restart only the
+  dedicated connector after the canary passes; do not restart Tasker, the
+  static origin, broker services, or the separate shared cursor-box tunnel.
+- The broker brief route must remain ahead of the static catch-all:
+  `/broker-brief*` routes to loopback port **8011**. Only the five approved
+  HTML files belong in that webroot; private broker JSON/XML artifacts stay
+  outside it.
 - Cloudflare Access was required during the dry run and remains in place
   post-cutover; removing Access protection requires separate attended approval.
 
