@@ -88,7 +88,7 @@ if [ "$MODE" = "safe" ]; then
         ulimit -v 6291456
         export PORTFOLIO_LAB_ENABLE_ML=0
         _isolate_public_data_dir
-        exec uv run pytest tests/ -q --tb=short "${PYTEST_ARGS[@]}"
+        exec "$PROJECT_DIR/scripts/agent_uv.sh" run pytest tests/ -q --tb=short "${PYTEST_ARGS[@]}"
     )
     EXIT=$?
     set -e
@@ -113,7 +113,7 @@ elif [ "$MODE" = "ml-extract" ]; then
         ulimit -v 6291456
         export PORTFOLIO_LAB_ENABLE_ML=0
         _isolate_public_data_dir
-        exec uv run pytest tests/ -q --tb=short --include-ml-extract "${PYTEST_ARGS[@]}"
+        exec "$PROJECT_DIR/scripts/agent_uv.sh" run pytest tests/ -q --tb=short --include-ml-extract "${PYTEST_ARGS[@]}"
     )
     EXIT=$?
     set -e
@@ -133,5 +133,5 @@ else
     echo ""
 
     export PORTFOLIO_LAB_ENABLE_ML=1
-    exec uv run pytest tests/ -q --tb=short --include-heavy "${PYTEST_ARGS[@]}"
+    exec "$PROJECT_DIR/scripts/agent_uv.sh" run pytest tests/ -q --tb=short --include-heavy "${PYTEST_ARGS[@]}"
 fi

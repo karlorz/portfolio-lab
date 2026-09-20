@@ -16,6 +16,8 @@ def test_makefile_defines_test_gate_as_test_fast_alias() -> None:
     assert "make test-gate" in makefile or "test-gate" in makefile
     # Help text must advertise gate as default agent path
     assert "DEFAULT agent gate" in makefile or "test-gate" in makefile.split("help:")[1].split("make data")[0]
+    assert "UV := $(PROJECT_DIR)/scripts/agent_uv.sh" in makefile
+    assert "$(UV) run pytest" in makefile
 
 
 def test_wait_test_exit_script_exists_and_is_executable_contract() -> None:
@@ -36,3 +38,4 @@ def test_agent_docs_tier_default_gate_not_full_suite() -> None:
         assert "do not default to full suite" in text.lower() or "tiered" in text.lower()
         # Must not be the old one-liner only
         assert "make test-fast" in text or "test-fast" in text
+        assert "agent_uv.sh" in text, f"{name} must point agents at the clean uv resolver"

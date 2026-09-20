@@ -195,6 +195,15 @@ def test_hermes_cron_wrappers_use_project_runtime_launcher(script_name: str) -> 
     assert "python3 -m src." not in text
 
 
+def test_python_runtime_defaults_to_script_repo_root_not_sg01_path() -> None:
+    """Agents clone this repo anywhere; do not assume /root/projects/portfolio-lab."""
+    text = RUNTIME_SCRIPT.read_text()
+    assert "/root/projects/portfolio-lab" not in text
+    assert 'REPO_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"' in text
+    assert 'PROJECT_DIR="${PORTFOLIO_LAB_PROJECT_DIR:-$REPO_ROOT}"' in text
+    assert "scripts/agent_uv.sh" in text
+
+
 def test_python_runtime_disables_core_dumps_and_prefers_musl_loader() -> None:
     """cursor-box overlay leftover: job-level dump disable + musl venv loader."""
     text = RUNTIME_SCRIPT.read_text()
@@ -213,7 +222,7 @@ def test_cron_guard_disables_core_dumps() -> None:
 
 
 def test_python_runtime_launcher_prefers_uv_run_python(tmp_path: Path) -> None:
-    """The shared launcher should route Python through uv when uv is available."""
+    """The shared launcher should route Python through the clean agent uv."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     calls = tmp_path / "uv-calls.txt"
@@ -229,6 +238,8 @@ exit 0
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}:{env['PATH']}"
     env["PORTFOLIO_LAB_PROJECT_DIR"] = str(PROJECT_ROOT)
+    env["PORTFOLIO_LAB_UV"] = str(uv_stub)
+    env["PORTFOLIO_LAB_MUSL_LOADER"] = str(tmp_path / "no-such-musl-loader")
 
     result = subprocess.run(
         [str(RUNTIME_SCRIPT), "-m", "src.monitor.health_check"],
@@ -241,3 +252,35 @@ exit 0
 
     assert result.returncode == 0, result.stderr
     assert calls.read_text().splitlines() == ["run", "python", "-m", "src.monitor.health_check"]
+
+
+def test_python_runtime_without_env_uses_script_repo_root(tmp_path: Path) -> None:
+    """Unset PORTFOLIO_LAB_PROJECT_DIR must not fall back to /root/projects."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    cwd_file = tmp_path / "cwd.txt"
+    uv_stub = bin_dir / "uv"
+    uv_stub.write_text(
+        f"""#!/bin/bash
+pwd > "{cwd_file}"
+exit 0
+"""
+    )
+    uv_stub.chmod(uv_stub.stat().st_mode | stat.S_IXUSR)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    env.pop("PORTFOLIO_LAB_PROJECT_DIR", None)
+    env["PORTFOLIO_LAB_UV"] = str(uv_stub)
+    env["PORTFOLIO_LAB_MUSL_LOADER"] = str(tmp_path / "no-such-musl-loader")
+
+    result = subprocess.run(
+        [str(RUNTIME_SCRIPT), "-c", "pass"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert cwd_file.read_text().strip() == str(PROJECT_ROOT)

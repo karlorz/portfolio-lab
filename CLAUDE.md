@@ -13,12 +13,13 @@ Keep this file short: it is always injected into agent context. **Do not re-expa
 - **Paths**: import from `src.paths` (`DATA_DIR`, `MARKET_DB`, `WIKI_DIR`, …). Metrics: `src/backtest/metrics.py`.
 - **Cron dual-mode**: when adding/changing jobs, update `Makefile` + `crontab` + `src/cron_compat.py` together; run `make verify-cron-sync`.
 - **Tests (tiered — do not default to full suite)**:
-  - **Default agent gate**: `make test-gate` (= `make test-fast`, &lt;2m, ensemble/signal). Prefer this mid-session.
-  - **Touched files**: `PORTFOLIO_LAB_ENABLE_ML=0 uv run pytest <paths> -q --tb=short`.
+  - **Default agent gate**: `make test-gate` (= `make test-fast`, &lt;2m, ensemble/signal). Routes through `scripts/agent_uv.sh` (clean standalone uv; skip `~/.local/bin/uv` Alpine `LD_LIBRARY_PATH` wrapper). Prefer this mid-session.
+  - **Touched files**: `PORTFOLIO_LAB_ENABLE_ML=0 scripts/agent_uv.sh run pytest <paths> -q --tb=short`.
   - **Generator / dual-write edits**: also `make test-generator`. Integration paths: `make test-integration`.
   - **Full `make test`**: merge/pre-release only (~30–45m). Never stack a second full suite; never poll with a 10m Bash timeout. Wait with `scripts/wait-test-exit.sh` (60m max) or skip if `pgrep` empty + stale `data/test_last_exit.json`.
   - **`make test-unit`**: still ~15k tests (not a fast gate). `make test-ml` only when user asks for ML.
-- **Frontend/data**: `bun run dev` / `build` / `fetch-data`. Python: `uv sync`, `uv run python …`.
+- **Frontend/data**: on cursor-box/Alpine musl Bun, `bun run dev` cannot load `@rolldown/binding-linux-x64-gnu` — use `bun run dev:node`. Python: `scripts/agent_uv.sh sync` / `scripts/agent_uv.sh run …`.
+- **Side-dev Tasker**: `TASKER_DISABLE_SCHEDULER=1` + `--no-scheduler` on a non-8000/8001 port from this checkout (`data/tasker-side.lock`). Never against the production app dir.
 - **Gotchas**: no `bc`; no bare `~/.hermes/` in app code (read `data/cron_status.json`); skillwiki pages need `started`/`updated`/`completed` frontmatter when validating; on sg01, Orca SSH tabs can leave stale `grok` TUIs — compare live `grok` PIDs + `~/.grok/active_sessions.json` to visible terminals before assuming the host is idle (vault: `projects/portfolio-lab/compound/sg01-orca-stale-grok-threads-2026-08-17`).
 
 ### Knowledge index (canonical docs)

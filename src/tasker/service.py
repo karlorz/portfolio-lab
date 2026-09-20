@@ -11,7 +11,7 @@ import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.paths import DATA_DIR
+from src.paths import DATA_DIR, PROJECT_ROOT
 from src.tasker.api import create_app
 from src.tasker.registry import TaskRegistry, load_task_registry
 from src.tasker.runner import TaskRunner
@@ -27,11 +27,73 @@ logger = logging.getLogger(__name__)
 # started while the systemd unit is up) previously duplicated every scheduled
 # run. flock auto-releases on process death (incl. SIGKILL), so there is no
 # stale-lock window across systemd RestartSec=10 restarts.
+#
+# Side-dev API-only instances (--no-scheduler / TASKER_DISABLE_SCHEDULER=1)
+# use data/tasker-side.lock so they do not contend with the production
+# scheduler flock. They must still run from a private checkout (not the
+# production app dir).
 TASKER_LOCK_PATH = DATA_DIR / "tasker.lock"
+TASKER_SIDE_LOCK_NAME = "tasker-side.lock"
 _SINGLETON_LOCK_FD: object | None = None  # held for the process lifetime
 
+# Known production app roots. Side-dev must not start an API sidecar here:
+# it would share TASKER_DB / status mirrors with the live scheduler.
+_PRODUCTION_APP_ROOTS = (
+    Path("/root/projects/portfolio-lab"),
+    Path("/home/box/.local/share/portfolio-lab/app"),
+)
 
-def acquire_singleton_lock(lock_path: Path | None = None) -> None:
+
+def scheduler_disabled(args: argparse.Namespace | None = None) -> bool:
+    """True when this process is API-only (no scheduler loop)."""
+    if args is not None and getattr(args, "no_scheduler", False):
+        return True
+    return os.environ.get("TASKER_DISABLE_SCHEDULER") == "1"
+
+
+def is_production_app_root(root: Path | None = None) -> bool:
+    """Return True when *root* is (or is under) a known production app dir."""
+    resolved = (root if root is not None else PROJECT_ROOT).expanduser()
+    try:
+        resolved = resolved.resolve()
+    except OSError:
+        resolved = Path(os.path.abspath(str(resolved)))
+    for prod in _PRODUCTION_APP_ROOTS:
+        try:
+            if resolved == prod or resolved.is_relative_to(prod):
+                return True
+        except (OSError, ValueError, TypeError):
+            prod_text = str(prod)
+            text = str(resolved)
+            if text == prod_text or text.startswith(prod_text + os.sep):
+                return True
+    return False
+
+
+def resolve_tasker_lock_path(
+    *,
+    lock_path: Path | None = None,
+    no_scheduler: bool = False,
+) -> Path:
+    """Resolve the flock path for this Tasker process.
+
+    Precedence:
+      1. explicit ``lock_path`` argument (tests)
+      2. ``TASKER_LOCK_PATH`` environment override
+      3. ``<same-dir>/tasker-side.lock`` when ``no_scheduler`` is True
+      4. ``TASKER_LOCK_PATH`` constant (``data/tasker.lock``)
+    """
+    if lock_path is not None:
+        return Path(lock_path)
+    env_override = os.environ.get("TASKER_LOCK_PATH", "").strip()
+    if env_override:
+        return Path(env_override).expanduser()
+    if no_scheduler:
+        return Path(TASKER_LOCK_PATH).with_name(TASKER_SIDE_LOCK_NAME)
+    return Path(TASKER_LOCK_PATH)
+
+
+def acquire_singleton_lock(lock_path: Path | None = None, *, no_scheduler: bool = False) -> None:
     """Take an exclusive flock so only one tasker service instance runs.
 
     The lock file also records the holder PID for diagnostics. Raises
@@ -42,9 +104,11 @@ def acquire_singleton_lock(lock_path: Path | None = None) -> None:
 
     Args:
         lock_path: Override for the lock file (tests use tmp dirs).
+        no_scheduler: When True (and no explicit/env override), use the
+            side-dev flock so API-only processes do not fight the scheduler.
     """
     global _SINGLETON_LOCK_FD
-    path = Path(lock_path) if lock_path is not None else TASKER_LOCK_PATH
+    path = resolve_tasker_lock_path(lock_path=lock_path, no_scheduler=no_scheduler)
     fd = path.open("a+")
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -234,8 +298,21 @@ def main(argv: list[str] | None = None) -> int:
         # TASKER-HARDENING s1: the single-instance guard must run before
         # build_service() — a second instance must not write mirrors,
         # reconcile runs, or bind the API.
+        no_sched = scheduler_disabled(args)
+        if (
+            no_sched
+            and is_production_app_root()
+            and os.environ.get("PORTFOLIO_LAB_ALLOW_PROD_SIDECAR") != "1"
+        ):
+            logger.error(
+                "refusing API-only Tasker in production app dir %s; "
+                "use the side-dev checkout with --no-scheduler on a non-8000/8001 port "
+                "(set PORTFOLIO_LAB_ALLOW_PROD_SIDECAR=1 only for attended recovery)",
+                PROJECT_ROOT,
+            )
+            return 1
         try:
-            acquire_singleton_lock()
+            acquire_singleton_lock(no_scheduler=no_sched)
         except SystemExit:
             return 1
     service, app = build_service()

@@ -20,8 +20,8 @@ def test_make_test_timeout_docs_match_command() -> None:
     findings: list[str] = []
     if f"Timeout: {EXPECTED_SAFE_TEST_TIMEOUT_SECONDS}s" not in body:
         findings.append("make test preamble does not disclose the 3600s timeout")
-    if f"timeout {EXPECTED_SAFE_TEST_TIMEOUT_SECONDS} uv run pytest" not in body:
-        findings.append("make test command does not use timeout 3600")
+    if f"timeout {EXPECTED_SAFE_TEST_TIMEOUT_SECONDS} $(UV) run pytest" not in body:
+        findings.append("make test command does not use timeout 3600 via scripts/agent_uv.sh")
     if f"exceeded {EXPECTED_SAFE_TEST_TIMEOUT_SECONDS}s limit" not in body:
         findings.append("make test timeout failure text does not disclose 3600s")
     if "exceeded 600s limit" in body:
