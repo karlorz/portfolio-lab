@@ -28,6 +28,8 @@ PORTFOLIO_LAB_PROJECT_DIR ?= $(PROJECT_DIR)
 DATA_DIR := $(PROJECT_DIR)/data
 CRON_UPDATE := $(PROJECT_DIR)/scripts/cron_update.py
 PYTHON_RUNTIME := $(PROJECT_DIR)/scripts/python_runtime.sh
+# Clean standalone uv (bypasses ~/.local/bin/uv Alpine LD_LIBRARY_PATH wrapper).
+UV := $(PROJECT_DIR)/scripts/agent_uv.sh
 PYTHONPATH := $(PROJECT_DIR)/src:$(PYTHONPATH)
 export PORTFOLIO_LAB_PROJECT_DIR
 export PYTHONPATH
@@ -42,7 +44,7 @@ PERF_UPDATE_BASELINE ?= 0
 help:
 	@echo "Portfolio-Lab Makefile"
 	@echo ""
-	@echo "  make test-gate    DEFAULT agent gate (= test-fast; <2m ensemble/signal)"
+	@echo "  make test-gate    DEFAULT agent gate (= test-fast; <2m ensemble/signal; uses scripts/agent_uv.sh)"
 	@echo "  make test-fast    Ensemble/signal subset only (alias of test-gate)"
 	@echo "  make lint         Ruff lint src/ tests/ scripts/ (CI parity, opt-in)"
 	@echo "  make test         Full safe suite merge gate (ML off, 6GB VSZ, ~30-45m, 3600s)"
@@ -167,7 +169,7 @@ test:
 		elif [ -f data/prices.json ]; then cp -a data/prices.json "$$PUBLIC_TMP/data/"; fi; \
 		export PUBLIC_DATA_DIR="$$PUBLIC_TMP/data"; \
 		export PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA=1; \
-		timeout 3600 uv run pytest tests/ -q --tb=short -p no:cacheprovider; \
+		timeout 3600 $(UV) run pytest tests/ -q --tb=short -p no:cacheprovider; \
 		EXIT=$$?; rm -rf "$$PUBLIC_TMP"; exit $$EXIT'; \
 	EXIT=$$?; \
 	set -e; \
@@ -213,7 +215,7 @@ test-gate: test-fast
 # Lint gate: local parity with the CI ruff step (ci.yml lint step runs the same command).
 .PHONY: lint
 lint:
-	@uv run ruff check src/ tests/ scripts/
+	@$(UV) run ruff check src/ tests/ scripts/
 
 # Canonical TS suite (runner matches ci.yml:60 `bun test tests/ts/`); explicit
 # path only — a bare `bun test` at root would pick up stray non-suite files.
@@ -230,10 +232,11 @@ test-ts:
 # `portfolio-lab-tasker.service` (install path: scripts/deploy-lab-app.sh);
 # start/restart it with:
 #   systemctl restart portfolio-lab-tasker
-# The service holds a single-instance flock guard (data/tasker.lock): a
-# second `uv run python -m src.tasker.service` exits 1 with "tasker
-# singleton lock already held (pid N)" while the unit runs. The `--once`
-# mirror-refresh helper is unguarded and safe to run alongside.
+# The production unit holds its own data/tasker.lock. Side-dev from this
+# checkout holds this tree's data/tasker.lock (one service per checkout,
+# scheduler or --no-scheduler). Do not start it against the production app dir.
+# A second service still exits 1 with "tasker singleton lock already
+# held (pid N)". The `--once` mirror-refresh helper is unguarded.
 # If the suite hits tab-loading timeouts (analytics/risk panels not visible),
 # the backend has degraded — restart it and re-run before debugging anything
 # else (evidence: fresh backend 20/20 vs degraded 16-19/20, all timeout-flakes).
@@ -264,7 +267,7 @@ test-fast:
 	echo "  Full merge gate: make test (~30-45m). Wait helper: scripts/wait-test-exit.sh"; \
 	START=$$(date +%s); \
 	bash -c 'ulimit -n 65536 2>/dev/null || true; \
-	PORTFOLIO_LAB_ENABLE_ML=0 uv run pytest tests/test_adaptive_sizing.py tests/test_adaptive_consensus.py tests/test_adaptive_ensemble_weights.py tests/test_regime_conditional_weights.py tests/test_ensemble_voter.py tests/test_regime_spec.py tests/test_regime_gate.py tests/test_ensemble_diversity_floor.py tests/test_ensemble_correlation.py tests/test_ensemble_n_eff.py tests/test_regime_bandit_integration.py tests/test_batch_ho_lag_dashboard_and_signals_restamp.py tests/test_batch_ih_health_ops_reconcile_timeout.py -q --tb=short -p no:cacheprovider; \
+	PORTFOLIO_LAB_ENABLE_ML=0 $(UV) run pytest tests/test_adaptive_sizing.py tests/test_adaptive_consensus.py tests/test_adaptive_ensemble_weights.py tests/test_regime_conditional_weights.py tests/test_ensemble_voter.py tests/test_regime_spec.py tests/test_regime_gate.py tests/test_ensemble_diversity_floor.py tests/test_ensemble_correlation.py tests/test_ensemble_n_eff.py tests/test_regime_bandit_integration.py tests/test_batch_ho_lag_dashboard_and_signals_restamp.py tests/test_batch_ih_health_ops_reconcile_timeout.py -q --tb=short -p no:cacheprovider; \
 	exit $$?'; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
@@ -301,7 +304,7 @@ test-unit:
 		for f in $(TEST_INTEGRATION_FILES); do \
 			IGNORE_ARGS="$$IGNORE_ARGS --ignore=$$f"; \
 		done; \
-		timeout 2400 uv run pytest tests/ -q --tb=short -p no:cacheprovider $$IGNORE_ARGS; \
+		timeout 2400 $(UV) run pytest tests/ -q --tb=short -p no:cacheprovider $$IGNORE_ARGS; \
 		EXIT=$$?; rm -rf "$$PUBLIC_TMP"; exit $$EXIT'; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
@@ -332,7 +335,7 @@ test-generator:
 		export PUBLIC_DATA_DIR="$$PUBLIC_TMP/data"; \
 		export PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA=1; \
 		export PORTFOLIO_LAB_ENABLE_ML=0; \
-		timeout 1200 uv run pytest $(TEST_GENERATOR_FILE) -q --tb=short -p no:cacheprovider; \
+		timeout 1200 $(UV) run pytest $(TEST_GENERATOR_FILE) -q --tb=short -p no:cacheprovider; \
 		EXIT=$$?; rm -rf "$$PUBLIC_TMP"; exit $$EXIT'; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
@@ -354,7 +357,7 @@ test-integration:
 		export PUBLIC_DATA_DIR="$$PUBLIC_TMP/data"; \
 		export PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA=1; \
 		export PORTFOLIO_LAB_ENABLE_ML=0; \
-		timeout 1200 uv run pytest $(TEST_INTEGRATION_FILES) -q --tb=short -p no:cacheprovider; \
+		timeout 1200 $(UV) run pytest $(TEST_INTEGRATION_FILES) -q --tb=short -p no:cacheprovider; \
 		EXIT=$$?; rm -rf "$$PUBLIC_TMP"; exit $$EXIT'; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
@@ -376,7 +379,7 @@ test-isolation:
 	ISOLATION_FILES="test_sentiment_client.py test_network_momentum_leadlag.py test_tsmom_overlay.py test_risk_parity_weight_overlay.py test_duration_yield_backtest.py test_fed_policy_overlay.py test_combined_strategy.py test_sentiment_analyzer.py test_ensemble_voter.py test_multi_speed_momentum.py test_international_momentum.py test_garch_cvar.py"; \
 	for f in $$ISOLATION_FILES; do \
 		echo "  Running $$f..."; \
-		if PORTFOLIO_LAB_ENABLE_ML=0 uv run pytest "tests/$$f" -q --tb=line -p no:cacheprovider --no-header 2>/dev/null; then \
+		if PORTFOLIO_LAB_ENABLE_ML=0 $(UV) run pytest "tests/$$f" -q --tb=line -p no:cacheprovider --no-header 2>/dev/null; then \
 			echo "    ✓ $$f PASSED"; \
 			passed=$$((passed + 1)); \
 		else \
@@ -396,7 +399,7 @@ test-ml:
 	echo "  Heavy tests: included"; \
 	echo "  WARNING: May use >3GB memory. Run on hosts with sufficient RAM."; \
 	START=$$(date +%s); \
-	PORTFOLIO_LAB_ENABLE_ML=1 uv run pytest tests/ -q --tb=short --include-heavy; \
+	PORTFOLIO_LAB_ENABLE_ML=1 $(UV) run pytest tests/ -q --tb=short --include-heavy; \
 	EXIT=$$?; \
 	END=$$(date +%s); \
 	DUR=$$((END - START)); \
@@ -845,7 +848,7 @@ broker-snapshot:
 
 .PHONY: ask
 ask:
-	@cd $(CURDIR) && uv run python -m src.chat.portfolio_query "$(ARGS)"
+	@cd $(CURDIR) && $(UV) run python -m src.chat.portfolio_query "$(ARGS)"
 
 # ── Run All ──────────────────────────────────────────────────────────
 

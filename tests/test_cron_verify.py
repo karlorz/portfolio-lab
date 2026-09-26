@@ -131,6 +131,17 @@ def test_ci_workflow_runs_cron_sync_gate() -> None:
     assert "CI=true make verify-cron-sync" in workflow
 
 
+def test_ci_python_sync_stubs_missing_broker_snapshot_sibling() -> None:
+    """Bare `uv sync` fails on Actions: broker-snapshot is a sibling path source."""
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "../broker-readonly-gateway" in workflow
+    assert "uv sync --no-group ml --no-group broker-snapshot" in workflow
+    # Must not regress to an unguarded sync that requires the sibling checkout.
+    install_block = workflow.split("name: Install dependencies", 1)[1].split("name: Lint", 1)[0]
+    assert "run: uv sync\n" not in install_block
+
+
 def test_verify_cron_sync_ci_mode_skips_host_local_checks() -> None:
     """The cron sync gate wired into CI should avoid host-only Hermes/wiki checks."""
     result = subprocess.run(

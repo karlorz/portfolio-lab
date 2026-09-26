@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "bunx --bun vite",
+    "dev:node": "node node_modules/vite/bin/vite.js",
     "build": "bunx --bun vite build",
+    "build:node": "node node_modules/vite/bin/vite.js build",
     "preview": "vite preview",
     "test:dashboard-browser": "playwright test --config playwright.config.ts",
     "fetch-data": "bun run scripts/fetch-data.ts",

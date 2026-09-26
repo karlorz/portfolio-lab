@@ -1,6 +1,7 @@
 """TASKER-HARDENING s1: single-instance flock guard for the tasker service."""
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -76,3 +77,69 @@ def test_main_once_mode_ignores_singleton_lock(monkeypatch, tmp_path):
     fake_app = _FakeApp()
     monkeypatch.setattr(service, "build_service", lambda: (fake_service, fake_app))
     assert service.main(["--once"]) == 0
+
+
+def test_no_scheduler_uses_same_lock_as_scheduler(tmp_path, monkeypatch):
+    """API-only and scheduler processes share data/tasker.lock."""
+    monkeypatch.setattr(service, "TASKER_LOCK_PATH", tmp_path / "tasker.lock")
+    sched = tmp_path / "tasker.lock"
+    service.acquire_singleton_lock()
+    assert sched.is_file()
+    assert not (tmp_path / "tasker-side.lock").exists()
+
+    service._SINGLETON_LOCK_FD.close()
+    service._SINGLETON_LOCK_FD = None
+    service.acquire_singleton_lock()
+    assert sched.read_text().strip() == str(os.getpid())
+    assert not (tmp_path / "tasker-side.lock").exists()
+
+
+def test_second_service_contends_for_the_same_lock(tmp_path, monkeypatch):
+    """A second service in this checkout must not open the same TASKER_DB."""
+    monkeypatch.setattr(service, "TASKER_LOCK_PATH", tmp_path / "tasker.lock")
+    service.acquire_singleton_lock()
+    held = service._SINGLETON_LOCK_FD
+    service._SINGLETON_LOCK_FD = None
+    with pytest.raises(SystemExit):
+        service.acquire_singleton_lock()
+    held.close()
+    assert not (tmp_path / "tasker-side.lock").exists()
+
+
+def test_env_tasker_lock_path_overrides_default(tmp_path, monkeypatch):
+    custom = tmp_path / "custom.lock"
+    monkeypatch.setenv("TASKER_LOCK_PATH", str(custom))
+    monkeypatch.setattr(service, "TASKER_LOCK_PATH", tmp_path / "tasker.lock")
+    assert service.resolve_tasker_lock_path() == custom
+
+
+def test_main_refuses_prod_sidecar_without_override(monkeypatch, tmp_path):
+    """API-only Tasker must not start from the production app dir."""
+    monkeypatch.setattr(service, "PROJECT_ROOT", Path("/home/box/.local/share/portfolio-lab/app"))
+    monkeypatch.setattr(service, "is_production_app_root", lambda root=None: True)
+    monkeypatch.setattr(service, "configure_logging", lambda: None)
+
+    def _boom():
+        raise AssertionError("build_service must not run for a prod sidecar")
+
+    monkeypatch.setattr(service, "build_service", _boom)
+    monkeypatch.delenv("PORTFOLIO_LAB_ALLOW_PROD_SIDECAR", raising=False)
+    assert service.main(["--no-scheduler"]) == 1
+
+
+def test_scheduler_disabled_reads_flag_and_env(monkeypatch):
+    monkeypatch.delenv("TASKER_DISABLE_SCHEDULER", raising=False)
+    args = service._parse_args(["--no-scheduler"])
+    assert service.scheduler_disabled(args) is True
+    args = service._parse_args([])
+    assert service.scheduler_disabled(args) is False
+    monkeypatch.setenv("TASKER_DISABLE_SCHEDULER", "1")
+    assert service.scheduler_disabled(args) is True
+
+
+def test_is_production_app_root_matches_known_app_dirs():
+    assert service.is_production_app_root(Path("/home/box/.local/share/portfolio-lab/app"))
+    assert service.is_production_app_root(Path("/root/projects/portfolio-lab"))
+    assert service.is_production_app_root(Path("/root/projects/portfolio-lab/src"))
+    assert not service.is_production_app_root(Path("/root/projects/portfolio-lab-preview"))
+    assert not service.is_production_app_root(Path("/home/box/code/portfolio-lab"))

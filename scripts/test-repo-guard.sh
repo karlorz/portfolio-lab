@@ -21,7 +21,9 @@ DENY_LIST=(
 )
 
 REQUIRED_MARKER="portfolio-lab"
-EXPECTED_PROJECT_DIR="${PORTFOLIO_LAB_PROJECT_DIR:-/root/projects/portfolio-lab}"
+# Message-only hint. Never default to a host-specific checkout path;
+# agents clone this repo in many locations (cursor-box, CI, laptops).
+EXPECTED_PROJECT_DIR="${PORTFOLIO_LAB_PROJECT_DIR:-$(pwd)}"
 
 guard_ensure_portfolio_lab() {
     local cwd

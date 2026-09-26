@@ -23,7 +23,21 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync
+        run: |
+          # uv lock/sync resolves every dependency-group, including the opt-in
+          # broker-snapshot path source (../broker-readonly-gateway). That sibling
+          # is not checked out on Actions (and uv.lock is gitignored), so a bare
+          # `uv sync` fails with: Distribution not found at file://.../broker-readonly-gateway.
+          # Stub the path for lock resolution only; do not install that group or ML.
+          sibling="${GITHUB_WORKSPACE}/../broker-readonly-gateway"
+          mkdir -p "$sibling"
+          printf '%s\n' \
+            '[project]' \
+            'name = "broker-readonly-gateway"' \
+            'version = "0.0.0"' \
+            'requires-python = ">=3.11"' \
+            > "$sibling/pyproject.toml"
+          uv sync --no-group ml --no-group broker-snapshot
 
       - name: Lint (ruff)
         run: uv run ruff check src/ tests/ scripts/
