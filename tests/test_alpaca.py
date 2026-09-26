@@ -356,13 +356,30 @@ class TestAlpacaMarketSessionGuard:
         )
         allowed = resolve_alpaca_market_session(
             {"is_open": False, "session_state": "extended_hours"},
-            env={"ALPACA_ALLOW_EXTENDED_HOURS": "true"},
+            env={"ALPACA_ALLOW_EXTENDED_HOURS": "1"},
         )
 
         assert blocked["guard_decision"] == "reject"
         assert blocked["reason"] == "extended_hours_not_allowed"
         assert allowed["guard_decision"] == "allow"
         assert allowed["allow_live_orders"] is True
+
+    def test_extended_hours_truthy_strings_stay_off(self):
+        for value in ("true", "yes", "on", "True", "0", ""):
+            session = resolve_alpaca_market_session(
+                {"is_open": False, "session_state": "extended_hours"},
+                env={"ALPACA_ALLOW_EXTENDED_HOURS": value},
+            )
+            assert session["guard_decision"] == "reject", value
+            assert session["reason"] == "extended_hours_not_allowed", value
+
+    def test_extended_hours_broker_allow_alias_literal_one(self):
+        session = resolve_alpaca_market_session(
+            {"is_open": False, "session_state": "extended_hours"},
+            env={"BROKER_ALLOW_EXTENDED_HOURS": "1"},
+        )
+        assert session["guard_decision"] == "allow"
+        assert session["allow_live_orders"] is True
 
     def test_unavailable_session_reports_error_type_without_raw_message(self):
         session = resolve_unavailable_alpaca_market_session(
