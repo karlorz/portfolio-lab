@@ -32,11 +32,12 @@ import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
+from src.env_flags import env_literal_one
 
 logger = logging.getLogger(__name__)
 
 # Conditional ML import — disabled by default to prevent OOM in test suites.
-_ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+_ML_ENABLED = env_literal_one("PORTFOLIO_LAB_ENABLE_ML")
 if _ML_ENABLED:
     import torch
 

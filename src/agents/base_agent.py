@@ -19,10 +19,11 @@ from enum import Enum
 import numpy as np
 from pathlib import Path
 import os
+from src.env_flags import env_literal_one
 
 # Conditional ML import — disabled by default to prevent OOM in test suites.
 # Set PORTFOLIO_LAB_ENABLE_ML=1 to load real torch.
-_ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+_ML_ENABLED = env_literal_one("PORTFOLIO_LAB_ENABLE_ML")
 
 if _ML_ENABLED:
     import torch

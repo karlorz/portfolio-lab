@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from src.paths import DATA_DIR, PUBLIC_DATA_DIR
+from src.env_flags import env_literal_one
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ def _pytest_blocks_live_incident_write(path: Path | str | None) -> bool:
         return False
     if not os.environ.get("PYTEST_CURRENT_TEST"):
         return False
-    if os.environ.get("PORTFOLIO_LAB_ALLOW_LIVE_INCIDENTS", "0") == "1":
+    if env_literal_one("PORTFOLIO_LAB_ALLOW_LIVE_INCIDENTS"):
         return False
     try:
         target = Path(path).resolve()
@@ -426,7 +427,7 @@ class IncidentManager:
             private_is_live_ssot = False
 
         under_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
-        allow_live_inc = os.environ.get("PORTFOLIO_LAB_ALLOW_LIVE_INCIDENTS", "0") == "1"
+        allow_live_inc = env_literal_one("PORTFOLIO_LAB_ALLOW_LIVE_INCIDENTS")
 
         if (
             not paths_identical

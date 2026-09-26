@@ -18,6 +18,7 @@ import numpy as np
 from src.paths import BASE_ALLOCATION, DATA_DIR, MARKET_DB, REGIME_OVERRIDES
 from src.strategy.regime_allocation import get_regime_allocation_with_override
 from src.backtest.metrics import save_results_json
+from src.env_flags import env_literal_one
 from enum import Enum
 
 
@@ -53,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 def _resolve_target_allocation(regime: str | None) -> Dict[str, float]:
     """Resolve target allocation using the scheduled env contract."""
-    if os.environ.get("REGIME_ALLOC_ENABLED", "0") == "1":
+    if env_literal_one("REGIME_ALLOC_ENABLED"):
         return get_regime_allocation_with_override(regime)
     return REGIME_OVERRIDES.get(regime) or BASE_ALLOCATION
 
@@ -925,7 +926,7 @@ def main() -> int:
 
     # Determine target allocation
     target_alloc = _resolve_target_allocation(regime)
-    if os.environ.get("REGIME_ALLOC_ENABLED", "0") == "1":
+    if env_literal_one("REGIME_ALLOC_ENABLED"):
         logger.info("Regime-conditional allocation (%s): %s", regime, target_alloc)
     logger.info("Target allocation: %s", target_alloc)
 

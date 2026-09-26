@@ -27,6 +27,7 @@ from typing import Any
 from src.paths import DATA_DIR, PUBLIC_DATA_DIR
 from src.monitor.alerting import AlertChannel, AlertLevel, send_alert, webhook_config_state
 from src.monitor.hermes_cron import (
+from src.env_flags import env_literal_one
     is_health_self_job,
 )
 
@@ -498,7 +499,7 @@ def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
 
 def _should_include_hermes_audit(local_backend: dict) -> bool:
     """Return true when Hermes should be surfaced alongside tasker health."""
-    if os.environ.get("TASKER_INCLUDE_HERMES_AUDIT") == "1":
+    if env_literal_one("TASKER_INCLUDE_HERMES_AUDIT", default=""):
         return True
     if local_backend.get("backend") == "tasker" and os.environ.get("CRON_BACKEND") == "tasker":
         return False

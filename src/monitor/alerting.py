@@ -24,6 +24,7 @@ from enum import Enum
 from typing import Dict, Optional
 
 from src.monitor.incident_manager import IncidentManager
+from src.env_flags import env_literal_one
 
 logger = logging.getLogger(__name__)
 
@@ -454,7 +455,7 @@ def check_staleness_and_alert(staleness_data: Dict) -> None:
     try:
         from src.monitor.signal_ownership import annotate_unavailable_signals, recovery_summary
 
-        ml_on = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+        ml_on = env_literal_one("PORTFOLIO_LAB_ENABLE_ML")
         ownership = annotate_unavailable_signals(
             staleness_data.get("unavailable_signals") or [],
             ml_enabled=ml_on,
@@ -525,7 +526,7 @@ def check_sustained_unavailability_and_alert(
         try:
             from src.monitor.signal_ownership import annotate_unavailable_signals, recovery_summary
 
-            ml_on = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+            ml_on = env_literal_one("PORTFOLIO_LAB_ENABLE_ML")
             ownership = annotate_unavailable_signals(unavailable, ml_enabled=ml_on)
             recovery = recovery_summary(ownership)
         except Exception:
