@@ -163,13 +163,6 @@ def _normalise(value: Any) -> str:
     return str(getattr(value, "value", value))
 
 
-def _env_bool(name: str, default: bool) -> bool:
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    return value.strip().lower() not in {"0", "false", "no", "off"}
-
-
 def _env_int(name: str, default: int) -> int:
     try:
         return int(os.environ.get(name, str(default)))
@@ -200,7 +193,7 @@ class IncidentManager:
             cycles = _env_int("INCIDENT_KILL_SWITCH_ESCALATION_CYCLES", 3)
         self.escalation_cycles = max(1, cycles)
         self.escalation_enabled = (
-            _env_bool("INCIDENT_KILL_SWITCH_ESCALATION_ENABLED", True)
+            env_literal_one("INCIDENT_KILL_SWITCH_ESCALATION_ENABLED", default="1")
             if escalation_enabled is None
             else escalation_enabled
         )
