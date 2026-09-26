@@ -47,3 +47,27 @@ def test_env_flags_module_is_the_single_literal_one_helper():
     body = ENV_FLAGS.read_text(encoding="utf-8")
     assert "def env_literal_one(" in body
     assert '== "1"' in body
+
+
+RAW_ALPACA_PAPER = re.compile(
+    r"""os\.(?:environ\.get|getenv)\(\s*['\"]ALPACA_PAPER['\"]"""
+)
+
+
+def test_no_raw_alpaca_paper_reads_outside_env_flags():
+    """ALPACA_PAPER must go through env_paper_unless_false (fail-open to paper)."""
+    offenders: list[str] = []
+    for path in _iter_src_py():
+        text = path.read_text(encoding="utf-8")
+        for match in RAW_ALPACA_PAPER.finditer(text):
+            rel = path.relative_to(PROJECT_ROOT).as_posix()
+            offenders.append(f"{rel}: {match.group(0)}")
+    assert offenders == [], (
+        "use env_paper_unless_false(); raw ALPACA_PAPER reads:\n" + "\n".join(offenders)
+    )
+
+
+def test_env_flags_module_is_the_single_paper_helper():
+    body = ENV_FLAGS.read_text(encoding="utf-8")
+    assert "def env_paper_unless_false(" in body
+    assert 'not in ("false", "0", "no")' in body
