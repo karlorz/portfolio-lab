@@ -20,6 +20,7 @@ from enum import Enum
 from zoneinfo import ZoneInfo
 
 from src.paths import MARKET_DB, DATA_DIR, sqlite_connect
+from src.env_flags import env_literal_one
 from src.broker.circuit_breaker import (
     BrokerError,
     CircuitBreakerError,
@@ -243,8 +244,6 @@ def resolve_alpaca_feed_entitlement(env: Optional[Mapping[str, str]] = None) -> 
     }
 
 
-def _truthy_env(value: Optional[str]) -> bool:
-    return (value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _normalize_session_state(value: Optional[str]) -> str:
@@ -336,9 +335,10 @@ def resolve_alpaca_market_session(
 ) -> Dict[str, Any]:
     """Return public-safe market-session policy metadata for live order guards."""
     values = env if env is not None else os.environ
-    extended_hours_allowed = _truthy_env(
-        values.get("ALPACA_ALLOW_EXTENDED_HOURS")
-        or values.get("BROKER_ALLOW_EXTENDED_HOURS")
+    extended_hours_allowed = env_literal_one(
+        "ALPACA_ALLOW_EXTENDED_HOURS", default="", env=values
+    ) or env_literal_one(
+        "BROKER_ALLOW_EXTENDED_HOURS", default="", env=values
     )
     override_state = _normalize_session_state(
         values.get("ALPACA_MARKET_SESSION_STATE")
