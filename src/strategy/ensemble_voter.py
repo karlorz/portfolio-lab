@@ -164,7 +164,7 @@ class EnsembleVoterBase:
 
         # Online IC weighter for IC-based ensemble weight learning
         # Gated by ENSEMBLE_USE_IC_WEIGHTS env var (default: off)
-        self._use_ic_weights = os.environ.get("ENSEMBLE_USE_IC_WEIGHTS", "0").lower() in ("1", "true")
+        self._use_ic_weights = os.environ.get("ENSEMBLE_USE_IC_WEIGHTS", "0") == "1"
         self._ic_weighter = None
         if self._use_ic_weights:
             try:

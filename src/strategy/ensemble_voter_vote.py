@@ -61,7 +61,7 @@ class VoteMixin:
         # Batch DN: health renorm concentrates mass — enforce documented 50% cap
         weights = self._cap_per_signal_weights(weights, regime.name)
         weights = self._apply_correlation_penalty(weights)
-        if os.environ.get("ENSEMBLE_DISABLE_REGIME_WEIGHTS", "").lower() not in ("1", "true"):
+        if os.environ.get("ENSEMBLE_DISABLE_REGIME_WEIGHTS", "") != "1":
             weights = self._apply_regime_weights(weights, regime)
         weights = self._apply_utility_reweighting(weights, regime)
         weights = self._apply_exploration_noise(weights, regime)
