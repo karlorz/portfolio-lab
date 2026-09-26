@@ -390,7 +390,7 @@ def evaluate_promotion_candidate(
     max_dd_worse = float(os.environ.get("PROMOTION_MAX_DD_WORSE_PCT", "2.0"))
     max_cvar_worse = float(os.environ.get("PROMOTION_MAX_CVAR_WORSE", "0.05"))
     max_turnover = float(os.environ.get("PROMOTION_MAX_TURNOVER", "1.5"))
-    require_wfe = os.environ.get("PROMOTION_REQUIRE_WFE", "0").lower() in {"1", "true", "yes"}
+    require_wfe = os.environ.get("PROMOTION_REQUIRE_WFE", "0") == "1"
 
     failures: list[str] = []
     if not metrics:
