@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.env_flags import env_literal_one
+from src.env_flags import env_literal_one, env_paper_unless_false
 
 TRUTHY_OFF = ("", "0", "true", "True", "yes", "on", "2", "1 ")
 
@@ -34,3 +34,30 @@ def test_mapping_override_ignores_os(monkeypatch):
 def test_empty_default_still_requires_literal_one():
     assert env_literal_one("MISSING", default="", env={}) is False
     assert env_literal_one("MISSING", default="", env={"MISSING": "1"}) is True
+
+
+PAPER_ON = ("", "true", "True", "1", "yes", "YES", "on", "paper")
+PAPER_OFF = ("false", "False", "0", "no", "NO")
+
+
+@pytest.mark.parametrize("value", PAPER_ON)
+def test_paper_unless_false_stays_paper(monkeypatch, value):
+    monkeypatch.setenv("ALPACA_PAPER", value)
+    assert env_paper_unless_false() is True
+
+
+@pytest.mark.parametrize("value", PAPER_OFF)
+def test_paper_unless_false_explicit_live(monkeypatch, value):
+    monkeypatch.setenv("ALPACA_PAPER", value)
+    assert env_paper_unless_false() is False
+
+
+def test_paper_unless_false_default_when_unset(monkeypatch):
+    monkeypatch.delenv("ALPACA_PAPER", raising=False)
+    assert env_paper_unless_false() is True
+
+
+def test_paper_unless_false_mapping_override(monkeypatch):
+    monkeypatch.setenv("ALPACA_PAPER", "false")
+    assert env_paper_unless_false(env={"ALPACA_PAPER": "1"}) is True
+    assert env_paper_unless_false(env={"ALPACA_PAPER": "0"}) is False

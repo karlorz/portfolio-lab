@@ -20,7 +20,7 @@ from enum import Enum
 from zoneinfo import ZoneInfo
 
 from src.paths import MARKET_DB, DATA_DIR, sqlite_connect
-from src.env_flags import env_literal_one
+from src.env_flags import env_literal_one, env_paper_unless_false
 from src.broker.circuit_breaker import (
     BrokerError,
     CircuitBreakerError,
@@ -786,7 +786,7 @@ class PaperTradingManager:
         return int(os.environ.get("BROKER_MAX_QUOTE_AGE_SECONDS", "900"))
 
     def _is_live_order_mode(self, dry_run: bool) -> bool:
-        paper_mode = os.environ.get("ALPACA_PAPER", "true").lower() not in ("false", "0", "no")
+        paper_mode = env_paper_unless_false()
         return not dry_run and not paper_mode
 
     def _position_quote(self, position: Position) -> MarketQuote:
@@ -1040,7 +1040,7 @@ def check_alpaca_status() -> Dict[str, Any]:
 
     Detects paper vs live mode from ALPACA_PAPER env var (default: True).
     """
-    paper_mode = os.environ.get("ALPACA_PAPER", "true").lower() not in ("false", "0", "no")
+    paper_mode = env_paper_unless_false()
     client = AlpacaClient(paper=paper_mode)
 
     status = {
