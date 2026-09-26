@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.env_flags import env_literal_one, env_paper_unless_false
+from src.env_flags import env_choice, env_literal_one, env_paper_unless_false
 
 TRUTHY_OFF = ("", "0", "true", "True", "yes", "on", "2", "1 ")
 
@@ -61,3 +61,41 @@ def test_paper_unless_false_mapping_override(monkeypatch):
     monkeypatch.setenv("ALPACA_PAPER", "false")
     assert env_paper_unless_false(env={"ALPACA_PAPER": "1"}) is True
     assert env_paper_unless_false(env={"ALPACA_PAPER": "0"}) is False
+
+
+
+def test_env_choice_accepts_allowed(monkeypatch):
+    monkeypatch.setenv("PORTFOLIO_LAB_TEST_CHOICE", "probe")
+    assert env_choice(
+        "PORTFOLIO_LAB_TEST_CHOICE",
+        allowed=("publication", "probe"),
+        default="publication",
+    ) == "probe"
+
+
+def test_env_choice_unknown_fails_closed(monkeypatch):
+    monkeypatch.setenv("PORTFOLIO_LAB_TEST_CHOICE", "bogus")
+    assert env_choice(
+        "PORTFOLIO_LAB_TEST_CHOICE",
+        allowed=("publication", "probe"),
+        default="publication",
+    ) == "publication"
+
+
+def test_env_choice_casefold_returns_canonical(monkeypatch):
+    monkeypatch.setenv("PORTFOLIO_LAB_TEST_CHOICE", "LiVe")
+    assert env_choice(
+        "PORTFOLIO_LAB_TEST_CHOICE",
+        allowed=("paper", "live"),
+        default="paper",
+        casefold=True,
+    ) == "live"
+
+
+def test_env_choice_default_when_unset(monkeypatch):
+    monkeypatch.delenv("PORTFOLIO_LAB_TEST_CHOICE", raising=False)
+    assert env_choice(
+        "PORTFOLIO_LAB_TEST_CHOICE",
+        allowed=("paper", "live"),
+        default="paper",
+    ) == "paper"

@@ -26,7 +26,7 @@ from typing import Any
 
 from src.paths import DATA_DIR, PUBLIC_DATA_DIR
 from src.monitor.alerting import AlertChannel, AlertLevel, send_alert, webhook_config_state
-from src.env_flags import env_literal_one
+from src.env_flags import env_choice, env_literal_one
 from src.monitor.hermes_cron import (
     is_health_self_job,
 )
@@ -989,10 +989,12 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description="Run the Portfolio Lab health producer.")
     _exit_modes = ("publication", "probe")
-    _env_exit = os.environ.get("PORTFOLIO_LAB_HEALTH_EXIT_MODE", "publication")
     # Unknown env values fail closed to publication (safe producer exit 0).
-    if _env_exit not in _exit_modes:
-        _env_exit = "publication"
+    _env_exit = env_choice(
+        "PORTFOLIO_LAB_HEALTH_EXIT_MODE",
+        allowed=_exit_modes,
+        default="publication",
+    )
     parser.add_argument(
         "--exit-mode",
         choices=_exit_modes,

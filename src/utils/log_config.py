@@ -31,7 +31,7 @@ import logging.config
 import os
 import sys
 
-from src.env_flags import env_literal_one
+from src.env_flags import env_choice, env_literal_one
 
 __all__ = ["configure_logging"]
 
@@ -62,7 +62,18 @@ def configure_logging(level: str | None = None) -> None:
         Override log level.  Defaults to the ``LOG_LEVEL`` environment
         variable, falling back to ``"INFO"``.
     """
-    effective_level = level or os.environ.get("LOG_LEVEL", "INFO").upper()
+    _log_levels = ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG")
+    if level is not None:
+        effective_level = str(level).upper()
+        if effective_level not in _log_levels:
+            effective_level = "INFO"
+    else:
+        effective_level = env_choice(
+            "LOG_LEVEL",
+            allowed=_log_levels,
+            default="INFO",
+            casefold=True,
+        ).upper()
 
     # Determine formatter
     use_json = env_literal_one("JSON_LOGS", default="")

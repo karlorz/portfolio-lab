@@ -18,7 +18,7 @@ import numpy as np
 from src.paths import BASE_ALLOCATION, DATA_DIR, MARKET_DB, REGIME_OVERRIDES
 from src.strategy.regime_allocation import get_regime_allocation_with_override
 from src.backtest.metrics import save_results_json
-from src.env_flags import env_literal_one
+from src.env_flags import env_choice, env_literal_one
 from enum import Enum
 
 
@@ -842,7 +842,8 @@ def main() -> int:
     logger.info("Strategy Evaluator Starting")
 
     # Determine mode from environment
-    mode = os.environ.get("ALPHALAB_MODE", "paper")
+    # Unknown ALPHALAB_MODE fails closed to paper (do not invent live state files).
+    mode = env_choice("ALPHALAB_MODE", allowed=("paper", "live"), default="paper", casefold=True)
     state_file = DATA_DIR / f"portfolio_{mode}.json"
 
     with sqlite_connect(DB_PATH) as conn:
