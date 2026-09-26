@@ -10,6 +10,8 @@ import hashlib
 import json
 import logging
 import os
+
+from src.env_flags import env_literal_one
 import sqlite3
 import uuid
 from contextlib import closing
@@ -390,7 +392,7 @@ def evaluate_promotion_candidate(
     max_dd_worse = float(os.environ.get("PROMOTION_MAX_DD_WORSE_PCT", "2.0"))
     max_cvar_worse = float(os.environ.get("PROMOTION_MAX_CVAR_WORSE", "0.05"))
     max_turnover = float(os.environ.get("PROMOTION_MAX_TURNOVER", "1.5"))
-    require_wfe = os.environ.get("PROMOTION_REQUIRE_WFE", "0") == "1"
+    require_wfe = env_literal_one("PROMOTION_REQUIRE_WFE")
 
     failures: list[str] = []
     if not metrics:

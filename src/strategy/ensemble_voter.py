@@ -35,6 +35,7 @@ Usage:
 import json
 
 import os
+from src.env_flags import env_literal_one
 
 
 
@@ -164,7 +165,7 @@ class EnsembleVoterBase:
 
         # Online IC weighter for IC-based ensemble weight learning
         # Gated by ENSEMBLE_USE_IC_WEIGHTS env var (default: off)
-        self._use_ic_weights = os.environ.get("ENSEMBLE_USE_IC_WEIGHTS", "0") == "1"
+        self._use_ic_weights = env_literal_one("ENSEMBLE_USE_IC_WEIGHTS")
         self._ic_weighter = None
         if self._use_ic_weights:
             try:
