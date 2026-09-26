@@ -1524,6 +1524,22 @@ class TestRemainingEdgeCases:
             fetcher = OptionsChainFetcher(api_key="k", secret_key="s")
             assert fetcher.paper_mode is False
 
+    def test_fetcher_paper_mode_literal_one_stays_paper(self):
+        """Align with alpaca: ALPACA_PAPER=1 stays paper (not live)."""
+        with patch.dict(os.environ, {"ALPACA_API_KEY": "k", "ALPACA_API_SECRET": "s", "ALPACA_PAPER": "1"}):
+            fetcher = OptionsChainFetcher(api_key="k", secret_key="s")
+            assert fetcher.paper_mode is True
+
+    def test_fetcher_paper_mode_yes_stays_paper(self):
+        with patch.dict(os.environ, {"ALPACA_API_KEY": "k", "ALPACA_API_SECRET": "s", "ALPACA_PAPER": "yes"}):
+            fetcher = OptionsChainFetcher(api_key="k", secret_key="s")
+            assert fetcher.paper_mode is True
+
+    def test_fetcher_paper_mode_zero_is_live(self):
+        with patch.dict(os.environ, {"ALPACA_API_KEY": "k", "ALPACA_API_SECRET": "s", "ALPACA_PAPER": "0"}):
+            fetcher = OptionsChainFetcher(api_key="k", secret_key="s")
+            assert fetcher.paper_mode is False
+
     def test_fetcher_partial_credentials_key_only(self):
         fetcher = OptionsChainFetcher(api_key="key_only")
         assert fetcher.has_api_access is False
