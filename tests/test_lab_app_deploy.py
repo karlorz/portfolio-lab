@@ -289,6 +289,27 @@ def test_health_check_exposes_publication_and_probe_exit_modes():
     assert '"publication"' in source
     assert '"probe"' in source
     assert "PORTFOLIO_LAB_HEALTH_EXIT_MODE" in source
+    # Regression: env_literal_one must not be nested inside hermes_cron import.
+    assert "from src.env_flags import env_literal_one" in source
+    assert "from src.monitor.hermes_cron import (\nfrom src.env_flags" not in source
+
+def test_health_exit_mode_unknown_env_fails_closed_to_publication(monkeypatch, capsys):
+    """Garbage PORTFOLIO_LAB_HEALTH_EXIT_MODE must not crash; use publication."""
+    import src.monitor.health_check as hc
+
+    monkeypatch.setenv("PORTFOLIO_LAB_HEALTH_EXIT_MODE", "bogus")
+    monkeypatch.setattr(hc, "run_health_check", lambda: {"status": "critical", "ok": False})
+    assert hc.main([]) == 0  # publication mode ignores severity for exit
+
+
+def test_health_exit_mode_probe_from_env(monkeypatch):
+    import src.monitor.health_check as hc
+
+    monkeypatch.setenv("PORTFOLIO_LAB_HEALTH_EXIT_MODE", "probe")
+    monkeypatch.setattr(hc, "run_health_check", lambda: {"status": "critical"})
+    assert hc.main([]) == 1
+    monkeypatch.setattr(hc, "run_health_check", lambda: {"status": "warning"})
+    assert hc.main([]) == 0
 
 
 def test_generation_publication_helpers_exist():
