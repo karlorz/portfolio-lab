@@ -920,11 +920,8 @@ def record_backtest_experiment(
     registry: DecisionRegistry | None = None,
 ) -> str | None:
     """Register a backtest or labs result artifact in the SQLite experiment ledger."""
-    if os.environ.get("DECISION_REGISTRY_RECORD_BACKTEST", "1").lower() in {
-        "0",
-        "false",
-        "no",
-    }:
+    # Default on; only exact "1" (or unset default) records. true/yes/false stay off-path.
+    if not env_literal_one("DECISION_REGISTRY_RECORD_BACKTEST", default="1"):
         return None
 
     reg = registry or DecisionRegistry()
