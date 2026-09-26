@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import Dict, Optional, Union
+from src.env_flags import env_literal_one
 
 # Repository root (3 levels up from this file: paths.py -> src/ -> repo_root/)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -75,7 +76,7 @@ def resolve_runtime_public_data_dir(
     if env_public and str(env_public).strip():
         return Path(str(env_public).strip()).expanduser()
 
-    allow_repo = str(env_map.get("PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA", "")) == "1"
+    allow_repo = env_literal_one("PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA", default="", env=env_map)
     repo_public = (root / "public" / "data")
 
     try:
