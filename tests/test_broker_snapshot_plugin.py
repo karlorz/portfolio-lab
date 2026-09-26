@@ -72,6 +72,14 @@ def test_disabled_by_default(monkeypatch):
     assert load_broker_snapshot_section(plugin=_ReadOnlyPlugin()) is None
 
 
+def test_enabled_only_for_literal_one(monkeypatch):
+    """Fail-closed: only exact '1' enables; truthy strings stay off."""
+    for value in ("", "0", "true", "True", "yes", "on", "2", "1 "):
+        monkeypatch.setenv(ENABLE_ENV, value)
+        assert broker_snapshot_enabled() is False, value
+        assert load_broker_snapshot_section(plugin=_ReadOnlyPlugin()) is None, value
+
+
 def test_enabled_without_plugin_skips(monkeypatch):
     monkeypatch.setenv(ENABLE_ENV, "1")
     with patch(
