@@ -135,6 +135,20 @@ def test_main_refuses_prod_sidecar_without_override(monkeypatch, tmp_path):
     assert service.main(["--no-scheduler"]) == 1
 
 
+@pytest.mark.parametrize("value", ("true", "True", "yes", "on", "0", "1 "))
+def test_main_refuses_prod_sidecar_for_non_literal_one(monkeypatch, value):
+    monkeypatch.setattr(service, "PROJECT_ROOT", Path("/home/box/.local/share/portfolio-lab/app"))
+    monkeypatch.setattr(service, "is_production_app_root", lambda root=None: True)
+    monkeypatch.setattr(service, "configure_logging", lambda: None)
+    monkeypatch.setattr(
+        service,
+        "build_service",
+        lambda: (_ for _ in ()).throw(AssertionError("build_service must not run")),
+    )
+    monkeypatch.setenv("PORTFOLIO_LAB_ALLOW_PROD_SIDECAR", value)
+    assert service.main(["--no-scheduler"]) == 1
+
+
 def test_scheduler_disabled_reads_flag_and_env(monkeypatch):
     monkeypatch.delenv("TASKER_DISABLE_SCHEDULER", raising=False)
     args = service._parse_args(["--no-scheduler"])

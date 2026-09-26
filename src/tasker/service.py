@@ -303,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
         if (
             no_sched
             and is_production_app_root()
-            and os.environ.get("PORTFOLIO_LAB_ALLOW_PROD_SIDECAR") != "1"
+            and not env_literal_one("PORTFOLIO_LAB_ALLOW_PROD_SIDECAR")
         ):
             logger.error(
                 "refusing API-only Tasker in production app dir %s; "
