@@ -20,7 +20,7 @@ Environment variables
 LOG_LEVEL : str
     Override log level.  Defaults to ``"INFO"``.
 JSON_LOGS : str
-    Set to ``"1"`` to enable JSON-structured output via python-json-logger.
+    Literal ``"1"`` only enables JSON-structured output via python-json-logger (``true``/``yes`` stay off).
 CRON_RUN_ID : str
     Optional correlation ID injected into every log record for
     cron pipeline tracing.
@@ -30,6 +30,8 @@ import logging
 import logging.config
 import os
 import sys
+
+from src.env_flags import env_literal_one
 
 __all__ = ["configure_logging"]
 
@@ -63,7 +65,7 @@ def configure_logging(level: str | None = None) -> None:
     effective_level = level or os.environ.get("LOG_LEVEL", "INFO").upper()
 
     # Determine formatter
-    use_json = os.environ.get("JSON_LOGS", "").strip() in ("1", "true", "yes")
+    use_json = env_literal_one("JSON_LOGS", default="")
 
     if use_json:
         try:
