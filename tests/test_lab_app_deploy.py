@@ -290,7 +290,7 @@ def test_health_check_exposes_publication_and_probe_exit_modes():
     assert '"probe"' in source
     assert "PORTFOLIO_LAB_HEALTH_EXIT_MODE" in source
     # Regression: env_literal_one must not be nested inside hermes_cron import.
-    assert "from src.env_flags import env_literal_one" in source
+    assert "env_literal_one" in source and "from src.env_flags import" in source
     assert "from src.monitor.hermes_cron import (\nfrom src.env_flags" not in source
 
 def test_health_exit_mode_unknown_env_fails_closed_to_publication(monkeypatch, capsys):
@@ -498,3 +498,28 @@ def test_deploy_candidate_fails_closed_for_authoritative_use(tmp_path):
     ]
     res = subprocess.run(good, capture_output=True, text=True, timeout=120)
     assert res.returncode == 0, res.stderr
+
+
+def test_evaluator_alphamode_unknown_fails_closed_to_paper():
+    """ALPHALAB_MODE garbage must resolve to paper via env_choice."""
+    from src.env_flags import env_choice
+
+    assert env_choice(
+        "ALPHALAB_MODE",
+        allowed=("paper", "live"),
+        default="paper",
+        casefold=True,
+        env={"ALPHALAB_MODE": "bogus"},
+    ) == "paper"
+    source = (Path(__file__).resolve().parents[1] / "src/strategy/evaluator.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'env_choice("ALPHALAB_MODE"' in source
+
+
+def test_health_exit_mode_uses_env_choice():
+    source = (Path(__file__).resolve().parents[1] / "src/monitor/health_check.py").read_text(
+        encoding="utf-8"
+    )
+    assert "env_choice(" in source
+    assert "PORTFOLIO_LAB_HEALTH_EXIT_MODE" in source

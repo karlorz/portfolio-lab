@@ -133,3 +133,15 @@ class TestConfigureLogging:
             for h in root.handlers:
                 if isinstance(h, logging.StreamHandler) and h.formatter is not None:
                     assert "JsonFormatter" not in type(h.formatter).__name__
+
+
+def test_configure_logging_unknown_env_level_fails_closed_to_info(monkeypatch):
+    """Garbage LOG_LEVEL must not ValueError; fall back to INFO."""
+    monkeypatch.setenv("LOG_LEVEL", "bogus")
+    configure_logging()
+    assert logging.getLogger().level == logging.INFO
+
+
+def test_configure_logging_unknown_override_fails_closed_to_info():
+    configure_logging(level="nope")
+    assert logging.getLogger().level == logging.INFO

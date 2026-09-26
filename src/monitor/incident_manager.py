@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from src.paths import DATA_DIR, PUBLIC_DATA_DIR
-from src.env_flags import env_literal_one
+from src.env_flags import env_choice, env_literal_one
 
 logger = logging.getLogger(__name__)
 
@@ -770,7 +770,7 @@ class IncidentManager:
             "enabled": True,
             "level": level,
             "reason": f"unresolved_incident:{incident.channel}",
-            "mode": os.environ.get("ALPHALAB_MODE", "paper"),
+            "mode": env_choice("ALPHALAB_MODE", allowed=("paper", "live"), default="paper", casefold=True),
             "timestamp": incident.updated_at,
             "position_reduction": _KILL_SWITCH_REDUCTION[level],
             "source": "incident_lifecycle",

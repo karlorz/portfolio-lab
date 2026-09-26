@@ -37,3 +37,29 @@ def env_paper_unless_false(
     """
     source: Mapping[str, str] = os.environ if env is None else env
     return str(source.get(name, default)).lower() not in ("false", "0", "no")
+
+
+def env_choice(
+    name: str,
+    *,
+    allowed: frozenset[str] | set[str] | tuple[str, ...],
+    default: str,
+    env: Mapping[str, str] | None = None,
+    casefold: bool = False,
+) -> str:
+    """Return env[name] when it is in ``allowed``, otherwise ``default``.
+
+    Unknown / garbage values fail closed to ``default``. When ``casefold`` is
+    True, matching is case-insensitive and the canonical spelling from
+    ``allowed`` is returned.
+    """
+    source: Mapping[str, str] = os.environ if env is None else env
+    raw = str(source.get(name, default))
+    if casefold:
+        lookup = {str(item).casefold(): str(item) for item in allowed}
+        return lookup.get(raw.casefold(), default)
+    allowed_set = {str(item) for item in allowed}
+    if raw in allowed_set:
+        return raw
+    return default
+
