@@ -142,7 +142,10 @@ def test_readme_cold_path_covers_uv_tests_side_tasker_and_rolldown() -> None:
     assert "TASKER_DISABLE_SCHEDULER=1" in text
     assert "--no-scheduler" in text
     assert "8010" in text or "non-8000" in text
-    assert "tasker-side.lock" in text
+    assert "data/tasker.lock" in text
+    assert "tasker-side.lock" not in text
+    assert "PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA=1" in text
+    assert "~/.local/bin/uv sync" in text
     assert "@rolldown/binding-linux-x64-gnu" in text
     assert "dev:node" in text
     assert "/root/projects/portfolio-lab" not in text or "Do not assume" in text

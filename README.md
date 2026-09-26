@@ -39,11 +39,13 @@ there.
 `LD_LIBRARY_PATH` (so `uv sync` can compile native wheels). That injection
 breaks `uv run pytest` on a mixed glibc/musl host.
 
-Use the clean resolver as the default agent path:
+Use the clean resolver for `run` and pytest. On cursor-box, keep the wrapper
+for native wheel installs only:
 
 ```bash
-# one-time, from this checkout
-scripts/agent_uv.sh sync
+# cursor-box native wheels (Alpine compiler env). Other hosts:
+# scripts/agent_uv.sh sync
+~/.local/bin/uv sync
 
 # mid-session gate (<2m, ensemble/signal). Makefile already uses scripts/agent_uv.sh.
 PORTFOLIO_LAB_ENABLE_ML=0 make test-gate
@@ -73,18 +75,23 @@ Never default to `make test-unit` (still ~15k tests) or `make test-ml`.
 
 ### Side-dev Tasker (private deploy)
 
-Production Tasker owns `data/tasker.lock` plus `:8000`/`:8001`. A side-dev API
-uses a **sibling flock** (`data/tasker-side.lock`) so `--no-scheduler` does
-not fight the live scheduler — but only when it runs from **this checkout's**
-`data/` (private `TASKER_DB`). Starting an API sidecar from the production app
-dir is refused.
+Production Tasker owns its own `data/tasker.lock` under
+`/home/box/.local/share/portfolio-lab/app` plus `:8000`/`:8001`. A side-dev
+API runs from **this checkout**, so its flock is this tree's `data/tasker.lock`
+and its store is this tree's `data/tasker.db`. One checkout still allows only
+one Tasker service: `--no-scheduler` takes the same flock as the scheduler.
+Starting an API sidecar from the production app dir is refused.
 
 ```bash
 export TASKER_DISABLE_SCHEDULER=1
 export TASKER_HOST=127.0.0.1
 export TASKER_PORT=8010   # anything other than 8000/8001
+export PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA=1
 scripts/python_runtime.sh -m src.tasker.service --host 127.0.0.1 --port 8010 --no-scheduler
 ```
+
+`PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA=1` keeps status mirrors in this
+checkout's `public/data` when `/var/www/portfolio-lab/data` exists.
 
 Do not set `PORTFOLIO_LAB_PROJECT_DIR` to the production app path. For a
 fully isolated tree, clone or worktree this repo and run from there

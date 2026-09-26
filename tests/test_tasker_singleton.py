@@ -79,46 +79,38 @@ def test_main_once_mode_ignores_singleton_lock(monkeypatch, tmp_path):
     assert service.main(["--once"]) == 0
 
 
-def test_no_scheduler_uses_sibling_side_lock(tmp_path, monkeypatch):
-    """API-only instances must not take data/tasker.lock."""
+def test_no_scheduler_uses_same_lock_as_scheduler(tmp_path, monkeypatch):
+    """API-only and scheduler processes share data/tasker.lock."""
     monkeypatch.setattr(service, "TASKER_LOCK_PATH", tmp_path / "tasker.lock")
     sched = tmp_path / "tasker.lock"
-    side = tmp_path / "tasker-side.lock"
-    service.acquire_singleton_lock(no_scheduler=False)
+    service.acquire_singleton_lock()
     assert sched.is_file()
-    assert not side.exists()
+    assert not (tmp_path / "tasker-side.lock").exists()
 
     service._SINGLETON_LOCK_FD.close()
     service._SINGLETON_LOCK_FD = None
-    service.acquire_singleton_lock(no_scheduler=True)
-    assert side.is_file()
-    assert side.read_text().strip() == str(os.getpid())
+    service.acquire_singleton_lock()
+    assert sched.read_text().strip() == str(os.getpid())
+    assert not (tmp_path / "tasker-side.lock").exists()
 
 
-def test_no_scheduler_does_not_contend_with_scheduler_lock(tmp_path, monkeypatch):
-    """Side-dev --no-scheduler can start while the scheduler flock is held."""
+def test_second_service_contends_for_the_same_lock(tmp_path, monkeypatch):
+    """A second service in this checkout must not open the same TASKER_DB."""
     monkeypatch.setattr(service, "TASKER_LOCK_PATH", tmp_path / "tasker.lock")
-    service.acquire_singleton_lock(no_scheduler=False)
-    # A second scheduler still fails.
-    with pytest.raises(SystemExit):
-        service.acquire_singleton_lock(no_scheduler=False)
-    # API-only uses the sibling file and succeeds.
-    service._SINGLETON_LOCK_FD  # keep scheduler fd referenced
-    side_fd_before = service._SINGLETON_LOCK_FD
-    # acquire_singleton_lock overwrites the global fd; hold the scheduler fd.
-    sched_fd = side_fd_before
+    service.acquire_singleton_lock()
+    held = service._SINGLETON_LOCK_FD
     service._SINGLETON_LOCK_FD = None
-    service.acquire_singleton_lock(no_scheduler=True)
-    assert (tmp_path / "tasker-side.lock").is_file()
-    sched_fd.close()
+    with pytest.raises(SystemExit):
+        service.acquire_singleton_lock()
+    held.close()
+    assert not (tmp_path / "tasker-side.lock").exists()
 
 
-def test_env_tasker_lock_path_overrides_side_and_scheduler(tmp_path, monkeypatch):
+def test_env_tasker_lock_path_overrides_default(tmp_path, monkeypatch):
     custom = tmp_path / "custom.lock"
     monkeypatch.setenv("TASKER_LOCK_PATH", str(custom))
     monkeypatch.setattr(service, "TASKER_LOCK_PATH", tmp_path / "tasker.lock")
-    assert service.resolve_tasker_lock_path(no_scheduler=True) == custom
-    assert service.resolve_tasker_lock_path(no_scheduler=False) == custom
+    assert service.resolve_tasker_lock_path() == custom
 
 
 def test_main_refuses_prod_sidecar_without_override(monkeypatch, tmp_path):

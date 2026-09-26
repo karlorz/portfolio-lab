@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Resolve a clean standalone uv for agent / test-gate / docs cold paths.
+# Resolve a clean standalone uv for agent test runs (`uv run` / pytest).
 #
 # On cursor-box, ~/.local/bin/uv is a relocatable wrapper that injects Alpine
 # musl LD_LIBRARY_PATH / compilers so `uv sync` can build native wheels. That
 # same injection breaks `uv run pytest` (glibc host python, or musl python
 # launched without the toolchain loader). Prefer the standalone payload next
-# to the wrapper, then PATH uv, and never re-enter the wrapper.
+# to the wrapper, then PATH uv, and never re-enter the wrapper. Native wheel
+# installs on cursor-box still call ~/.local/bin/uv sync directly.
 set -euo pipefail
 
 _is_uv_wrapper() {

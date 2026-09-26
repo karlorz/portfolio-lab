@@ -28,12 +28,12 @@ logger = logging.getLogger(__name__)
 # run. flock auto-releases on process death (incl. SIGKILL), so there is no
 # stale-lock window across systemd RestartSec=10 restarts.
 #
-# Side-dev API-only instances (--no-scheduler / TASKER_DISABLE_SCHEDULER=1)
-# use data/tasker-side.lock so they do not contend with the production
-# scheduler flock. They must still run from a private checkout (not the
-# production app dir).
+# One flock per checkout data dir (data/tasker.lock). Scheduler and
+# API-only (--no-scheduler) processes share TASKER_DB, so both take this
+# file. A private side checkout has its own data/ and does not contend
+# with production. API-only startup inside a known production app dir is
+# refused unless PORTFOLIO_LAB_ALLOW_PROD_SIDECAR=1.
 TASKER_LOCK_PATH = DATA_DIR / "tasker.lock"
-TASKER_SIDE_LOCK_NAME = "tasker-side.lock"
 _SINGLETON_LOCK_FD: object | None = None  # held for the process lifetime
 
 # Known production app roots. Side-dev must not start an API sidecar here:
@@ -51,49 +51,62 @@ def scheduler_disabled(args: argparse.Namespace | None = None) -> bool:
     return os.environ.get("TASKER_DISABLE_SCHEDULER") == "1"
 
 
-def is_production_app_root(root: Path | None = None) -> bool:
-    """Return True when *root* is (or is under) a known production app dir."""
-    resolved = (root if root is not None else PROJECT_ROOT).expanduser()
+def _path_is_same_or_under(path: Path, root: Path) -> bool:
     try:
-        resolved = resolved.resolve()
+        return path == root or path.is_relative_to(root)
+    except (OSError, ValueError, TypeError):
+        root_text = str(root)
+        text = str(path)
+        return text == root_text or text.startswith(root_text + os.sep)
+
+
+def is_production_app_root(root: Path | None = None) -> bool:
+    """Return True when *root* is (or is under) a known production app dir.
+
+    Compare both the given path and its resolved form. ``/home`` is a
+    symlink on some hosts, so a resolved checkout must still match the
+    unresolved production path (and the reverse).
+    """
+    candidate = (root if root is not None else PROJECT_ROOT).expanduser()
+    try:
+        resolved = candidate.resolve()
     except OSError:
-        resolved = Path(os.path.abspath(str(resolved)))
+        resolved = Path(os.path.abspath(str(candidate)))
     for prod in _PRODUCTION_APP_ROOTS:
+        prod_path = prod.expanduser()
         try:
-            if resolved == prod or resolved.is_relative_to(prod):
-                return True
-        except (OSError, ValueError, TypeError):
-            prod_text = str(prod)
-            text = str(resolved)
-            if text == prod_text or text.startswith(prod_text + os.sep):
-                return True
+            prod_resolved = prod_path.resolve()
+        except OSError:
+            prod_resolved = prod_path
+        if (
+            _path_is_same_or_under(resolved, prod_resolved)
+            or _path_is_same_or_under(resolved, prod_path)
+            or _path_is_same_or_under(candidate, prod_path)
+        ):
+            return True
     return False
 
 
-def resolve_tasker_lock_path(
-    *,
-    lock_path: Path | None = None,
-    no_scheduler: bool = False,
-) -> Path:
+def resolve_tasker_lock_path(*, lock_path: Path | None = None) -> Path:
     """Resolve the flock path for this Tasker process.
 
     Precedence:
       1. explicit ``lock_path`` argument (tests)
       2. ``TASKER_LOCK_PATH`` environment override
-      3. ``<same-dir>/tasker-side.lock`` when ``no_scheduler`` is True
-      4. ``TASKER_LOCK_PATH`` constant (``data/tasker.lock``)
+      3. ``TASKER_LOCK_PATH`` constant (``data/tasker.lock``)
+
+    Scheduler and ``--no-scheduler`` processes in one checkout use the same
+    file so only one of them can open that checkout's ``TASKER_DB``.
     """
     if lock_path is not None:
         return Path(lock_path)
     env_override = os.environ.get("TASKER_LOCK_PATH", "").strip()
     if env_override:
         return Path(env_override).expanduser()
-    if no_scheduler:
-        return Path(TASKER_LOCK_PATH).with_name(TASKER_SIDE_LOCK_NAME)
     return Path(TASKER_LOCK_PATH)
 
 
-def acquire_singleton_lock(lock_path: Path | None = None, *, no_scheduler: bool = False) -> None:
+def acquire_singleton_lock(lock_path: Path | None = None) -> None:
     """Take an exclusive flock so only one tasker service instance runs.
 
     The lock file also records the holder PID for diagnostics. Raises
@@ -104,11 +117,9 @@ def acquire_singleton_lock(lock_path: Path | None = None, *, no_scheduler: bool 
 
     Args:
         lock_path: Override for the lock file (tests use tmp dirs).
-        no_scheduler: When True (and no explicit/env override), use the
-            side-dev flock so API-only processes do not fight the scheduler.
     """
     global _SINGLETON_LOCK_FD
-    path = resolve_tasker_lock_path(lock_path=lock_path, no_scheduler=no_scheduler)
+    path = resolve_tasker_lock_path(lock_path=lock_path)
     fd = path.open("a+")
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -121,7 +132,7 @@ def acquire_singleton_lock(lock_path: Path | None = None, *, no_scheduler: bool 
             pass
         fd.close()
         logger.error(
-            "tasker singleton lock already held (pid %s): refusing to start a second scheduler instance",
+            "tasker singleton lock already held (pid %s): refusing to start a second tasker service instance",
             holder or "unknown",
         )
         raise SystemExit(1)
@@ -312,7 +323,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
         try:
-            acquire_singleton_lock(no_scheduler=no_sched)
+            acquire_singleton_lock()
         except SystemExit:
             return 1
     service, app = build_service()

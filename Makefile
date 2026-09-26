@@ -232,10 +232,10 @@ test-ts:
 # `portfolio-lab-tasker.service` (install path: scripts/deploy-lab-app.sh);
 # start/restart it with:
 #   systemctl restart portfolio-lab-tasker
-# The production unit holds data/tasker.lock. Side-dev API-only
-# (`--no-scheduler` / TASKER_DISABLE_SCHEDULER=1) uses data/tasker-side.lock
-# from this checkout — do not start it against the production app dir.
-# A second scheduler still exits 1 with "tasker singleton lock already
+# The production unit holds its own data/tasker.lock. Side-dev from this
+# checkout holds this tree's data/tasker.lock (one service per checkout,
+# scheduler or --no-scheduler). Do not start it against the production app dir.
+# A second service still exits 1 with "tasker singleton lock already
 # held (pid N)". The `--once` mirror-refresh helper is unguarded.
 # If the suite hits tab-loading timeouts (analytics/risk panels not visible),
 # the backend has degraded — restart it and re-run before debugging anything
