@@ -154,6 +154,7 @@ dist
 dist/
 .env.local
 *.pyc
+*.egg-info/
 .coverage
 crontab.backup.*
 
@@ -171,6 +172,7 @@ raw/market/
 
 # Playwright CLI runtime output (machine-local config + output)
 .playwright/
+.playwright-cli/
 .chrome-debug-profile/
 
 # Portfolio Lab recovery archives (scripts/portfolio_lab_recovery.py)
