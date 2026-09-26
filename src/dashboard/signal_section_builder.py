@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict
+from src.env_flags import env_literal_one
 
 logger = logging.getLogger(__name__)
 
@@ -1126,7 +1127,7 @@ class SignalSectionBuilder:
 
             staleness = output.get("staleness")
             if isinstance(staleness, dict):
-                ml_on = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+                ml_on = env_literal_one("PORTFOLIO_LAB_ENABLE_ML")
                 ownership = annotate_unavailable_signals(
                     staleness.get("unavailable_signals") or [],
                     ml_enabled=ml_on,

@@ -25,6 +25,7 @@ import numpy as np
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 from collections import defaultdict
+from src.env_flags import env_literal_one
 
 logger = logging.getLogger(__name__)
 
@@ -32,12 +33,12 @@ from .base_agent import BaseAgent, AgentType, AgentObservation, AgentAction, Age
 from src.paths import BASE_ALLOCATION
 
 # FPILOT inference-time planning (numpy-only, no ML deps)
-_INFERENCE_TIME_PLANNING = os.environ.get("INFERENCE_TIME_PLANNING", "0") == "1"
+_INFERENCE_TIME_PLANNING = env_literal_one("INFERENCE_TIME_PLANNING")
 if _INFERENCE_TIME_PLANNING:
     from .predictive_model import PredictiveModel, TrajectoryOptimizer
 
 # Conditional ML import — disabled by default to prevent OOM in test suites.
-_ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+_ML_ENABLED = env_literal_one("PORTFOLIO_LAB_ENABLE_ML")
 if _ML_ENABLED:
     import torch
     import torch.nn as nn

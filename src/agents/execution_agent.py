@@ -31,13 +31,14 @@ import numpy as np
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from enum import Enum
+from src.env_flags import env_literal_one
 
 logger = logging.getLogger(__name__)
 
 from .base_agent import BaseAgent, AgentType, AgentObservation, AgentAction, MessageType
 
 # Conditional ML import — disabled by default to prevent OOM in test suites.
-_ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+_ML_ENABLED = env_literal_one("PORTFOLIO_LAB_ENABLE_ML")
 if _ML_ENABLED:
     import torch
     import torch.nn as nn

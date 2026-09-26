@@ -17,6 +17,7 @@ from src.tasker.registry import TaskRegistry, load_task_registry
 from src.tasker.runner import TaskRunner
 from src.tasker.store import TaskerStore
 from src.utils.log_config import configure_logging
+from src.env_flags import env_literal_one
 import waitress
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ def scheduler_disabled(args: argparse.Namespace | None = None) -> bool:
     """True when this process is API-only (no scheduler loop)."""
     if args is not None and getattr(args, "no_scheduler", False):
         return True
-    return os.environ.get("TASKER_DISABLE_SCHEDULER") == "1"
+    return env_literal_one("TASKER_DISABLE_SCHEDULER", default="")
 
 
 def _path_is_same_or_under(path: Path, root: Path) -> bool:
@@ -332,7 +333,7 @@ def main(argv: list[str] | None = None) -> int:
         service.store.write_status_mirrors(service.registry)
         return 0
 
-    if not args.no_scheduler and os.environ.get("TASKER_DISABLE_SCHEDULER") != "1":
+    if not args.no_scheduler and not env_literal_one("TASKER_DISABLE_SCHEDULER", default=""):
         service.start_background_scheduler()
 
     # Bounded graceful drain (Task 3B): SIGTERM/SIGINT enter draining, finalize
