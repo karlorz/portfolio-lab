@@ -19,7 +19,6 @@ which reads data/signals/alternative_data_latest.json.
 import json
 import logging
 import math
-import os
 
 from src.env_flags import env_literal_one
 import statistics

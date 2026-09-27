@@ -5,8 +5,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
 ENV_FLAGS = SRC_ROOT / "env_flags.py"
@@ -88,7 +86,7 @@ KNOWN_LITERAL_ONE_GATES = frozenset(
         "JSON_LOGS",
         "PROMOTION_REQUIRE_WFE",
         "DECISION_REGISTRY_RECORD_BACKTEST",
-        "ALT_DATA_AUTO_PROJECT",
+        "PORTFOLIO_LAB_ALT_DATA_AUTO_PROJECT",
         "INCIDENT_KILL_SWITCH_ESCALATION_ENABLED",
         "INFERENCE_TIME_PLANNING",
         "ALPACA_ALLOW_EXTENDED_HOURS",

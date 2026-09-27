@@ -7,7 +7,6 @@ IBKR/OpenD sockets or import the live execution broker.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 from src.env_flags import env_literal_one
