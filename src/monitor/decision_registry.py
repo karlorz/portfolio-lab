@@ -10,6 +10,8 @@ import hashlib
 import json
 import logging
 import os
+
+from src.env_flags import env_literal_one
 import sqlite3
 import uuid
 from contextlib import closing
@@ -390,7 +392,7 @@ def evaluate_promotion_candidate(
     max_dd_worse = float(os.environ.get("PROMOTION_MAX_DD_WORSE_PCT", "2.0"))
     max_cvar_worse = float(os.environ.get("PROMOTION_MAX_CVAR_WORSE", "0.05"))
     max_turnover = float(os.environ.get("PROMOTION_MAX_TURNOVER", "1.5"))
-    require_wfe = os.environ.get("PROMOTION_REQUIRE_WFE", "0").lower() in {"1", "true", "yes"}
+    require_wfe = env_literal_one("PROMOTION_REQUIRE_WFE")
 
     failures: list[str] = []
     if not metrics:
@@ -918,11 +920,8 @@ def record_backtest_experiment(
     registry: DecisionRegistry | None = None,
 ) -> str | None:
     """Register a backtest or labs result artifact in the SQLite experiment ledger."""
-    if os.environ.get("DECISION_REGISTRY_RECORD_BACKTEST", "1").lower() in {
-        "0",
-        "false",
-        "no",
-    }:
+    # Default on; only exact "1" (or unset default) records. true/yes/false stay off-path.
+    if not env_literal_one("DECISION_REGISTRY_RECORD_BACKTEST", default="1"):
         return None
 
     reg = registry or DecisionRegistry()

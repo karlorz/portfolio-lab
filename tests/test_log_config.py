@@ -117,3 +117,31 @@ class TestConfigureLogging:
             # May or may not have JsonFormatter depending on whether
             # python-json-logger is installed; just verify no crash
             assert root.level > 0
+
+    def test_json_logs_true_stays_off(self):
+        with patch.dict(os.environ, {"JSON_LOGS": "true"}):
+            configure_logging()
+            root = logging.getLogger()
+            for h in root.handlers:
+                if isinstance(h, logging.StreamHandler) and h.formatter is not None:
+                    assert "JsonFormatter" not in type(h.formatter).__name__
+
+    def test_json_logs_yes_stays_off(self):
+        with patch.dict(os.environ, {"JSON_LOGS": "yes"}):
+            configure_logging()
+            root = logging.getLogger()
+            for h in root.handlers:
+                if isinstance(h, logging.StreamHandler) and h.formatter is not None:
+                    assert "JsonFormatter" not in type(h.formatter).__name__
+
+
+def test_configure_logging_unknown_env_level_fails_closed_to_info(monkeypatch):
+    """Garbage LOG_LEVEL must not ValueError; fall back to INFO."""
+    monkeypatch.setenv("LOG_LEVEL", "bogus")
+    configure_logging()
+    assert logging.getLogger().level == logging.INFO
+
+
+def test_configure_logging_unknown_override_fails_closed_to_info():
+    configure_logging(level="nope")
+    assert logging.getLogger().level == logging.INFO

@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import Dict, Optional, Union
+from src.env_flags import env_literal_one
 
 # Repository root (3 levels up from this file: paths.py -> src/ -> repo_root/)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -53,7 +54,7 @@ def resolve_runtime_public_data_dir(
     Priority:
       1. ``PUBLIC_DATA_DIR`` environment variable
       2. Live WWW tree when it exists and is distinct from repo public/data
-         (unless ``PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA`` is truthy)
+         (unless ``PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA`` is literal ``1``)
       3. Repo ``public/data`` (offline / fixture / CI default)
 
     Unlike ``resolve_ops_public_data_dir`` (auditors fail-closed), runtime
@@ -75,12 +76,7 @@ def resolve_runtime_public_data_dir(
     if env_public and str(env_public).strip():
         return Path(str(env_public).strip()).expanduser()
 
-    allow_repo = str(env_map.get("PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA", "")).strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    allow_repo = env_literal_one("PORTFOLIO_LAB_ALLOW_REPO_PUBLIC_DATA", default="", env=env_map)
     repo_public = (root / "public" / "data")
 
     try:

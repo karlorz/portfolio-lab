@@ -20,6 +20,7 @@ from enum import Enum
 from zoneinfo import ZoneInfo
 
 from src.paths import MARKET_DB, DATA_DIR, sqlite_connect
+from src.env_flags import env_literal_one, env_paper_unless_false
 from src.broker.circuit_breaker import (
     BrokerError,
     CircuitBreakerError,
@@ -243,8 +244,6 @@ def resolve_alpaca_feed_entitlement(env: Optional[Mapping[str, str]] = None) -> 
     }
 
 
-def _truthy_env(value: Optional[str]) -> bool:
-    return (value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _normalize_session_state(value: Optional[str]) -> str:
@@ -336,9 +335,10 @@ def resolve_alpaca_market_session(
 ) -> Dict[str, Any]:
     """Return public-safe market-session policy metadata for live order guards."""
     values = env if env is not None else os.environ
-    extended_hours_allowed = _truthy_env(
-        values.get("ALPACA_ALLOW_EXTENDED_HOURS")
-        or values.get("BROKER_ALLOW_EXTENDED_HOURS")
+    extended_hours_allowed = env_literal_one(
+        "ALPACA_ALLOW_EXTENDED_HOURS", default="", env=values
+    ) or env_literal_one(
+        "BROKER_ALLOW_EXTENDED_HOURS", default="", env=values
     )
     override_state = _normalize_session_state(
         values.get("ALPACA_MARKET_SESSION_STATE")
@@ -786,7 +786,7 @@ class PaperTradingManager:
         return int(os.environ.get("BROKER_MAX_QUOTE_AGE_SECONDS", "900"))
 
     def _is_live_order_mode(self, dry_run: bool) -> bool:
-        paper_mode = os.environ.get("ALPACA_PAPER", "true").lower() not in ("false", "0", "no")
+        paper_mode = env_paper_unless_false()
         return not dry_run and not paper_mode
 
     def _position_quote(self, position: Position) -> MarketQuote:
@@ -1040,7 +1040,7 @@ def check_alpaca_status() -> Dict[str, Any]:
 
     Detects paper vs live mode from ALPACA_PAPER env var (default: True).
     """
-    paper_mode = os.environ.get("ALPACA_PAPER", "true").lower() not in ("false", "0", "no")
+    paper_mode = env_paper_unless_false()
     client = AlpacaClient(paper=paper_mode)
 
     status = {

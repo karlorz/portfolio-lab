@@ -46,6 +46,7 @@ from collections import defaultdict, deque
 from enum import Enum
 
 from src.paths import PROJECT_ROOT, DATA_DIR, BASE_ALLOCATION
+from src.env_flags import env_literal_one
 from pathlib import Path
 
 import logging
@@ -54,7 +55,7 @@ logger = logging.getLogger(__name__)
 
 # Conditional ML import — disabled by default to prevent OOM in test suites.
 # hmmlearn (~23MB) + sklearn (~78MB) accumulate in single-process test runs.
-_ML_ENABLED_RISK = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+_ML_ENABLED_RISK = env_literal_one("PORTFOLIO_LAB_ENABLE_ML")
 if _ML_ENABLED_RISK:
     try:
         from hmmlearn.hmm import GaussianHMM

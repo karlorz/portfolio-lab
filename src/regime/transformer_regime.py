@@ -23,18 +23,18 @@ Usage:
 
 import logging
 import math
-import os
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 from src.paths import DATA_DIR
+from src.env_flags import env_literal_one
 
 logger = logging.getLogger(__name__)
 
 # ML gate
-_ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML") == "1"
+_ML_ENABLED = env_literal_one("PORTFOLIO_LAB_ENABLE_ML")
 torch = None
 nn = None
 F = None

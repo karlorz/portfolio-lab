@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from src.paths import BASE_ALLOCATION
+from src.env_flags import env_literal_one
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +184,7 @@ def _should_skip_production_ssot_write(path: Path | str | None) -> bool:
     """Skip production SSOT writes under pytest unless explicitly allowed."""
     if path is None:
         return False
-    if os.environ.get("PORTFOLIO_LAB_ALLOW_LIVE_PUBLIC", "0") == "1":
+    if env_literal_one("PORTFOLIO_LAB_ALLOW_LIVE_PUBLIC"):
         return False
     if not os.environ.get("PYTEST_CURRENT_TEST"):
         return False
@@ -242,7 +243,7 @@ def _public_projection_enabled(path: Path | str | None) -> bool:
     callers can force the policy for an isolated fixture with the environment
     switch used by projection contract tests.
     """
-    if os.environ.get("PORTFOLIO_LAB_FORCE_PUBLIC_PROJECTION", "0") == "1":
+    if env_literal_one("PORTFOLIO_LAB_FORCE_PUBLIC_PROJECTION"):
         return True
     return not is_ephemeral_write_path(path)
 

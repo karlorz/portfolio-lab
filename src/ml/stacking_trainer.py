@@ -28,9 +28,10 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 import logging
 import os
+from src.env_flags import env_literal_one
 
 # Conditional xgboost import — disabled by default (see src/experimental.py)
-_ML_ENABLED = os.environ.get("PORTFOLIO_LAB_ENABLE_ML", "0") == "1"
+_ML_ENABLED = env_literal_one("PORTFOLIO_LAB_ENABLE_ML")
 
 if _ML_ENABLED:
     import xgboost as xgb

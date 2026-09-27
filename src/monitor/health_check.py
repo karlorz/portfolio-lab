@@ -26,6 +26,7 @@ from typing import Any
 
 from src.paths import DATA_DIR, PUBLIC_DATA_DIR
 from src.monitor.alerting import AlertChannel, AlertLevel, send_alert, webhook_config_state
+from src.env_flags import env_choice, env_literal_one
 from src.monitor.hermes_cron import (
     is_health_self_job,
 )
@@ -498,7 +499,7 @@ def publish_ops_health_surfaces(report: dict[str, Any]) -> None:
 
 def _should_include_hermes_audit(local_backend: dict) -> bool:
     """Return true when Hermes should be surfaced alongside tasker health."""
-    if os.environ.get("TASKER_INCLUDE_HERMES_AUDIT") == "1":
+    if env_literal_one("TASKER_INCLUDE_HERMES_AUDIT", default=""):
         return True
     if local_backend.get("backend") == "tasker" and os.environ.get("CRON_BACKEND") == "tasker":
         return False
@@ -987,10 +988,17 @@ def main(argv: list[str] | None = None) -> int:
     from src.utils.log_config import configure_logging
 
     parser = argparse.ArgumentParser(description="Run the Portfolio Lab health producer.")
+    _exit_modes = ("publication", "probe")
+    # Unknown env values fail closed to publication (safe producer exit 0).
+    _env_exit = env_choice(
+        "PORTFOLIO_LAB_HEALTH_EXIT_MODE",
+        allowed=_exit_modes,
+        default="publication",
+    )
     parser.add_argument(
         "--exit-mode",
-        choices=("publication", "probe"),
-        default=os.environ.get("PORTFOLIO_LAB_HEALTH_EXIT_MODE", "publication"),
+        choices=_exit_modes,
+        default=_env_exit,
     )
     args = parser.parse_args(argv)
     configure_logging()

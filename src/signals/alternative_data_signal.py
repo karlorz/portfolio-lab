@@ -19,7 +19,8 @@ which reads data/signals/alternative_data_latest.json.
 import json
 import logging
 import math
-import os
+
+from src.env_flags import env_literal_one
 import statistics
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
@@ -633,8 +634,7 @@ class AlternativeDataSignalGenerator:
 
         # Bounded public projection refresh so operators do not wait for the
         # next full dashboard cron after a producer write.
-        auto_project = os.environ.get("PORTFOLIO_LAB_ALT_DATA_AUTO_PROJECT", "1")
-        if str(auto_project).strip().lower() not in {"0", "false", "no", "off"}:
+        if env_literal_one("PORTFOLIO_LAB_ALT_DATA_AUTO_PROJECT", default="1"):
             try:
                 from src.dashboard.generator import refresh_public_alternative_data_projection
 

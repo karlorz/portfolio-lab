@@ -25,6 +25,7 @@ import aiohttp
 import sqlite3
 from pathlib import Path
 
+from src.env_flags import env_paper_unless_false
 from src.paths import OPTIONS_CACHE_DIR, MARKET_DB, sqlite_connect
 from src.utils import safe_get
 
@@ -222,7 +223,8 @@ class OptionsChainFetcher:
     def __init__(self, api_key: Optional[str] = None, secret_key: Optional[str] = None):
         self.api_key = api_key or os.getenv("ALPACA_API_KEY")
         self.secret_key = secret_key or _get_alpaca_secret_key()
-        self.paper_mode = os.getenv("ALPACA_PAPER", "true").lower() == "true"
+        # Match src.broker.alpaca: fail-open to paper unless explicitly false/0/no.
+        self.paper_mode = env_paper_unless_false()
         self.cache_dir = OPTIONS_CACHE_DIR
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         

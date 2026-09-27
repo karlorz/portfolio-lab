@@ -7,8 +7,9 @@ IBKR/OpenD sockets or import the live execution broker.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
+
+from src.env_flags import env_literal_one
 
 ENABLE_ENV = "PORTFOLIO_LAB_ENABLE_BROKER_SNAPSHOT"
 ENTRY_POINT_GROUP = "portfolio_lab.plugins"
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 def broker_snapshot_enabled() -> bool:
-    return os.environ.get(ENABLE_ENV, "0") == "1"
+    return env_literal_one(ENABLE_ENV)
 
 
 def _discover_plugin() -> Any | None:

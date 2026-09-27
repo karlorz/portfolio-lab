@@ -18,6 +18,8 @@ from typing import Tuple
 import json
 import numpy as np
 import os
+
+from src.env_flags import env_literal_one
 import random
 import sqlite3
 logger = logging.getLogger("src.strategy.ensemble_voter")
@@ -61,7 +63,7 @@ class VoteMixin:
         # Batch DN: health renorm concentrates mass — enforce documented 50% cap
         weights = self._cap_per_signal_weights(weights, regime.name)
         weights = self._apply_correlation_penalty(weights)
-        if os.environ.get("ENSEMBLE_DISABLE_REGIME_WEIGHTS", "").lower() not in ("1", "true"):
+        if not env_literal_one("ENSEMBLE_DISABLE_REGIME_WEIGHTS", default=""):
             weights = self._apply_regime_weights(weights, regime)
         weights = self._apply_utility_reweighting(weights, regime)
         weights = self._apply_exploration_noise(weights, regime)
