@@ -99,7 +99,7 @@ TRANSCRIPT="$DATA_DIR/run-${CYCLE}-${TIMESTAMP}.json"
 # model route is authenticated.
 OPS_MAINT_MODEL="${OPS_MAINT_MODEL:-flash-max}"
 
-WOULD_RUN_CMD=(grok --agent minimal --model "$OPS_MAINT_MODEL" --prompt-file "$RUNBOOK" --always-approve --max-turns 40 --output-format json --disable-web-search)
+WOULD_RUN_CMD=(grok --agent minimal --model "$OPS_MAINT_MODEL" --prompt-file "$RUNBOOK" --always-approve --max-turns "${OPS_MAINT_MAX_TURNS:-80}" --output-format json --disable-web-search)
 
 if [ "$DRY_RUN" -eq 1 ]; then
     echo "=== Ops Maintenance Dry-Run ==="
