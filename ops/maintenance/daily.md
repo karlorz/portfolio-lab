@@ -168,3 +168,6 @@ For each repository:
    - On all checks passing (`"status": "ok"` or minor warnings):
      - Stay a silent digest (no spam capture).
      - Exit code 0.
+
+4. **Mechanical reporter (SSOT)**:
+   After the agent exits — including grok CLI auth failures — `ops/maintenance/report.py` writes `last-daily.json` and posts fail-only `wiki_capture`. Do not skip this step when the agent crashes.

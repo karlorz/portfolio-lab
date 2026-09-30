@@ -1,12 +1,14 @@
 #!/bin/bash
-# run.sh — Entrypoint for S1 maintenance playbooks on cursor-box.
+# run.sh — Entrypoint for S1/S3 maintenance playbooks on cursor-box.
 #
 # Manual Invocation:
 #   ops/maintenance/run.sh daily [--dry-run]
 #   ops/maintenance/run.sh weekly [--dry-run]
 #
-# NOTE: System crontab registration is a separate later phase (S2).
-# Do not register this entrypoint in crontab or Makefile yet.
+# Box-user crontab (S2) already registers this entrypoint. Repo dual-mode
+# (Makefile / crontab / src/cron_compat.py) stays deferred: this is box-level
+# ops, not a Tasker job. After grok exits, report.py always writes
+# last-<cycle>.json and posts fail-only wiki_capture.
 
 set -euo pipefail
 
@@ -89,9 +91,11 @@ fi
 source "$GUARD_LIB"
 
 # ── Dry-Run Mode ───────────────────────────────────────────────────────────
-DATA_DIR="$REPO_ROOT/data/ops-maintenance"
+DATA_DIR="${OPS_MAINT_DATA_DIR:-$REPO_ROOT/data/ops-maintenance}"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 TRANSCRIPT="$DATA_DIR/run-${CYCLE}-${TIMESTAMP}.json"
+LAST_REPORT="$DATA_DIR/last-${CYCLE}.json"
+REPORT_PY="$SCRIPT_DIR/report.py"
 
 # Model route is configurable: cursor-box has no default-route auth (xAI 401),
 # so it must run via its configured gateway model (flash-max via NEW_API key in
@@ -100,6 +104,12 @@ TRANSCRIPT="$DATA_DIR/run-${CYCLE}-${TIMESTAMP}.json"
 OPS_MAINT_MODEL="${OPS_MAINT_MODEL:-flash-max}"
 
 WOULD_RUN_CMD=(grok --agent minimal --model "$OPS_MAINT_MODEL" --prompt-file "$RUNBOOK" --always-approve --max-turns "${OPS_MAINT_MAX_TURNS:-80}" --output-format json --disable-web-search)
+REPORT_CMD=("${OPS_MAINT_PYTHON:-python3}" "$REPORT_PY" --cycle "$CYCLE" --transcript "$TRANSCRIPT" --agent-exit 0 --output-dir "$DATA_DIR")
+
+if [ ! -f "$REPORT_PY" ]; then
+    echo "ERROR: Reporter not found: $REPORT_PY" >&2
+    exit 1
+fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
     echo "=== Ops Maintenance Dry-Run ==="
@@ -110,7 +120,9 @@ if [ "$DRY_RUN" -eq 1 ]; then
     echo "Runbook: $RUNBOOK"
     echo "Grok Binary: $(command -v grok)"
     echo "Transcript Destination: $TRANSCRIPT"
+    echo "Report Destination: $LAST_REPORT"
     echo "Command: ${WOULD_RUN_CMD[*]}"
+    echo "Reporter: ${REPORT_CMD[*]}"
     exit 0
 fi
 
@@ -125,21 +137,21 @@ if cron_guard_start "$JOB_NAME" "$TIMEOUT_SECS"; then
     set +e
     "${WOULD_RUN_CMD[@]}" > "$TRANSCRIPT" 2>&1
     AGENT_EXIT=$?
+    "${OPS_MAINT_PYTHON:-python3}" "$REPORT_PY" \
+        --cycle "$CYCLE" \
+        --transcript "$TRANSCRIPT" \
+        --agent-exit "$AGENT_EXIT" \
+        --output-dir "$DATA_DIR"
+    REPORT_RC=$?
     set -e
 
     if [ "$AGENT_EXIT" -ne 0 ]; then
         echo "ERROR: grok agent execution failed with exit code $AGENT_EXIT" >&2
         EXEC_RC="$AGENT_EXIT"
-    elif [ -f "$TRANSCRIPT" ]; then
-        # Heuristic check: fail if transcript contains "status": "fail"
-        # The agent output JSON is structured and includes check statuses.
-        if grep -q '"status"[[:space:]]*:[[:space:]]*"fail"' "$TRANSCRIPT"; then
-            echo "ERROR: One or more checks failed in $TRANSCRIPT" >&2
-            EXEC_RC=1
-        fi
-    else
-        echo "ERROR: Transcript file was not generated: $TRANSCRIPT" >&2
-        EXEC_RC=1
+    fi
+    if [ "$REPORT_RC" -ne 0 ]; then
+        echo "ERROR: ops-maintenance reporter failed with exit code $REPORT_RC" >&2
+        EXEC_RC="$REPORT_RC"
     fi
 
     cron_guard_end "$JOB_NAME" "$EXEC_RC"
