@@ -28,6 +28,15 @@ You run under a hard cap of ~80 turns and 20 minutes. Batch independent checks i
 - MUST NOT retry Flex queries within throttle window when encountering error 1001 or 1025.
 - MUST NOT attempt automated fixes when IBKR TWS API is refused or down.
 
+### Autofix Classes (incremental rollout)
+
+Autofix classes are the ONLY direct fixes you may apply; everything else goes through a `bot/maint-<topic>-<YYYYMMDD>` branch plus PR. **Active** classes run every cycle. **Gated** classes run only when the `OPS_MAINT_AUTOFIX` environment variable (space-separated class names, provided via the cron environment or the host-local ops env file) contains the class name; unset means report-only. Record every autofix in the report `actions` section with before/after evidence.
+
+- Class 1 `log-hygiene` (active): the §5 log rotation/pruning — nothing beyond §5.
+- Class 2 `stale-lock-cleanup` (active): §5 stale-lock removal with PID-dead proof.
+- Class 3 `plugin-cache-refresh` (active, weekly cycle only): `grok plugin update`.
+- Class 4 `artifact-regen` (gated, weekly cycle only): regenerate derived artifacts inside `/workspace/code/portfolio-lab` from committed sources via repo `make` targets; changes land on a `bot/maint-*` branch plus PR, never direct on `main`, never in the production app dir.
+
 ---
 
 ## Daily Maintenance Checklist
