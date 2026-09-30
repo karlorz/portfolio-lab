@@ -93,7 +93,13 @@ DATA_DIR="$REPO_ROOT/data/ops-maintenance"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 TRANSCRIPT="$DATA_DIR/run-${CYCLE}-${TIMESTAMP}.json"
 
-WOULD_RUN_CMD=(grok --agent minimal --prompt-file "$RUNBOOK" --always-approve --max-turns 40 --output-format json --disable-web-search)
+# Model route is configurable: cursor-box has no default-route auth (xAI 401),
+# so it must run via its configured gateway model (flash-max via NEW_API key in
+# ~/.grok/config.toml). Override with OPS_MAINT_MODEL on hosts whose default
+# model route is authenticated.
+OPS_MAINT_MODEL="${OPS_MAINT_MODEL:-flash-max}"
+
+WOULD_RUN_CMD=(grok --agent minimal --model "$OPS_MAINT_MODEL" --prompt-file "$RUNBOOK" --always-approve --max-turns 40 --output-format json --disable-web-search)
 
 if [ "$DRY_RUN" -eq 1 ]; then
     echo "=== Ops Maintenance Dry-Run ==="
