@@ -202,3 +202,43 @@ def test_run_script_fails_closed_when_runbook_missing(tmp_path):
     assert res.returncode != 0
     assert "Runbook file not found" in res.stderr
     assert str(empty_ops / "daily.md") in res.stderr
+
+
+def test_run_script_dry_run_reports_env_file_status(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_grok = bin_dir / "grok"
+    fake_grok.write_text("#!/bin/sh\nexit 0\n")
+    fake_grok.chmod(0o755)
+
+    env_file = tmp_path / "ops-maintenance.env"
+    env_file.write_text("SKILLWIKI_MCP_TOKEN=dummy-test-token\n")
+
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["OPS_MAINT_ENV_FILE"] = str(env_file)
+
+    res = subprocess.run(
+        [str(RUN_SCRIPT), "daily", "--dry-run"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert res.returncode == 0, f"run.sh failed: {res.stderr}"
+    assert f"Escalation Env: present ({env_file})" in res.stdout
+    # The token value must never be printed
+    assert "dummy-test-token" not in res.stdout
+    assert "dummy-test-token" not in res.stderr
+
+    env_absent = dict(env)
+    env_absent["OPS_MAINT_ENV_FILE"] = str(tmp_path / "missing.env")
+    res_absent = subprocess.run(
+        [str(RUN_SCRIPT), "daily", "--dry-run"],
+        capture_output=True,
+        text=True,
+        env=env_absent,
+        check=False,
+    )
+    assert res_absent.returncode == 0, f"run.sh failed: {res_absent.stderr}"
+    assert "Escalation Env: absent" in res_absent.stdout
