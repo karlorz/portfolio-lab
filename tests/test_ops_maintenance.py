@@ -127,6 +127,8 @@ def test_run_script_dry_run_daily(tmp_path):
     assert "--model flash-max" in res.stdout
     assert str(DAILY_RUNBOOK) in res.stdout
     assert "ops-maint-daily" in res.stdout
+    assert "last-daily.json" in res.stdout
+    assert "report.py" in res.stdout
 
 
 def test_run_script_dry_run_weekly(tmp_path):
@@ -151,6 +153,8 @@ def test_run_script_dry_run_weekly(tmp_path):
     assert "--model flash-max" in res.stdout
     assert str(WEEKLY_RUNBOOK) in res.stdout
     assert "ops-maint-weekly" in res.stdout
+    assert "last-weekly.json" in res.stdout
+    assert "report.py" in res.stdout
 
 
 def test_run_script_fails_closed_when_grok_absent(tmp_path):
