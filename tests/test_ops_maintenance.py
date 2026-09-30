@@ -124,6 +124,7 @@ def test_run_script_dry_run_daily(tmp_path):
     )
     assert res.returncode == 0, f"run.sh failed: {res.stderr}"
     assert "--agent minimal" in res.stdout
+    assert "--model flash-max" in res.stdout
     assert str(DAILY_RUNBOOK) in res.stdout
     assert "ops-maint-daily" in res.stdout
 
@@ -147,6 +148,7 @@ def test_run_script_dry_run_weekly(tmp_path):
     )
     assert res.returncode == 0, f"run.sh failed: {res.stderr}"
     assert "--agent minimal" in res.stdout
+    assert "--model flash-max" in res.stdout
     assert str(WEEKLY_RUNBOOK) in res.stdout
     assert "ops-maint-weekly" in res.stdout
 
