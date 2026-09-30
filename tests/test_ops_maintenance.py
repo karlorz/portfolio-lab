@@ -27,6 +27,13 @@ def test_daily_runbook_must_not_rails_and_contracts():
     assert "PORTFOLIO_LAB_ENABLE_ML" in content
     assert "must stay `0`" in content or "stays 0" in content
 
+    # Autofix class registry and gate
+    assert "Autofix Classes" in content
+    assert "OPS_MAINT_AUTOFIX" in content
+    assert "log-hygiene" in content
+    assert "stale-lock-cleanup" in content
+    assert "artifact-regen" in content
+
     # Output contract checks
     assert "data/ops-maintenance/last-daily.json" in content
     assert "host_health" in content
@@ -56,6 +63,12 @@ def test_weekly_runbook_must_not_rails_and_contracts():
     assert "uv pip list --outdated" in content
     assert "make test-gate" in content
     assert "grok plugin update" in content
+
+    # Autofix class registry and gate
+    assert "Autofix Classes" in content
+    assert "OPS_MAINT_AUTOFIX" in content
+    assert "plugin-cache-refresh" in content
+    assert "artifact-regen" in content
 
     # Output contract checks
     assert "data/ops-maintenance/last-weekly.json" in content
