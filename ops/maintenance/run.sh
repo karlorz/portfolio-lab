@@ -66,6 +66,19 @@ if [ -z "${OPS_SKIP_PATH_PREPEND:-}" ]; then
     export PATH="$HOME/.local/bin:$PATH"
 fi
 
+# Optional escalation env (fail-only wiki_capture token read by report.py).
+# Host-local file, mode 600, never committed; only its presence is reported.
+OPS_MAINT_ENV_FILE="${OPS_MAINT_ENV_FILE:-$HOME/.skillwiki/ops-maintenance.env}"
+if [ -f "$OPS_MAINT_ENV_FILE" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$OPS_MAINT_ENV_FILE"
+    set +a
+    OPS_ENV_STATUS="present ($OPS_MAINT_ENV_FILE)"
+else
+    OPS_ENV_STATUS="absent ($OPS_MAINT_ENV_FILE)"
+fi
+
 # Allow environment override for the ops maintenance directory (used by tests)
 OPS_DIR="${OPS_MAINT_DIR:-$SCRIPT_DIR}"
 RUNBOOK="$OPS_DIR/${CYCLE}.md"
@@ -123,6 +136,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
     echo "Report Destination: $LAST_REPORT"
     echo "Command: ${WOULD_RUN_CMD[*]}"
     echo "Reporter: ${REPORT_CMD[*]}"
+    echo "Escalation Env: $OPS_ENV_STATUS"
     exit 0
 fi
 
