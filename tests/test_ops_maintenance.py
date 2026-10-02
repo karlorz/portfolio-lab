@@ -6,11 +6,23 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RUN_SCRIPT = PROJECT_ROOT / "ops" / "maintenance" / "run.sh"
 DAILY_RUNBOOK = PROJECT_ROOT / "ops" / "maintenance" / "daily.md"
 WEEKLY_RUNBOOK = PROJECT_ROOT / "ops" / "maintenance" / "weekly.md"
+
+
+@pytest.fixture(autouse=True)
+def _clear_price_cache():
+    """Override tests/conftest.py so `uv run --with pytest --no-project` works.
+
+    The session conftest autouse imports cachetools + src.signals.vpin_bvc;
+    ops maintenance tests are read-only sh/runbook checks and do not need it.
+    """
+    yield
 
 
 def test_daily_runbook_must_not_rails_and_contracts():
@@ -255,3 +267,127 @@ def test_run_script_dry_run_reports_env_file_status(tmp_path):
     )
     assert res_absent.returncode == 0, f"run.sh failed: {res_absent.stderr}"
     assert "Escalation Env: absent" in res_absent.stdout
+
+
+CHECK_TOOLCHAIN_MAKE = PROJECT_ROOT / "ops" / "maintenance" / "check-toolchain-make.sh"
+LIVE_TOOLCHAIN_PREFIX = "/home/box/.local/share/portfolio-lab"
+
+
+def _toolchain_env(tmp_path: Path, extra: dict | None = None) -> dict[str, str]:
+    """Point every override at tmp_path so the live alpine-build-root is never read."""
+    env = dict(os.environ)
+    env["HOME"] = str(tmp_path)
+    env["PORTFOLIO_LAB_ALPINE_BUILD_ROOT"] = str(tmp_path / "alpine-build-root")
+    env.pop("PORTFOLIO_LAB_MAKE_BIN", None)
+    env.pop("PORTFOLIO_LAB_MAKE_WRAPPER", None)
+    if extra:
+        env.update(extra)
+    return env
+
+
+def _run_toolchain_check(
+    tmp_path: Path, extra_env: dict | None = None
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["sh", str(CHECK_TOOLCHAIN_MAKE)],
+        capture_output=True,
+        text=True,
+        env=_toolchain_env(tmp_path, extra_env),
+        check=False,
+        timeout=10,
+    )
+
+
+def _write_exec(path: Path, body: str = "#!/bin/sh\nexit 0\n") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def _assert_hermetic(res: subprocess.CompletedProcess[str]) -> None:
+    combined = f"{res.stdout}{res.stderr}"
+    assert LIVE_TOOLCHAIN_PREFIX not in combined
+
+
+def test_check_toolchain_make_syntax_and_executable():
+    assert CHECK_TOOLCHAIN_MAKE.is_file(), f"Missing {CHECK_TOOLCHAIN_MAKE}"
+    assert os.access(CHECK_TOOLCHAIN_MAKE, os.X_OK), f"{CHECK_TOOLCHAIN_MAKE} is not executable"
+    text = CHECK_TOOLCHAIN_MAKE.read_text(encoding="utf-8")
+    assert text.splitlines()[0] == "#!/bin/sh"
+    assert "PORTFOLIO_LAB_ALPINE_BUILD_ROOT" in text
+    assert "PORTFOLIO_LAB_MAKE_BIN" in text
+    assert "PORTFOLIO_LAB_MAKE_WRAPPER" in text
+    res = subprocess.run(
+        ["sh", "-n", str(CHECK_TOOLCHAIN_MAKE)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 0, f"sh -n failed: {res.stderr}"
+
+
+def test_runbooks_mention_toolchain_make_check():
+    daily = DAILY_RUNBOOK.read_text(encoding="utf-8")
+    weekly = WEEKLY_RUNBOOK.read_text(encoding="utf-8")
+    assert "check-toolchain-make.sh" in daily
+    assert "alpine-build-root" in daily
+    assert "check-toolchain-make.sh" in weekly
+    assert "alpine-build-root" in weekly
+
+
+def test_check_toolchain_make_ok_path(tmp_path):
+    root = tmp_path / "alpine-build-root"
+    loader = root / "lib" / "ld-musl-x86_64.so.1"
+    make_bin = root / "usr" / "bin" / "make"
+    _write_exec(loader)
+    _write_exec(make_bin, "#!/bin/sh\necho 'GNU Make 4.4'\nexit 0\n")
+    res = _run_toolchain_check(tmp_path)
+    _assert_hermetic(res)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert f"loader={loader} present=yes" in res.stdout
+    assert f"make_bin={make_bin} present=yes" in res.stdout
+    assert f"wrapper={tmp_path / '.local' / 'bin' / 'make'} present=no" in res.stdout
+    assert "probe=skipped" in res.stdout
+    assert "toolchain-make: ok" in res.stdout
+
+
+def test_check_toolchain_make_missing_loader(tmp_path):
+    root = tmp_path / "alpine-build-root"
+    make_bin = root / "usr" / "bin" / "make"
+    _write_exec(make_bin)
+    res = _run_toolchain_check(tmp_path)
+    _assert_hermetic(res)
+    assert res.returncode == 1
+    assert f"loader={root / 'lib' / 'ld-musl-x86_64.so.1'} present=no" in res.stdout
+    assert f"make_bin={make_bin} present=yes" in res.stdout
+    assert "toolchain-make: fail" in res.stdout
+
+
+def test_check_toolchain_make_missing_make_bin(tmp_path):
+    root = tmp_path / "alpine-build-root"
+    loader = root / "lib" / "ld-musl-x86_64.so.1"
+    _write_exec(loader)
+    res = _run_toolchain_check(tmp_path)
+    _assert_hermetic(res)
+    assert res.returncode == 1
+    assert f"loader={loader} present=yes" in res.stdout
+    assert f"make_bin={root / 'usr' / 'bin' / 'make'} present=no" in res.stdout
+    assert "toolchain-make: fail" in res.stdout
+
+
+def test_check_toolchain_make_non_executable(tmp_path):
+    root = tmp_path / "alpine-build-root"
+    loader = root / "lib" / "ld-musl-x86_64.so.1"
+    make_bin = root / "usr" / "bin" / "make"
+    loader.parent.mkdir(parents=True, exist_ok=True)
+    make_bin.parent.mkdir(parents=True, exist_ok=True)
+    loader.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    make_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    loader.chmod(0o644)
+    make_bin.chmod(0o644)
+    res = _run_toolchain_check(tmp_path)
+    _assert_hermetic(res)
+    assert res.returncode == 1
+    assert f"loader={loader} present=no" in res.stdout
+    assert f"make_bin={make_bin} present=no" in res.stdout
+    assert "toolchain-make: fail" in res.stdout
