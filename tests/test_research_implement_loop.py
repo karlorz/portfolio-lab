@@ -80546,6 +80546,73 @@ def test_beat993_pickable_whitespace_log_dry_run_fails_tmp(tmp_path: Path) -> No
         assert out == "" or ("queued" not in out and "light" not in out), name
 
 
+def test_beat994_idle_plan_and_log_live_fails_tmp(tmp_path: Path, capsys) -> None:
+    """Beat 994: two idle fixtures session-a --plan and --log together --json raise SystemExit 2; both copies unchanged."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {"watch_only_lookalike"}
+    for name in ("empty_queue", "watch_only_lookalike"):
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_plan.md"
+        log = tmp_path / f"{name}_also.md"
+        plan.write_text(src, encoding="utf-8")
+        log.write_text(src, encoding="utf-8")
+
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "session-a",
+                    "--plan",
+                    str(plan),
+                    "--log",
+                    str(log),
+                    "--json",
+                ]
+            )
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "not allowed" in err and "--plan" in err, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        assert log.read_text(encoding="utf-8") == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+
+
+def test_beat994_idle_plan_and_log_dry_run_fails_tmp(tmp_path: Path, capsys) -> None:
+    """Beat 994: same two idle fixtures session-a --plan and --log --dry-run --json raise SystemExit 2; both copies unchanged."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {"watch_only_lookalike"}
+    for name in ("empty_queue", "watch_only_lookalike"):
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_plan.md"
+        log = tmp_path / f"{name}_also.md"
+        plan.write_text(src, encoding="utf-8")
+        log.write_text(src, encoding="utf-8")
+
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "session-a",
+                    "--plan",
+                    str(plan),
+                    "--log",
+                    str(log),
+                    "--dry-run",
+                    "--json",
+                ]
+            )
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "not allowed" in err and "--plan" in err, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        assert log.read_text(encoding="utf-8") == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
