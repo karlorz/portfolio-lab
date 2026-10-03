@@ -95481,6 +95481,60 @@ def test_beat1194_idle_fixtures_session_b_relative_plan_dry_run_tmp(tmp_path: Pa
         assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
 
 
+def test_beat1195_nonpickable_session_b_relative_plan_tmp(tmp_path: Path, monkeypatch) -> None:
+    """Beat 1195: two non-pickable fixtures session-b relative --plan --json stay idle; plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    for name in ("shipped_only", "incomplete_open"):
+        src = _load(f"{name}.md")
+        plan_rel = f"{name}_rel_b_plan.md"
+        plan = tmp_path / plan_rel
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-b", "--plan", plan_rel, "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["verdict"] != "dry_run", name
+        assert payload["open_count"] == 0, name
+        assert payload["queue"] == "queue 0/10", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_beat1195_nonpickable_session_b_relative_plan_dry_run_tmp(tmp_path: Path, monkeypatch) -> None:
+    """Beat 1195: same two non-pickable fixtures session-b relative --plan --dry-run --json stay idle (not dry_run); plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    for name in ("shipped_only", "incomplete_open"):
+        src = _load(f"{name}.md")
+        plan_rel = f"{name}_rel_b_plan_dry.md"
+        plan = tmp_path / plan_rel
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-b", "--plan", plan_rel, "--dry-run", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["verdict"] != "dry_run", name
+        assert payload["open_count"] == 0, name
+        assert payload["queue"] == "queue 0/10", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
