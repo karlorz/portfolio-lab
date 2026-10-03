@@ -94787,6 +94787,90 @@ def test_beat1184_idle_session_a_relative_log_stub_dry_run_no_write_tmp(tmp_path
         assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
 
 
+def test_beat1185_idle_fixtures_session_a_relative_log_stub_writes_tmp(tmp_path: Path, monkeypatch) -> None:
+    """Beat 1185: four idle fixtures session-a relative --log --stub --json (no dry-run) queue a write; log copy keeps Watch polarity."""
+    from src.research_implement.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    for name in (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    ):
+        src = _load(f"{name}.md")
+        log_rel = f"{name}_rel_log_stub_write.md"
+        log = tmp_path / log_rel
+        log.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-a", "--log", log_rel, "--stub", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "queued", name
+        assert payload["wrote_item"] is True, name
+        assert payload["open_count"] == 1, name
+        assert payload["queue"] == "queue 1/10", name
+        assert payload["title"] == "Stub shippable change", name
+        body = log.read_text(encoding="utf-8")
+        assert body != src, name
+        assert "## Queue" in body, name
+        if name in watch_fixtures:
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+            assert "## Queue" in body, name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
+def test_beat1185_idle_fixtures_session_a_relative_log_stub_dry_run_no_write_tmp(tmp_path: Path, monkeypatch) -> None:
+    """Beat 1185: same four idle fixtures session-a relative --log --stub --dry-run --json stay queued with log unchanged."""
+    from src.research_implement.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    for name in (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    ):
+        src = _load(f"{name}.md")
+        log_rel = f"{name}_rel_log_stub_dry.md"
+        log = tmp_path / log_rel
+        log.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-a", "--log", log_rel, "--stub", "--dry-run", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "queued", name
+        assert payload["wrote_item"] is True, name
+        assert payload["open_count"] == 1, name
+        assert payload["queue"] == "queue 1/10", name
+        assert payload["title"] == "Stub shippable change", name
+        body = log.read_text(encoding="utf-8")
+        assert body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
