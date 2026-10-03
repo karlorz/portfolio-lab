@@ -63050,6 +63050,85 @@ def test_beat786_idle_fixtures_session_a_candidate_list_json_dry_run_json_no_wri
         assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
 
 
+def test_beat787_idle_skip_nondict_live_write_json_tmp(tmp_path: Path) -> None:
+    """Beat 787: two idle fixtures session-a skip-nondict list --candidate-json --json changes the tmp plan."""
+    from src.research_implement.__main__ import main
+
+    cand = tmp_path / "complete_candidate_list_skip_nondict.json"
+    cand.write_text(
+        (FIXTURES / "complete_candidate_list_skip_nondict.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    watch_fixtures = {"watch_only_lookalike"}
+    for name in ("empty_queue", "watch_only_lookalike"):
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_b787_a_cand_skip_write.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(
+                ["session-a", "--plan", str(plan), "--candidate-json", str(cand), "--json"]
+            )
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "queued", name
+        assert payload["wrote_item"] is True, name
+        assert payload["open_count"] == 1, name
+        assert payload["queue"] == "queue 1/10", name
+        assert payload["title"] == "Skip-nondict first dict", name
+        body = plan.read_text(encoding="utf-8")
+        assert body != src, name
+        assert "## Queue" in body, name
+        if name in watch_fixtures:
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
+def test_beat787_idle_skip_nondict_dry_run_json_no_write_tmp(tmp_path: Path) -> None:
+    """Beat 787: same two fixtures session-a skip-nondict list --candidate-json --dry-run --json leaves the tmp plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    cand = tmp_path / "complete_candidate_list_skip_nondict.json"
+    cand.write_text(
+        (FIXTURES / "complete_candidate_list_skip_nondict.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    watch_fixtures = {"watch_only_lookalike"}
+    for name in ("empty_queue", "watch_only_lookalike"):
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_b787_a_cand_skip_dry.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(
+                [
+                    "session-a",
+                    "--plan",
+                    str(plan),
+                    "--candidate-json",
+                    str(cand),
+                    "--dry-run",
+                    "--json",
+                ]
+            )
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "queued", name
+        assert payload["wrote_item"] is True, name
+        assert payload["open_count"] == 1, name
+        assert payload["queue"] == "queue 1/10", name
+        assert payload["title"] == "Skip-nondict first dict", name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
