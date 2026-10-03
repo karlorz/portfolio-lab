@@ -75389,6 +75389,91 @@ def test_beat928_pickable_plan_symlink_dir_dry_run_fails_tmp(tmp_path: Path) -> 
         assert list(target.iterdir()) == [], name
 
 
+def test_beat929_pickable_plan_symlink_dir_live_fails_tmp(tmp_path: Path) -> None:
+    """Beat 929: remaining pickable fixtures session-a --plan symlink-to-dir --json raise SystemExit; plan resolve not deferred."""
+    from src.research_implement.__main__ import main
+
+    for name in ("two_open_ready", "mixed_priority", "watch_queue_heartbeat"):
+        src = _load(f"{name}.md")
+        target = tmp_path / f"{name}_plan_dir_target"
+        target.mkdir()
+        bad = tmp_path / f"{name}_plan_dir_link"
+        bad.symlink_to(target)
+        contrast = tmp_path / f"{name}_unused_fixture.md"
+        contrast.write_text(src, encoding="utf-8")
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(
+                    [
+                        "session-a",
+                        "--plan",
+                        str(bad),
+                        "--json",
+                    ]
+                )
+        assert ei.value.code != 0, name
+        msg = str(ei.value)
+        assert "--plan/--log" in msg, name
+        assert "not a file" in msg.lower(), name
+        body = contrast.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+        out = buf.getvalue().strip()
+        assert out == "" or ("queued" not in out and "light" not in out), name
+        assert bad.is_symlink(), name
+        assert not bad.is_file(), name
+        assert list(target.iterdir()) == [], name
+
+
+def test_beat929_pickable_plan_symlink_dir_dry_run_fails_tmp(tmp_path: Path) -> None:
+    """Beat 929: same pickable fixtures session-a --plan symlink-to-dir --dry-run --json raise SystemExit; plan resolve not deferred."""
+    from src.research_implement.__main__ import main
+
+    for name in ("two_open_ready", "mixed_priority", "watch_queue_heartbeat"):
+        src = _load(f"{name}.md")
+        target = tmp_path / f"{name}_plan_dir_target"
+        target.mkdir()
+        bad = tmp_path / f"{name}_plan_dir_link"
+        bad.symlink_to(target)
+        contrast = tmp_path / f"{name}_unused_fixture.md"
+        contrast.write_text(src, encoding="utf-8")
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(
+                    [
+                        "session-a",
+                        "--plan",
+                        str(bad),
+                        "--dry-run",
+                        "--json",
+                    ]
+                )
+        assert ei.value.code != 0, name
+        msg = str(ei.value)
+        assert "--plan/--log" in msg, name
+        assert "not a file" in msg.lower(), name
+        body = contrast.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+        out = buf.getvalue().strip()
+        assert out == "" or ("queued" not in out and "light" not in out), name
+        assert bad.is_symlink(), name
+        assert not bad.is_file(), name
+        assert list(target.iterdir()) == [], name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
