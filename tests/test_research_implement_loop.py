@@ -76801,6 +76801,101 @@ def test_beat944_nonpick_plan_directory_dry_run_fails_tmp(tmp_path: Path) -> Non
         assert list(bad.iterdir()) == [], name
 
 
+def test_beat945_nonpickable_fixtures_session_a_plan_directory_fails_tmp(tmp_path: Path):
+    """Beat 945 replay of Beat 230: multi-fixture non-pickable session-a --plan directory --json (NO dry-run)→SystemExit; no write."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        bad = tmp_path / f"{name}_plan_dir"
+        bad.mkdir()
+        contrast = tmp_path / f"{name}_unused_fixture.md"
+        contrast.write_text(src, encoding="utf-8")
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(
+                    [
+                        "session-a",
+                        "--plan",
+                        str(bad),
+                        "--json",
+                    ]
+                )
+        assert ei.value.code != 0, name
+        msg = str(ei.value)
+        assert "--plan/--log" in msg, name
+        assert "not a file" in msg.lower(), name
+        body = contrast.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+        out = buf.getvalue().strip()
+        assert out == "" or ("queued" not in out and "light" not in out), name
+        assert bad.is_dir(), name
+        assert not bad.is_file(), name
+        assert list(bad.iterdir()) == [], name
+
+
+def test_beat945_nonpickable_fixtures_session_a_plan_directory_dry_run_fails_tmp(tmp_path: Path):
+    """Beat 945 replay of Beat 230: multi-fixture non-pickable session-a --plan directory --dry-run --json→SystemExit; no write."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        bad = tmp_path / f"{name}_plan_dir"
+        bad.mkdir()
+        contrast = tmp_path / f"{name}_unused_fixture.md"
+        contrast.write_text(src, encoding="utf-8")
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(
+                    [
+                        "session-a",
+                        "--plan",
+                        str(bad),
+                        "--dry-run",
+                        "--json",
+                    ]
+                )
+        assert ei.value.code != 0, name
+        msg = str(ei.value)
+        assert "--plan/--log" in msg, name
+        assert "not a file" in msg.lower(), name
+        body = contrast.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+        out = buf.getvalue().strip()
+        assert out == "" or ("queued" not in out and "light" not in out), name
+        assert bad.is_dir(), name
+        assert not bad.is_file(), name
+        assert list(bad.iterdir()) == [], name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
