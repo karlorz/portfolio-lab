@@ -94584,6 +94584,82 @@ def test_beat1181_pickable_session_a_relative_plan_stub_dry_run_still_light_no_w
         assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
 
 
+def test_beat1182_pickable_fixtures_session_a_relative_plan_stub_still_light_no_write_tmp(tmp_path: Path, monkeypatch) -> None:
+    """Beat 1182: five pickable fixtures session-a relative --plan --stub --json (no dry-run) stay light; plan copy keeps BEAT19 markers."""
+    from src.research_implement.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    cases = (
+        ("watch_lookalike", 1, "queue 1/10", "Real ready Queue item"),
+        ("one_open_ready", 1, "queue 1/10", "Add fixture unit test for queue parser"),
+        ("two_open_ready", 2, "queue 2/10", "First ready complete item"),
+        ("mixed_priority", 1, "queue 1/10", "Second ready complete item"),
+        ("watch_queue_heartbeat", 1, "queue 1/10", "Beat19 shippable preserve item"),
+    )
+    for name, open_count, queue, b_pick_title in cases:
+        src = _load(f"{name}.md")
+        plan_rel = f"{name}_rel_stub_light.md"
+        plan = tmp_path / plan_rel
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-a", "--plan", plan_rel, "--stub", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "light", name
+        assert payload["wrote_item"] is False, name
+        assert payload["open_count"] == open_count, name
+        assert payload["queue"] == queue, name
+        assert payload["b_pick_title"] == b_pick_title, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
+def test_beat1182_pickable_fixtures_session_a_relative_plan_stub_dry_run_still_light_no_write_tmp(tmp_path: Path, monkeypatch) -> None:
+    """Beat 1182: same five pickable fixtures session-a relative --plan --stub --dry-run --json stay light; plan copy keeps BEAT19 markers."""
+    from src.research_implement.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    cases = (
+        ("watch_lookalike", 1, "queue 1/10", "Real ready Queue item"),
+        ("one_open_ready", 1, "queue 1/10", "Add fixture unit test for queue parser"),
+        ("two_open_ready", 2, "queue 2/10", "First ready complete item"),
+        ("mixed_priority", 1, "queue 1/10", "Second ready complete item"),
+        ("watch_queue_heartbeat", 1, "queue 1/10", "Beat19 shippable preserve item"),
+    )
+    for name, open_count, queue, b_pick_title in cases:
+        src = _load(f"{name}.md")
+        plan_rel = f"{name}_rel_stub_dry.md"
+        plan = tmp_path / plan_rel
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-a", "--plan", plan_rel, "--stub", "--dry-run", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "light", name
+        assert payload["wrote_item"] is False, name
+        assert payload["open_count"] == open_count, name
+        assert payload["queue"] == queue, name
+        assert payload["b_pick_title"] == b_pick_title, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
