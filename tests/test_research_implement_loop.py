@@ -61799,6 +61799,62 @@ def test_beat771_nonpickable_fixtures_session_a_stub_dry_run_json_no_write_tmp(t
         assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
 
 
+def test_beat772_pickable_stub_vs_no_stub_live_light_no_write_tmp(tmp_path: Path) -> None:
+    """Beat 772: two pickables session-a --stub|--no-stub --json (no dry-run) stay light; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        ("watch_lookalike", 1, "queue 1/10", "Real ready Queue item"),
+        ("one_open_ready", 1, "queue 1/10", "Add fixture unit test for queue parser"),
+    )
+    for name, open_count, queue, b_pick_title in cases:
+        src = _load(f"{name}.md")
+        for flag, suffix in (("--stub", "stub"), ("--no-stub", "no_stub")):
+            plan = tmp_path / f"{name}_b772_a_{suffix}_live.md"
+            plan.write_text(src, encoding="utf-8")
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = main(["session-a", "--plan", str(plan), flag, "--json"])
+            payload = json.loads(buf.getvalue())
+            assert rc == 0, (name, flag)
+            assert payload["ok"] is True, (name, flag)
+            assert payload["verdict"] == "light", (name, flag)
+            assert payload["wrote_item"] is False, (name, flag)
+            assert payload["open_count"] == open_count, (name, flag)
+            assert payload["queue"] == queue, (name, flag)
+            assert payload["b_pick_title"] == b_pick_title, (name, flag)
+            assert plan.read_text(encoding="utf-8") == src, (name, flag)
+            assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), (name, flag)
+
+
+def test_beat772_pickable_stub_vs_no_stub_dry_run_light_no_write_tmp(tmp_path: Path) -> None:
+    """Beat 772: same two pickables session-a --stub|--no-stub --dry-run --json stay light; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        ("watch_lookalike", 1, "queue 1/10", "Real ready Queue item"),
+        ("one_open_ready", 1, "queue 1/10", "Add fixture unit test for queue parser"),
+    )
+    for name, open_count, queue, b_pick_title in cases:
+        src = _load(f"{name}.md")
+        for flag, suffix in (("--stub", "stub"), ("--no-stub", "no_stub")):
+            plan = tmp_path / f"{name}_b772_a_{suffix}_dry.md"
+            plan.write_text(src, encoding="utf-8")
+            buf = StringIO()
+            with redirect_stdout(buf):
+                rc = main(["session-a", "--plan", str(plan), flag, "--dry-run", "--json"])
+            payload = json.loads(buf.getvalue())
+            assert rc == 0, (name, flag)
+            assert payload["ok"] is True, (name, flag)
+            assert payload["verdict"] == "light", (name, flag)
+            assert payload["wrote_item"] is False, (name, flag)
+            assert payload["open_count"] == open_count, (name, flag)
+            assert payload["queue"] == queue, (name, flag)
+            assert payload["b_pick_title"] == b_pick_title, (name, flag)
+            assert plan.read_text(encoding="utf-8") == src, (name, flag)
+            assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), (name, flag)
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
