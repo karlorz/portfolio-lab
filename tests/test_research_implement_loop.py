@@ -92763,6 +92763,121 @@ def test_beat1157_idle_session_a_relative_candidate_json_dry_run_no_write_tmp(tm
         assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
 
 
+def test_beat1158_idle_fixtures_session_a_relative_candidate_json_writes_tmp(tmp_path: Path, monkeypatch) -> None:
+    """Beat 1158: four idle fixtures session-a relative --candidate-json --json (no dry-run) queue a write; plan copy keeps Watch polarity."""
+    from src.research_implement.__main__ import main
+
+    cand_src = (FIXTURES / "complete_candidate.json").read_text(encoding="utf-8")
+    cand = tmp_path / "cand.json"
+    cand.write_text(cand_src, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    for name in (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    ):
+        src = _load(f"{name}.md")
+        plan_rel = f"{name}_rel_cand_write.md"
+        plan = tmp_path / plan_rel
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(
+                [
+                    "session-a",
+                    "--plan",
+                    plan_rel,
+                    "--no-stub",
+                    "--candidate-json",
+                    "cand.json",
+                    "--json",
+                ]
+            )
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "queued", name
+        assert payload["wrote_item"] is True, name
+        assert payload["open_count"] == 1, name
+        assert payload["queue"] == "queue 1/10", name
+        assert payload["title"] == "Complete candidate fixture", name
+        body = plan.read_text(encoding="utf-8")
+        assert body != src, name
+        assert "## Queue" in body, name
+        assert cand.read_text(encoding="utf-8") == cand_src, name
+        if name in watch_fixtures:
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+            assert "## Queue" in body, name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
+def test_beat1158_idle_fixtures_session_a_relative_candidate_json_dry_run_no_write_tmp(tmp_path: Path, monkeypatch) -> None:
+    """Beat 1158: same four idle fixtures session-a relative --candidate-json --dry-run --json stay queued with plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    cand_src = (FIXTURES / "complete_candidate.json").read_text(encoding="utf-8")
+    cand = tmp_path / "cand.json"
+    cand.write_text(cand_src, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    for name in (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    ):
+        src = _load(f"{name}.md")
+        plan_rel = f"{name}_rel_cand_dry.md"
+        plan = tmp_path / plan_rel
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(
+                [
+                    "session-a",
+                    "--plan",
+                    plan_rel,
+                    "--no-stub",
+                    "--candidate-json",
+                    "cand.json",
+                    "--dry-run",
+                    "--json",
+                ]
+            )
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "queued", name
+        assert payload["wrote_item"] is True, name
+        assert payload["open_count"] == 1, name
+        assert payload["queue"] == "queue 1/10", name
+        assert payload["title"] == "Complete candidate fixture", name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        assert cand.read_text(encoding="utf-8") == cand_src, name
+        if name in watch_fixtures:
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
