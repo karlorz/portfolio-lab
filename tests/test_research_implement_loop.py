@@ -62165,6 +62165,92 @@ def test_beat776_nonpick_no_stub_dry_run_json_fails_tmp(tmp_path: Path) -> None:
         assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
 
 
+def test_beat777_idle_nonpickable_session_a_no_stub_json_fails_tmp(tmp_path: Path):
+    """Beat 777: replay Beat 174 session-a --no-stub --json (NO dry-run)→rc=1 failed; plans UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {
+        "watch_only_lookalike",
+        "queue_with_watch_heartbeat",
+    }
+    cases = (
+        "empty_queue",
+        "watch_only_lookalike",
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+        "two_queue_sections",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+
+        # session-a --no-stub --json (NO --dry-run) → rc=1 failed; wrote_item=False; plan unchanged
+        plan = tmp_path / f"{name}_a_no_stub_live.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-a", "--plan", str(plan), "--no-stub", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 1, name
+        assert payload["ok"] is False, name
+        assert payload["verdict"] == "failed", name
+        assert payload["wrote_item"] is False, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+        if name == "queue_with_watch_heartbeat":
+            assert body.find("## Watch") < body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
+def test_beat777_idle_nonpickable_session_a_no_stub_dry_run_json_fails_tmp(tmp_path: Path):
+    """Beat 777: replay Beat 174 session-a --no-stub --dry-run --json→rc=1 failed; plans UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {
+        "watch_only_lookalike",
+        "queue_with_watch_heartbeat",
+    }
+    cases = (
+        "empty_queue",
+        "watch_only_lookalike",
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+        "two_queue_sections",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+
+        # session-a --no-stub --dry-run --json → rc=1 failed; wrote_item=False; plan unchanged
+        plan = tmp_path / f"{name}_a_no_stub_dry.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-a", "--plan", str(plan), "--no-stub", "--dry-run", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 1, name
+        assert payload["ok"] is False, name
+        assert payload["verdict"] == "failed", name
+        assert payload["wrote_item"] is False, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+        if name == "queue_with_watch_heartbeat":
+            assert body.find("## Watch") < body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
