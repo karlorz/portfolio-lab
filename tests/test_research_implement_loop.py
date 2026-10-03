@@ -60458,6 +60458,139 @@ def test_beat756_nonpickable_smoke_session_a_stub_vs_no_stub_dry_run_json_tmp(tm
         assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
 
 
+def test_beat757_spectrum_idle_decode_json_tmp(tmp_path: Path):
+    """Beat 757: verdict spectrum idle-decode: one_open_ready picked Q1, empty_queue idle, two_queue_sections failed (promotes Beat 168)."""
+    from src.research_implement.__main__ import main
+
+    src = _load("one_open_ready.md")
+    plan = tmp_path / "one_open_b757_idle.md"
+    plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "picked"
+    assert payload["open_count"] == 1
+    assert payload["queue"] == "queue 1/10"
+    assert payload["item"]["item_id"] == "Q1"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    src = _load("empty_queue.md")
+    plan = tmp_path / "empty_b757_idle.md"
+    plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "idle"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    src = _load("two_queue_sections.md")
+    plan = tmp_path / "two_queue_b757_idle.md"
+    plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(plan), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+
+def test_beat757_spectrum_session_b_dry_run_and_decode_only_json_tmp(tmp_path: Path):
+    """Beat 757: spectrum session-b: one_open_ready decode-only picked and dry_run Q1; empty_queue idle; two_queue failed (not dry_run)."""
+    from src.research_implement.__main__ import main
+
+    src = _load("one_open_ready.md")
+    decode_plan = tmp_path / "one_open_b757_decode.md"
+    decode_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(decode_plan), "--decode-only", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "picked"
+    assert payload["open_count"] == 1
+    assert payload["queue"] == "queue 1/10"
+    assert payload["item"]["item_id"] == "Q1"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert decode_plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    dry_plan = tmp_path / "one_open_b757_dry.md"
+    dry_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(dry_plan), "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "dry_run"
+    assert payload["open_count"] == 1
+    assert payload["queue"] == "queue 1/10"
+    assert payload["item"]["item_id"] == "Q1"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert dry_plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    src = _load("empty_queue.md")
+    plan = tmp_path / "empty_b757_dry.md"
+    plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 0
+    assert payload["ok"] is True
+    assert payload["verdict"] == "idle"
+    assert payload["verdict"] != "dry_run"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    src = _load("two_queue_sections.md")
+    plan = tmp_path / "two_queue_b757_dry.md"
+    plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["verdict"] != "dry_run"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
