@@ -96731,6 +96731,66 @@ def test_beat1213_nonpickable_idle_decode_whitespace_plan_fails_tmp(tmp_path: Pa
         assert out == "" or ("idle" not in out and "picked" not in out), name
 
 
+def test_beat1214_nonpickable_idle_decode_empty_plan_fails_tmp(tmp_path: Path) -> None:
+    """Beat 1214: four non-pickable fixtures idle-decode empty --plan --json raise SystemExit; unused copy keeps Watch before Queue."""
+    from src.research_implement.__main__ import main
+
+    for name in (
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    ):
+        src = _load(f"{name}.md")
+        contrast = tmp_path / f"{name}_unused_empty_plan.md"
+        contrast.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(["idle-decode", "--plan", "", "--json"])
+        assert ei.value.code != 0, name
+        msg = str(ei.value).lower()
+        assert "empty" in msg, name
+        body = contrast.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+        out = buf.getvalue().strip()
+        assert out == "" or ("idle" not in out and "picked" not in out), name
+
+
+def test_beat1214_nonpickable_idle_decode_whitespace_plan_fails_tmp(tmp_path: Path) -> None:
+    """Beat 1214: same four non-pickable fixtures idle-decode whitespace --plan --json raise SystemExit; unused copy keeps Watch before Queue."""
+    from src.research_implement.__main__ import main
+
+    for name in (
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    ):
+        src = _load(f"{name}.md")
+        contrast = tmp_path / f"{name}_unused_ws_plan.md"
+        contrast.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(["idle-decode", "--plan", "   ", "--json"])
+        assert ei.value.code != 0, name
+        msg = str(ei.value).lower()
+        assert "empty" in msg, name
+        body = contrast.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+        out = buf.getvalue().strip()
+        assert out == "" or ("idle" not in out and "picked" not in out), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
