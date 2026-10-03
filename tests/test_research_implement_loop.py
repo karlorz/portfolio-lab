@@ -97769,6 +97769,70 @@ def test_beat1232_nonpickable_session_b_empty_plan_dry_run_fails_tmp(tmp_path: P
         assert out == "" or ("idle" not in out and "dry_run" not in out), name
 
 
+def test_beat1233_nonpickable_session_b_empty_plan_fails_tmp(tmp_path: Path) -> None:
+    """Beat 1233: six non-pickable fixtures session-b empty --plan --json (no dry-run) raise SystemExit; unused copy unchanged."""
+    from src.research_implement.__main__ import main
+
+    for name in (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    ):
+        src = _load(f"{name}.md")
+        contrast = tmp_path / f"{name}_unused_b_empty_plan.md"
+        contrast.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(["session-b", "--plan", "", "--json"])
+        assert ei.value.code != 0, name
+        msg = str(ei.value).lower()
+        assert "empty" in msg, name
+        body = contrast.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+        out = buf.getvalue().strip()
+        assert out == "" or ("idle" not in out and "picked" not in out), name
+
+
+def test_beat1233_nonpickable_session_b_empty_plan_dry_run_fails_tmp(tmp_path: Path) -> None:
+    """Beat 1233: same six non-pickable fixtures session-b empty --plan --dry-run --json raise SystemExit; unused copy unchanged."""
+    from src.research_implement.__main__ import main
+
+    for name in (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    ):
+        src = _load(f"{name}.md")
+        contrast = tmp_path / f"{name}_unused_b_empty_plan_dry.md"
+        contrast.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(["session-b", "--plan", "", "--dry-run", "--json"])
+        assert ei.value.code != 0, name
+        msg = str(ei.value).lower()
+        assert "empty" in msg, name
+        body = contrast.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+        out = buf.getvalue().strip()
+        assert out == "" or ("idle" not in out and "dry_run" not in out), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
