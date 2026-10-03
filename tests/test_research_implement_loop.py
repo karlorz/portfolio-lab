@@ -62937,6 +62937,119 @@ def test_beat785_watch_candidate_list_dry_run_json_no_write_tmp(tmp_path: Path) 
         assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
 
 
+def test_beat786_idle_fixtures_session_a_candidate_list_json_writes_tmp(tmp_path: Path):
+    """Beat 786: replay Beat 177 session-a --candidate-json list --json→queued wrote_item=True; plan CHANGED; ## Queue present."""
+    from src.research_implement.__main__ import main
+
+    cand_src = FIXTURES / "complete_candidate_list.json"
+    cand = tmp_path / "complete_candidate_list.json"
+    cand.write_text(cand_src.read_text(encoding="utf-8"), encoding="utf-8")
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+
+        # session-a --candidate-json list --json (NO --dry-run) → queued wrote_item=True; plan CHANGED
+        plan = tmp_path / f"{name}_a_cand_list_write.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(
+                [
+                    "session-a",
+                    "--plan",
+                    str(plan),
+                    "--candidate-json",
+                    str(cand),
+                    "--json",
+                ]
+            )
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "queued", name
+        assert payload["wrote_item"] is True, name
+        assert payload["open_count"] == 1, name
+        assert payload["queue"] == "queue 1/10", name
+        assert payload["title"] == "Complete list candidate", name
+        body = plan.read_text(encoding="utf-8")
+        assert body != src, name
+        assert "## Queue" in body, name
+        if name in watch_fixtures:
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+            assert "## Queue" in body, name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
+def test_beat786_idle_fixtures_session_a_candidate_list_json_dry_run_json_no_write_tmp(tmp_path: Path):
+    """Beat 786: replay Beat 177 session-a --candidate-json list --dry-run --json→queued wrote_item=True; plan UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    cand_src = FIXTURES / "complete_candidate_list.json"
+    cand = tmp_path / "complete_candidate_list.json"
+    cand.write_text(cand_src.read_text(encoding="utf-8"), encoding="utf-8")
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+
+        # session-a --candidate-json list --dry-run --json → queued wrote_item=True; plan UNCHANGED
+        plan = tmp_path / f"{name}_a_cand_list_dry.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(
+                [
+                    "session-a",
+                    "--plan",
+                    str(plan),
+                    "--candidate-json",
+                    str(cand),
+                    "--dry-run",
+                    "--json",
+                ]
+            )
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "queued", name
+        assert payload["wrote_item"] is True, name
+        assert payload["open_count"] == 1, name
+        assert payload["queue"] == "queue 1/10", name
+        assert payload["title"] == "Complete list candidate", name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in body, name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
