@@ -102613,6 +102613,50 @@ def test_beat1323_nonpickable_fixtures_session_a_implement_rejected_dry_run_tmp(
             assert body.find("## Watch") < body.find("## Queue"), name
 
 
+def test_beat1324_pickable_session_a_implement_rejected_tmp(tmp_path: Path, capsys) -> None:
+    """Beat 1324: two pickable fixtures session-a --implement --json (no dry-run) raise argparse SystemExit 2; plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    for name in ("watch_lookalike", "one_open_ready"):
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_a_implement.md"
+        plan.write_text(src, encoding="utf-8")
+        with pytest.raises(SystemExit) as ei:
+            main(["session-a", "--plan", str(plan), "--implement", "stub-ship", "--json"])
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "unrecognized" in err and "--implement" in err, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+
+
+def test_beat1324_pickable_session_a_implement_rejected_dry_run_tmp(tmp_path: Path, capsys) -> None:
+    """Beat 1324: same two pickable fixtures session-a --implement --dry-run --json raise argparse SystemExit 2; plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    for name in ("watch_lookalike", "one_open_ready"):
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_a_implement_dry.md"
+        plan.write_text(src, encoding="utf-8")
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "session-a",
+                    "--plan",
+                    str(plan),
+                    "--implement",
+                    "stub-ship",
+                    "--dry-run",
+                    "--json",
+                ]
+            )
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "unrecognized" in err and "--implement" in err, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
