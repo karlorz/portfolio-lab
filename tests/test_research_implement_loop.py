@@ -67845,6 +67845,76 @@ def test_beat843_nonpickable_fixtures_session_a_empty_object_candidate_json_dry_
         assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
 
 
+def test_beat844_pickable_empty_obj_live_light_no_write_tmp(tmp_path: Path) -> None:
+    """Beat 844: two pickables session-a --candidate-json {} --json stay light; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    cand = tmp_path / "empty_obj.json"
+    cand.write_text("{}\n", encoding="utf-8")
+    cases = (
+        ("watch_lookalike", 1, "queue 1/10", "Real ready Queue item"),
+        ("one_open_ready", 1, "queue 1/10", "Add fixture unit test for queue parser"),
+    )
+    for name, open_count, queue, b_pick_title in cases:
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_b844_a_empty_obj_live.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(
+                ["session-a", "--plan", str(plan), "--candidate-json", str(cand), "--json"]
+            )
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "light", name
+        assert payload["wrote_item"] is False, name
+        assert payload["open_count"] == open_count, name
+        assert payload["queue"] == queue, name
+        assert payload["b_pick_title"] == b_pick_title, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
+def test_beat844_pickable_empty_obj_dry_run_light_no_write_tmp(tmp_path: Path) -> None:
+    """Beat 844: same two pickables session-a --candidate-json {} --dry-run --json stay light; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    cand = tmp_path / "empty_obj.json"
+    cand.write_text("{}\n", encoding="utf-8")
+    cases = (
+        ("watch_lookalike", 1, "queue 1/10", "Real ready Queue item"),
+        ("one_open_ready", 1, "queue 1/10", "Add fixture unit test for queue parser"),
+    )
+    for name, open_count, queue, b_pick_title in cases:
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_b844_a_empty_obj_dry.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(
+                [
+                    "session-a",
+                    "--plan",
+                    str(plan),
+                    "--candidate-json",
+                    str(cand),
+                    "--dry-run",
+                    "--json",
+                ]
+            )
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "light", name
+        assert payload["wrote_item"] is False, name
+        assert payload["open_count"] == open_count, name
+        assert payload["queue"] == queue, name
+        assert payload["b_pick_title"] == b_pick_title, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
