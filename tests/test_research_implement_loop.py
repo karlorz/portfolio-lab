@@ -87292,6 +87292,85 @@ def test_beat1084_idle_session_b_candidate_json_rejected_dry_run_tmp(tmp_path: P
             assert "## Heartbeat" in src, name
 
 
+def test_beat1085_idle_session_b_candidate_json_rejected_tmp(tmp_path: Path, capsys) -> None:
+    """Beat 1085: remaining idle fixtures session-b --candidate-json --json raise argparse SystemExit 2; plan+cand unchanged."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    cand_src = (FIXTURES / "complete_candidate.json").read_text(encoding="utf-8")
+    for name in ("watch_heartbeat_no_queue", "watch_only_lookalike"):
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_plan.md"
+        cand = tmp_path / f"{name}_cand.json"
+        plan.write_text(src, encoding="utf-8")
+        cand.write_text(cand_src, encoding="utf-8")
+
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "session-b",
+                    "--plan",
+                    str(plan),
+                    "--candidate-json",
+                    str(cand),
+                    "--json",
+                ]
+            )
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "unrecognized" in err and "--candidate-json" in err, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        assert cand.read_text(encoding="utf-8") == cand_src, name
+        if name in watch_fixtures:
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+
+
+def test_beat1085_idle_session_b_candidate_json_rejected_dry_run_tmp(tmp_path: Path, capsys) -> None:
+    """Beat 1085: same remaining idle fixtures session-b --candidate-json --dry-run --json raise argparse SystemExit 2; plan+cand unchanged."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    cand_src = (FIXTURES / "complete_candidate.json").read_text(encoding="utf-8")
+    for name in ("watch_heartbeat_no_queue", "watch_only_lookalike"):
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_plan.md"
+        cand = tmp_path / f"{name}_cand.json"
+        plan.write_text(src, encoding="utf-8")
+        cand.write_text(cand_src, encoding="utf-8")
+
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "session-b",
+                    "--plan",
+                    str(plan),
+                    "--candidate-json",
+                    str(cand),
+                    "--dry-run",
+                    "--json",
+                ]
+            )
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "unrecognized" in err and "--candidate-json" in err, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        assert cand.read_text(encoding="utf-8") == cand_src, name
+        if name in watch_fixtures:
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
