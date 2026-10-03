@@ -91533,6 +91533,78 @@ def test_beat1142_nonpickable_unknown_subcommand_rejected_log_tmp(tmp_path: Path
             assert body.find("## Watch") < body.find("## Queue"), name
 
 
+def test_beat1143_nonpickable_fixtures_unknown_subcommand_rejected_plan_tmp(tmp_path: Path, capsys) -> None:
+    """Beat 1143: six non-pickable fixtures unknown subcommand --plan --json raise argparse SystemExit 2; plan copy keeps Watch before Queue."""
+    from src.research_implement.__main__ import main
+
+    for name in (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    ):
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_plan.md"
+        plan.write_text(src, encoding="utf-8")
+
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "not-a-real-cmd",
+                    "--plan",
+                    str(plan),
+                    "--json",
+                ]
+            )
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "invalid choice" in err or "not-a-real-cmd" in err, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+
+
+def test_beat1143_nonpickable_fixtures_unknown_subcommand_rejected_log_tmp(tmp_path: Path, capsys) -> None:
+    """Beat 1143: same six non-pickable fixtures unknown subcommand --log --json raise argparse SystemExit 2; log copy keeps Watch before Queue."""
+    from src.research_implement.__main__ import main
+
+    for name in (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    ):
+        src = _load(f"{name}.md")
+        log = tmp_path / f"{name}_log.md"
+        log.write_text(src, encoding="utf-8")
+
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "not-a-real-cmd",
+                    "--log",
+                    str(log),
+                    "--json",
+                ]
+            )
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "invalid choice" in err or "not-a-real-cmd" in err, name
+        body = log.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
