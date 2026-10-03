@@ -73256,6 +73256,113 @@ def test_beat905_idle_directory_candidate_json_dry_run_fails_tmp(tmp_path: Path)
         assert bad.is_dir(), name
 
 
+def test_beat906_idle_fixtures_session_a_directory_candidate_json_fails_tmp(tmp_path: Path):
+    """Beat 906 replay of Beat 217: multi-fixture idle session-a --candidate-json directory --json (NO dry-run)→SystemExit; plan UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        bad = tmp_path / "cand-dir"
+        bad.mkdir(exist_ok=True)
+
+        # session-a --candidate-json directory --json (NO --dry-run) → SystemExit; plan UNCHANGED
+        # CLI load-fail (not verdict=failed JSON); promotes Beat 32 unit → multi-fixture idle contrast
+        plan = tmp_path / f"{name}_a_dir_cand_live.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(
+                    [
+                        "session-a",
+                        "--plan",
+                        str(plan),
+                        "--candidate-json",
+                        str(bad),
+                        "--json",
+                    ]
+                )
+        assert ei.value.code != 0, name
+        msg = str(ei.value)
+        assert "--candidate-json" in msg, name
+        assert "not a file" in msg.lower(), name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in body, name
+        out = buf.getvalue().strip()
+        assert out == "" or ("queued" not in out and "light" not in out), name
+        assert bad.is_dir(), name
+
+
+def test_beat906_idle_fixtures_session_a_directory_candidate_json_dry_run_fails_tmp(tmp_path: Path):
+    """Beat 906 replay of Beat 217: multi-fixture idle session-a --candidate-json directory --dry-run --json→SystemExit; plan UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        bad = tmp_path / "cand-dir"
+        bad.mkdir(exist_ok=True)
+
+        # session-a --candidate-json directory --dry-run --json → SystemExit; plan UNCHANGED
+        # dry-run does not skip the directory load
+        plan = tmp_path / f"{name}_a_dir_cand_dry.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(
+                    [
+                        "session-a",
+                        "--plan",
+                        str(plan),
+                        "--candidate-json",
+                        str(bad),
+                        "--dry-run",
+                        "--json",
+                    ]
+                )
+        assert ei.value.code != 0, name
+        msg = str(ei.value)
+        assert "--candidate-json" in msg, name
+        assert "not a file" in msg.lower(), name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in body, name
+        out = buf.getvalue().strip()
+        assert out == "" or ("queued" not in out and "light" not in out), name
+        assert bad.is_dir(), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
