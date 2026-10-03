@@ -63930,6 +63930,109 @@ def test_beat797_nonpick_incomplete_candidate_dry_run_json_fails_tmp(tmp_path: P
         assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
 
 
+def test_beat798_nonpickable_fixtures_session_a_incomplete_candidate_json_fails_tmp(tmp_path: Path):
+    """Beat 798: replay Beat 181 multi-fixture non-pickable session-a --candidate-json incomplete --json (NO dry-run)→rc=1 failed; plan UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    cand_src = FIXTURES / "incomplete_candidate.json"
+    cand = tmp_path / "incomplete_candidate.json"
+    cand.write_text(cand_src.read_text(encoding="utf-8"), encoding="utf-8")
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+
+        # session-a --candidate-json incomplete --json (NO --dry-run) → rc=1 failed; plan UNCHANGED
+        plan = tmp_path / f"{name}_a_inc_cand_live.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(
+                [
+                    "session-a",
+                    "--plan",
+                    str(plan),
+                    "--candidate-json",
+                    str(cand),
+                    "--json",
+                ]
+            )
+        payload = json.loads(buf.getvalue())
+        assert rc == 1, name
+        assert payload["ok"] is False, name
+        assert payload["verdict"] == "failed", name
+        assert payload["wrote_item"] is False, name
+        assert payload["open_count"] == 0, name
+        assert payload["queue"] == "queue 0/10", name
+        assert payload["title"] == "Incomplete candidate fixture", name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
+def test_beat798_nonpickable_fixtures_session_a_incomplete_candidate_json_dry_run_json_fails_tmp(tmp_path: Path):
+    """Beat 798: replay Beat 181 multi-fixture non-pickable session-a --candidate-json incomplete --dry-run --json→rc=1 failed; plan UNCHANGED."""
+    from src.research_implement.__main__ import main
+
+    cand_src = FIXTURES / "incomplete_candidate.json"
+    cand = tmp_path / "incomplete_candidate.json"
+    cand.write_text(cand_src.read_text(encoding="utf-8"), encoding="utf-8")
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+
+        # session-a --candidate-json incomplete --dry-run --json → rc=1 failed; plan UNCHANGED
+        plan = tmp_path / f"{name}_a_inc_cand_dry.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(
+                [
+                    "session-a",
+                    "--plan",
+                    str(plan),
+                    "--candidate-json",
+                    str(cand),
+                    "--dry-run",
+                    "--json",
+                ]
+            )
+        payload = json.loads(buf.getvalue())
+        assert rc == 1, name
+        assert payload["ok"] is False, name
+        assert payload["verdict"] == "failed", name
+        assert payload["wrote_item"] is False, name
+        assert payload["open_count"] == 0, name
+        assert payload["queue"] == "queue 0/10", name
+        assert payload["title"] == "Incomplete candidate fixture", name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
