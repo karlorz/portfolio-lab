@@ -47,6 +47,7 @@ Execute each section in sequence. Record exact commands, outputs, status (`ok`, 
 - **Load Average**: Check `/proc/loadavg` or `uptime`. Pass if 1-min loadavg < 5.0.
 - **Memory**: Check `free -h` or `cat /proc/meminfo`. Pass if available memory > 500MB.
 - **Root Filesystem**: Run `df -h /`. Pass if disk usage <= 85%. Alert/fail if > 85%.
+- **Toolchain make**: Run `ops/maintenance/check-toolchain-make.sh`. Pass if `toolchain-make: ok`. If alpine-build-root loader or make is missing, escalate alpine-build-root make/loader missing (exit 127 risk for Tasker make jobs); do NOT auto-reinstall the full 58-package closure here.
 
 ### 2. Portfolio-Lab Application Services
 - **HTTP Endpoints**:

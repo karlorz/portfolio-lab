@@ -48,7 +48,7 @@ Execute the daily baseline checks plus these weekly deep maintenance audits:
 
 ### 1. Daily Baseline Execution
 - Perform full checks from daily checklist:
-  - Host health (loadavg, memory, disk <85%).
+  - Host health (loadavg, memory, disk <85%, toolchain make via `ops/maintenance/check-toolchain-make.sh`). If alpine-build-root make/loader is missing, escalate (exit 127 risk for Tasker make jobs); do NOT auto-reinstall the full 58-package closure here.
   - App HTTP: `:8000` via `/api/tasker/status` (HTTP 200 + `"backend":"tasker"` or service `portfolio-lab-tasker`; `/` is observational — Tasker-only waitress 404 is warn/note, NOT fail), `:8001/` must be HTTP 200, Tasker freshness.
   - Broker gateway HTTP 200 on `:8011`, snapshot freshness, TWS/OpenD port connectivity.
   - Tunnel reachability on `https://lab.termolo.com/broker-brief/`.
