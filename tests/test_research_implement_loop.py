@@ -96229,6 +96229,82 @@ def test_beat1205_nonpickable_session_b_relative_log_dry_run_tmp(tmp_path: Path,
         assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
 
 
+def test_beat1206_nonpickable_fixtures_session_b_relative_log_tmp(tmp_path: Path, monkeypatch) -> None:
+    """Beat 1206: six non-pickable fixtures session-b relative --log --json stay idle; log copy keeps Watch before Queue."""
+    from src.research_implement.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    for name in (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    ):
+        src = _load(f"{name}.md")
+        log_rel = f"{name}_rel_b_log.md"
+        log = tmp_path / log_rel
+        log.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-b", "--log", log_rel, "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["verdict"] != "dry_run", name
+        assert payload["open_count"] == 0, name
+        assert payload["queue"] == "queue 0/10", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        body = log.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_beat1206_nonpickable_fixtures_session_b_relative_log_dry_run_tmp(tmp_path: Path, monkeypatch) -> None:
+    """Beat 1206: same six non-pickable fixtures session-b relative --log --dry-run --json stay idle (not dry_run); log copy keeps Watch before Queue."""
+    from src.research_implement.__main__ import main
+
+    monkeypatch.chdir(tmp_path)
+    for name in (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    ):
+        src = _load(f"{name}.md")
+        log_rel = f"{name}_rel_b_log_dry.md"
+        log = tmp_path / log_rel
+        log.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-b", "--log", log_rel, "--dry-run", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["verdict"] != "dry_run", name
+        assert payload["open_count"] == 0, name
+        assert payload["queue"] == "queue 0/10", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        body = log.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
