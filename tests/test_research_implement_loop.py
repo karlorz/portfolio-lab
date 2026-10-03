@@ -79293,6 +79293,81 @@ def test_beat976_idle_whitespace_plan_dry_run_fails_tmp(tmp_path: Path) -> None:
         assert out == "" or ("queued" not in out and "light" not in out), name
 
 
+def test_beat977_idle_whitespace_plan_live_fails_tmp(tmp_path: Path) -> None:
+    """Beat 977: remaining idle fixtures session-a --plan whitespace --json raise SystemExit; unused fixture unchanged."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+    }
+    for name in ("watch_queue_heartbeat_empty", "watch_heartbeat_no_queue"):
+        src = _load(f"{name}.md")
+        contrast = tmp_path / f"{name}_unused_fixture.md"
+        contrast.write_text(src, encoding="utf-8")
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(
+                    [
+                        "session-a",
+                        "--plan",
+                        "   ",
+                        "--json",
+                    ]
+                )
+        assert ei.value.code != 0, name
+        msg = str(ei.value).lower()
+        assert "empty" in msg, name
+        assert contrast.read_text(encoding="utf-8") == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+        out = buf.getvalue().strip()
+        assert out == "" or ("queued" not in out and "light" not in out), name
+
+
+def test_beat977_idle_whitespace_plan_dry_run_fails_tmp(tmp_path: Path) -> None:
+    """Beat 977: same idle fixtures session-a --plan whitespace --dry-run --json raise SystemExit; unused fixture unchanged."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+    }
+    for name in ("watch_queue_heartbeat_empty", "watch_heartbeat_no_queue"):
+        src = _load(f"{name}.md")
+        contrast = tmp_path / f"{name}_unused_fixture.md"
+        contrast.write_text(src, encoding="utf-8")
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(
+                    [
+                        "session-a",
+                        "--plan",
+                        "   ",
+                        "--dry-run",
+                        "--json",
+                    ]
+                )
+        assert ei.value.code != 0, name
+        msg = str(ei.value).lower()
+        assert "empty" in msg, name
+        assert contrast.read_text(encoding="utf-8") == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+        out = buf.getvalue().strip()
+        assert out == "" or ("queued" not in out and "light" not in out), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
