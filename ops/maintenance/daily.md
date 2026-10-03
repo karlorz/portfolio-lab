@@ -50,8 +50,10 @@ Execute each section in sequence. Record exact commands, outputs, status (`ok`, 
 
 ### 2. Portfolio-Lab Application Services
 - **HTTP Endpoints**:
-  - `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/` -> Must be HTTP 200.
+  - Primary pass for `:8000`: `curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/api/tasker/status` must be HTTP 200, and the JSON body must contain `"backend":"tasker"` (or service name `portfolio-lab-tasker`). Helper: `ops/maintenance/check-tasker-http.sh` (status code + tiny field peek; do not dump the JSON body).
+  - Observational only for `http://127.0.0.1:8000/`: record the status code. Tasker-only waitress commonly returns HTTP 404 on `/` — treat as warn/note, NOT fail, when `/api/tasker/status` is 200.
   - `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8001/` -> Must be HTTP 200.
+  - MUST NOT restart prod app under `/home/box/.local/share/portfolio-lab/app` based on `/` 404 alone.
 - **Tasker Job Freshness**:
   - Inspect `/home/box/.local/share/portfolio-lab/app/data/cron_status.json` (or side-dev `data/cron_status.json`).
   - Evaluate job freshness in a schedule-aware manner:
