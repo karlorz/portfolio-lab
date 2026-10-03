@@ -101661,6 +101661,62 @@ def test_beat1304_nonpickable_session_b_stub_ship_rejected_dry_run_tmp(tmp_path:
             assert body.find("## Watch") < body.find("## Queue"), name
 
 
+def test_beat1305_nonpickable_fixtures_session_b_stub_ship_rejected_tmp(tmp_path: Path, capsys) -> None:
+    """Beat 1305: six non-pickable fixtures session-b --stub-ship --json (no dry-run) raise argparse SystemExit 2; plan keeps Watch before Queue."""
+    from src.research_implement.__main__ import main
+
+    for name in (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    ):
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_b_stub_ship.md"
+        plan.write_text(src, encoding="utf-8")
+        with pytest.raises(SystemExit) as ei:
+            main(["session-b", "--plan", str(plan), "--stub-ship", "--json"])
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "unrecognized" in err and "--stub-ship" in err, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+
+
+def test_beat1305_nonpickable_fixtures_session_b_stub_ship_rejected_dry_run_tmp(tmp_path: Path, capsys) -> None:
+    """Beat 1305: same six non-pickable fixtures session-b --stub-ship --dry-run --json raise argparse SystemExit 2; plan keeps Watch before Queue."""
+    from src.research_implement.__main__ import main
+
+    for name in (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    ):
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_b_stub_ship_dry.md"
+        plan.write_text(src, encoding="utf-8")
+        with pytest.raises(SystemExit) as ei:
+            main(["session-b", "--plan", str(plan), "--stub-ship", "--dry-run", "--json"])
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "unrecognized" in err and "--stub-ship" in err, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
