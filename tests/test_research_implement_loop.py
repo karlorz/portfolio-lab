@@ -89164,6 +89164,86 @@ def test_beat1109_pickable_idle_decode_dry_run_rejected_log_tmp(tmp_path: Path, 
             assert "BEAT19_HEARTBEAT_MARKER" in body, name
 
 
+def test_beat1110_pickable_fixtures_idle_decode_dry_run_rejected_plan_tmp(
+    tmp_path: Path, capsys
+) -> None:
+    """Beat 1110: multi-fixture pickable idle-decode --plan --dry-run --json→argparse SystemExit 2; not deferred."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "watch_lookalike",
+        "one_open_ready",
+        "two_open_ready",
+        "mixed_priority",
+        "watch_queue_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_plan.md"
+        plan.write_text(src, encoding="utf-8")
+
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "idle-decode",
+                    "--plan",
+                    str(plan),
+                    "--dry-run",
+                    "--json",
+                ]
+            )
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "unrecognized" in err and "--dry-run" in err, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+
+
+def test_beat1110_pickable_fixtures_idle_decode_dry_run_rejected_log_tmp(
+    tmp_path: Path, capsys
+) -> None:
+    """Beat 1110: multi-fixture pickable idle-decode --log --dry-run --json→argparse SystemExit 2; not deferred."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "watch_lookalike",
+        "one_open_ready",
+        "two_open_ready",
+        "mixed_priority",
+        "watch_queue_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        log = tmp_path / f"{name}_log.md"
+        log.write_text(src, encoding="utf-8")
+
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "idle-decode",
+                    "--log",
+                    str(log),
+                    "--dry-run",
+                    "--json",
+                ]
+            )
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "unrecognized" in err and "--dry-run" in err, name
+        body = log.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
