@@ -96519,6 +96519,54 @@ def test_beat1209_pickable_fixtures_session_b_relative_log_dry_run_tmp(tmp_path:
         assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
 
 
+def test_beat1210_idle_idle_decode_empty_plan_fails_tmp(tmp_path: Path) -> None:
+    """Beat 1210: two idle fixtures idle-decode empty --plan --json raise SystemExit; unused copy unchanged."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {"watch_queue_heartbeat_empty"}
+    for name in ("empty_queue", "watch_queue_heartbeat_empty"):
+        src = _load(f"{name}.md")
+        contrast = tmp_path / f"{name}_unused_empty_plan.md"
+        contrast.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(["idle-decode", "--plan", "", "--json"])
+        assert ei.value.code != 0, name
+        msg = str(ei.value).lower()
+        assert "empty" in msg, name
+        assert contrast.read_text(encoding="utf-8") == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+        out = buf.getvalue().strip()
+        assert out == "" or ("idle" not in out and "picked" not in out), name
+
+
+def test_beat1210_idle_idle_decode_whitespace_plan_fails_tmp(tmp_path: Path) -> None:
+    """Beat 1210: same two idle fixtures idle-decode whitespace --plan --json raise SystemExit; unused copy unchanged."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {"watch_queue_heartbeat_empty"}
+    for name in ("empty_queue", "watch_queue_heartbeat_empty"):
+        src = _load(f"{name}.md")
+        contrast = tmp_path / f"{name}_unused_ws_plan.md"
+        contrast.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(["idle-decode", "--plan", "   ", "--json"])
+        assert ei.value.code != 0, name
+        msg = str(ei.value).lower()
+        assert "empty" in msg, name
+        assert contrast.read_text(encoding="utf-8") == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+        out = buf.getvalue().strip()
+        assert out == "" or ("idle" not in out and "picked" not in out), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
