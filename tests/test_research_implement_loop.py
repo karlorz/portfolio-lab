@@ -103319,6 +103319,88 @@ def test_beat1337_idle_session_b_default_decode_only_log_tmp(tmp_path: Path) -> 
         assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
 
 
+def test_beat1338_idle_fixtures_session_b_default_decode_only_plan_tmp(tmp_path: Path) -> None:
+    """Beat 1338: four idle fixtures session-b --plan --json stay idle keep_schedule; implement_result None."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    for name in (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    ):
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_b_decode_plan.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-b", "--plan", str(plan), "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert payload["shipped"] is False, name
+        assert payload["implement_result"] is None, name
+        assert payload["open_count"] == 0, name
+        assert payload["queue"] == "queue 0/10", name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_beat1338_idle_fixtures_session_b_default_decode_only_log_tmp(tmp_path: Path) -> None:
+    """Beat 1338: same four idle fixtures session-b --log --json stay idle keep_schedule; implement_result None."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    for name in (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    ):
+        src = _load(f"{name}.md")
+        log = tmp_path / f"{name}_b_decode_log.md"
+        log.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-b", "--log", str(log), "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert payload["shipped"] is False, name
+        assert payload["implement_result"] is None, name
+        assert payload["open_count"] == 0, name
+        assert payload["queue"] == "queue 0/10", name
+        body = log.read_text(encoding="utf-8")
+        assert body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
