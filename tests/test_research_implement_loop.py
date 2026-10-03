@@ -86870,6 +86870,77 @@ def test_beat1078_nonpick_session_b_no_stub_rejected_dry_run_tmp(tmp_path: Path,
         assert body == src, name
 
 
+def test_beat1079_nonpick_session_b_no_stub_rejected_tmp(tmp_path: Path, capsys) -> None:
+    """Beat 1079: remaining non-pickable fixtures session-b --no-stub --json raise argparse SystemExit 2; plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    for name in (
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    ):
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_plan.md"
+        plan.write_text(src, encoding="utf-8")
+
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "session-b",
+                    "--plan",
+                    str(plan),
+                    "--no-stub",
+                    "--json",
+                ]
+            )
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "unrecognized" in err and "--no-stub" in err, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+
+
+def test_beat1079_nonpick_session_b_no_stub_rejected_dry_run_tmp(tmp_path: Path, capsys) -> None:
+    """Beat 1079: remaining non-pickable fixtures session-b --no-stub --dry-run --json raise argparse SystemExit 2; plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    for name in (
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    ):
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_plan.md"
+        plan.write_text(src, encoding="utf-8")
+
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "session-b",
+                    "--plan",
+                    str(plan),
+                    "--no-stub",
+                    "--dry-run",
+                    "--json",
+                ]
+            )
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "unrecognized" in err and "--no-stub" in err, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
