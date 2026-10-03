@@ -80917,6 +80917,89 @@ def test_beat998_nonpick_plan_and_log_dry_run_fails_tmp(tmp_path: Path, capsys) 
             assert src.find("## Watch") < src.find("## Queue"), name
 
 
+def test_beat999_nonpick_plan_and_log_live_fails_tmp(tmp_path: Path, capsys) -> None:
+    """Beat 999: multi-fixture non-pickable session-a --plan and --log together --json (NO dry-run)→argparse SystemExit 2."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_plan.md"
+        log = tmp_path / f"{name}_also.md"
+        plan.write_text(src, encoding="utf-8")
+        log.write_text(src, encoding="utf-8")
+
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "session-a",
+                    "--plan",
+                    str(plan),
+                    "--log",
+                    str(log),
+                    "--json",
+                ]
+            )
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "not allowed" in err and "--plan" in err, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        assert log.read_text(encoding="utf-8") == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+            assert src.find("## Watch") < src.find("## Queue"), name
+
+
+def test_beat999_nonpick_plan_and_log_dry_run_fails_tmp(tmp_path: Path, capsys) -> None:
+    """Beat 999: multi-fixture non-pickable session-a --plan and --log --dry-run --json→argparse SystemExit 2."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_plan.md"
+        log = tmp_path / f"{name}_also.md"
+        plan.write_text(src, encoding="utf-8")
+        log.write_text(src, encoding="utf-8")
+
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "session-a",
+                    "--plan",
+                    str(plan),
+                    "--log",
+                    str(log),
+                    "--dry-run",
+                    "--json",
+                ]
+            )
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "not allowed" in err and "--plan" in err, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        assert log.read_text(encoding="utf-8") == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+            assert src.find("## Watch") < src.find("## Queue"), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
