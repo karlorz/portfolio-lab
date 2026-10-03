@@ -51714,6 +51714,80 @@ def test_beat670_idle_fixtures_session_b_dry_run_json_two_queue_fail_closed_fami
         assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
 
 
+def test_beat671_nonpickable_fixtures_idle_decode_json_two_queue_fail_closed_family_tmp(tmp_path: Path):
+    """Beat 671: multi-fixture non-pickable idle-decode --json stays idle (Beat 139 contrast; two_queue stays failed and is not in this set)."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_idle_b671.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan = tmp_path / f"{name}_idle_b671.json.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["idle-decode", "--plan", str(plan), "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
+def test_beat671_nonpickable_fixtures_session_b_dry_run_json_two_queue_fail_closed_family_tmp(tmp_path: Path):
+    """Beat 671: multi-fixture non-pickable session-b --dry-run --json stays idle (Beat 139 pair; two_queue is fail-closed, not idle)."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_b671_dry.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan = tmp_path / f"{name}_b671_dry.json.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "idle", name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
