@@ -90099,6 +90099,67 @@ def test_beat1122_idle_fixtures_session_b_plan_and_log_together_dry_run_fails_tm
             assert "## Queue" not in src, name
 
 
+def test_beat1123_nonpickable_session_b_plan_and_log_together_fails_tmp(tmp_path: Path, capsys) -> None:
+    """Beat 1123: two non-pickable fixtures session-b --plan and --log together --json raise argparse SystemExit 2."""
+    from src.research_implement.__main__ import main
+
+    for name in ("shipped_only", "incomplete_open"):
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_plan.md"
+        log = tmp_path / f"{name}_also.md"
+        plan.write_text(src, encoding="utf-8")
+        log.write_text(src, encoding="utf-8")
+
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "session-b",
+                    "--plan",
+                    str(plan),
+                    "--log",
+                    str(log),
+                    "--json",
+                ]
+            )
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "not allowed" in err and "--plan" in err, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        assert log.read_text(encoding="utf-8") == src, name
+
+
+def test_beat1123_nonpickable_session_b_plan_and_log_together_dry_run_fails_tmp(tmp_path: Path, capsys) -> None:
+    """Beat 1123: same two non-pickable fixtures session-b --plan and --log --dry-run --json raise argparse SystemExit 2."""
+    from src.research_implement.__main__ import main
+
+    for name in ("shipped_only", "incomplete_open"):
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_plan.md"
+        log = tmp_path / f"{name}_also.md"
+        plan.write_text(src, encoding="utf-8")
+        log.write_text(src, encoding="utf-8")
+
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "session-b",
+                    "--plan",
+                    str(plan),
+                    "--log",
+                    str(log),
+                    "--dry-run",
+                    "--json",
+                ]
+            )
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "not allowed" in err and "--plan" in err, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        assert log.read_text(encoding="utf-8") == src, name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
