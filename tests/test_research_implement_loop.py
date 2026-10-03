@@ -85312,6 +85312,95 @@ def test_beat1055_pickable_stub_and_no_stub_dry_run_fails_tmp(tmp_path: Path) ->
         assert out == "" or ("queued" not in out and "light" not in out), name
 
 
+def test_beat1056_pickable_fixtures_session_a_stub_and_no_stub_fails_tmp(tmp_path: Path) -> None:
+    """Beat 1056: multi-fixture pickable session-a --stub + --no-stub --json (NO dry-run)→SystemExit; both-stub check not deferred."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "watch_lookalike",
+        "one_open_ready",
+        "two_open_ready",
+        "mixed_priority",
+        "watch_queue_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_plan.md"
+        plan.write_text(src, encoding="utf-8")
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(
+                    [
+                        "session-a",
+                        "--plan",
+                        str(plan),
+                        "--stub",
+                        "--no-stub",
+                        "--json",
+                    ]
+                )
+        assert ei.value.code != 0, name
+        msg = str(ei.value).lower()
+        assert "only one" in msg and "--stub" in msg, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+        out = buf.getvalue().strip()
+        assert out == "" or ("queued" not in out and "light" not in out), name
+
+
+def test_beat1056_pickable_fixtures_session_a_stub_and_no_stub_dry_run_fails_tmp(
+    tmp_path: Path,
+) -> None:
+    """Beat 1056: multi-fixture pickable session-a --stub + --no-stub --dry-run --json→SystemExit; both-stub check not deferred."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "watch_lookalike",
+        "one_open_ready",
+        "two_open_ready",
+        "mixed_priority",
+        "watch_queue_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_plan.md"
+        plan.write_text(src, encoding="utf-8")
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(
+                    [
+                        "session-a",
+                        "--plan",
+                        str(plan),
+                        "--stub",
+                        "--no-stub",
+                        "--dry-run",
+                        "--json",
+                    ]
+                )
+        assert ei.value.code != 0, name
+        msg = str(ei.value).lower()
+        assert "only one" in msg and "--stub" in msg, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+        out = buf.getvalue().strip()
+        assert out == "" or ("queued" not in out and "light" not in out), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
