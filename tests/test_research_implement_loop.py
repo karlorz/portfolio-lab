@@ -86336,6 +86336,86 @@ def test_beat1070_nonpick_idle_decode_stub_rejected_log_tmp(tmp_path: Path, caps
             assert body.find("## Watch") < body.find("## Queue"), name
 
 
+def test_beat1071_nonpickable_fixtures_idle_decode_stub_rejected_plan_tmp(
+    tmp_path: Path, capsys
+) -> None:
+    """Beat 1071: multi-fixture non-pickable idle-decode --plan --stub --json→argparse SystemExit 2; plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_plan.md"
+        plan.write_text(src, encoding="utf-8")
+
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "idle-decode",
+                    "--plan",
+                    str(plan),
+                    "--stub",
+                    "--json",
+                ]
+            )
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "unrecognized" in err and "--stub" in err, name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+
+
+def test_beat1071_nonpickable_fixtures_idle_decode_stub_rejected_log_tmp(
+    tmp_path: Path, capsys
+) -> None:
+    """Beat 1071: multi-fixture non-pickable idle-decode --log --stub --json→argparse SystemExit 2; unused fixture unchanged."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        "shipped_only",
+        "incomplete_open",
+        "broken_ready_flag",
+        "open_complete_not_ready",
+        "contract_spec",
+        "queue_with_watch_heartbeat",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        log = tmp_path / f"{name}_log.md"
+        log.write_text(src, encoding="utf-8")
+
+        with pytest.raises(SystemExit) as ei:
+            main(
+                [
+                    "idle-decode",
+                    "--log",
+                    str(log),
+                    "--stub",
+                    "--json",
+                ]
+            )
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "unrecognized" in err and "--stub" in err, name
+        body = log.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "queue_with_watch_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert body.find("## Watch") < body.find("## Queue"), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
