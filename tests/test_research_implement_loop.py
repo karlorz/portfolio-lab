@@ -64033,6 +64033,68 @@ def test_beat798_nonpickable_fixtures_session_a_incomplete_candidate_json_dry_ru
         assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
 
 
+def test_beat799_nonpick_candidate_list_live_json_writes_tmp(tmp_path: Path) -> None:
+    """Beat 799: two non-pickables session-a complete list --candidate-json --json write; plans changed."""
+    from src.research_implement.__main__ import main
+
+    cand = tmp_path / "complete_candidate_list.json"
+    cand.write_text((FIXTURES / "complete_candidate_list.json").read_text(encoding="utf-8"), encoding="utf-8")
+    for name in ("shipped_only", "incomplete_open"):
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_b799_a_cand_list_write.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(
+                ["session-a", "--plan", str(plan), "--candidate-json", str(cand), "--json"]
+            )
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "queued", name
+        assert payload["wrote_item"] is True, name
+        assert payload["open_count"] == 1, name
+        assert payload["queue"] == "queue 1/10", name
+        assert payload["title"] == "Complete list candidate", name
+        assert plan.read_text(encoding="utf-8") != src, name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
+def test_beat799_nonpick_candidate_list_dry_run_json_no_write_tmp(tmp_path: Path) -> None:
+    """Beat 799: same two fixtures session-a complete list --candidate-json --dry-run --json; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    cand = tmp_path / "complete_candidate_list.json"
+    cand.write_text((FIXTURES / "complete_candidate_list.json").read_text(encoding="utf-8"), encoding="utf-8")
+    for name in ("shipped_only", "incomplete_open"):
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_b799_a_cand_list_dry.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(
+                [
+                    "session-a",
+                    "--plan",
+                    str(plan),
+                    "--candidate-json",
+                    str(cand),
+                    "--dry-run",
+                    "--json",
+                ]
+            )
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "queued", name
+        assert payload["wrote_item"] is True, name
+        assert payload["open_count"] == 1, name
+        assert payload["queue"] == "queue 1/10", name
+        assert payload["title"] == "Complete list candidate", name
+        assert plan.read_text(encoding="utf-8") == src, name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
