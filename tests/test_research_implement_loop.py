@@ -57464,6 +57464,141 @@ def test_beat728_nonpickable_fixtures_session_b_dry_run_json_two_queue_sections_
         assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
 
 
+def test_beat729_two_queue_sections_stub_dry_run_json_fail_matrix_tmp(tmp_path: Path):
+    """Beat 729: two_queue_sections dry-run fail-closed; every path rc 1; not idle, not dry_run; plans unchanged (closes Beat 158)."""
+    from src.research_implement.__main__ import main
+
+    src = _load("two_queue_sections.md")
+
+    idle_plan = tmp_path / "two_queue_b729_idle.md"
+    idle_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["idle-decode", "--plan", str(idle_plan), "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert idle_plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    dry_plan = tmp_path / "two_queue_b729_b_dry.md"
+    dry_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-b", "--plan", str(dry_plan), "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["verdict"] != "dry_run"
+    assert payload["open_count"] == 0
+    assert payload["queue"] == "queue 0/10"
+    assert payload["keep_schedule"] is True
+    assert payload["scheduler_delete_called"] is False
+    assert dry_plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS)
+
+    stub_plan = tmp_path / "two_queue_b729_a_stub_dry.md"
+    stub_plan.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(stub_plan), "--stub", "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["wrote_item"] is False
+    assert stub_plan.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
+
+    no_stub = tmp_path / "two_queue_b729_a_no_stub_dry.md"
+    no_stub.write_text(src, encoding="utf-8")
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = main(["session-a", "--plan", str(no_stub), "--no-stub", "--dry-run", "--json"])
+    payload = json.loads(buf.getvalue())
+    assert rc == 1
+    assert payload["ok"] is False
+    assert payload["verdict"] == "failed"
+    assert payload["wrote_item"] is False
+    assert no_stub.read_text(encoding="utf-8") == src
+    assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS)
+
+
+def test_beat729_pickable_idle_decode_and_session_b_dry_run_tmp(tmp_path: Path):
+    """Beat 729: multi-fixture pickable idle-decode picks and session-b --dry-run stays dry_run (closes Beat 158)."""
+    from src.research_implement.__main__ import main
+
+    cases = (
+        ("watch_lookalike", "Q3"),
+        ("one_open_ready", "Q1"),
+        ("two_open_ready", "Q1"),
+        ("mixed_priority", "Q2"),
+        ("watch_queue_heartbeat", "Q1"),
+    )
+    for name, item_id in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_idle_b729.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan = tmp_path / f"{name}_idle_b729.json.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["idle-decode", "--plan", str(plan), "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["verdict"] == "picked", name
+        assert payload["item"]["item_id"] == item_id, name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
+    cases = (
+        ("watch_lookalike", "Q3"),
+        ("one_open_ready", "Q1"),
+        ("two_open_ready", "Q1"),
+        ("mixed_priority", "Q2"),
+        ("watch_queue_heartbeat", "Q1"),
+    )
+    for name, item_id in cases:
+        src = _load(f"{name}.md")
+        unused = tmp_path / f"{name}_b729_pick_dry.unused.md"
+        unused.write_text(src, encoding="utf-8")
+        plan = tmp_path / f"{name}_b729_pick_dry.json.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-b", "--plan", str(plan), "--dry-run", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "dry_run", name
+        assert payload["item"]["item_id"] == item_id, name
+        assert payload["keep_schedule"] is True, name
+        assert payload["scheduler_delete_called"] is False, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        body = unused.read_text(encoding="utf-8")
+        assert body == src, name
+        if name == "watch_queue_heartbeat":
+            assert "## Watch" in body, name
+            assert "## Heartbeat" in body, name
+            assert "BEAT19_WATCH_MARKER" in body, name
+            assert "BEAT19_HEARTBEAT_MARKER" in body, name
+        assert set(payload.keys()) == set(SESSION_RESULT_JSON_KEYS), name
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
