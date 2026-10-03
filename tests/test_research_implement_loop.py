@@ -61380,6 +61380,71 @@ def test_beat765_public_api_milestone_exports():
     assert len(ri.__all__) == len(set(ri.__all__))
 
 
+def test_beat766_idle_stub_live_write_json_tmp(tmp_path: Path) -> None:
+    """Beat 766: two idle fixtures session-a --stub --json writes the tmp plan (promotes Beat 171)."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {"watch_only_lookalike"}
+    cases = (
+        "empty_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        stub_plan = tmp_path / f"{name}_b766_a_stub_write.md"
+        stub_plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-a", "--plan", str(stub_plan), "--stub", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "queued", name
+        assert payload["wrote_item"] is True, name
+        assert payload["open_count"] == 1, name
+        assert payload["queue"] == "queue 1/10", name
+        assert payload["title"] == "Stub shippable change", name
+        stub_body = stub_plan.read_text(encoding="utf-8")
+        assert stub_body != src, name
+        assert "## Queue" in stub_body, name
+        if name in watch_fixtures:
+            assert "## Watch" in stub_body, name
+            assert "## Heartbeat" in stub_body, name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
+def test_beat766_idle_stub_dry_run_json_no_write_tmp(tmp_path: Path) -> None:
+    """Beat 766: same two idle fixtures session-a --stub --dry-run --json leaves the tmp plan unchanged."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {"watch_only_lookalike"}
+    cases = (
+        "empty_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        dry_plan = tmp_path / f"{name}_b766_a_stub_dry.md"
+        dry_plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            rc = main(["session-a", "--plan", str(dry_plan), "--stub", "--dry-run", "--json"])
+        payload = json.loads(buf.getvalue())
+        assert rc == 0, name
+        assert payload["ok"] is True, name
+        assert payload["verdict"] == "queued", name
+        assert payload["wrote_item"] is True, name
+        assert payload["open_count"] == 1, name
+        assert payload["queue"] == "queue 1/10", name
+        assert payload["title"] == "Stub shippable change", name
+        dry_body = dry_plan.read_text(encoding="utf-8")
+        assert dry_body == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in dry_body, name
+            assert "## Heartbeat" in dry_body, name
+        assert set(payload.keys()) == set(SESSION_A_RESULT_JSON_KEYS), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
