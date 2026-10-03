@@ -74942,6 +74942,111 @@ def test_beat923_idle_plan_symlink_dir_dry_run_fails_tmp(tmp_path: Path) -> None
         assert list(target.iterdir()) == [], name
 
 
+def test_beat924_idle_fixtures_session_a_plan_symlink_dir_fails_tmp(tmp_path: Path):
+    """Beat 924 replay of Beat 223: multi-fixture idle session-a --plan symlink-to-dir --json (NO dry-run)→SystemExit; no write."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        target = tmp_path / f"{name}_plan_dir_target"
+        target.mkdir()
+        bad = tmp_path / f"{name}_plan_dir_link"
+        bad.symlink_to(target)
+        contrast = tmp_path / f"{name}_unused_fixture.md"
+        contrast.write_text(src, encoding="utf-8")
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(
+                    [
+                        "session-a",
+                        "--plan",
+                        str(bad),
+                        "--json",
+                    ]
+                )
+        assert ei.value.code != 0, name
+        msg = str(ei.value)
+        assert "--plan/--log" in msg, name
+        assert "not a file" in msg.lower(), name
+        assert contrast.read_text(encoding="utf-8") == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+        out = buf.getvalue().strip()
+        assert out == "" or ("queued" not in out and "light" not in out), name
+        assert bad.is_symlink(), name
+        assert not bad.is_file(), name
+        assert list(target.iterdir()) == [], name
+
+
+def test_beat924_idle_fixtures_session_a_plan_symlink_dir_dry_run_fails_tmp(tmp_path: Path):
+    """Beat 924 replay of Beat 223: multi-fixture idle session-a --plan symlink-to-dir --dry-run --json→SystemExit; no write."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    }
+    cases = (
+        "empty_queue",
+        "watch_queue_heartbeat_empty",
+        "watch_heartbeat_no_queue",
+        "watch_only_lookalike",
+    )
+    for name in cases:
+        src = _load(f"{name}.md")
+        target = tmp_path / f"{name}_plan_dir_target"
+        target.mkdir()
+        bad = tmp_path / f"{name}_plan_dir_link"
+        bad.symlink_to(target)
+        contrast = tmp_path / f"{name}_unused_fixture.md"
+        contrast.write_text(src, encoding="utf-8")
+
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(
+                    [
+                        "session-a",
+                        "--plan",
+                        str(bad),
+                        "--dry-run",
+                        "--json",
+                    ]
+                )
+        assert ei.value.code != 0, name
+        msg = str(ei.value)
+        assert "--plan/--log" in msg, name
+        assert "not a file" in msg.lower(), name
+        assert contrast.read_text(encoding="utf-8") == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+        out = buf.getvalue().strip()
+        assert out == "" or ("queued" not in out and "light" not in out), name
+        assert bad.is_symlink(), name
+        assert not bad.is_file(), name
+        assert list(target.iterdir()) == [], name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
