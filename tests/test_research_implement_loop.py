@@ -73363,6 +73363,75 @@ def test_beat906_idle_fixtures_session_a_directory_candidate_json_dry_run_fails_
         assert bad.is_dir(), name
 
 
+def test_beat907_nonpick_directory_candidate_json_live_fails_tmp(tmp_path: Path) -> None:
+    """Beat 907: two non-pickable fixtures session-a --candidate-json directory --json raise SystemExit; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    for name in ("shipped_only", "incomplete_open"):
+        src = _load(f"{name}.md")
+        bad = tmp_path / "cand-dir"
+        bad.mkdir(exist_ok=True)
+        plan = tmp_path / f"{name}_b907_a_dir_cand_live.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(
+                    [
+                        "session-a",
+                        "--plan",
+                        str(plan),
+                        "--candidate-json",
+                        str(bad),
+                        "--json",
+                    ]
+                )
+        assert ei.value.code != 0, name
+        msg = str(ei.value)
+        assert "--candidate-json" in msg, name
+        assert "not a file" in msg.lower(), name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        out = buf.getvalue().strip()
+        assert out == "" or ("queued" not in out and "light" not in out), name
+        assert bad.is_dir(), name
+
+
+def test_beat907_nonpick_directory_candidate_json_dry_run_fails_tmp(tmp_path: Path) -> None:
+    """Beat 907: same two non-pickable fixtures session-a --candidate-json directory --dry-run --json raise SystemExit; plans unchanged."""
+    from src.research_implement.__main__ import main
+
+    for name in ("shipped_only", "incomplete_open"):
+        src = _load(f"{name}.md")
+        bad = tmp_path / "cand-dir"
+        bad.mkdir(exist_ok=True)
+        plan = tmp_path / f"{name}_b907_a_dir_cand_dry.md"
+        plan.write_text(src, encoding="utf-8")
+        buf = StringIO()
+        with redirect_stdout(buf):
+            with pytest.raises(SystemExit) as ei:
+                main(
+                    [
+                        "session-a",
+                        "--plan",
+                        str(plan),
+                        "--candidate-json",
+                        str(bad),
+                        "--dry-run",
+                        "--json",
+                    ]
+                )
+        assert ei.value.code != 0, name
+        msg = str(ei.value)
+        assert "--candidate-json" in msg, name
+        assert "not a file" in msg.lower(), name
+        body = plan.read_text(encoding="utf-8")
+        assert body == src, name
+        out = buf.getvalue().strip()
+        assert out == "" or ("queued" not in out and "light" not in out), name
+        assert bad.is_dir(), name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
