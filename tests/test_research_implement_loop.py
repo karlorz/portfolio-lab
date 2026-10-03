@@ -101891,6 +101891,50 @@ def test_beat1309_idle_idle_decode_stub_ship_rejected_tmp(tmp_path: Path, capsys
             assert "## Heartbeat" in src, name
 
 
+def test_beat1310_idle_idle_decode_implement_rejected_tmp(tmp_path: Path, capsys) -> None:
+    """Beat 1310: two idle fixtures idle-decode --implement --json raise argparse SystemExit 2; loaded source keeps Watch polarity."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {"watch_heartbeat_no_queue", "watch_only_lookalike"}
+    for name in ("watch_heartbeat_no_queue", "watch_only_lookalike"):
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_idle_implement.md"
+        plan.write_text(src, encoding="utf-8")
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--plan", str(plan), "--implement", "stub-ship", "--json"])
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "unrecognized" in err and "--implement" in err, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+
+
+def test_beat1310_idle_idle_decode_stub_ship_rejected_tmp(tmp_path: Path, capsys) -> None:
+    """Beat 1310: same two idle fixtures idle-decode --stub-ship --json raise argparse SystemExit 2; loaded source keeps Watch polarity."""
+    from src.research_implement.__main__ import main
+
+    watch_fixtures = {"watch_heartbeat_no_queue", "watch_only_lookalike"}
+    for name in ("watch_heartbeat_no_queue", "watch_only_lookalike"):
+        src = _load(f"{name}.md")
+        plan = tmp_path / f"{name}_idle_stub_ship.md"
+        plan.write_text(src, encoding="utf-8")
+        with pytest.raises(SystemExit) as ei:
+            main(["idle-decode", "--plan", str(plan), "--stub-ship", "--json"])
+        assert ei.value.code == 2, name
+        err = capsys.readouterr().err.lower()
+        assert "unrecognized" in err and "--stub-ship" in err, name
+        assert plan.read_text(encoding="utf-8") == src, name
+        if name in watch_fixtures:
+            assert "## Watch" in src, name
+            assert "## Heartbeat" in src, name
+        if name == "watch_heartbeat_no_queue":
+            assert "## Queue" not in src, name
+
+
 def test_cli_session_b_decode_only_flag_idle_stays_idle_tmp(tmp_path: Path):
     """CLI leftover (not Beat N): idle session-b --decode-only --json stays idle; plan UNCHANGED."""
     from src.research_implement.__main__ import main
